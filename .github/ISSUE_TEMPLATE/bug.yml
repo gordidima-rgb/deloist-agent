@@ -1,0 +1,33 @@
+name: Ошибка
+description: Что-то работает не так
+labels: ["ошибка"]
+body:
+  - type: markdown
+    attributes:
+      value: Задачи здесь видны всем. Убери из текста и снимков ключи, пароли и личные данные.
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что произошло и чего ты ждёшь вместо этого.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как повторить
+      placeholder: "1. Открыть настройки\n2. Нажать...\n3. Появляется ошибка..."
+  - type: input
+    id: version
+    attributes:
+      label: Версия программы
+      description: Указана в настройках, в разделе «Обновления».
+      placeholder: "0.2.0"
+  - type: dropdown
+    id: source
+    attributes:
+      label: Откуда бот берёт ответы
+      options:
+        - Демо-режим
+        - Модель по ключу API
+        - Программа на компьютере (Claude, Codex, OpenCode)

@@ -1,0 +1,15 @@
+name: Предложение
+description: Как сделать программу лучше
+labels: ["предложение"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Что мешает или чего не хватает
+      description: Какую задачу ты решаешь и что сейчас неудобно.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Как это могло бы работать
