@@ -1,10 +1,10 @@
 # Deloist в контейнере: серверная сборка (`deloist --server`), без окна, GTK и WebKit.
 #
-# Сервер слушает только loopback (HOST другим адресом не принимается, это защита). Поэтому порт `-p` наружу
-# не пробросить: запускай с `--network host` (тогда loopback контейнера и есть loopback хоста) или ходи
-# внутрь через `docker exec`.
-#   docker build -t deloist-server .
-#   docker run --rm --network host -v deloist-data:/data deloist-server
+# Без облачного режима сервер слушает только loopback (это защита): тогда `--network host` или `docker exec`.
+# Облачный режим (CREW_CLOUD=1 + CREW_GATEWAY_PUBKEY, CREW_USER_ID, CREW_PUBLIC_ORIGIN, CREW_SECRETS_KEY)
+# разрешает HOST=0.0.0.0, вход только по пропуску шлюза. Так запускает стенд (notes/web-version.md, 2г):
+#   docker run --runtime=runsc --env-file /etc/deloist-cloud/<id>.env -e HOST=0.0.0.0 -e PORT=8899 \
+#     -p 127.0.0.1:<порт>:8899 -v deloist-<id>:/data ghcr.io/gordidima-rgb/deloist-server:main
 #
 # Сборка: `RUSTUP_TOOLCHAIN=stable` перебивает rust-toolchain.toml (там тулчейн для Windows).
 
