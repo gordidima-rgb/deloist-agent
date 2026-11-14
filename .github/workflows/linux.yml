@@ -117,7 +117,8 @@ jobs:
   # Стенд на сервере сам подтягивает новый образ (таймер раз в 10 минут). Секретов нет: только GITHUB_TOKEN.
   image:
     name: publish server image
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # feat/stand — до того, как этот файл попадёт в main (ручной запуск GitHub видит только из main).
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/stand'))
     needs: [server]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -135,7 +136,8 @@ jobs:
       - name: Image tag
         id: tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then t="${{ inputs.tag }}"; else t="main"; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then t="${{ inputs.tag }}";
+          elif [ "${{ github.ref }}" = "refs/heads/feat/stand" ]; then t="stand"; else t="main"; fi
           echo "tag=$t" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
