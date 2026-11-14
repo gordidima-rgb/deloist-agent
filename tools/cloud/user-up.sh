@@ -27,13 +27,16 @@ if [ ! -f "$ENVF" ]; then
 fi
 
 docker network inspect "$NAME" >/dev/null 2>&1 || docker network create --subnet "172.30.$NET.0/24" "$NAME" >/dev/null
+# Встроенный резолвер Docker (127.0.0.11) под gVisor не отвечает: свой resolv.conf с внешними DNS.
+RESOLV=/opt/deloist-cloud/resolv.conf
+[ -f "$RESOLV" ] || printf 'nameserver 77.88.8.8\nnameserver 1.1.1.1\noptions edns0 ndots:0\n' > "$RESOLV"
 docker pull -q "$IMAGE"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" \
   --runtime=runsc \
   --restart unless-stopped \
   --network "$NAME" \
-  --dns 77.88.8.8 --dns 1.1.1.1 \
+  --mount "type=bind,src=$RESOLV,dst=/etc/resolv.conf,readonly" \
   -p "127.0.0.1:$PORT:8899" \
   --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 \
   --cap-drop ALL --security-opt no-new-privileges \
