@@ -43,9 +43,9 @@
             Рабочие процессы
             <span class="badge" id="workflows-dot" hidden></span>
           </button>
-          <button class="ghost side-link" id="btn-routines" title="Рутины">
+          <button class="ghost side-link" id="btn-routines" title="Задачи и автоматизация">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-            Рутины
+            Задачи и автоматизация
             <span class="badge" id="routines-dot" hidden></span>
           </button>
           <button class="ghost side-link" id="btn-report" title="Отчёт">
@@ -953,10 +953,14 @@
       </div>
     </dialog>
 
-    <dialog id="modal-routines" class="modal kit-dialog kit-form kit-wide">
-      <div class="modal-inner">
-        <h3 tabindex="-1" autofocus>Рутины</h3>
+    <dialog id="modal-routines" class="modal kit-dialog kit-form kit-sheet" aria-labelledby="rt-title">
+      <div class="modal-inner sheet">
+        <div class="sheet-head">
+          <h3 id="rt-title" tabindex="-1" autofocus>Задачи и автоматизация</h3>
+          <button type="button" class="icon-btn" data-close title="Закрыть" aria-label="Закрыть"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
         <div id="rt-tabs" class="rt-tabs"></div>
+        <div class="sheet-body">
         <div id="rt-pane-routines" role="tabpanel">
         <p class="note">Бот сам просыпается по расписанию и делает работу. Результат появится в его чате.</p>
         <div id="routines-list" class="routines-list"></div>
@@ -1036,16 +1040,17 @@
             </form>
           </div>
         </details>
-        <h4 class="subhead">Что было</h4>
+        </div>
+        <div id="rt-pane-journal" role="tabpanel" hidden>
         <p class="note" id="journal-usage"></p>
         <div id="journal-list" class="journal-list"></div>
         </div>
         <div id="rt-pane-reminders" role="tabpanel" hidden></div>
         <div id="rt-pane-todos" role="tabpanel" hidden></div>
         <div id="rt-pane-habits" role="tabpanel" hidden></div>
-        <div class="modal-actions">
+        </div>
+        <div class="modal-actions sheet-foot">
           <a class="ghost" id="rt-ics" href="/api/routines.ics" download="deloist-routines.ics">Добавить в календарь</a>
-          <button type="button" class="ghost" data-close>Закрыть</button>
         </div>
       </div>
     </dialog>

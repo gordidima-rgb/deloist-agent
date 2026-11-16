@@ -6736,7 +6736,7 @@ async function markJournalSeen() {
   }
 }
 
-// Вкладки окна: «Рутины» рисует этот файл, «Задачи», «Напоминания» и «Привычки» — компоненты Svelte (ui/src/components/routines).
+// Правая панель «Задачи и автоматизация»: «Рутины» и «Журнал» рисует этот файл, «Задачи», «Напоминания» и «Привычки» — компоненты Svelte (ui/src/components/routines).
 let routineTab = 'routines';
 let routineTabsView = null;
 let remindersView = null;
@@ -6780,10 +6780,11 @@ function setRoutineTab(id) {
   const ui = window.DeloistUI;
   routineTab = id;
   $('#rt-pane-routines').hidden = id !== 'routines';
+  $('#rt-pane-journal').hidden = id !== 'journal';
   $('#rt-pane-reminders').hidden = id !== 'reminders';
   $('#rt-pane-todos').hidden = id !== 'todos';
   $('#rt-pane-habits').hidden = id !== 'habits';
-  $('#rt-ics').hidden = id !== 'routines';
+  $('#rt-ics').closest('.sheet-foot').hidden = id !== 'routines';
   dropRoutineTabViews();
   if (id === 'reminders' && ui?.mountRemindersTab) remindersView = ui.mountRemindersTab($('#rt-pane-reminders'), reminderProps());
   if (id === 'habits' && ui?.mountHabitsTab) habitsView = ui.mountHabitsTab($('#rt-pane-habits'), { api, onopentelegram: openTelegramFromRoutines });
@@ -6800,6 +6801,7 @@ function mountRoutineTabs() {
     value: 'routines',
     items: [
       { id: 'routines', label: tr('Рутины'), panelId: 'rt-pane-routines' },
+      { id: 'journal', label: tr('Журнал'), panelId: 'rt-pane-journal' },
       { id: 'todos', label: tr('Задачи'), panelId: 'rt-pane-todos' },
       { id: 'reminders', label: tr('Напоминания'), panelId: 'rt-pane-reminders' },
       { id: 'habits', label: tr('Привычки'), panelId: 'rt-pane-habits' },
@@ -6819,7 +6821,7 @@ async function openRoutines(tab) {
     routinesCloseBound = true;
     $('#modal-routines').addEventListener('close', dropRoutineTabViews);
   }
-  setRoutineTab(typeof tab === 'string' && ['routines', 'todos', 'reminders', 'habits'].includes(tab) ? tab : 'routines');
+  setRoutineTab(typeof tab === 'string' && ['routines', 'journal', 'todos', 'reminders', 'habits'].includes(tab) ? tab : 'routines');
   openModal('modal-routines');
   if (await loadJournal()) renderJournal();
   markJournalSeen();

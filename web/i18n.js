@@ -1540,6 +1540,7 @@
     '{s} с': '{s} s',
     'Ошибки: {n}': 'Failures: {n}',
     'Рутины': 'Routines',
+    'Задачи и автоматизация': 'Tasks & automation',
     'Использование и лимиты': 'Usage and limits',
     'Использование токенов и лимиты': 'Token usage and limits',
     'Лимиты и расход': 'Usage & limits',
