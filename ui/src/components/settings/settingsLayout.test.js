@@ -39,9 +39,9 @@ describe('settings window layout', () => {
     expect(doc.querySelector('[data-settings-section="voice"] #set-voice-anchor')).not.toBeNull();
   });
 
-  it('opens fourteen sub-screens inside the form, each with a parent section and a title', () => {
+  it('opens fifteen sub-screens inside the form, each with a parent section and a title', () => {
     const subs = [...doc.querySelectorAll('#form-settings .settings-sub')];
-    expect(subs.map((sub) => sub.dataset.sub).sort()).toEqual(['chrome', 'discord', 'dock', 'engines', 'images', 'mcp', 'rules', 'scripts', 'skills', 'slack', 'stt-models', 'team', 'telegram', 'vault']);
+    expect(subs.map((sub) => sub.dataset.sub).sort()).toEqual(['chrome', 'cloud', 'discord', 'dock', 'engines', 'images', 'mcp', 'rules', 'scripts', 'skills', 'slack', 'stt-models', 'team', 'telegram', 'vault']);
     for (const sub of subs) {
       expect(sub.hidden, sub.dataset.sub).toBe(true);
       expect(SECTIONS, sub.dataset.sub).toContain(sub.dataset.parent);
@@ -52,7 +52,7 @@ describe('settings window layout', () => {
 
   it('has a link row for every sub-screen opened from a section', () => {
     const links = [...doc.querySelectorAll('[data-s-link]')].map((node) => node.dataset.sLink);
-    for (const id of ['dock', 'skills', 'mcp', 'images', 'team', 'telegram', 'discord', 'slack', 'vault', 'rules', 'engines', 'chrome']) expect(links).toContain(id);
+    for (const id of ['dock', 'skills', 'mcp', 'images', 'team', 'telegram', 'discord', 'slack', 'vault', 'cloud', 'rules', 'engines', 'chrome']) expect(links).toContain(id);
   });
 
   it('wires the Discord sub-screen through the mount helper and the link map', () => {
@@ -77,7 +77,7 @@ describe('settings window layout', () => {
   });
 
   it('keeps the ids and field names the handlers rely on', () => {
-    for (const id of ['skills-list', 'skill-name', 'skill-desc', 'skill-body', 'skill-add', 'mcp-list', 'mcp-name', 'mcp-transport', 'mcp-command', 'mcp-url', 'mcp-args', 'mcp-auto', 'mcp-add', 'team-export', 'team-import', 'team-file', 'team-note', 'rules-list', 'user-chrome-body', 'dock-enabled', 'dock-layer', 'dock-display', 'dock-edge', 'dock-autohide', 'dock-activity', 'dock-results', 'dock-bots', 'pets-mode', 'pet-picks', 'obscura-action', 'obscura-line', 'browser-engine', 'upd-check', 'upd-whatsnew', 'upd-tools', 'upd-app-line', 'upd-summary-version', 'upd-settings-foot', 'selfdev-checkout', 'selfdev-save', 'selfdev-clone', 'btn-know-me', 'settings-path', 'set-model', 'stt-models-host', 'sub-telegram', 'sub-discord', 'sub-slack', 'sub-vault']) {
+    for (const id of ['skills-list', 'skill-name', 'skill-desc', 'skill-body', 'skill-add', 'mcp-list', 'mcp-name', 'mcp-transport', 'mcp-command', 'mcp-url', 'mcp-args', 'mcp-auto', 'mcp-add', 'team-export', 'team-import', 'team-file', 'team-note', 'rules-list', 'user-chrome-body', 'dock-enabled', 'dock-layer', 'dock-display', 'dock-edge', 'dock-autohide', 'dock-activity', 'dock-results', 'dock-bots', 'pets-mode', 'pet-picks', 'obscura-action', 'obscura-line', 'browser-engine', 'upd-check', 'upd-whatsnew', 'upd-tools', 'upd-app-line', 'upd-summary-version', 'upd-settings-foot', 'selfdev-checkout', 'selfdev-save', 'selfdev-clone', 'btn-know-me', 'settings-path', 'set-model', 'stt-models-host', 'sub-telegram', 'sub-discord', 'sub-slack', 'sub-vault', 'sub-cloud']) {
       expect(doc.getElementById(id), id).not.toBeNull();
     }
     for (const name of ['driver', 'model', 'acpModel', 'planModel', 'baseUrl', 'apiKey', 'anthropicApiKey', 'geminiApiKey', 'apiKeyEnv', 'cliCommand', 'acpCommand', 'fallbackDriver', 'fallbackModel', 'fallbackBaseUrl', 'fallbackApiKey', 'fallbackCliCommand', 'temperature', 'historyLimit', 'vision', 'browserPath', 'browserEngine', 'imageBaseUrl', 'imageModel', 'imageDaily', 'imageApiKey', 'dailyTokenLimit', 'autostart', 'keepAwake', 'checkUpdates', 'petsMode', 'skillLearning']) {

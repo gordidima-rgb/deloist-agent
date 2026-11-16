@@ -29,6 +29,7 @@ import SettingsHint from './components/settings/SettingsHint.svelte';
 import TelegramSettings from './components/settings/TelegramSettings.svelte';
 import DiscordSettings from './components/settings/DiscordSettings.svelte';
 import SlackSettings from './components/settings/SlackSettings.svelte';
+import CloudSettings from './components/settings/CloudSettings.svelte';
 import VaultSettings from './components/settings/VaultSettings.svelte';
 import DrawerHead from './components/drawer/DrawerHead.svelte';
 import DrawerProfile from './components/drawer/DrawerProfile.svelte';
@@ -136,6 +137,8 @@ window.DeloistUI = {
   // Экран «Slack»: два токена приложения, выбор отвечающего бота и привязка личных сообщений.
   mountSlackSettings: (target, props) => mountComponent(SlackSettings, target, props),
   // Экран «Менеджер паролей»: Bitwarden, 1Password и проверка входов для сайта.
+  // Экран «Облако»: машина Instabox для ботов.
+  mountCloudSettings: (target, props) => mountComponent(CloudSettings, target, props),
   mountVaultSettings: (target, props) => mountComponent(VaultSettings, target, props),
   // Шапка панели бота (вкладки и «Закрыть»); содержимое вкладок рисует web/app.js.
   mountDrawerHead: (target, props) => mountComponent(DrawerHead, target, props),

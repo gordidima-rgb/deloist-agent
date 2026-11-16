@@ -6239,6 +6239,7 @@ let telegramView = null;
 let discordView = null;
 let slackView = null;
 let vaultView = null;
+let cloudView = null;
 
 function settingsSectionById(sectionId) {
   const id = LEGACY_SETTINGS_SECTIONS[sectionId] || sectionId;
@@ -6297,6 +6298,7 @@ function loadSubscreen(subId) {
   if (subId === 'discord') mountDiscordSettings();
   if (subId === 'slack') mountSlackSettings();
   if (subId === 'vault') mountVaultSettings();
+  if (subId === 'cloud') mountCloudSettings();
 }
 
 // Экран Telegram монтируем один раз: при следующем открытии передаём свежий список ботов.
@@ -6338,6 +6340,15 @@ function mountSlackSettings() {
   else slackView = window.DeloistUI.mountSlackSettings(host, props);
 }
 
+// Экран «Облако»: машина Instabox. Секреты остаются на ПК, окно получает только состояние.
+function mountCloudSettings() {
+  const host = $('#sub-cloud');
+  if (!host || !window.DeloistUI?.mountCloudSettings) return;
+  const props = { api };
+  if (cloudView) cloudView.update(props);
+  else cloudView = window.DeloistUI.mountCloudSettings(host, props);
+}
+
 // Экран «Менеджер паролей»: данные только из окна, пароли и токены живут в полях ввода.
 function mountVaultSettings() {
   const host = $('#sub-vault');
@@ -6360,6 +6371,7 @@ const SETTINGS_LINKS = {
   telegram: { label: tr('Telegram'), sub: tr('Писать боту из своего Telegram') },
   discord: { label: tr('Discord'), sub: tr('Писать боту из личных сообщений Discord') },
   slack: { label: tr('Slack'), sub: tr('Писать боту из личных сообщений Slack') },
+  cloud: { label: tr('Облако'), sub: tr('Боты в облаке, даже когда компьютер выключен') },
   vault: { label: tr('Менеджер паролей'), sub: tr('Bitwarden и 1Password: бот входит на сайты сам') },
   rules: { label: tr('Правила разрешений'), sub: tr('Что бот делает без вопроса') },
   engines: { label: tr('Chrome, Obscura и Moli'), sub: tr('Чем отличаются и что показали замеры') },
