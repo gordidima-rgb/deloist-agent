@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" width="88" height="88" alt="Deloist">
+<img src="docs/images/bots.webp" width="453" alt="Deloist bots: glass orbs with glowing eyes that smile, think, search and fall asleep">
 
 # Deloist Bots
 
@@ -133,6 +133,16 @@ bot works in your Chrome, only on the sites you choose.
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/browser-en-dark.webp">
   <img src="docs/images/browser-en-light.webp" alt="The bot's browser window with the Take control button">
 </picture>
+
+## It searches where people actually write
+
+<img src="docs/images/search.webp" width="150" align="right" alt="A bot whose eyes turn into Telegram, map and X icons while it searches">
+
+The bot searches open Telegram channels by keyword, without a browser, and brings back posts with dates and links.
+It reads chats and groups on Telegram Web, looks up places on maps and follows discussions on X, all in its own browser.
+Sending, liking or joining a chat waits for your approval.
+
+<br clear="right">
 
 ## Use the subscriptions you already pay for
 

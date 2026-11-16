@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" width="88" height="88" alt="Deloist">
+<img src="docs/images/bots.webp" width="453" alt="Боты Deloist: стеклянные шары со светящимися глазами — радуются, думают, ищут и засыпают">
 
 # Deloist Боты
 
@@ -133,6 +133,16 @@ Deloist — программа для Windows, в которой живёт **к
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/browser-ru-dark.webp">
   <img src="docs/images/browser-ru-light.webp" alt="Окно браузера бота с кнопкой «Взять управление»">
 </picture>
+
+## Ищет там, где правда пишут люди
+
+<img src="docs/images/search.webp" width="150" align="right" alt="Бот, у которого во время поиска глаза сменяются значками Telegram, карт и X">
+
+Бот ищет по открытым каналам Telegram по слову, без браузера, и приносит посты с датами и ссылками.
+Чаты и группы читает в Telegram Web, места ищет на картах, обсуждения смотрит в X — всё в своём браузере.
+Отправить, лайкнуть или вступить в чат он может только после вашего «да».
+
+<br clear="right">
 
 ## Подписки, за которые вы уже платите
 
