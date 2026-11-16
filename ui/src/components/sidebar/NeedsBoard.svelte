@@ -15,7 +15,7 @@
       </div>
       {#each section.items as item (item.id)}
         <button type="button" class="nb-item" onclick={() => onpick?.(section.key, item)}>
-          <span class="nb-where">{item.where}{#if item.meta}<span class="nb-meta"> · {item.meta}</span>{/if}</span>
+          <span class="nb-where">{item.meta ? `${item.where} · ${item.meta}` : item.where}</span>
           {#if item.title}<span class="nb-text">{item.title}</span>{/if}
           {#if item.tag}<span class="nb-tag">{item.tag}</span>{/if}
         </button>
