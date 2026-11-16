@@ -488,7 +488,7 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
             };
             d.risk = "high";
             d.text = ph!(format!("{me}: {summary}"), format!("{me}: {summary}"));
-            d.details = summary;
+            d.details = crate::workflow_tools::full_summary(app, name, args);
         }
         "generate_image" => {
             d.class = "spend";

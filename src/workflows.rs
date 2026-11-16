@@ -137,6 +137,8 @@ pub struct Workflow {
     /// Выключенный процесс не запускается ни по расписанию, ни вебхуком, ни сообщением; вручную работает всегда.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Осторожность, которую процесс не теряет: правка ботом поднимает её до режима правящего, ход шага не работает смелее.
+    pub approval_floor: String,
     pub revision: u64,
     pub graph: Graph,
     pub created_at: i64,
@@ -197,6 +199,9 @@ pub struct Run {
     pub trigger_node: Option<String>,
     /// Общий счётчик порядка шагов.
     pub counter: u64,
+    /// Пол осторожности процесса на момент запуска.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub floor: String,
     /// Запуск одного узла («выполнить шаг»): ниже по графу ничего не идёт.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
@@ -244,6 +249,48 @@ const SCHEDULE_KINDS: [&str; 7] = ["hourly", "daily", "weekdays", "weekly", "mon
 
 fn parse_time(text: &str) -> Option<NaiveTime> {
     crate::schedule::parse_time(text)
+}
+
+/// Допустимый провайдер модели в шаге: по умолчанию, подписка, нативный драйвер или `openai:<имя>`.
+/// Внешние агенты (`acp:`, `cli`) и демо сюда не годятся.
+pub fn provider_ok(provider: &str) -> bool {
+    let p = provider.trim();
+    if matches!(p, "" | "deloist" | "api" | "anthropic" | "gemini") {
+        return true;
+    }
+    p.strip_prefix("openai:").is_some_and(|id| !id.is_empty() && id.len() <= 40 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')))
+}
+
+/// Провайдер `openai:<имя>` должен существовать у человека (сохранение и запуск).
+pub fn check_providers(app: &crate::App, graph: &Graph) -> Result<(), GraphError> {
+    for node in graph.nodes.iter().filter(|n| matches!(n.kind.as_str(), "llm" | "condition" | "image")) {
+        if let Some(id) = node.text("provider").trim().strip_prefix("openai:") {
+            if !app.providers.has_address(app, id) {
+                return Err(err_node("bad_provider", format!("такого провайдера нет: {id}"), &node.id));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Расписание словами.
+pub fn describe_schedule(s: &Schedule) -> String {
+    let time = s.time.clone().unwrap_or_default();
+    const DAYS: [&str; 7] = ["понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам", "воскресеньям"];
+    match s.kind.as_str() {
+        "hourly" => format!("каждый час в {:02} минут", s.minute.unwrap_or(0)),
+        "daily" => format!("каждый день в {time}"),
+        "weekdays" => format!("по будням в {time}"),
+        "weekly" => format!("по {} в {time}", DAYS[(s.weekday.unwrap_or(1).clamp(1, 7) - 1) as usize]),
+        "monthly" => format!("каждого {}-го числа в {time}", s.day.unwrap_or(1)),
+        "interval" => format!(
+            "каждые {} {}",
+            s.amount.unwrap_or(0.0),
+            match s.unit.as_deref() { Some("hours") => "ч", Some("days") => "дн", _ => "мин" }
+        ),
+        "once" => format!("один раз {} в {time}", s.date.clone().unwrap_or_default()),
+        other => other.to_string(),
+    }
 }
 
 /// Тип на выходе узла: текст, картинка или файл. У вывода и аннотаций выхода нет.
@@ -398,6 +445,9 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
                 return Err(err_node("bad_trigger", format!("неизвестный запуск «{trigger}»"), &node.id));
             }
         }
+        if matches!(node.kind.as_str(), "llm" | "condition" | "image") && !provider_ok(&node.text("provider")) {
+            return Err(err_node("bad_provider", "провайдер: пусто, deloist, api, anthropic, gemini или openai:<имя>", &node.id));
+        }
         if node.kind == "shape" {
             let shape = node.text("shape");
             if !shape.is_empty() && !matches!(shape.as_str(), "rect" | "circle" | "diamond" | "triangle" | "oval" | "star") {
@@ -413,7 +463,8 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
         }
         if node.kind == "asset" {
             let path = node.text("path");
-            let ok = crate::workflow_io::safe_relative(&path).is_ok_and(|parts| parts.first().is_some_and(|p| p == "assets"));
+            // Пустой путь допустим: ресурс-текст и ещё не выбранный файл лежат на холсте без файла.
+            let ok = path.trim().is_empty() || crate::workflow_io::safe_relative(&path).is_ok_and(|parts| parts.first().is_some_and(|p| p == "assets"));
             if !ok {
                 return Err(err_node("bad_asset", "файл должен лежать в assets/ папки процесса", &node.id));
             }
@@ -572,7 +623,11 @@ fn schedule_nodes(graph: &Graph) -> impl Iterator<Item = (&Node, &Schedule)> {
 
 /// Привести сроки в порядок: новые и изменённые узлы получают срок, исчезнувшие забываются. `true` — что-то изменилось.
 pub fn refresh_slots(stored: &mut Stored, now_ms: i64) -> bool {
-    let mut changed = false;
+    // Секрет вебхука живёт, только пока узел остаётся запуском вебхуком: сменили вид или убрали узел — адрес мёртв.
+    let alive: HashSet<String> = stored.wf.graph.nodes.iter().filter(|n| n.kind == "trigger" && n.text("trigger") == "webhook").map(|n| n.id.clone()).collect();
+    let before_hooks = stored.hooks.len();
+    stored.hooks.retain(|id, _| alive.contains(id));
+    let mut changed = before_hooks != stored.hooks.len();
     let mut keep: HashSet<String> = HashSet::new();
     for (node, schedule) in schedule_nodes(&stored.wf.graph) {
         keep.insert(node.id.clone());
@@ -633,6 +688,8 @@ pub struct Inner {
     pub deliveries: HashMap<String, std::collections::VecDeque<String>>,
     /// Тексты, которые наши выводы отправили в мессенджеры: ответом они запуска не вызывают.
     pub sent: std::collections::VecDeque<(i64, String)>,
+    /// Когда последний раз сработал вебхук процесса (не чаще раза в 10 секунд).
+    pub last_hook: HashMap<String, i64>,
     /// Бот, который сейчас идёт шагом процесса → процесс.
     pub bot_steps: HashMap<String, String>,
 }
@@ -746,6 +803,27 @@ impl Inner {
         self.sent.iter().any(|(when, sent)| at - *when < 10 * 60_000 && sent == text.trim())
     }
 
+    /// У старых завершённых запусков граф не держим: берутся только свежие пять (повтор и «отсюда» нужны свежим).
+    pub fn trim_old_graphs(&mut self, id: &str) {
+        let Some(list) = self.runs.get_mut(id) else { return };
+        let keep_from = list.len().saturating_sub(5);
+        for run in list.iter_mut().take(keep_from).filter(|r| !r.is_open()) {
+            if !run.graph.nodes.is_empty() || !run.graph.strokes.is_empty() {
+                run.graph = Graph::default();
+            }
+        }
+    }
+
+    /// Файл запусков не больше ~20 МБ: лишнее уходит с самых старых завершённых.
+    pub fn cap_runs_file(&mut self, id: &str) {
+        const CAP: usize = 20 * 1024 * 1024;
+        let Some(list) = self.runs.get_mut(id) else { return };
+        while serde_json::to_vec(&*list).map_or(0, |v| v.len()) > CAP {
+            let Some(old) = list.iter().position(|r| !r.is_open()) else { break };
+            list.remove(old);
+        }
+    }
+
     pub fn has_open_run(&self, wf_id: &str) -> bool {
         self.runs.get(wf_id).is_some_and(|v| v.iter().any(Run::is_open))
     }
@@ -776,7 +854,7 @@ impl Workflows {
             }
         }
         items.sort_by_key(|s| s.wf.created_at);
-        Self { inner: Mutex::new(Inner { dir, versions, items, runs, tokens: HashMap::new(), deliveries: HashMap::new(), sent: Default::default(), bot_steps: HashMap::new() }) }
+        Self { inner: Mutex::new(Inner { dir, versions, items, runs, tokens: HashMap::new(), deliveries: HashMap::new(), last_hook: HashMap::new(), sent: Default::default(), bot_steps: HashMap::new() }) }
     }
 
     pub fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -786,13 +864,13 @@ impl Workflows {
 
 pub fn new_workflow(title: &str, graph: Graph) -> Stored {
     let at = now();
-    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, revision: 1, graph, created_at: at, updated_at: at, last_run: None }, slots: HashMap::new(), hooks: HashMap::new() }
+    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, last_run: None }, slots: HashMap::new(), hooks: HashMap::new() }
 }
 
 /// Строка списка: без графа.
 pub fn summary(w: &Workflow) -> Value {
     let steps = w.graph.nodes.iter().filter(|n| !is_annotation(&n.kind)).count();
-    serde_json::json!({ "id": w.id, "title": w.title, "steps": steps, "updated_at": w.updated_at, "last_run": w.last_run })
+    serde_json::json!({ "id": w.id, "title": w.title, "enabled": w.enabled, "steps": steps, "updated_at": w.updated_at, "last_run": w.last_run })
 }
 
 #[cfg(test)]
@@ -837,6 +915,21 @@ mod tests {
         let mut long = node("a", "prompt");
         long.fields.insert("text".into(), Value::String("я".repeat(MAX_FIELD_CHARS + 1)));
         assert_eq!(code(&graph(vec![long], vec![])), "field_too_long");
+    }
+
+    #[test]
+    fn the_runs_file_is_capped_by_dropping_the_oldest_finished_runs() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("wf-cap-{}", now()));
+        let ws = Workflows::open(&dir);
+        let mut inner = ws.lock();
+        let big = |status: &str, n: u64| Run { id: format!("r{n}"), status: status.into(), started_at: n as i64, steps: vec![Step { output: "я".repeat(9 * 1024 * 1024), ..Step::default() }], ..Run::default() };
+        inner.runs.insert("w".into(), vec![big("done", 1), big("done", 2), big("running", 3), big("done", 4)]);
+        inner.cap_runs_file("w");
+        let ids: Vec<String> = inner.runs["w"].iter().map(|r| r.id.clone()).collect();
+        assert!(ids.contains(&"r3".to_string()), "открытый запуск не трогаем: {ids:?}");
+        assert!(!ids.contains(&"r1".to_string()), "самый старый ушёл: {ids:?}");
+        drop(inner);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

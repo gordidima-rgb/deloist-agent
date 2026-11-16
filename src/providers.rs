@@ -685,6 +685,11 @@ impl Providers {
         Self::builtin(id).is_some() || self.entry(app, id)["custom"] == "openai" || self.entry(app, id)["server"] == true
     }
 
+    /// Есть ли у человека провайдер `openai:<id>`.
+    pub fn has_address(&self, app: &App, id: &str) -> bool {
+        self.is_address(app, id)
+    }
+
     /// Куда и с каким ключом идёт бот на драйвере `openai:<id>`.
     pub fn route(&self, app: &App, id: &str, wanted: &str) -> Route {
         let entry = self.entry(app, id);

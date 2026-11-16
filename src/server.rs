@@ -3022,8 +3022,10 @@ async fn connector_remove(State(app): Shared, Path(id): Path<String>) -> Respons
     connector_result(crate::connectors::remove(&app, &id).await)
 }
 
-async fn export_team(State(app): Shared) -> Response {
-    ok(json!({ "team": crate::team::export(&app) }))
+async fn export_team(State(app): Shared, headers: axum::http::HeaderMap) -> Response {
+    // Ключ программы приходит заголовком Bearer; окно — сессией (cookie). Процессы отдаём только окну.
+    let by_key = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("Bearer "));
+    ok(json!({ "team": crate::team::export_with(&app, !by_key) }))
 }
 
 async fn import_team(State(app): Shared, body: axum::body::Bytes) -> Response {

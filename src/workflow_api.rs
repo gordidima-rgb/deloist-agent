@@ -69,9 +69,9 @@ fn body_of(bytes: &Bytes) -> Result<Value, Response> {
     serde_json::from_slice(bytes).map_err(|_| fail(StatusCode::BAD_REQUEST, "тело не является JSON"))
 }
 
-fn graph_of(value: &Value) -> Result<Graph, Response> {
+fn graph_of(app: &Arc<App>, value: &Value) -> Result<Graph, Response> {
     let graph: Graph = serde_json::from_value(value.clone()).map_err(|e| reply(StatusCode::BAD_REQUEST, json!({ "error": format!("граф не разобран: {e}"), "code": "bad_graph" })))?;
-    wf::validate_graph(&graph).map_err(|e| {
+    wf::validate_graph(&graph).and_then(|()| wf::check_providers(app, &graph)).map_err(|e| {
         let mut body = json!({ "error": e.message, "code": e.code });
         if let Some(id) = e.node_id {
             body["node_id"] = json!(id);
@@ -107,7 +107,7 @@ async fn create(State(app): Shared, bytes: Bytes) -> Response {
     };
     let Some(title) = title_of(&body) else { return fail(StatusCode::BAD_REQUEST, "нужно название") };
     let graph = match body.get("graph").filter(|g| !g.is_null()) {
-        Some(value) => match graph_of(value) {
+        Some(value) => match graph_of(&app, value) {
             Ok(g) => g,
             Err(r) => return r,
         },
@@ -137,7 +137,7 @@ async fn read(State(app): Shared, Path(id): Path<String>) -> Response {
         .nodes
         .iter()
         .filter(|n| n.kind == "trigger")
-        .map(|n| json!({ "node_id": n.id, "type": if n.text("trigger").is_empty() { "manual".to_string() } else { n.text("trigger") }, "next_run": stored.slots.get(&n.id).and_then(|s| s.next) }))
+        .map(|n| json!({ "node_id": n.id, "type": if n.text("trigger").is_empty() { "manual".to_string() } else { n.text("trigger") }, "next_run": stored.slots.get(&n.id).and_then(|s| s.next), "hook": stored.hooks.contains_key(&n.id) }))
         .collect();
     let view = stored.wf.clone();
     if touched {
@@ -152,7 +152,7 @@ async fn save_graph(State(app): Shared, Path(id): Path<String>, bytes: Bytes) ->
         Err(r) => return r,
     };
     let Some(base) = body.get("base_revision").and_then(Value::as_u64) else { return fail(StatusCode::BAD_REQUEST, "нужна base_revision") };
-    let graph = match graph_of(body.get("graph").unwrap_or(&Value::Null)) {
+    let graph = match graph_of(&app, body.get("graph").unwrap_or(&Value::Null)) {
         Ok(g) => g,
         Err(r) => return r,
     };
@@ -345,6 +345,9 @@ async fn restore(State(app): Shared, Path((id, v)): Path<(String, u64)>) -> Resp
         let Some(graph) = guard.versions.get(&id).and_then(|l| l.iter().find(|x| x.v == v)).map(|x| x.graph.clone()) else {
             return fail(StatusCode::NOT_FOUND, "такой версии нет");
         };
+        if let Err(e) = wf::validate_graph(&graph).and_then(|()| wf::check_providers(&app, &graph)) {
+            return fail(StatusCode::BAD_REQUEST, &format!("версию нельзя восстановить: {}", e.message));
+        }
         let Some(stored) = guard.get_mut(&id) else { return not_found() };
         stored.wf.graph = graph.clone();
         stored.wf.revision += 1;
@@ -378,6 +381,7 @@ async fn rotate_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id))
 
 const HOOK_BODY_CHARS: usize = 64_000;
 const HOOK_DELIVERIES: usize = 200;
+const HOOK_MIN_GAP_MS: i64 = 10_000;
 
 /// Входящий вебхук процесса. Неверный адрес, неверный секрет и выключенный процесс отвечают одинаково.
 async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id, secret)): Path<(String, String, String)>, body: Bytes) -> Response {
@@ -408,10 +412,15 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
         if guard.has_open_run(&id) {
             return reply(StatusCode::ACCEPTED, json!({ "skipped": "busy" }));
         }
+        // Не чаще одного запуска в 10 секунд на процесс: внешний вызов не должен сжечь токены частотой.
+        if guard.last_hook.get(&id).is_some_and(|at| now() - *at < HOOK_MIN_GAP_MS) {
+            return fail(StatusCode::TOO_MANY_REQUESTS, "слишком часто: не чаще раза в 10 секунд");
+        }
     }
     let data = crate::workflow_run::frame_external(&String::from_utf8_lossy(&body));
     match run::start_run_with(&app, &id, "webhook", None, None, Some(node_id.clone()), false, Some(data)) {
         Ok(started) => {
+            app.workflows.lock().last_hook.insert(id.clone(), now());
             if let Some(key) = delivery {
                 let mut guard = app.workflows.lock();
                 let list = guard.deliveries.entry(id).or_default();
@@ -423,11 +432,17 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
             reply(StatusCode::ACCEPTED, json!({ "ok": true, "run_id": started.id }))
         }
         Err(e) if e.status == 409 => reply(StatusCode::ACCEPTED, json!({ "skipped": "busy" })),
+        Err(e) if e.status == 429 => fail(StatusCode::TOO_MANY_REQUESTS, &e.message),
         Err(_) => fail(StatusCode::NOT_FOUND, "нет такого вебхука"),
     }
 }
 
 const MAX_ASSET_BYTES: usize = 20 * 1024 * 1024;
+const MAX_ASSETS_TOTAL: u64 = 200 * 1024 * 1024;
+
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir).map(|entries| entries.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()).unwrap_or(0)
+}
 /// Тело с запасом на base64 (4/3) и поля JSON.
 const UPLOAD_BODY_LIMIT: usize = 28 * 1024 * 1024;
 
@@ -475,6 +490,11 @@ async fn upload_asset(State(app): Shared, Path(id): Path<String>, bytes: Bytes) 
     };
     let size = data.len();
     let (data_dir, wf) = (app.store.data_dir().to_path_buf(), id.clone());
+    // Всего файлов на процесс не больше 200 МБ.
+    let used = dir_size(&crate::workflow_io::files_dir(&data_dir, &wf).join("assets"));
+    if used + size as u64 > MAX_ASSETS_TOTAL {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "у процесса уже много файлов: всего не больше 200 МБ");
+    }
     let saved = tokio::task::spawn_blocking(move || {
         // Занятое имя не затираем: берём следующий номер.
         for counter in 1..=99 {

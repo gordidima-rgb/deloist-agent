@@ -76,12 +76,11 @@ pub fn refuse(app: &App, bot: &Bot, name: &str, args: &Value) -> Option<String> 
     if app.turns.delegation_depth_of(&bot.id) > 0 {
         return Some("Рабочие процессы правит только бот, с которым говорит человек, а не исполнитель чужой задачи.".into());
     }
-    let own = app.workflows.lock().bot_steps.get(&bot.id).cloned();
-    if let Some(own) = own {
-        if name == "run_workflow" || text(args, "workflow_id") == own {
-            return Some("Бот, который сейчас идёт шагом процесса, не запускает и не правит процессы сам.".into());
-        }
+    // Бот внутри шага любого процесса не запускает, не правит и не удаляет процессы: иначе цепочка через второй процесс.
+    if app.workflows.lock().bot_steps.contains_key(&bot.id) {
+        return Some("Бот, который сейчас идёт шагом процесса, не запускает и не правит процессы сам.".into());
     }
+    let _ = args;
     None
 }
 
@@ -125,20 +124,47 @@ fn output_label(node: &Node) -> String {
     }
 }
 
-fn describe_node(app: &App, node: &Node) -> String {
-    let main = ["task", "text", "prompt", "question", "rule"].iter().map(|k| node.text(k)).find(|t| !t.trim().is_empty()).unwrap_or_default();
-    let mut line = kind_label(app, node);
-    if !main.is_empty() {
-        line.push_str(&format!(": {}", clip(&main, 160)));
-    }
-    if node.schedule.is_some() {
-        line.push_str(" (с расписанием)");
-    }
-    line
+fn shown(app: &App, key: &str, value: &Value, limit: usize) -> String {
+    let rendered = match value {
+        Value::Null => "«сбросит»".to_string(),
+        Value::String(s) if key == "bot_id" => app.store.bot(s).map_or_else(|| format!("бот не найден ({s})"), |b| format!("бот «{}»", b.name)),
+        Value::String(s) => format!("«{s}»"),
+        other => other.to_string(),
+    };
+    clip_chars(&rendered, limit)
 }
 
-/// Человеческое описание вызова для карточки. Собирает программа, слова бота тут не нужны.
-pub fn summary(app: &App, name: &str, args: &Value) -> String {
+/// Обрезать по знакам с пометкой, не склеивая строки: полный текст остаётся в подробностях карточки.
+fn clip_chars(s: &str, limit: usize) -> String {
+    if s.chars().count() <= limit {
+        return s.to_string();
+    }
+    format!("{}… (+{} знаков)", s.chars().take(limit).collect::<String>(), s.chars().count() - limit)
+}
+
+fn fields_list(app: &App, fields: &serde_json::Map<String, Value>, limit: usize) -> String {
+    fields.iter().map(|(k, v)| format!("{k} = {}", shown(app, k, v, limit))).collect::<Vec<_>>().join("; ")
+}
+
+/// Что за узел и во что он ведёт: вывод, бот и согласие меняют внешний мир, их отмечаем явно.
+fn sensitive(node: Option<&Node>) -> Option<&'static str> {
+    match node?.kind.as_str() {
+        "output" => Some("вывод"),
+        "bot" => Some("бот"),
+        "approval" => Some("согласие человека"),
+        _ => None,
+    }
+}
+
+fn edge_line(app: &App, graph: &Graph, verb: &str, from: &str, to: &str) -> String {
+    let label = |id: &str| graph.node(id).map_or_else(|| format!("шаг {id}"), |n| format!("«{}»", kind_label(app, n)));
+    let mark: Vec<&str> = [sensitive(graph.node(from)), sensitive(graph.node(to))].into_iter().flatten().collect();
+    let warn = if mark.is_empty() { String::new() } else { format!(" ВНИМАНИЕ: затрагивает {}", mark.join(" и ")) };
+    format!("• {verb} {} → {}{warn}", label(from), label(to))
+}
+
+/// Описание вызова: `limit` — сколько знаков показывать у каждого значения (в карточке 300, в подробностях без предела).
+fn render(app: &App, name: &str, args: &Value, limit: usize) -> String {
     let id = text(args, "workflow_id");
     let title = app.workflows.lock().get(id).map(|s| s.wf.title.clone());
     let Some(title) = title else { return format!("Процесс «{id}» не найден") };
@@ -146,9 +172,7 @@ pub fn summary(app: &App, name: &str, args: &Value) -> String {
         "run_workflow" => format!("Запустить рабочий процесс «{title}» сейчас"),
         "delete_workflow" => format!("Удалить рабочий процесс «{title}» вместе со всеми запусками"),
         _ => {
-            let guard = app.workflows.lock();
-            let graph = guard.get(id).map(|s| s.wf.graph.clone()).unwrap_or_default();
-            drop(guard);
+            let graph = app.workflows.lock().get(id).map(|s| s.wf.graph.clone()).unwrap_or_default();
             let label_of = |node_id: &str| graph.node(node_id).map_or_else(|| format!("шаг {node_id}"), |n| format!("«{}»", kind_label(app, n)));
             let mut lines = vec![format!("В процессе «{title}»:")];
             for op in args.get("ops").and_then(Value::as_array).into_iter().flatten().take(MAX_OPS) {
@@ -159,28 +183,36 @@ pub fn summary(app: &App, name: &str, args: &Value) -> String {
                             node.fields = fields.clone();
                         }
                         node.schedule = op.get("schedule").and_then(|s| serde_json::from_value(s.clone()).ok());
-                        format!("• добавит шаг {}", describe_node(app, &node))
+                        let mut line = format!("• добавит шаг {}", kind_label(app, &node));
+                        if !node.fields.is_empty() {
+                            line.push_str(&format!(": {}", fields_list(app, &node.fields, limit)));
+                        }
+                        if let Some(s) = &node.schedule {
+                            line.push_str(&format!("; расписание: {}", wf::describe_schedule(s)));
+                        }
+                        line
                     }
                     "update_node" => {
-                        let keys: Vec<&str> = op.get("fields").and_then(Value::as_object).map(|f| f.keys().map(String::as_str).collect()).unwrap_or_default();
-                        let mut line = format!("• изменит {} (поля: {})", label_of(text(op, "id")), keys.join(", "));
+                        let mut line = format!("• изменит {}", label_of(text(op, "id")));
                         if let Some(fields) = op.get("fields").and_then(Value::as_object) {
-                            if let Some(target) = fields.get("target").and_then(Value::as_str) {
-                                line.push_str(&format!("; выход: {target}"));
-                            }
-                            if fields.contains_key("path") {
-                                line.push_str(&format!("; файл «{}»", fields["path"].as_str().unwrap_or("")));
-                            }
+                            line.push_str(&format!(": {}", fields_list(app, fields, limit)));
                         }
-                        if op.get("schedule").is_some() {
-                            line.push_str("; новое расписание");
+                        if let Some(s) = op.get("schedule") {
+                            let words = if s.is_null() { "«сбросит»".to_string() } else { serde_json::from_value::<wf::Schedule>(s.clone()).map_or_else(|_| "не разобрано".to_string(), |s| wf::describe_schedule(&s)) };
+                            line.push_str(&format!("; расписание: {words}"));
                         }
                         line
                     }
                     "move_node" => format!("• передвинет {}", label_of(text(op, "id"))),
                     "remove_node" => format!("• удалит {}", label_of(text(op, "id"))),
-                    "connect" => format!("• соединит {} → {}", label_of(text(op, "from")), label_of(text(op, "to"))),
-                    "disconnect" => "• разорвёт связь".to_string(),
+                    "connect" => edge_line(app, &graph, "соединит", text(op, "from"), text(op, "to")),
+                    "disconnect" => {
+                        let edge = graph.edges.iter().find(|e| (!text(op, "id").is_empty() && e.id == text(op, "id")) || (e.from == text(op, "from") && e.to == text(op, "to")));
+                        match edge {
+                            Some(e) => edge_line(app, &graph, "разорвёт связь", &e.from, &e.to),
+                            None => "• разорвёт связь (такой связи нет)".to_string(),
+                        }
+                    }
                     "rename" => format!("• переименует процесс в «{}»", text(op, "title")),
                     other => format!("• неизвестная операция «{other}»"),
                 });
@@ -188,6 +220,16 @@ pub fn summary(app: &App, name: &str, args: &Value) -> String {
             lines.join("\n")
         }
     }
+}
+
+/// Для строки карточки: значения не длиннее 300 знаков.
+pub fn summary(app: &App, name: &str, args: &Value) -> String {
+    render(app, name, args, 300)
+}
+
+/// Для подробностей карточки: ничего не обрезано, в том числе постановка шага бота целиком.
+pub fn full_summary(app: &App, name: &str, args: &Value) -> String {
+    render(app, name, args, usize::MAX)
 }
 
 fn number(op: &Value, key: &str) -> Option<f64> {
@@ -347,7 +389,14 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 let mut graph = stored.wf.graph.clone();
                 let mut title = stored.wf.title.clone();
                 apply_ops(&mut graph, &mut title, ops)?;
-                wf::validate_graph(&graph).map_err(|e| format!("граф не прошёл проверку: {}{}", e.message, e.node_id.or(e.edge_id).map_or(String::new(), |i| format!(" ({i})"))))?;
+                let bad = |e: wf::GraphError| format!("граф не прошёл проверку: {}{}", e.message, e.node_id.or(e.edge_id).map_or(String::new(), |i| format!(" ({i})")));
+                wf::validate_graph(&graph).map_err(bad)?;
+                wf::check_providers(app, &graph).map_err(bad)?;
+                // Правка ботом добавляет осторожность правящего: пол процесса остаётся и только растёт.
+                let editor = app.turns.effective_approval(&app.store, &bot.id, &bot.approval);
+                if let Some(floor) = crate::goals::combine_floor(&stored.wf.approval_floor, &editor) {
+                    stored.wf.approval_floor = floor;
+                }
                 stored.wf.graph = graph.clone();
                 stored.wf.title = title;
                 stored.wf.revision += 1;

@@ -48,6 +48,11 @@ fn sanitized(item: &Value, allowed: &[&str]) -> Value {
 /// Всё, что можно перенести на другую машину. Имена вместо идентификаторов:
 /// на новой машине они всё равно будут другими.
 pub fn export(app: &App) -> Value {
+    export_with(app, true)
+}
+
+/// `workflows: false` — для ключа программы (скрипт бота): графы процессов содержат постановки и адреса, их отдаёт только окно.
+pub fn export_with(app: &App, workflows: bool) -> Value {
     let bots = app.store.bots();
     let skills = app.store.skills();
     let rooms = app.store.rooms();
@@ -71,7 +76,7 @@ pub fn export(app: &App) -> Value {
             "members": r.bot_ids.iter().map(|id| name_of(id)).filter(|n| !n.is_empty()).collect::<Vec<_>>(),
             "lead": name_of(&r.lead),
         })).collect::<Vec<_>>(),
-        "workflows": export_workflows(app, &name_of),
+        "workflows": if workflows { export_workflows(app, &name_of) } else { Vec::new() },
         "routines": routines.iter().map(|r| json!({
             "bot": name_of(&r.bot_id), "title": r.title, "prompt": r.prompt,
             "everyMinutes": r.every_minutes, "at": r.at, "days": r.days,
@@ -223,7 +228,7 @@ pub async fn import(app: &Arc<App>, team: &Value) -> Result<Value, String> {
                 }
             }
         }
-        if crate::workflows::validate_graph(&graph).is_err() {
+        if crate::workflows::validate_graph(&graph).and_then(|()| crate::workflows::check_providers(app, &graph)).is_err() {
             continue;
         }
         let mut stored = crate::workflows::new_workflow(&title.chars().take(200).collect::<String>(), graph);

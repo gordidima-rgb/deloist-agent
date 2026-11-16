@@ -2778,7 +2778,7 @@ pub fn delegate_to_bot_with(
 
 /// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём и с теми же согласиями.
 /// Ждёт, пока бот освободится (до минуты). Возвращает последний ответ бота; `stop` останавливает ход.
-pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, attachments: Vec<Value>, unattended: bool, stop: CancellationToken) -> Result<String, String> {
+pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, workflow_id: &str, text: &str, attachments: Vec<Value>, unattended: bool, floor: Option<String>, stop: CancellationToken) -> Result<String, String> {
     let Some(bot) = app.store.bot(bot_id) else {
         return Err("бот не найден".into());
     };
@@ -2796,10 +2796,12 @@ pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, attachm
         waited += 1;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     };
+    // Бот занят шагом процесса только с этой минуты: так отказ «занят» не оставляет отметки.
+    app.workflows.lock().bot_steps.insert(bot_id.to_string(), workflow_id.to_string());
     if unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
-    let opts = TurnOptions { source: Some("delegation:Рабочий процесс".into()), depth: 1, unattended, ..TurnOptions::default() };
+    let opts = TurnOptions { source: Some("delegation:Рабочий процесс".into()), depth: 1, unattended, approval_floor: floor, ..TurnOptions::default() };
     let watcher = {
         let (app, bot_id, stop) = (app.clone(), bot_id.to_string(), stop.clone());
         tokio::spawn(async move {
@@ -2809,6 +2811,9 @@ pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, attachm
     };
     let (answer, _tokens) = run_turn_body(app.clone(), bot, text.to_string(), attachments, opts, cancel).await;
     watcher.abort();
+    // Отметка «без человека» уходит вместе с ходом: следующий разговор с ботом не должен её унаследовать.
+    app.turns.take_missed(bot_id);
+    app.workflows.lock().bot_steps.remove(bot_id);
     if stop.is_cancelled() {
         return Err("остановлено".into());
     }

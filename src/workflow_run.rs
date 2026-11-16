@@ -24,10 +24,10 @@ fn err(status: u16, message: impl Into<String>) -> RunError {
 
 /// Что нужно сделать вне блокировки состояния.
 enum Spawn {
-    Bot { run_id: String, step_id: String, workflow_id: String, bot_id: String, text: String, files: Vec<String>, unattended: bool, token: CancellationToken },
+    Bot { run_id: String, step_id: String, workflow_id: String, bot_id: String, text: String, files: Vec<String>, floor: Option<String>, unattended: bool, token: CancellationToken },
     Image { run_id: String, step_id: String, workflow_id: String, prompt: String, size: String, token: CancellationToken },
     Llm { run_id: String, step_id: String, workflow_id: String, files: Vec<String>, system: String, task: String, provider: String, model: String, condition: bool, token: CancellationToken },
-    Output { run_id: String, step_id: String, workflow_id: String, title: String, target: String, node: Node, input: String },
+    Output { run_id: String, step_id: String, workflow_id: String, title: String, target: String, node: Node, input: String, external: bool },
     Notice { workflow_id: String, run_id: String, step_id: String, title: String, question: String },
 }
 
@@ -45,13 +45,16 @@ fn clip(text: &str, limit: usize) -> String {
 // Ядро: действия над одним запуском под блокировкой
 // ---------------------------------------------------------------------------
 
+/// Ответ одного шага в запуске не длиннее 64 000 знаков: запуски хранятся на диске.
+const MAX_OUTPUT_CHARS: usize = 64_000;
+
 fn finish(run: &mut Run, index: usize, status: &str, output: Option<String>, error: Option<String>) {
     run.counter += 1;
     let seq = run.counter;
     let step = &mut run.steps[index];
     step.status = status.to_string();
     if let Some(output) = output {
-        step.output = output;
+        step.output = if output.chars().count() > MAX_OUTPUT_CHARS { format!("{}…", output.chars().take(MAX_OUTPUT_CHARS).collect::<String>()) } else { output };
     }
     step.error = error;
     step.ended_at = Some(now());
@@ -119,7 +122,7 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
         "output" => {
             let target = node.text("target");
             let target = if target.is_empty() { "notify".to_string() } else { target };
-            spawns.push(Spawn::Output { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), title: title.to_string(), target, node: node.clone(), input: input.clone() });
+            spawns.push(Spawn::Output { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), title: title.to_string(), target, node: node.clone(), input: input.clone(), external: is_external(&run.source) });
         }
         "bot" => {
             let bot_id = node.text("bot_id");
@@ -131,7 +134,7 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
             let token = CancellationToken::new();
             tokens.insert(step_id.clone(), token.clone());
             run.steps[index].thread_id = Some(format!("bot:{bot_id}"));
-            spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), bot_id, text, files: gathered.files, unattended: run.source != "manual", token });
+            spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), bot_id, text, files: gathered.files, floor: step_floor(run), unattended: run.source != "manual", token });
         }
         "llm" | "condition" => {
             let condition = kind == "condition";
@@ -153,9 +156,13 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
         "asset" => {
             let path = node.text("path");
             let text = node.text("text");
-            let output = if text.trim().is_empty() { path.clone() } else { format!("{path}\n\n{text}") };
+            let output = match (path.trim().is_empty(), text.trim().is_empty()) {
+                (_, true) => path.clone(),
+                (true, false) => text.clone(),
+                (false, false) => format!("{path}\n\n{text}"),
+            };
             finish(run, index, "done", Some(output), None);
-            run.steps[index].files = vec![path];
+            run.steps[index].files = if path.trim().is_empty() { Vec::new() } else { vec![path] };
         }
         "image" => {
             let wanted = node.text("prompt");
@@ -174,6 +181,20 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
         }
         _ => finish(run, index, "failed", None, Some("неизвестный вид шага".into())),
     }
+}
+
+/// Пол осторожности хода шага: сохранённый у процесса, а у запусков от внешних событий не мягче «спрашивать».
+fn step_floor(run: &Run) -> Option<String> {
+    let base = run.floor.clone();
+    if is_external(&run.source) {
+        return Some(if base.is_empty() { "ask".to_string() } else { crate::tools::stricter(&base, "ask") });
+    }
+    (!base.is_empty()).then_some(base)
+}
+
+/// Запуск начался от внешнего события: вебхука или сообщения из мессенджера.
+fn is_external(source: &str) -> bool {
+    matches!(source, "webhook" | "telegram" | "discord" | "slack")
 }
 
 fn stop_active(run: &mut Run, tokens: &mut Tokens, reason: Option<&str>) {
@@ -367,6 +388,8 @@ fn with_run<T>(app: &Arc<App>, run_id: &str, f: impl FnOnce(&mut Run, &str, &mut
             let value = f(run, &title, tokens, &mut spawns);
             (value, run.status.clone(), run.ended_at.unwrap_or(run.started_at), newest)
         };
+        inner.trim_old_graphs(&wf_id);
+        inner.cap_runs_file(&wf_id);
         inner.save_runs(&wf_id);
         if newest {
             if let Some(stored) = inner.get_mut(&wf_id) {
@@ -404,14 +427,12 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
         let app = app.clone();
         tokio::spawn(async move {
             match spawn {
-                Spawn::Bot { run_id, step_id, workflow_id, bot_id, text, files, unattended, token } => {
+                Spawn::Bot { run_id, step_id, workflow_id, bot_id, text, files, floor, unattended, token } => {
                     let attachments = match crate::workflow_io::attachments_for_bot(&app, &workflow_id, &bot_id, &files).await {
                         Ok(list) => list,
                         Err(e) => return complete(&app, &run_id, &step_id, Err(e)),
                     };
-                    app.workflows.lock().bot_steps.insert(bot_id.clone(), workflow_id);
-                    let result = crate::turn::run_workflow_step(&app, &bot_id, &text, attachments, unattended, token).await;
-                    app.workflows.lock().bot_steps.remove(&bot_id);
+                    let result = crate::turn::run_workflow_step(&app, &bot_id, &workflow_id, &text, attachments, unattended, floor, token).await;
                     complete(&app, &run_id, &step_id, result.map(|text| (text, None, Vec::new())));
                 }
                 Spawn::Image { run_id, step_id, workflow_id, prompt, size, token } => {
@@ -437,8 +458,8 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
                     });
                     complete(&app, &run_id, &step_id, result);
                 }
-                Spawn::Output { run_id, step_id, workflow_id, title, target, node, input } => {
-                    let result = crate::workflow_io::deliver(&app, &workflow_id, &title, &target, &node, &input).await;
+                Spawn::Output { run_id, step_id, workflow_id, title, target, node, input, external } => {
+                    let result = crate::workflow_io::deliver(&app, &workflow_id, &title, &target, &node, &input, external).await;
                     complete(&app, &run_id, &step_id, result.map(|out| (out, None, Vec::new())));
                 }
                 Spawn::Notice { workflow_id, run_id, step_id, title, question } => {
@@ -490,10 +511,15 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
         if source != "manual" && inner.has_open_run(wf_id) {
             return Err(err(409, "у процесса уже идёт запуск"));
         }
+        // Запуски без человека не тратят токены сверх дневного предела.
+        if source != "manual" && crate::scheduler::over_limit(app) {
+            return Err(err(429, "дневной предел токенов исчерпан"));
+        }
+        let floor = stored.wf.approval_floor.clone();
         let revision = stored.wf.revision;
         let mut run = Run {
             id: uid("run"), workflow_id: wf_id.to_string(), status: "running".into(), source: source.to_string(), started_at: now(),
-            revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, trigger_data: data, ..Run::default()
+            revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, trigger_data: data, floor, ..Run::default()
         };
         if let Some(from) = &from_node {
             let prev = inner.runs.get(wf_id).and_then(|l| l.iter().max_by_key(|r| r.started_at)).cloned();
@@ -509,6 +535,7 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
             let Some(old) = list.iter().position(|r| !r.is_open()) else { break };
             list.remove(old);
         }
+        inner.trim_old_graphs(wf_id);
         id
     };
     with_run(app, &run_id, |run, title, tokens, spawns| advance_core(run, title, tokens, spawns));
@@ -552,6 +579,9 @@ pub fn retry_step(app: &Arc<App>, step_id: &str) -> Result<Run, RunError> {
     };
     let result = with_run(app, &run_id, |run, title, tokens, spawns| -> Result<(), RunError> {
         let Some(old) = run.steps.iter().find(|s| s.id == step_id).cloned() else { return Err(err(404, "шага нет")) };
+        if run.graph.node(&old.node_id).is_none() {
+            return Err(err(409, "запуск слишком старый: повторить можно только свежие"));
+        }
         if !walk::terminal(&old.status) {
             return Err(err(409, "шаг ещё идёт"));
         }
@@ -724,7 +754,21 @@ pub fn tick(app: &Arc<App>) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_branch;
+    use super::{parse_branch, step_floor};
+    use crate::workflows::Run;
+
+    #[test]
+    fn external_runs_never_work_bolder_than_ask_and_the_saved_floor_stays() {
+        let run = |source: &str, floor: &str| Run { source: source.into(), floor: floor.into(), ..Run::default() };
+        assert_eq!(step_floor(&run("manual", "")), None);
+        assert_eq!(step_floor(&run("manual", "strict")), Some("strict".into()));
+        for source in ["webhook", "telegram", "discord", "slack"] {
+            assert_eq!(step_floor(&run(source, "")), Some("ask".into()), "{source}");
+            assert_eq!(step_floor(&run(source, "auto")), Some("ask".into()), "{source}");
+            assert_eq!(step_floor(&run(source, "strict")), Some("strict".into()), "{source}");
+        }
+        assert_eq!(step_floor(&run("schedule", "")), None, "расписание — решение самого человека");
+    }
 
     #[test]
     fn the_model_answer_is_read_as_yes_or_no() {

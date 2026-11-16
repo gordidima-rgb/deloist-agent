@@ -1600,6 +1600,19 @@ async fn the_program_key_cannot_touch_workflows() {
 }
 
 #[tokio::test]
+async fn the_team_export_keeps_workflows_from_the_program_key() {
+    let crew = Crew::start("workflows-export").await;
+    crew.ok("POST", "/api/workflows", Some(json!({ "title": "Секретная постановка" }))).await;
+    let token = agent_token(&crew);
+    let by_key = reqwest::Client::new().get(format!("{}/api/team/export", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(by_key.status().as_u16(), 200, "командная строка по-прежнему выгружает команду");
+    let text = by_key.text().await.unwrap();
+    assert!(!text.contains("Секретная постановка"), "процессы ушли ключу программы");
+    let by_window = crew.ok("GET", "/api/team/export", None).await;
+    assert_eq!(by_window["team"]["workflows"][0]["title"], "Секретная постановка");
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_reassign_a_room() {
     let crew = Crew::start("security-reassign").await;
     let state = crew.ok("GET", "/api/state", None).await;
