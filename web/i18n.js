@@ -1649,7 +1649,6 @@
     'Выбрать дату': 'Pick a date',
     'Добавить подзадачу': 'Add a subtask',
     'Приложить файл': 'Attach a file',
-    'Файл': 'File',
     'С прошлых дней осталось {n}': 'Left over from earlier days: {n}',
     'Свой повтор': 'Custom repeat',
     'Сюда попадают убранные и вчерашние выполненные задачи.': 'Archived tasks and tasks finished on earlier days end up here.',
