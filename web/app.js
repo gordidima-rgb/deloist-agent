@@ -168,7 +168,13 @@ function paintBadges(el, bot) {
 
 // Настроение после события: списка не перерисовываем, аватар сам знает, как перейти.
 // Все живые аватары бота в окне: в списке, в команде и в шапке открытого чата.
-const avatarsOf = (id) => [S.avatars.get(`side:${id}`), S.avatars.get(`team:${id}`), id === S.currentId ? S.avatars.get('head') : null].filter(Boolean);
+// Строка бота внутри команды живёт в слоте «side:<бот>:<команда>»: у одного бота их может быть несколько, и все они его.
+const slotBotId = (slot) => (/^(?:side|team):([^:]+)/.exec(slot) || [])[1] || '';
+const avatarsOf = (id) => {
+  const found = [];
+  for (const [slot, avatar] of S.avatars) if (slotBotId(slot) === id || (slot === 'head' && id === S.currentId)) found.push(avatar);
+  return found;
+};
 const feelBot = (id, mood, seconds) => avatarsOf(id).forEach((avatar) => avatar.feel(mood, seconds));
 // Знак занятия и эмоции от событий хода: правила в avatar-states.js, общие для программы, дока и питомцев.
 const avatarStates = window.CrewAvatarStates?.createTracker(avatarsOf);
@@ -188,7 +194,7 @@ function orbLog(kind, id, data) {
   if (orbEvents.length > 80) orbEvents.shift();
 }
 function orbDump(id = S.currentId) {
-  const slots = [...S.avatars].filter(([slot]) => slot.endsWith(`:${id}`) || slot === 'head').map(([slot, avatar]) => ({ slot, ...(avatar.debug?.() || {}) }));
+  const slots = [...S.avatars].filter(([slot]) => slotBotId(slot) === id || slot === 'head').map(([slot, avatar]) => ({ slot, ...(avatar.debug?.() || {}) }));
   return {
     bot: botById(id)?.name || id, currentIsHead: id === S.currentId,
     app: { busy: S.busy.has(id), waiting: [...(S.waiting.get(id) || [])], waitTitle: S.waitTitle.get(id) || '', state: botState(id) },
@@ -207,9 +213,7 @@ document.addEventListener('keydown', (e) => {
 let listeners = [];
 let listenTimer = 0;
 
-function botAvatars(id) {
-  return [S.avatars.get(`side:${id}`), S.avatars.get(`team:${id}`), id === S.currentId ? S.avatars.get('head') : null].filter(Boolean);
-}
+const botAvatars = avatarsOf;
 
 function listenToInput(on) {
   const next = on && !inRoom() && S.currentId ? botAvatars(S.currentId) : [];
@@ -526,7 +530,7 @@ async function syncWaiting() {
 
 function pruneAvatars() {
   for (const [slot, avatar] of S.avatars) {
-    if ((slot.startsWith('side:') || slot.startsWith('team:')) && !botById(slot.slice(5))) {
+    if (slotBotId(slot) && !botById(slotBotId(slot))) {
       avatar.destroy();
       S.avatars.delete(slot);
     }
