@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "app.gosuslugi",
+  "kind": "app",
+  "version": "1.0.0",
+  "category": "personal",
+  "tier": "verified",
+  "title": { "ru": "Госуслуги", "en": "Gosuslugi" },
+  "summary": {
+    "ru": "Кабинет в браузере бота: вы входите сами, бот смотрит заявления и письма.",
+    "en": "A cabinet in the bot's browser: you sign in, the bot reads applications and mail."
+  },
+  "description": {
+    "ru": "У Госуслуг нет открытого API для людей, поэтому бот работает в своём браузере. Вы входите сами в окне бота: пароль и коды из СМС бот не вводит никогда. Дальше бот может смотреть статусы заявлений, письма и начисления и рассказывать о них. Любое действие на сайте он сначала показывает вам.",
+    "en": "Gosuslugi has no public API for people, so the bot works in its own browser. You sign in yourself in the bot's window: the bot never types passwords or SMS codes. Then it can read application statuses, mail and charges and tell you about them. It shows you any action on the site first."
+  },
+  "icon": "emoji:🏛️",
+  "source": {
+    "name": "Deloist",
+    "url": "https://deloist.ru/catalog/gosuslugi",
+    "license": "MIT",
+    "notice": "Copyright (c) 2026 Deloist",
+    "modified": false
+  },
+  "app": {
+    "web_cabinet": {
+      "url": "https://www.gosuslugi.ru/",
+      "sites": ["gosuslugi.ru", "esia.gosuslugi.ru"],
+      "note": {
+        "ru": "Входите сами в окне бота. Пароль и коды бот не вводит.",
+        "en": "Sign in yourself in the bot's window. The bot never types passwords or codes."
+      }
+    }
+  },
+  "requires": { "apps": [], "builtin": ["browser"], "sites": ["gosuslugi.ru"] }
+}

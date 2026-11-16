@@ -1,0 +1,41 @@
+Third-party material: CopilotKit/OpenBot
+Repository: https://github.com/CopilotKit/OpenBot
+Commit taken: 6149031275cda6b71764dba57558e79ad21ef2e2
+License: MIT
+
+Files used (every catalog text built from them was rewritten, translated into Russian and adapted by Deloist):
+  - examples/fintech/skills.yaml (slug check-a-claim)  ->  skill.check-a-claim
+  - examples/personal/skills.yaml (slug research-public-web)  ->  skill.research-public-web
+  - examples/fintech/catalog/feedback-digest.yaml  ->  skill.marketplace-reviews-digest
+  - examples/personal/agents.yaml (id personal-assistant)  ->  agent.personal-assistant
+  - examples/fintech/catalog/research-desk.yaml  ->  agent.researcher
+  - examples/fintech/catalog/meeting-follow-ups.yaml  ->  agent.meeting-secretary
+
+Authors named in the files used:
+  - Copyright (c) 2026 CopilotKit
+
+----------------------------------------------------------------------
+License text (copied from the source repository):
+----------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 CopilotKit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

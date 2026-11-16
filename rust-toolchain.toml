@@ -1,0 +1,5 @@
+# gnullvm собирается без Visual Studio, MSYS2 и C-компилятора: линкер и системные библиотеки
+# лежат в самом тулчейне. Обычный windows-gnu требует внешний ассемблер для crate-ов windows.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnullvm"
+profile = "minimal"

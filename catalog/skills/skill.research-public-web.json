@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "skill.research-public-web",
+  "kind": "skill",
+  "version": "1.0.0",
+  "category": "research",
+  "tier": "verified",
+  "title": {
+    "ru": "Исследование по открытым источникам",
+    "en": "Research the public web"
+  },
+  "summary": {
+    "ru": "Ищешь по открытому вебу, читаешь страницы целиком и пишешь короткий бриф со ссылками и перечнем того, что не нашлось.",
+    "en": "Search the open web, read the pages in full and write a short brief with links and a list of what you could not find."
+  },
+  "icon": "emoji:🌐",
+  "source": {
+    "name": "CopilotKit/OpenBot",
+    "url": "https://github.com/CopilotKit/OpenBot",
+    "file": "examples/personal/skills.yaml (slug research-public-web)",
+    "commit": "6149031275cda6b71764dba57558e79ad21ef2e2",
+    "license": "MIT",
+    "notice": "Copyright (c) 2026 CopilotKit",
+    "modified": true
+  },
+  "skill": {
+    "tools": [
+      "web_fetch",
+      "browser_nav",
+      "browser_page",
+      "write_file",
+      "remember"
+    ],
+    "body": {
+      "ru": "Ты собираешь бриф по открытым источникам. Поискового инструмента может не быть, поэтому ищи так:\n- web_fetch страницы поиска, например https://yandex.ru/search/?text=ЗАПРОС или https://duckduckgo.com/html/?q=ЗАПРОС (запрос запиши через плюсы вместо пробелов), и возьми из выдачи адреса;\n- если страница не открывается или просит капчу, открой её в браузере (browser_nav, browser_page). Капчу сам не решай: попроси человека.\n\nКак работать:\n1. Сформулируй вопрос одной фразой и 2–4 коротких запроса. Не отправляй в поиск личные данные и содержимое документов человека, только суть запроса.\n2. Открой 3–6 разных источников. Предпочитай первоисточники: сайты компаний и ведомств, документы, а не пересказы.\n3. Читай страницу целиком, а не сниппет. Если страница недоступна, попробуй ещё раз или другим путём и отметь пробел.\n4. Напиши бриф:\n   - вывод одной фразой;\n   - доказательства: каждая строка называет страницу и содержит ссылку;\n   - чего не нашёл и какие вопросы остались открытыми;\n   - даты публикации источников (ДД.ММ.ГГГГ), особенно для цен, законов и курсов.\n5. Если человек просил файл, сохрани бриф через write_file (например, в brief.md).\n\nПравила:\n- Не выдавай свои воспоминания за слова источника. Что не подтверждено страницей, помечай «не подтверждено».\n- Расходящиеся источники показывай оба, с датами.\n- Суммы приводи в рублях, а если источник даёт другую валюту, оставь её и добавь курс на дату источника.\n- Законы, налоги, медицина, деньги: добавь «это справка по открытым источникам, а не консультация специалиста».",
+      "en": "You build a brief from public sources. There may be no search tool, so search like this:\n- web_fetch a search page, for example https://yandex.ru/search/?text=QUERY or https://duckduckgo.com/html/?q=QUERY, and take addresses from the results;\n- if a page does not open or shows a captcha, open it in the browser (browser_nav, browser_page). Never solve a captcha yourself: ask the person.\n\nHow to work:\n1. State the question in one sentence and write 2-4 short queries. Never put personal data or the contents of the person's documents into a search, only the gist.\n2. Open 3-6 different sources. Prefer primary sources (company and agency sites, documents) over retellings.\n3. Read the whole page, not the snippet. If a page fails, try once more or another way and note the gap.\n4. Write the brief: the finding in one sentence; the evidence, each line naming the page with a link; what you could not find and open questions; source dates (DD.MM.YYYY), especially for prices, laws and rates.\n5. If a file was requested, save the brief with write_file (for example brief.md).\n\nRules:\n- Never present your own recollection as something a source said. Mark unconfirmed items \"unconfirmed\".\n- Show disagreeing sources side by side with dates.\n- Give sums in rubles; if the source uses another currency keep it and add the rate on the source date.\n- Law, tax, medicine, money: add \"this is a summary of public sources, not professional advice\"."
+    }
+  },
+  "requires": {
+    "apps": [],
+    "builtin": [
+      "browser"
+    ],
+    "sites": []
+  }
+}

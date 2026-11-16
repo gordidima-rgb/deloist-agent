@@ -1,0 +1,108 @@
+name: linux
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  server:
+    name: server shape (build + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server
+      - name: Build (server only, no GTK/WebKit)
+        run: cargo build --no-default-features
+      - name: Server shape must not pull GTK, WebKit or window crates
+        run: |
+          if cargo tree --no-default-features --edges normal | grep -E '(^|[ │├└─]+)(gtk|webkit2gtk|wry|tao|tray-icon) v'; then
+            echo "window crates leaked into the server shape"; exit 1
+          fi
+      # drivers / safety / surface / user_chrome suites need sh-based fake programs
+      # and run on Windows only until stage 2-3.
+      - name: Compile every test target
+        run: cargo test --no-default-features --no-run
+      - name: Test (unit)
+        run: cargo test --no-default-features --bin deloist --no-fail-fast -- --test-threads 2
+      - name: Test (core)
+        run: cargo test --no-default-features --test core --no-fail-fast -- --test-threads 2
+      - name: Test (cloud and Linux secrets guarantees)
+        run: cargo test --no-default-features --test safety -- --test-threads 2 the_secrets_master_key_file_is_closed_like_any_key the_master_key_is_never_in_a_team_export cloud_mode_keeps_the_master_key_out_of_command_environment cloud_mode_refuses_to_start_without_a_valid_key cloud_mode_process_memory_and_environ_do_not_reveal_the_key a_secrets_key_without_cloud_mode_is_refused cloud_mode_has_no_run_command_and_refuses_a_forced_call cloud_mode_file_tools_work_only_inside_the_bots_own_folder cloud_mode_refuses_cli_and_acp_bots cloud_mode_refuses_stdio_mcp_and_connectors_but_takes_http cloud_mode_closes_every_route_that_starts_a_process_or_touches_the_desktop cloud_flag_without_server_is_a_startup_error
+
+  desktop:
+    name: desktop shape (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev libssl-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop
+      - name: Build (desktop, default features)
+        run: cargo build
+
+  package:
+    name: package release binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [server, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev libssl-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Build release (server)
+        run: cargo build --release --no-default-features --bin deloist
+      - name: Package server
+        run: |
+          mkdir -p dist/deloist-server
+          cp target/release/deloist dist/deloist-server/deloist
+          tar -C dist -czf dist/deloist-server-linux-x86_64.tar.gz deloist-server
+      - name: Build release (desktop)
+        run: cargo build --release --bin deloist
+      - name: Package desktop
+        run: |
+          mkdir -p dist/Deloist
+          cp target/release/deloist dist/Deloist/deloist
+          tar -C dist -czf dist/Deloist-linux-x86_64.tar.gz Deloist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deloist-linux-x86_64
+          path: |
+            dist/Deloist-linux-x86_64.tar.gz
+            dist/deloist-server-linux-x86_64.tar.gz
+
+  docker:
+    name: docker image (not pushed)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t deloist-server:ci .

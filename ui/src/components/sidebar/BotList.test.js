@@ -1,0 +1,203 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
+import BotList from './BotList.svelte';
+
+const bot = (id, extra = {}) => ({ id, name: id, rank: 'lead', pinned: false, busy: false, unread: false, time: '', preview: '', ...extra });
+const room = (id, extra = {}) => ({ id, name: id, active: false, unread: false, time: '', preview: '', archived: false, ...extra });
+
+let instance;
+let host;
+
+afterEach(() => {
+  if (instance) unmount(instance);
+  host?.remove();
+  instance = null;
+  host = null;
+  localStorage.clear();
+});
+
+function render(props = {}) {
+  host = document.createElement('div');
+  document.body.append(host);
+  instance = mount(BotList, { target: host, props: { bots: [], rooms: [], paint: () => {}, ...props } });
+  flushSync();
+  return host;
+}
+
+const ids = () => [...host.querySelectorAll('.sb-row[data-id]')].map((el) => el.dataset.id);
+const heads = () => [...host.querySelectorAll('.sb-head')].map((el) => el.textContent.trim());
+
+describe('BotList', () => {
+  it('shows pinned first, then leads; idle specialists wait folded in reserve', () => {
+    render({ bots: [bot('lead'), bot('spec', { rank: 'specialist' }), bot('pin', { rank: 'specialist', pinned: true })] });
+    expect(ids()).toEqual(['pin', 'lead']);
+    expect(heads()[0]).toBe('Закреплённые');
+    const toggle = host.querySelector('.sb-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toContain('1');
+    toggle.click();
+    flushSync();
+    expect(ids()).toEqual(['pin', 'lead', 'spec']);
+    expect(localStorage.getItem('deloist:sidebar-reserve-open')).toBe('1');
+  });
+
+  it('keeps a busy, unread or open specialist among the team', () => {
+    render({
+      currentId: 'open',
+      bots: [bot('busy', { rank: 'specialist', busy: true }), bot('new', { rank: 'specialist', unread: true }), bot('open', { rank: 'specialist' })],
+    });
+    expect(ids()).toEqual(['busy', 'new', 'open']);
+    expect(host.querySelector('.sb-toggle')).toBeNull();
+  });
+
+  it('search shows every match in one flat list', () => {
+    render({ filter: 'x', bots: [bot('spec', { rank: 'specialist' }), bot('pin', { pinned: true })] });
+    expect(ids()).toEqual(['spec', 'pin']);
+    expect(heads()).toEqual([]);
+  });
+
+  it('pin button reports the new state and row click selects', () => {
+    const onpin = vi.fn();
+    const onselect = vi.fn();
+    render({ bots: [bot('a')], onpin, onselect });
+    host.querySelector('.sb-pin').click();
+    expect(onpin).toHaveBeenCalledWith('a', true);
+    host.querySelector('.k-list-item__main').click();
+    expect(onselect).toHaveBeenCalledWith('a');
+  });
+
+  it('paints each bot avatar once through the callback', () => {
+    const paint = vi.fn();
+    render({ bots: [bot('a'), bot('b')], paint });
+    expect(paint.mock.calls.map((c) => c[1])).toEqual(['a', 'b']);
+  });
+
+  it('keeps archived rooms folded at the end of the list', () => {
+    render({ rooms: [room('live'), room('old', { archived: true })] });
+    expect(ids()).toEqual(['live']);
+    const toggle = host.querySelector('.sb-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Архив команд · 1');
+    expect(toggle.textContent).toContain('Архив команд');
+    expect(toggle.textContent).toContain('1');
+    toggle.click();
+    flushSync();
+    expect(ids()).toEqual(['live', 'old']);
+    expect(localStorage.getItem('deloist:sidebar-archive-open')).toBe('1');
+  });
+
+  it('says nobody was found when the lists are empty', () => {
+    render();
+    expect(host.textContent).toContain('Никого не нашлось.');
+  });
+  it('shows members instead of "пока пусто" for a team with bots, and strips markdown from previews', () => {
+    render({
+      bots: [bot('lead', { name: 'Редактор', preview: 'Передал данные **@Редакт' }), bot('a', { name: 'Картинка' })],
+      rooms: [room('t1', { memberIds: ['lead', 'a'], lead: 'lead' }), room('t2', { memberIds: [] }), room('t3', { memberIds: ['a'], preview: 'Картинка: **готово**' })],
+    });
+    const sub = (id) => host.querySelector(`li[data-team="${id}"] .k-list-item__sub`)?.textContent.trim();
+    expect(sub('t1')).toBe('Редактор, Картинка');
+    expect(sub('t2')).toBe('пока пусто');
+    expect(sub('t3')).toBe('Картинка: готово');
+    expect(host.querySelector('.sb-row[data-id="lead"]:not(.sb-team) .k-list-item__sub').textContent.trim()).toBe('Передал данные @Редакт');
+  });
+
+  describe('team tree', () => {
+    const tree = (extra = {}) => ({
+      bots: [bot('lead'), bot('a'), bot('b'), bot('solo'), bot('both')],
+      rooms: [
+        room('t1', { memberIds: ['a', 'lead', 'both'], lead: 'lead', color: '#c33' }),
+        room('t2', { memberIds: ['both', 'b'], lead: '' }),
+      ],
+      ...extra,
+    });
+    const rowEls = () => [...host.querySelectorAll('.sb-tree li[role="treeitem"]')];
+    const level = (el) => Number(el.getAttribute('aria-level'));
+
+    it('puts the lead under the team and the rest one level deeper; free bots go under "Без команды"', () => {
+      render(tree());
+      const rows = rowEls().map((el) => [el.dataset.id, level(el)]);
+      expect(rows).toEqual([['t1', 1], ['lead', 2], ['a', 3], ['both', 3], ['t2', 1], ['both', 2], ['b', 3]]);
+      expect(heads()).toEqual(['Команды', 'Без команды']);
+      expect([...host.querySelectorAll('.sb-list:not(.sb-tree) .sb-row')].map((el) => el.dataset.id)).toEqual(['solo']);
+      expect(host.querySelector('.sb-tree').getAttribute('role')).toBe('tree');
+    });
+
+    it('marks a bot that is in a second team as a repeat and gives it its own avatar slot', () => {
+      const paint = vi.fn();
+      render(tree({ paint }));
+      const both = [...host.querySelectorAll('.sb-row[data-id="both"]')];
+      expect(both.map((el) => el.classList.contains('is-repeat'))).toEqual([false, true]);
+      const slots = paint.mock.calls.filter((c) => c[1] === 'both').map((c) => c[2]);
+      expect(new Set(slots).size).toBe(2);
+    });
+
+    it('collapses and expands with the chevron, remembers it, and keeps the chat click', () => {
+      const onselectroom = vi.fn();
+      render(tree({ onselectroom }));
+      const team = host.querySelector('li[data-team="t1"]');
+      expect(team.getAttribute('aria-expanded')).toBe('true');
+      team.querySelector('.sb-chev-btn').click();
+      flushSync();
+      expect(team.getAttribute('aria-expanded')).toBe('false');
+      expect(host.querySelector('li[data-id="lead"]').closest('[inert]')).not.toBeNull();
+      expect(JSON.parse(localStorage.getItem('deloist:sidebar-teams-closed'))).toEqual(['t1']);
+      // Щелчок по имени открывает чат и раскрывает команду.
+      team.querySelector('.k-list-item__main').click();
+      flushSync();
+      expect(onselectroom).toHaveBeenCalledWith('t1');
+      expect(team.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('restores a collapsed team from storage and survives broken storage', () => {
+      localStorage.setItem('deloist:sidebar-teams-closed', JSON.stringify(['t2']));
+      render(tree());
+      expect(host.querySelector('li[data-team="t2"]').getAttribute('aria-expanded')).toBe('false');
+      unmount(instance);
+      host.remove();
+      localStorage.setItem('deloist:sidebar-teams-closed', '{не json');
+      render(tree());
+      expect(host.querySelector('li[data-team="t2"]').getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('shows a rollup badge on a collapsed team when a member needs the owner or failed', () => {
+      localStorage.setItem('deloist:sidebar-teams-closed', JSON.stringify(['t1']));
+      render(tree({ bots: [bot('lead', { needs: true }), bot('a', { error: true }), bot('b'), bot('solo'), bot('both')] }));
+      const team = host.querySelector('li[data-team="t1"]');
+      expect(team.querySelector('.sb-roll.is-needs').textContent).toBe('1');
+      expect(host.querySelector('li[data-team="t2"] .sb-roll')).toBeNull();
+      team.querySelector('.sb-chev-btn').click();
+      flushSync();
+      expect(team.querySelector('.sb-roll')).toBeNull();
+    });
+
+    it('search opens collapsed teams that have matches and hides the plain list duplicates', () => {
+      localStorage.setItem('deloist:sidebar-teams-closed', JSON.stringify(['t1']));
+      render(tree({ filter: 'a', bots: [bot('a')], rooms: [room('t1', { memberIds: ['a'], lead: 'a' })] }));
+      expect(host.querySelector('li[data-team="t1"]').getAttribute('aria-expanded')).toBe('true');
+      expect(host.querySelector('li[data-id="a"]').closest('[inert]')).toBeNull();
+      expect(host.querySelectorAll('.sb-row[data-id="a"]').length).toBe(1);
+    });
+
+    it('arrow keys walk the tree: right opens, down enters, left goes back and closes', () => {
+      render(tree());
+      const mainOf = (id, n = 0) => host.querySelectorAll('li[data-id="' + id + '"] .k-list-item__main')[n];
+      const press = (el, key) => {
+        el.focus();
+        el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        flushSync();
+      };
+      const team = host.querySelector('li[data-team="t1"]');
+      press(mainOf('t1'), 'ArrowLeft');
+      expect(team.getAttribute('aria-expanded')).toBe('false');
+      press(mainOf('t1'), 'ArrowRight');
+      expect(team.getAttribute('aria-expanded')).toBe('true');
+      press(mainOf('t1'), 'ArrowRight');
+      expect(document.activeElement).toBe(mainOf('lead'));
+      press(mainOf('lead'), 'ArrowDown');
+      expect(document.activeElement).toBe(mainOf('a'));
+      press(mainOf('a'), 'ArrowLeft');
+      expect(document.activeElement).toBe(mainOf('t1'));
+    });
+  });
+});

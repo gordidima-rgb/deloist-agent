@@ -1,0 +1,9 @@
+Third-party material: simple-icons/simple-icons
+Repository: https://github.com/simple-icons/simple-icons
+Package taken: simple-icons 15.22.0 (npm, via jsDelivr)
+License: CC0 1.0 Universal
+
+Files used (single-colour SVG, unchanged): icons/<slug>.svg -> web/icons/apps/<slug>.svg, 173 logos;
+web/icons/apps/index.json lists every slug with the name of the application.
+Shown on the bot avatar while it works in that application (avatar.js, act: app).
+Logos are trademarks of their owners and are shown only to name the application.

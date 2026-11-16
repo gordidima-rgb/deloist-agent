@@ -1,0 +1,30 @@
+Deloist
+Copyright 2026 IP Gordienko D. V. (Dmitry Gordienko)
+
+Deloist is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+Official builds published in GitHub Releases are free to use for any purpose, including commercial use, under the Deloist terms of use (https://deloist.ru/legal/offer); the noncommercial limit applies to the source code and to builds made from it.
+Third-party components below remain under their own licences.
+
+The glass orb images (art/orbs, web/orbs.webp) and web/avatar-gears.mp4 were generated with AI tools by the copyright holder.
+
+Third-party components
+======================
+Full licence texts and the exact copyright lines are in THIRD_PARTY/.
+
+- Svelte runtime, bundled in web/ui/kit.js. https://github.com/sveltejs/svelte. MIT. Copyright (c) 2016-2025 Svelte Contributors. THIRD_PARTY/svelte.txt
+- Rust crates from Cargo.lock (about 417, from crates.io). Licences: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, Unlicense, CC0-1.0, 0BSD and, for five unmodified crates (cssparser, cssparser-macros, dtoa-short, option-ext, selectors), MPL-2.0. Names, versions, licences, authors and repositories: THIRD_PARTY/rust-crates.txt
+- OpenWebView2Loader. https://github.com/jchv/OpenWebView2Loader. ISC. Copyright 2020 (the upstream licence names no holder). Logic ported to Rust in src/webview_loader.rs; no C/C++ source is bundled. THIRD_PARTY/jchv-OpenWebView2Loader.txt
+- CopilotKit/OpenBot. https://github.com/CopilotKit/OpenBot. MIT. Copyright (c) 2026 CopilotKit. THIRD_PARTY/CopilotKit-OpenBot.txt
+- NousResearch/hermes-agent. https://github.com/NousResearch/hermes-agent. MIT. Copyright (c) 2025 Nous Research. THIRD_PARTY/NousResearch-hermes-agent.txt
+- msitarzewski/agency-agents. https://github.com/msitarzewski/agency-agents. MIT. Copyright (c) 2025 AgentLand Contributors. THIRD_PARTY/msitarzewski-agency-agents.txt
+- talkstream/ru-text. https://github.com/talkstream/ru-text. MIT. Copyright (c) 2026 Arseniy Kamyshev. THIRD_PARTY/talkstream-ru-text.txt
+- anthropics/skills (docx, pdf, pptx, xlsx, internal-comms). https://github.com/anthropics/skills. Apache-2.0. Anthropic, PBC. THIRD_PARTY/anthropics-skills.txt
+- LobeHub icons (@lobehub/icons-static-svg). https://github.com/lobehub/lobe-icons. MIT. Copyright (c) 2023 LobeHub. THIRD_PARTY/lobe-icons.txt
+- Simple Icons. https://github.com/simple-icons/simple-icons. CC0-1.0. THIRD_PARTY/simple-icons.txt
+- Fonts in web/fonts: Golos Text (Copyright 2019 The Golos Text Project Authors), Onest (Copyright 2021 The Onest Project Authors), Nunito (Copyright 2014 The Nunito Project Authors). SIL Open Font License 1.1. THIRD_PARTY/fonts-OFL.txt
+- Russian Trusted Root CA public certificate (assets/russian_trusted_root_ca.pem), published by the Ministry of Digital Development of the Russian Federation; a public certificate, not software.
+- Moli (https://github.com/lexmount/moli), Apache-2.0 OR MIT. Optional browser engine: not part of the sources; downloaded by the user on request and included only in the server Docker image. THIRD_PARTY/lexmount-moli.txt
+
+Trademarks
+==========
+Product names and logos shown in the application belong to their owners and are used only to name the product. The name "Deloist" and the Deloist logo are not licensed under the PolyForm Noncommercial License.

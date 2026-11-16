@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deloist: питомцы</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      /* Окно прозрачное: питомцы стоят прямо на рабочем столе, без рамки и тени. */
+      html, body { background: transparent; }
+      body { overflow: hidden; user-select: none; -webkit-user-select: none; }
+      html, body { margin: 0; padding: 0; }
+      .pet {
+        position: relative;
+        width: 136px;
+        height: 140px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        cursor: grab;
+      }
+      .pet:active { cursor: grabbing; }
+      .pet-avatar {
+        position: relative;
+        width: 96px;
+        height: 96px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        color: var(--color-on-brand);
+        font-family: "Nunito", var(--font-body);
+        font-weight: 800;
+        font-size: 38px;
+      }
+      .pet-avatar.live { background: transparent; }
+      .pet-avatar { transform-origin: 50% 100%; transition: transform 240ms cubic-bezier(0.3, 1.7, 0.5, 1); }
+      .pet-avatar.squish { transform: scale(1.1, 0.86); transition-duration: 90ms; }
+      @media (prefers-reduced-motion: reduce) { .pet-avatar, .pet-avatar.squish { transition: none; transform: none; } }
+      .pet-badges {
+        position: absolute;
+        left: 2px;
+        top: 4px;
+        z-index: 2;
+        display: flex;
+        gap: 1px;
+      }
+      .pet-badges .avatar-badge { border-color: transparent; }
+      /* Крестик виден только при наведении: в покое на столе остаётся один персонаж. */
+      .pet-close {
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        z-index: 3;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--color-border-default);
+        border-radius: 50%;
+        background: var(--color-bg-surface);
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 120ms ease-out;
+      }
+      .pet-close .i { width: 14px; height: 14px; }
+      .pet:hover .pet-close, .pet-close:focus-visible { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <div id="pet" class="pet"></div>
+    <script src="/i18n.js"></script>
+    <script src="/avatar.js"></script>
+    <script src="/avatar-states.js"></script>
+    <script src="/pet.js"></script>
+  </body>
+</html>

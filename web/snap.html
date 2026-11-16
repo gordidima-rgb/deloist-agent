@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deloist: правка текста</title>
+    <link rel="icon" href="data:," />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      /* Окно прозрачное: видна только карточка, тень помещается в отступ. */
+      html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+      .card {
+        position: absolute; inset: 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;
+        padding: 12px 14px; border-radius: 18px; background: var(--color-bg-surface); color: var(--color-text-primary);
+        border: 1px solid var(--color-border-default); box-shadow: 0 6px 22px rgba(15, 23, 42, 0.22);
+      }
+      .head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-muted); }
+      .head .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .close { border: none; background: transparent; color: var(--color-text-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 4px; }
+      .row { display: flex; align-items: center; gap: 10px; }
+      .ask {
+        flex: 1; min-width: 0; resize: none; box-sizing: border-box; height: 64px; padding: 8px 10px; font: inherit; font-size: 14px;
+        border-radius: 12px; border: 1.5px solid var(--color-border-default); background: var(--color-bg-canvas); color: inherit;
+      }
+      .ask:focus { outline: none; border-color: var(--color-brand-primary); }
+      .ask[readonly] { background: var(--color-bg-surface-soft); }
+      .mic, .go {
+        width: 40px; height: 40px; flex: none; border-radius: 12px; border: none; display: grid; place-items: center; cursor: pointer;
+      }
+      .mic { background: transparent; color: var(--color-text-secondary); border: 1.5px solid var(--color-border-default); }
+      .go { background: var(--color-brand-fill); color: var(--color-on-brand); }
+      .go:disabled { opacity: 0.4; cursor: default; }
+      .mic .i, .go .i { width: 20px; height: 20px; }
+      .status { font-size: 13px; line-height: 1.35; color: var(--color-text-muted); min-height: 18px; max-height: 36px; overflow: hidden; }
+      .status.error { color: var(--color-accent-text); }
+      .actions { display: flex; gap: 8px; justify-content: flex-end; }
+      .actions button { height: 32px; padding: 0 12px; border-radius: 10px; font-size: 13px; }
+      body.notice .row { display: none; }
+      body.notice .status { font-size: 14px; color: var(--color-text-primary); }
+    </style>
+  </head>
+  <body data-voice="manual">
+    <div class="card" id="card">
+      <div class="head">
+        <span class="what" id="what"></span>
+        <button type="button" class="close" id="close" aria-label="Закрыть">×</button>
+      </div>
+      <div class="row">
+        <textarea class="ask" id="ask" rows="2"></textarea>
+        <div style="display: flex; gap: 6px">
+          <button type="button" class="mic mic-btn" id="mic"></button>
+          <button type="button" class="go" id="go" disabled aria-label="Переписать">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="status" id="status" role="status"></div>
+    </div>
+    <script src="/i18n.js"></script>
+    <script src="/voice.js"></script>
+    <script src="/snap.js"></script>
+  </body>
+</html>

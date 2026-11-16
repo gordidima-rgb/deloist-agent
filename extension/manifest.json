@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "description": "__MSG_extDescription__",
+  "version": "0.3.1",
+  "default_locale": "ru",
+  "minimum_chrome_version": "116",
+  "incognito": "not_allowed",
+  "permissions": ["debugger", "tabGroups", "nativeMessaging", "storage", "alarms", "webNavigation"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Deloist", "default_popup": "popup.html" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu4fGsnDayfi3P7ipoVJ4PBAFbiu5YXpqc0xqnJfWAOqJfPhiE0q3gclCFtgBAt6meVy5trPIrlgJK1eoHioRAgBvHGE97ibUVijzMw1J+aH/KDfhrz04651g/AAnswGgLhU4gZu+6w82y5MvpDdKzUqDuU7c0MzZn+gat/suXJ3bHrK64PImQ3PK1NZdeUCZ2urHS5diOJjhG8PEDjwLuC5dzpOvtcQ+5+GQbmWU87SnNQ2XrDpUQg8TFhQ/phzgNzJcHeMUd/MYYONlso+T6ONibY007grUtUlEpNFrs7vUr3dKLslFereBBU3jQrbzQIx8kz/4o6o4s5CLHFalzQIDAQAB"
+}

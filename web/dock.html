@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deloist: док ботов</title>
+    <link rel="icon" href="data:," />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/kit.css" />
+    <link rel="stylesheet" href="/ui/kit.css" />
+    <style>
+      /* Окно прозрачное и во всю высоту края: видно только сам док и карточки рядом с ним.
+         Мышь окно ловит лишь там, где они нарисованы, остальное пропускает к программам под ним. */
+      html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+      body { overflow: hidden; user-select: none; -webkit-user-select: none; }
+
+      /* Док «Тушь и сигнал» (docs/design/kit.md): островок, места с кольцом лимита, спрятанный лоток
+         рисует Svelte-компонент Dock (ui/src/components/Dock.svelte) внутри .wrap. Здесь только то, что
+         принадлежит окну: место у края, уход за край, оттягивание от стены и перенос. */
+      .wrap {
+        --pull: 0px;
+        position: absolute;
+        top: 8px;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        transform: translateX(calc(-1 * var(--pull)));
+        transition: transform 420ms var(--k-ease-spring);
+      }
+      body.left .wrap { right: auto; left: 0; align-items: flex-start; transform: translateX(var(--pull)); }
+      .wrap.tucked { transform: translateX(calc(100% + 4px)); transition: transform var(--k-dur-exit) var(--k-ease-in); }
+      body.left .wrap.tucked { transform: translateX(calc(-100% - 4px)); }
+      .wrap.pulling, .wrap.carried { transition: none; }
+      /* Отлип: скругление со всех сторон, вогнутые уголки втягиваются, док отходит от стены. */
+      .wrap .k-fillet { transition: transform var(--k-dur-morph) var(--k-ease-spring); }
+      .wrap .k-fillet--top { transform-origin: 100% 100%; }
+      .wrap .k-fillet--bottom { transform-origin: 100% 0; }
+      .wrap .k-island { transition: border-radius var(--k-dur-morph) var(--k-ease-spring); }
+      .wrap.loose .k-island { border-radius: 31px; }
+      .wrap.loose .k-fillet { transform: scale(0); }
+      .wrap.loose { --pull: 18px; }
+      .wrap.pulling .k-grip, .wrap.carried .k-grip { cursor: grabbing; }
+
+      /* Аватар бота внутри кольца: свой у каждого (слизь, стекло, аниме, экран). Фон лица — от движка. */
+      .wrap .k-ring__face { position: relative; display: grid; place-items: center; background: transparent; color: #fff; font: 800 18px/1 var(--k-font-display); }
+      /* У экрана-аватара свой цветной обод; в доке обод — это кольцо лимита. */
+      .wrap .k-ring__face .led-ring { background: #050505 !important; box-shadow: none !important; }
+      .wrap .k-ring__face .led-ring canvas { inset: 0 !important; width: 100% !important; height: 100% !important; }
+      .wrap .k-seat { position: relative; }
+      .wrap .avatar-badges { position: absolute; left: -2px; top: -2px; display: flex; gap: 1px; z-index: 1; }
+      /* Готовая работа, которую ещё не открыли; коралловая — ждёт человека. */
+      .seat-dot {
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--k-brand);
+        box-shadow: 0 0 0 2px var(--k-ink);
+      }
+      .seat-dot.is-need { background: var(--k-attention); }
+
+      /* Невидимая полоска у края: пока док спрятан, она ловит указатель и зовёт его обратно. */
+      .strip { position: absolute; top: 0; bottom: 0; right: 0; width: 4px; display: none; }
+      body.left .strip { right: auto; left: 0; }
+      body.tucked .strip { display: block; }
+
+      /* Подпись при наведении: имя, чем бот занят и сколько осталось бюджета (точное число — только здесь). */
+      .label {
+        position: absolute;
+        right: 76px;
+        max-width: 260px;
+        padding: 8px 12px;
+        border-radius: var(--k-radius-md);
+        background: var(--k-ink);
+        color: var(--k-on-ink);
+        box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateX(6px);
+        transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out);
+      }
+      body.left .label { right: auto; left: 76px; transform: translateX(-6px); }
+      .label.on { opacity: 1; transform: none; }
+      .label-name { font: 800 14px/1.3 var(--k-font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .label-note, .label-limit { font: 400 var(--k-text-xs)/1.4 var(--k-font-body); color: var(--k-on-ink-2); font-variant-numeric: tabular-nums; }
+      .label-limit.is-low { color: var(--k-attention); }
+      .label-note:empty, .label-limit:empty { display: none; }
+
+      /* Готовая работа: карточки ненадолго рядом с доком. */
+      .shelf {
+        position: absolute;
+        right: 76px;
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      body.left .shelf { right: auto; left: 76px; }
+      .card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 14px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-lg);
+        background: var(--color-bg-surface);
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+        cursor: pointer;
+        animation: card-in 280ms cubic-bezier(0.34, 1.4, 0.5, 1);
+        transition: opacity 300ms ease-out, border-color var(--motion-fast);
+      }
+      [data-theme="dark"] .card { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
+      .card:hover { border-color: var(--color-border-strong); }
+      .card.leaving { opacity: 0; }
+      @keyframes card-in { from { opacity: 0; transform: translateX(14px); } }
+      body.left .card { animation-name: card-in-left; }
+      @keyframes card-in-left { from { opacity: 0; transform: translateX(-14px); } }
+      .card-head { display: flex; align-items: center; gap: 8px; padding-right: 22px; }
+      .card-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+      .card-name { font: 800 14px/1.3 var(--font-heading); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .card-text {
+        font: 400 var(--text-sm)/1.45 var(--font-body);
+        color: var(--color-text-secondary);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+      }
+      .card-close {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 24px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+      }
+      .card-close:hover { background: var(--color-bg-surface-soft); color: var(--color-text-primary); }
+      .card-close .i { width: 14px; height: 14px; }
+      .more {
+        align-self: flex-end;
+        padding: 4px 12px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-pill);
+        background: var(--color-bg-surface);
+        color: var(--color-text-secondary);
+        font: 600 var(--text-xs)/1.4 var(--font-body);
+        cursor: pointer;
+      }
+      body.left .more { align-self: flex-start; }
+
+      /* Чем занят бот: плашка (Svelte StepPill) вырастает из дока у места бота, прилипнув к нему вогнутыми
+         стыками. Сверху приглушённо прошлый шаг, под ним текущий с девятью пикселями. */
+      .pill-host { position: absolute; right: calc(var(--k-dock-width) - 1px); height: 52px; }
+      body.left .pill-host { right: auto; left: calc(var(--k-dock-width) - 1px); }
+      .pill {
+        --join: 12px;
+        position: absolute;
+        top: 0;
+        right: 0;
+        height: 52px;
+        box-sizing: border-box;
+        border-radius: 20px 0 0 20px;
+        background: var(--k-ink);
+        color: var(--k-on-ink);
+        filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.28));
+        transition: width var(--k-dur-morph) var(--k-ease-morph), opacity var(--k-dur-base) var(--k-ease-out);
+      }
+      .pill.left { right: auto; left: 0; border-radius: 0 20px 20px 0; }
+      .pill.leaving { opacity: 0; transition: width var(--k-dur-exit) var(--k-ease-in), opacity var(--k-dur-exit) var(--k-ease-in); }
+      .pill::before, .pill::after { content: ""; position: absolute; right: 0; width: var(--join); height: var(--join); }
+      .pill::before { bottom: 100%; background: radial-gradient(circle at 0 0, transparent calc(var(--join) - 0.5px), var(--k-ink) var(--join)); }
+      .pill::after { top: 100%; background: radial-gradient(circle at 0 100%, transparent calc(var(--join) - 0.5px), var(--k-ink) var(--join)); }
+      .pill.left::before, .pill.left::after { right: auto; left: 0; }
+      .pill.left::before { background: radial-gradient(circle at 100% 0, transparent calc(var(--join) - 0.5px), var(--k-ink) var(--join)); }
+      .pill.left::after { background: radial-gradient(circle at 100% 100%, transparent calc(var(--join) - 0.5px), var(--k-ink) var(--join)); }
+      .pill-lines { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+      .pill-line { position: absolute; left: 16px; right: 12px; display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+      .pill.left .pill-line { left: 14px; right: 16px; }
+      .pill-line.now { top: 24px; font: 600 14px/22px var(--k-font-body); }
+      .pill-line.was { top: 6px; font: 400 12px/18px var(--k-font-body); color: var(--k-on-ink-3); }
+      .pill-meta { color: var(--k-on-ink-3); font-weight: 400; }
+      .pill-text { overflow: hidden; text-overflow: ellipsis; }
+      .pill-measure { position: absolute; visibility: hidden; white-space: nowrap; font: 600 14px/22px var(--k-font-body); }
+
+      /* Мини-чат: вырастает из аватара бота и сворачивается обратно в него. */
+      .chat {
+        position: absolute;
+        right: 72px;
+        width: 380px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-card);
+        background: var(--color-bg-surface);
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+        overflow: hidden;
+      }
+      /* style.css даёт главному чату `#chat { position: relative }`; по id он сильнее .chat и сдвигал мини-чат влево на 72px. */
+      #chat.chat { position: absolute; }
+      .chat[hidden] { display: none; }
+      body.left .chat { right: auto; left: 72px; }
+      [data-theme="dark"] .chat { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+      body.chatting .shelf, body.chatting .label { display: none; }
+      .chat-head { position: relative; display: flex; align-items: center; gap: 10px; padding: 12px 10px 8px 16px; }
+      .chat-face { position: relative; width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; color: var(--color-on-brand); font: 800 14px/1 var(--font-heading); }
+      .chat-face.live { background: transparent; }
+      .chat-title { min-width: 0; flex: 1; }
+      .chat-name { font: 800 15px/1.25 var(--font-heading); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .chat-state { font: 400 var(--text-xs)/1.3 var(--font-body); color: var(--color-text-muted); }
+      .chat-state:empty { display: none; }
+      .chat-icon {
+        width: 32px;
+        height: 32px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        transition: background var(--motion-fast), color var(--motion-fast);
+      }
+      .chat-icon:hover, .chat-icon[aria-expanded="true"] { background: var(--color-bg-surface-soft); color: var(--color-text-primary); }
+      .chat-icon .i { width: 18px; height: 18px; }
+      /* «…» в шапке мини-чата: меню кита (Svelte Menu, .k-menu), растёт из кнопки, как меню шестерёнки. */
+      .chat-pop {
+        position: absolute;
+        top: 46px;
+        right: 10px;
+        z-index: 2;
+        width: 252px;
+        max-height: 440px;
+        overflow-y: auto;
+        scrollbar-width: none;
+        border-radius: 20px;
+        transform-origin: calc(100% - 46px) 0;
+        animation: chat-pop-in var(--k-dur-morph, 420ms) var(--k-ease-morph, ease-out) 1;
+      }
+      .chat-pop[hidden] { display: none; }
+      .chat-pop .k-menu { box-shadow: var(--k-ink-rim), 0 18px 40px -14px rgba(0, 0, 0, 0.45); }
+      @keyframes chat-pop-in { from { clip-path: inset(0 0 calc(100% - 32px) calc(100% - 80px) round 16px); } to { clip-path: inset(0 round 20px); } }
+      @media (prefers-reduced-motion: reduce) { .chat-pop { animation: none; } }
+      .chat-log {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 6px 16px 12px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-border-strong) transparent;
+        user-select: text;
+        -webkit-user-select: text;
+        font: 400 var(--text-md)/1.5 var(--font-body);
+        color: var(--color-text-primary);
+      }
+      .chat-empty { margin: auto; color: var(--color-text-muted); font-size: var(--text-sm); text-align: center; }
+      /* Ответ бота — текст без рамки, рамка только у твоих сообщений. */
+      .m-bot { align-self: stretch; overflow-wrap: anywhere; }
+      .m-bot p { margin: 0 0 6px; }
+      .m-bot p:last-child { margin-bottom: 0; }
+      .m-bot ul { margin: 0 0 6px; padding-left: 18px; }
+      .m-bot pre { margin: 0 0 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--color-bg-surface-soft); overflow-x: auto; font-size: var(--text-sm); }
+      .m-bot code { font-size: 0.92em; }
+      .m-bot a { color: var(--color-brand-text); }
+      .m-bot.error { color: var(--color-accent-text); }
+      .m-actions { display: flex; align-items: center; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity var(--k-dur-base) ease; user-select: none; -webkit-user-select: none; }
+      .m-bot:hover .m-actions, .m-actions:focus-within, .m-bot.last-answer .m-actions { opacity: 1; }
+      .m-act { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; }
+      .m-act:hover { background: var(--color-bg-surface-soft); color: var(--color-text-primary); }
+      .m-act:focus-visible { outline: 2px solid var(--color-brand-primary); outline-offset: 1px; }
+      .m-act.on { color: var(--color-brand-text); }
+      .m-act .i { width: 15px; height: 15px; }
+      .m-when { margin-left: 6px; font: 400 var(--text-xs)/1.4 var(--font-body); color: var(--color-text-muted); white-space: nowrap; }
+      .m-user {
+        align-self: flex-end;
+        max-width: 85%;
+        padding: 8px 12px;
+        border-radius: 18px 18px 6px 18px;
+        background: var(--color-brand-tint);
+        color: var(--color-text-primary);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .m-user.pending { opacity: 0.6; }
+      .m-note {
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+      }
+      .m-note button {
+        flex: none;
+        padding: 4px 10px;
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-pill);
+        background: transparent;
+        color: var(--color-text-primary);
+        font: 600 var(--text-xs)/1.4 var(--font-body);
+        cursor: pointer;
+      }
+      /* Бот работает: девять пикселей на бумаге (только пока ход идёт). */
+      .typing { display: flex; padding: 8px 0; }
+      .chat-compose {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        margin: 0 12px 12px;
+        padding: 6px 6px 6px 14px;
+        border: 1.5px solid var(--color-border-default);
+        border-radius: 20px;
+        background: var(--color-bg-surface);
+        transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+      }
+      .chat-compose:focus-within { border-color: var(--color-brand-primary); box-shadow: 0 0 0 3px var(--color-brand-tint); }
+      .chat-input {
+        flex: 1;
+        min-height: 22px;
+        max-height: 120px;
+        padding: 5px 0;
+        border: 0;
+        outline: none;
+        resize: none;
+        background: transparent;
+        font: 400 var(--text-md)/1.4 var(--font-body);
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .chat-input::placeholder { color: var(--color-text-muted); }
+      .chat-send {
+        width: 32px;
+        height: 32px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: var(--color-brand-fill);
+        color: var(--color-on-brand);
+        cursor: pointer;
+        transition: background var(--motion-fast), opacity var(--motion-fast);
+      }
+      .chat-send:hover { background: var(--color-brand-fill-hover); }
+      .chat-send:disabled { opacity: 0.35; cursor: default; }
+      .chat-send .i { width: 18px; height: 18px; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .wrap, .wrap.tucked, .wrap .k-fillet, .wrap .k-island, .label, .card { transition: none; animation: none; }
+        .pill { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="strip" id="strip"></div>
+    <div class="shelf" id="shelf"></div>
+    <div class="label" id="label"><div class="label-name"></div><div class="label-note"></div><div class="label-limit"></div></div>
+    <section class="chat" id="chat" hidden>
+      <div class="chat-head">
+        <div class="chat-face" id="chat-face"></div>
+        <div class="chat-title"><div class="chat-name" id="chat-name"></div><div class="chat-state" id="chat-state"></div></div>
+        <button type="button" class="chat-icon" id="chat-menu" data-menu-trigger aria-haspopup="menu" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <button type="button" class="chat-icon" id="chat-close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+        <div class="chat-pop" id="chat-pop" hidden></div>
+      </div>
+      <div class="chat-log" id="chat-log"></div>
+      <form class="chat-compose" id="chat-form">
+        <textarea class="chat-input" id="chat-input" rows="1"></textarea>
+        <button type="submit" class="chat-send" id="chat-send" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button>
+      </form>
+    </section>
+    <div class="wrap" id="wrap"></div>
+    <script src="/i18n.js"></script>
+    <script src="/avatar.js"></script>
+    <script src="/avatar-states.js"></script>
+    <script src="/ui/kit.js"></script>
+    <script src="/voice.js"></script>
+    <script src="/stt.js"></script>
+    <script src="/dock.js"></script>
+  </body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "id": "skill.check-a-claim",
+  "kind": "skill",
+  "version": "1.0.0",
+  "category": "research",
+  "tier": "verified",
+  "title": {
+    "ru": "Проверить утверждение по источнику",
+    "en": "Check a claim against a source"
+  },
+  "summary": {
+    "ru": "Берёшь утверждение, находишь документ или страницу, которая его решает, и отвечаешь: подтверждает, противоречит или не затрагивает.",
+    "en": "Take a statement, find the source that settles it and say whether it supports, contradicts or does not address the claim."
+  },
+  "icon": "emoji:🔎",
+  "source": {
+    "name": "CopilotKit/OpenBot",
+    "url": "https://github.com/CopilotKit/OpenBot",
+    "file": "examples/fintech/skills.yaml (slug check-a-claim)",
+    "commit": "6149031275cda6b71764dba57558e79ad21ef2e2",
+    "license": "MIT",
+    "notice": "Copyright (c) 2026 CopilotKit",
+    "modified": true
+  },
+  "skill": {
+    "tools": [
+      "read_file",
+      "list_files",
+      "web_fetch",
+      "browser_nav",
+      "browser_page"
+    ],
+    "body": {
+      "ru": "Ты проверяешь утверждение, а не отвечаешь на вопрос. Твоя задача: найти источник, который это решает, прочитать его и дать один из трёх вердиктов.\n\nКак работать:\n1. Выпиши утверждение одной фразой. Если в нём несколько фактов (цифра, дата, имя), проверь каждый отдельно.\n2. Найди источник. Сначала файлы человека: list_files, затем read_file. Если файлов нет или нужна публичная страница, открой её через web_fetch (для страниц с входом или скриптами используй browser_nav и browser_page). Читай сам текст, а не заголовок или сниппет.\n3. Скажи вердикт:\n   - «Подтверждает»: источник говорит то же самое.\n   - «Противоречит»: источник говорит иначе. Покажи, в чём разница.\n   - «Не затрагивает»: источника по этому вопросу нет или он молчит. «В источнике этого нет» — полноценный ответ.\n4. Процитируй предложение, на которое опираешься, и назови источник: имя файла, страницу или адрес.\n\nПравила:\n- Не заполняй пробелы в источнике своими знаниями. Если источник молчит, так и скажи.\n- Если подходящих источников несколько и они расходятся, перечисли их, а не выбирай молча.\n- Если ничего не нашёл, назови, где искал и что искал.\n- Дата и версия источника важны: если документ старый, отметь это (формат даты ДД.ММ.ГГГГ).\n- Ты только читаешь. Не меняй и не удаляй файлы человека.",
+      "en": "You are checking a claim, not answering a question. Find the source that settles it, read it, and give one of three verdicts.\n\nHow to work:\n1. Write the claim in one sentence. If it contains several facts (a figure, a date, a name), check each separately.\n2. Find the source. Look in the person's files first: list_files, then read_file. For a public page use web_fetch (browser_nav and browser_page for pages that need a login or scripts). Read the text itself, not a title or snippet.\n3. Give a verdict: \"supports\", \"contradicts\" (show the difference) or \"does not address\". \"The source does not say\" is a complete answer.\n4. Quote the sentence you rely on and name the source: file name, page or address.\n\nRules:\n- Never fill a gap in the source with your own knowledge.\n- If several sources disagree, list them instead of silently picking one.\n- If you found nothing, say where and what you searched for.\n- Note the source date; mention if the document is old (dates as DD.MM.YYYY).\n- You only read. Never change or delete the person's files."
+    }
+  },
+  "requires": {
+    "apps": [],
+    "builtin": [],
+    "sites": []
+  }
+}

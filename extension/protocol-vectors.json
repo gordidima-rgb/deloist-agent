@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "code": "amber anchor apple arrow atlas beacon birch bloom",
+      "salt_app": "00112233445566778899aabbccddeeff",
+      "salt_ext": "ffeeddccbbaa99887766554433221100",
+      "dir": 1,
+      "n": 1,
+      "body": "{\"type\":\"ready\"}",
+      "K": "1ffde5dfc4b566dc15262829e5f1619180c146a1b73622be5ed93de80885182d",
+      "S": "081a396685795f5c77aa3cac63c50c4c0299118d96ae3fe507f466334c02ead9",
+      "mac": "2ac855f321dd5b268db1d3217963d7d89a37b992f79ebcfac2760eeafe345d6d"
+    },
+    {
+      "code": "cedar chalk charm chess civic cliff cloud coral",
+      "salt_app": "11223344556677889900aabbccddeeff",
+      "salt_ext": "00ffeeddccbbaa998877665544332211",
+      "dir": 2,
+      "n": 42,
+      "body": "{\"type\":\"cdp\",\"bot\":\"b1\"}",
+      "K": "5b0f662e094dcf5ed85c2a725c1308062a314570404b7c02cb2b915f35ce97c2",
+      "S": "e04df6885d66dc6f4b0c247ee99ae41fb97d0b15d52d7751995b79b1fc87bb42",
+      "mac": "3b8e88179d9a9cf283cbc87d4c6819005efda33a11a91dbc761cd3a1b4a71268"
+    },
+    {
+      "code": "crane crest daisy delta drift eagle ember fable",
+      "salt_app": "aabbccddeeff00112233445566778899",
+      "salt_ext": "99887766554433221100ffeeddccbb00",
+      "dir": 1,
+      "n": 7,
+      "body": "{\"type\":\"state\",\"bots\":[]}",
+      "K": "3127a15e5597b6007e03eae5a1f39fa8efe767e834ceee1739c632bff5dc34c0",
+      "S": "0e987833d79221b89012c11158abfb2bb83abb902ba81a50b9d842fe444bacfc",
+      "mac": "d39acd89a91ca8bc44a5bcf30d4ce381ce202ceeada0d52a06ddb77b516d644b"
+    }
+  ]
+}

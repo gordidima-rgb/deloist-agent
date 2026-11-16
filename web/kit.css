@@ -1,0 +1,1594 @@
+/* Deloist kit «Ink & Signal» — tokens and base components.
+   Not wired into the app yet: the preview is docs/design/kit-preview.html, the rules are docs/design/kit.md.
+
+   The idea in one line: calm paper surfaces for reading and deciding, pure black «ink» islands for
+   everything that lives at the screen edge (dock, step pill, gear menu, toasts), and colour only as
+   signal light — limit rings, 9-pixel status glyphs, the bot's own rim.
+
+   Fonts: Nunito 800 for headings only; the system face (Segoe UI) at 400/600, never heavier.
+   Every name is prefixed with --k- / .k- so the kit can sit next to style.css while it is adopted. */
+
+:root {
+  color-scheme: light;
+
+  /* ---- type ---- */
+  --k-font-display: "Nunito", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --k-font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --k-font-mono: "Cascadia Code", ui-monospace, Consolas, monospace;
+  --k-text-micro: 11px;   /* ring percent, counters */
+  --k-text-xs: 12px;      /* meta, captions */
+  --k-text-sm: 13px;      /* secondary lines, menus */
+  --k-text-md: 15px;      /* body, chat */
+  --k-text-lg: 18px;      /* card titles (display face) */
+  --k-text-xl: 22px;      /* section titles */
+  --k-text-2xl: 28px;     /* page titles */
+  --k-text-3xl: 36px;     /* hero, onboarding */
+  --k-leading-tight: 1.2;
+  --k-leading-body: 1.5;
+
+  /* ---- paper (light) ---- */
+  --k-canvas: #ecebe8;
+  --k-surface: #ffffff;
+  --k-surface-2: #f1f0ec;
+  --k-surface-3: #e7e5e0;
+  --k-line: #e0ded9;
+  --k-line-strong: #cfcdc7;
+  --k-text: #262931;
+  --k-text-2: #5c5f66;
+  --k-text-3: #8d8f94;
+
+  /* ---- ink: the black islands, identical in both themes ---- */
+  --k-ink: #000000;
+  --k-ink-2: #17181c;       /* raised item on ink: hover */
+  --k-ink-3: #24262c;       /* pressed / selected on ink */
+  --k-ink-line: rgba(255, 255, 255, 0.09);
+  --k-ink-rim: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --k-on-ink: #ffffff;
+  --k-on-ink-2: rgba(255, 255, 255, 0.64);
+  --k-on-ink-3: rgba(255, 255, 255, 0.38);
+
+  /* ---- roles ---- */
+  --k-brand: #025bff;          /* actions, links, focus */
+  --k-brand-hover: #0049d6;
+  --k-brand-tint: #e7efff;
+  --k-brand-text: #0250e0;
+  --k-on-brand: #ffffff;
+  --k-attention: #ff5a3c;      /* needs you: approvals, low limit, errors */
+  --k-attention-tint: #ffe8e2;
+  --k-attention-text: #b4321b;
+  --k-ai: #6d5dfb;             /* the model is working (paper only) */
+  --k-ai-tint: #eeebff;
+  --k-focus: 0 0 0 3px rgba(2, 91, 255, 0.28);
+
+  /* ---- signal light: bot identity colours, tuned to read on ink ---- */
+  --k-bot-tangerine: #ff8a3d;
+  --k-bot-mint: #3ddc97;
+  --k-bot-lemon: #ffd23f;
+  --k-bot-sky: #4fb4ff;
+  --k-bot-violet: #a98bff;
+  --k-bot-rose: #ff6fb5;
+  --k-bot-coral: #ff6a4d;
+  --k-bot-ice: #9be3f0;
+
+  /* ---- 9-pixel glyph: hi = light corner, lo = deep corner ---- */
+  --k-pix-think-hi: #ffe4d0;  --k-pix-think-lo: #ff9150;
+  --k-pix-read-hi: #dff2ff;   --k-pix-read-lo: #48a2ff;
+  --k-pix-write-hi: #ebe5ff;  --k-pix-write-lo: #8f7bff;
+  --k-pix-act-hi: #fff0c4;    --k-pix-act-lo: #ffae1a;
+  --k-pix-wait-hi: #ffffff;   --k-pix-wait-lo: #8d96a6;
+
+  /* ---- space (4-based) ---- */
+  --k-space-0: 2px;
+  --k-space-1: 4px;
+  --k-space-2: 8px;
+  --k-space-3: 12px;
+  --k-space-4: 16px;
+  --k-space-5: 20px;
+  --k-space-6: 24px;
+  --k-space-8: 32px;
+  --k-space-12: 48px;
+
+  /* ---- radii: nested shapes are concentric (inner = outer - padding) ---- */
+  --k-radius-xs: 6px;
+  --k-radius-sm: 12px;
+  --k-radius-md: 18px;      /* controls: inputs, segmented */
+  --k-radius-lg: 26px;      /* panels: cards, menus */
+  --k-radius-xl: 34px;      /* large surfaces: sheets, the routine board */
+  --k-radius-island: 28px;
+  --k-radius-pill: 999px;
+  --k-fillet: 18px;           /* concave join between an island and the screen edge */
+
+  /* ---- dock footprint: same as the current dock (web/dock.html: island 60px, avatar 44px, gap 10px).
+     The ring wraps the avatar at its current size: 1.5px gap + 2.5px stroke on each side. ---- */
+  --k-avatar: 44px;
+  --k-ring-gap: 1.5px;
+  --k-ring-stroke: 2.5px;
+  --k-seat: calc(var(--k-avatar) + 2 * (var(--k-ring-gap) + var(--k-ring-stroke))); /* 52px */
+  --k-dock-width: 62px;       /* old 60 + 2: five px of air each side of the seat */
+  --k-dock-gap: 6px;          /* between seats; old 10 between bare avatars, the ring eats the rest */
+  --k-gear: 40px;
+
+  /* ---- voice: the mic's own colours are --k-mic-* tokens, set per look (see «Mic looks») ---- */
+  --k-rec: #ff4757;                         /* the REC dot of look C: clean red-coral, never dimmed */
+  --k-voice-target: #ffffff;                /* colour of the bot the voice goes to; the dock sets it */
+  --k-dur-fly: 460ms;                       /* transcript flies to the bot */
+  --k-dur-pulse: 360ms;                     /* the bot's ring answers once */
+
+  /* ---- elevation ---- */
+  --k-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px var(--k-line);
+  --k-shadow-2: 0 20px 48px rgba(0, 0, 0, 0.1), 0 3px 10px rgba(0, 0, 0, 0.045), 0 0 0 1px var(--k-line);
+  --k-shadow-3: 0 28px 70px -12px rgba(0, 0, 0, 0.22), 0 0 0 1px var(--k-line);
+  --k-shadow-island: 0 18px 40px -14px rgba(0, 0, 0, 0.5);
+  --k-island-filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+  --k-backdrop: rgba(0, 0, 0, 0.42);
+
+  /* ---- layers ---- */
+  --k-z-tip: 60;
+  --k-z-modal: 80;
+  --k-z-toast: 90;
+
+  /* ---- motion ---- */
+  --k-ease-out: cubic-bezier(0.22, 1, 0.36, 1);      /* most entrances, value changes */
+  --k-ease-morph: cubic-bezier(0.32, 0.72, 0, 1);    /* shapes growing out of their origin */
+  --k-ease-spring: cubic-bezier(0.34, 1.36, 0.5, 1); /* small overshoot: press release, dock pull */
+  --k-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);     /* exits */
+  --k-ease-inout: cubic-bezier(0.65, 0, 0.35, 1);    /* pixel breathing */
+  --k-dur-instant: 90ms;
+  --k-dur-fast: 140ms;
+  --k-dur-base: 220ms;
+  --k-dur-exit: 260ms;
+  --k-dur-morph: 420ms;
+  --k-dur-ring: 700ms;
+  --k-dur-pix: 1440ms;       /* one full 9-pixel cycle */
+  --k-blur-in: 6px;          /* content arrives out of focus, then sharpens */
+}
+
+/* Dark: paper turns to night paper, ink stays ink and gains a hairline so it separates from it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --k-canvas: #1b1b1b;
+    --k-surface: #2a2a2a;
+    --k-surface-2: #303030;
+    --k-surface-3: #3a3a3a;
+    --k-line: #363636;
+    --k-line-strong: #484848;
+    --k-text: #f4f4f4;
+    --k-text-2: #c4c4c4;
+    --k-text-3: #8e8e8e;
+    --k-ink-line: rgba(255, 255, 255, 0.12);
+    --k-ink-rim: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 0 0 1px rgba(255, 255, 255, 0.07);
+    --k-brand: #4f8bff;
+    --k-brand-hover: #79a6ff;
+    --k-brand-tint: #2b3342;
+    --k-brand-text: #92b6ff;
+    --k-attention: #ff7a5e;
+    --k-attention-tint: #3a1a12;
+    --k-attention-text: #ffb4a0;
+    --k-ai: #9d8bff;
+    --k-ai-tint: #231a52;
+    --k-focus: 0 0 0 3px rgba(79, 139, 255, 0.4);
+    --k-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--k-line);
+    --k-shadow-2: 0 12px 30px -10px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--k-line);
+    --k-shadow-3: 0 26px 64px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--k-line);
+    --k-shadow-island: 0 18px 40px -14px rgba(0, 0, 0, 0.8);
+    --k-island-filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+    --k-backdrop: rgba(0, 0, 0, 0.6);
+  }
+}
+:root[data-theme="dark"], [data-theme="dark"] {
+  color-scheme: dark;
+  --k-canvas: #1b1b1b;
+  --k-surface: #2a2a2a;
+  --k-surface-2: #303030;
+  --k-surface-3: #3a3a3a;
+  --k-line: #363636;
+  --k-line-strong: #484848;
+  --k-text: #f4f4f4;
+  --k-text-2: #c4c4c4;
+  --k-text-3: #8e8e8e;
+  --k-ink-line: rgba(255, 255, 255, 0.12);
+  --k-ink-rim: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --k-brand: #4f8bff;
+  --k-brand-hover: #79a6ff;
+  --k-brand-tint: #2b3342;
+  --k-brand-text: #92b6ff;
+  --k-attention: #ff7a5e;
+  --k-attention-tint: #3a1a12;
+  --k-attention-text: #ffb4a0;
+  --k-ai: #9d8bff;
+  --k-ai-tint: #231a52;
+  --k-focus: 0 0 0 3px rgba(79, 139, 255, 0.4);
+  --k-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--k-line);
+  --k-shadow-2: 0 12px 30px -10px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--k-line);
+  --k-shadow-3: 0 26px 64px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--k-line);
+  --k-shadow-island: 0 18px 40px -14px rgba(0, 0, 0, 0.8);
+  --k-island-filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+  --k-backdrop: rgba(0, 0, 0, 0.6);
+}
+
+/* A nested light island, e.g. the two-theme gallery: the paper tokens come back without
+   touching the ink tokens, so components can sit in either theme on one page. */
+[data-theme="light"] {
+  color-scheme: light;
+  --k-canvas: #ecebe8;
+  --k-surface: #ffffff;
+  --k-surface-2: #f1f0ec;
+  --k-surface-3: #e7e5e0;
+  --k-line: #e0ded9;
+  --k-line-strong: #cfcdc7;
+  --k-text: #262931;
+  --k-text-2: #5c5f66;
+  --k-text-3: #8d8f94;
+  --k-ink-line: rgba(255, 255, 255, 0.09);
+  --k-ink-rim: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --k-brand: #025bff;
+  --k-brand-hover: #0049d6;
+  --k-brand-tint: #e7efff;
+  --k-brand-text: #0250e0;
+  --k-attention: #ff5a3c;
+  --k-attention-tint: #ffe8e2;
+  --k-attention-text: #b4321b;
+  --k-ai: #6d5dfb;
+  --k-ai-tint: #eeebff;
+  --k-focus: 0 0 0 3px rgba(2, 91, 255, 0.28);
+  --k-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px var(--k-line);
+  --k-shadow-2: 0 20px 48px rgba(0, 0, 0, 0.1), 0 3px 10px rgba(0, 0, 0, 0.045), 0 0 0 1px var(--k-line);
+  --k-shadow-3: 0 28px 70px -12px rgba(0, 0, 0, 0.22), 0 0 0 1px var(--k-line);
+  --k-shadow-island: 0 18px 40px -14px rgba(0, 0, 0, 0.5);
+  --k-island-filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+  --k-backdrop: rgba(0, 0, 0, 0.42);
+}
+
+/* =====================================================================================
+   Buttons
+   ===================================================================================== */
+.k-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--k-space-2);
+  height: 36px;
+  padding: 0 var(--k-space-4);
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-surface-2);
+  color: var(--k-text);
+  font: 600 var(--k-text-sm) / 1 var(--k-font-body);
+  cursor: pointer;
+  transition: background var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-spring),
+    box-shadow var(--k-dur-fast) var(--k-ease-out);
+}
+.k-btn:hover { background: var(--k-surface-3); }
+.k-btn:active { transform: scale(0.96); transition-duration: var(--k-dur-instant); }
+.k-btn:focus-visible { outline: none; box-shadow: var(--k-focus); }
+.k-btn:disabled { opacity: 0.4; cursor: default; transform: none; }
+.k-btn .k-i { width: 16px; height: 16px; }
+.k-btn--primary { background: var(--k-brand); color: var(--k-on-brand); }
+.k-btn--primary:hover { background: var(--k-brand-hover); }
+.k-btn--ink { background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim); }
+.k-btn--ink:hover { background: var(--k-ink-2); }
+.k-btn--ghost { background: transparent; color: var(--k-text-2); }
+.k-btn--ghost:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-btn--attention { background: var(--k-attention); color: #fff; }
+.k-btn--sm { height: 28px; padding: 0 var(--k-space-3); font-size: var(--k-text-xs); }
+.k-btn--icon { width: 36px; padding: 0; }
+
+/* =====================================================================================
+   Input
+   ===================================================================================== */
+.k-field { display: flex; flex-direction: column; gap: 6px; }
+.k-label { font: 600 var(--k-text-xs) / 1.3 var(--k-font-body); color: var(--k-text-2); }
+.k-hint { font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); color: var(--k-text-3); }
+.k-hint.is-error { color: var(--k-attention-text); }
+.k-input {
+  height: 40px;
+  padding: 0 var(--k-space-3);
+  border: 1px solid var(--k-line-strong);
+  border-radius: var(--k-radius-md);
+  background: var(--k-surface);
+  color: var(--k-text);
+  font: 400 var(--k-text-md) / 1.3 var(--k-font-body);
+  transition: border-color var(--k-dur-fast) var(--k-ease-out), box-shadow var(--k-dur-fast) var(--k-ease-out);
+}
+.k-input::placeholder { color: var(--k-text-3); }
+.k-input:hover { border-color: var(--k-text-3); }
+.k-input:focus { outline: none; border-color: var(--k-brand); box-shadow: var(--k-focus); }
+.k-input[aria-invalid="true"] { border-color: var(--k-attention); }
+.k-input:disabled { background: var(--k-surface-2); color: var(--k-text-3); }
+
+/* =====================================================================================
+   Chip — filters and tags. Selected chip turns to ink.
+   ===================================================================================== */
+.k-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--k-space-3);
+  border: 1px solid var(--k-line-strong);
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: var(--k-text-2);
+  font: 600 var(--k-text-xs) / 1 var(--k-font-body);
+  cursor: pointer;
+  transition: background var(--k-dur-fast) var(--k-ease-out), color var(--k-dur-fast) var(--k-ease-out),
+    border-color var(--k-dur-fast) var(--k-ease-out);
+}
+.k-chip:hover { border-color: var(--k-text-3); color: var(--k-text); }
+.k-chip:focus-visible { outline: none; box-shadow: var(--k-focus); }
+.k-chip[aria-pressed="true"] { background: var(--k-ink); border-color: var(--k-ink); color: var(--k-on-ink); }
+.k-chip .k-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* =====================================================================================
+   Card — only where something must be held apart: a result, a decision.
+   ===================================================================================== */
+.k-card {
+  padding: var(--k-space-4);
+  border-radius: var(--k-radius-lg);
+  background: var(--k-surface);
+  box-shadow: var(--k-shadow-1);
+}
+.k-card--raised { box-shadow: var(--k-shadow-2); }
+
+/* Approval card: the only loud card. A decision needs your hand, so it carries the attention hue. */
+.k-approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-3);
+  padding: var(--k-space-4);
+  border-radius: var(--k-radius-lg);
+  background: var(--k-surface);
+  box-shadow: 0 0 0 1.5px var(--k-attention), 0 14px 32px -16px rgba(255, 90, 60, 0.45);
+}
+.k-approval__head { display: flex; align-items: center; gap: var(--k-space-2); }
+.k-approval__title { font: 800 var(--k-text-lg) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
+.k-approval__what {
+  padding: var(--k-space-2) var(--k-space-3);
+  border-radius: var(--k-radius-sm);
+  background: var(--k-surface-2);
+  color: var(--k-text-2);
+  font: 400 var(--k-text-sm) / 1.45 var(--k-font-mono);
+  overflow-wrap: anywhere;
+}
+.k-approval__actions { display: flex; flex-wrap: wrap; gap: var(--k-space-2); }
+
+/* =====================================================================================
+   Tabs — the selection is one ink lozenge that slides between tabs (shared element), not a fade.
+   ===================================================================================== */
+.k-tabs {
+  position: relative;
+  display: inline-flex;
+  padding: 4px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-surface-2);
+}
+.k-tabs__thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 0;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-ink);
+  box-shadow: var(--k-ink-rim);
+  transition: transform var(--k-dur-morph) var(--k-ease-morph), width var(--k-dur-morph) var(--k-ease-morph);
+}
+.k-tab {
+  position: relative;
+  z-index: 1;
+  height: 30px;
+  padding: 0 var(--k-space-4);
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: var(--k-text-2);
+  font: 600 var(--k-text-sm) / 1 var(--k-font-body);
+  cursor: pointer;
+  transition: color var(--k-dur-base) var(--k-ease-out);
+}
+.k-tab:hover { color: var(--k-text); }
+.k-tab[aria-selected="true"] { color: var(--k-on-ink); }
+.k-tab:focus-visible { outline: none; box-shadow: var(--k-focus); }
+
+/* =====================================================================================
+   Menu — an ink island. Opens by growing out of its trigger (clip-path), content sharpens in.
+   ===================================================================================== */
+.k-menu {
+  min-width: 220px;
+  padding: 6px;
+  border-radius: var(--k-radius-lg);
+  background: var(--k-ink);
+  color: var(--k-on-ink);
+  box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+}
+.k-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--k-space-3);
+  border: 0;
+  border-radius: calc(var(--k-radius-lg) - 6px);
+  background: transparent;
+  color: var(--k-on-ink);
+  font: 400 var(--k-text-sm) / 1.3 var(--k-font-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--k-dur-fast) var(--k-ease-out);
+}
+.k-menu__item:hover, .k-menu__item:focus-visible { outline: none; background: var(--k-ink-2); }
+.k-menu__item:active { background: var(--k-ink-3); }
+.k-menu__item .k-i { width: 18px; height: 18px; color: var(--k-on-ink-2); flex: none; }
+.k-menu__value { margin-left: auto; color: var(--k-on-ink-3); font-size: var(--k-text-xs); }
+.k-menu__sep { height: 1px; margin: 6px 8px; background: var(--k-ink-line); }
+
+/* Switch inside an ink menu */
+.k-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin-left: auto;
+  flex: none;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-ink-3);
+  transition: background var(--k-dur-base) var(--k-ease-out);
+}
+.k-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--k-on-ink-2);
+  transition: transform var(--k-dur-base) var(--k-ease-spring), background var(--k-dur-base) var(--k-ease-out);
+}
+[aria-checked="true"] > .k-switch { background: var(--k-brand); }
+[aria-checked="true"] > .k-switch::after { transform: translateX(14px); background: #fff; }
+
+/* =====================================================================================
+   Toast — ink pill at the bottom; one line, one optional action.
+   ===================================================================================== */
+.k-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  min-height: 44px;
+  padding: 0 6px 0 var(--k-space-4);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-ink);
+  color: var(--k-on-ink);
+  box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+  font: 400 var(--k-text-sm) / 1.3 var(--k-font-body);
+}
+.k-toast__action {
+  height: 32px;
+  padding: 0 var(--k-space-3);
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-ink-3);
+  color: var(--k-on-ink);
+  font: 600 var(--k-text-xs) / 1 var(--k-font-body);
+  cursor: pointer;
+}
+.k-toast__action:hover { background: #33363e; }
+.k-toast__action:focus-visible { outline: none; box-shadow: var(--k-focus); }
+
+/* =====================================================================================
+   Avatar rim and limit ring — one element. The bot's colour IS the ring:
+   the faint full circle is its budget, the bright arc is what is left of it.
+   Markup: <span class="k-ring" style="--ring-color:#ff8a3d; --left:.73">
+             <svg viewBox="0 0 52 52"><circle class="k-ring__track" .../><circle class="k-ring__arc" .../></svg>
+             <span class="k-ring__face">…avatar…</span>
+           </span>
+   ===================================================================================== */
+.k-ring {
+  --ring-size: var(--k-seat);
+  --ring-stroke: var(--k-ring-stroke);
+  --ring-color: var(--k-bot-sky);
+  --left: 1;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  flex: none;
+}
+.k-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.k-ring__track { fill: none; stroke: var(--ring-color); stroke-opacity: 0.22; stroke-width: var(--ring-stroke); }
+.k-ring__arc {
+  fill: none;
+  stroke: var(--ring-color);
+  stroke-width: var(--ring-stroke);
+  stroke-linecap: round;
+  /* pathLength="100" on the circle: dasharray in percent */
+  stroke-dasharray: calc(var(--left) * 100) 100;
+  /* only the length travels; the colour switches at once: a tween between two hues (mint → coral) passes through olive */
+  transition: stroke-dasharray var(--k-dur-ring) var(--k-ease-out);
+}
+.k-ring.is-low { --ring-color: var(--k-attention); }
+.k-ring.is-empty .k-ring__arc { stroke-opacity: 0; }
+.k-ring.is-free .k-ring__arc { stroke-opacity: 0; } /* no limit known: only the faint rim in the bot's colour */
+.k-ring.is-empty .k-ring__face { filter: grayscale(1) brightness(0.6); }
+.k-ring__face {
+  /* the bot's own avatar sits here at full size: the glass orb the person chose */
+  width: calc(var(--ring-size) - 2 * (var(--k-ring-gap) + var(--ring-stroke)));
+  height: calc(var(--ring-size) - 2 * (var(--k-ring-gap) + var(--ring-stroke)));
+  border-radius: 50%;
+  overflow: hidden;
+  background: #050505; /* LED screen */
+  transition: filter var(--k-dur-base) var(--k-ease-out);
+}
+/* Percent text: NOT used in the dock (owner, round 1: the ring is the information; the exact value
+   lives in the hover tip). Kept for settings and reports, where a ring sits next to a table. */
+.k-ring__pct {
+  font: 600 var(--k-text-micro) / 1 var(--k-font-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--k-on-ink-2);
+}
+.k-ring.is-low + .k-ring__pct, .k-ring__pct.is-low { color: var(--k-attention); }
+
+/* =====================================================================================
+   9-pixel glyph — the single «working» signal of the product (replaces dots and the 4-pixel badge).
+   A 3×3 block of touching cells; each cell breathes opacity, offsets make the pattern travel.
+   Colour runs from a light corner (hi) to a deep corner (lo); a soft glow sits under each cell.
+   Only opacity animates, on composited layers, and only while the glyph is in the DOM and visible.
+   Markup: <span class="k-pix k-pix--think" role="img" aria-label="Думает"><i></i>×9</span>
+   ===================================================================================== */
+.k-pix {
+  --px: 5px;
+  --hi: var(--k-pix-think-hi);
+  --lo: var(--k-pix-think-lo);
+  display: inline-grid;
+  grid-template-columns: repeat(3, var(--px));
+  grid-auto-rows: var(--px);
+  flex: none;
+  vertical-align: middle;
+}
+/* No muddy tones (owner, round 2): a cell never fades towards black, because a warm colour on its way
+   to black turns brown and olive. The cell always burns its clean saturated base (lo, nudged a little
+   towards hi in the light corner); only a light layer of the same hue (hi) breathes on top of it.
+   Every in-between frame is a mix of two clean colours of one hue. */
+.k-pix > i {
+  --m: 0;      /* 0 = light corner, 1 = deep corner */
+  --d: 0;      /* phase offset, in steps */
+  position: relative;
+  display: block;
+  background: color-mix(in oklab, var(--lo), var(--hi) calc((1 - var(--m)) * 35%));
+  box-shadow: 0 0 calc(var(--px) * 1.2) color-mix(in oklab, var(--lo) 65%, transparent);
+}
+.k-pix > i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--hi);
+  will-change: opacity;
+  animation: k-pix var(--k-dur-pix) var(--k-ease-inout) infinite;
+  animation-delay: calc(var(--d) * var(--k-dur-pix) / -8);
+}
+.k-pix > i:nth-child(1) { --m: 0; }
+.k-pix > i:nth-child(2) { --m: 0.25; }
+.k-pix > i:nth-child(3) { --m: 0.5; }
+.k-pix > i:nth-child(4) { --m: 0.25; }
+.k-pix > i:nth-child(5) { --m: 0.5; }
+.k-pix > i:nth-child(6) { --m: 0.75; }
+.k-pix > i:nth-child(7) { --m: 0.5; }
+.k-pix > i:nth-child(8) { --m: 0.75; }
+.k-pix > i:nth-child(9) { --m: 1; }
+@keyframes k-pix {
+  0%, 100% { opacity: 1; }
+  34% { opacity: 0.4; }
+  62% { opacity: 0; }
+  84% { opacity: 0.7; }
+}
+
+/* think: a diagonal wave from the light corner — peach */
+.k-pix--think { --hi: var(--k-pix-think-hi); --lo: var(--k-pix-think-lo); }
+.k-pix--think > i:nth-child(1) { --d: 0; }
+.k-pix--think > i:nth-child(2), .k-pix--think > i:nth-child(4) { --d: 1; }
+.k-pix--think > i:nth-child(3), .k-pix--think > i:nth-child(5), .k-pix--think > i:nth-child(7) { --d: 2; }
+.k-pix--think > i:nth-child(6), .k-pix--think > i:nth-child(8) { --d: 3; }
+.k-pix--think > i:nth-child(9) { --d: 4; }
+
+/* read: columns scan left to right — ice blue */
+.k-pix--read { --hi: var(--k-pix-read-hi); --lo: var(--k-pix-read-lo); }
+.k-pix--read > i:nth-child(3n + 1) { --d: 0; }
+.k-pix--read > i:nth-child(3n + 2) { --d: 1.5; }
+.k-pix--read > i:nth-child(3n) { --d: 3; }
+
+/* write: a light runs round the edge, the centre holds — violet */
+.k-pix--write { --hi: var(--k-pix-write-hi); --lo: var(--k-pix-write-lo); }
+.k-pix--write > i:nth-child(1) { --d: 0; }
+.k-pix--write > i:nth-child(2) { --d: 1; }
+.k-pix--write > i:nth-child(3) { --d: 2; }
+.k-pix--write > i:nth-child(6) { --d: 3; }
+.k-pix--write > i:nth-child(9) { --d: 4; }
+.k-pix--write > i:nth-child(8) { --d: 5; }
+.k-pix--write > i:nth-child(7) { --d: 6; }
+.k-pix--write > i:nth-child(4) { --d: 7; }
+.k-pix--write > i:nth-child(5)::after { animation: none; opacity: 0.85; }
+
+/* act (runs a tool, clicks, sends): checker swaps — amber */
+.k-pix--act { --hi: var(--k-pix-act-hi); --lo: var(--k-pix-act-lo); }
+.k-pix--act > i:nth-child(odd) { --d: 0; }
+.k-pix--act > i:nth-child(even) { --d: 4; }
+
+/* wait (needs you / queued): still plus sign, no animation at all */
+.k-pix--wait { --hi: var(--k-pix-wait-hi); --lo: var(--k-pix-wait-lo); }
+/* wait: neutral only, so no hue can go muddy: dark clean grey cells, a white plus on top */
+.k-pix--wait > i { background: #30333a; box-shadow: none; }
+.k-pix--wait > i::after { animation: none; opacity: 0; }
+.k-pix--wait > i:nth-child(2)::after, .k-pix--wait > i:nth-child(4)::after, .k-pix--wait > i:nth-child(5)::after,
+.k-pix--wait > i:nth-child(6)::after, .k-pix--wait > i:nth-child(8)::after { opacity: 1; }
+.k-pix--wait > i:nth-child(2), .k-pix--wait > i:nth-child(4), .k-pix--wait > i:nth-child(5),
+.k-pix--wait > i:nth-child(6), .k-pix--wait > i:nth-child(8) { box-shadow: 0 0 calc(var(--px) * 1.2) rgba(255, 255, 255, 0.35); }
+
+/* On paper (chat on a light surface) the light corner would vanish: use the deep half of the ramp. */
+.k-pix--paper { --hi: color-mix(in oklab, var(--lo) 55%, #ffffff); }
+.k-pix--paper > i { box-shadow: none; }
+.k-pix--paper.k-pix--wait > i { background: #d9dce1; }
+.k-pix--paper.k-pix--wait > i::after { background: #3a3f48; }
+.k-pix--lg { --px: 8px; }
+.k-pix--xl { --px: 20px; }
+
+/* =====================================================================================
+   Edge island — the dock shape. Straight side on the wall, round outside,
+   concave fillets above and below as if the shape were poured from the edge.
+   Use: <div class="k-edge"><i class="k-fillet k-fillet--top"></i><div class="k-island">…</div><i class="k-fillet k-fillet--bottom"></i></div>
+   Mirror with .k-edge--left.
+   ===================================================================================== */
+.k-edge { display: flex; flex-direction: column; align-items: flex-end; filter: var(--k-island-filter); }
+.k-edge--left { align-items: flex-start; }
+.k-island {
+  background: var(--k-ink);
+  color: var(--k-on-ink);
+  width: var(--k-dock-width);
+  border-radius: var(--k-radius-island) 0 0 var(--k-radius-island);
+}
+.k-edge--left .k-island { border-radius: 0 var(--k-radius-island) var(--k-radius-island) 0; }
+.k-fillet { display: block; width: var(--k-fillet); height: var(--k-fillet); flex: none; }
+.k-fillet--top { background: radial-gradient(circle at 0 0, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
+.k-fillet--bottom { background: radial-gradient(circle at 0 100%, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
+.k-edge--left .k-fillet--top { background: radial-gradient(circle at 100% 0, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
+.k-edge--left .k-fillet--bottom { background: radial-gradient(circle at 100% 100%, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
+
+/* Dock seat: ring + percent under it. Hover lifts the face, press sinks it. */
+.k-seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.k-seat .k-ring { transition: transform var(--k-dur-base) var(--k-ease-spring); }
+.k-seat:hover .k-ring { transform: scale(1.07); }
+.k-seat:hover .k-ring__track { stroke-opacity: 0.36; }
+.k-seat:active .k-ring { transform: scale(0.93); transition-duration: var(--k-dur-instant); }
+.k-seat:focus-visible { outline: none; }
+.k-seat:focus-visible .k-ring { box-shadow: 0 0 0 2px var(--k-ink), 0 0 0 4px var(--k-brand); border-radius: 50%; }
+
+/* Gear: a separate round ink button under the dock; it turns 90° once when the menu opens. */
+.k-gear {
+  width: var(--k-gear);
+  height: var(--k-gear);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-ink);
+  color: var(--k-on-ink-2);
+  box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+  cursor: pointer;
+  transition: color var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-base) var(--k-ease-spring);
+}
+.k-gear .k-i { width: 20px; height: 20px; transition: transform var(--k-dur-morph) var(--k-ease-morph); }
+.k-gear:hover { color: var(--k-on-ink); }
+.k-gear:active { transform: scale(0.92); }
+.k-gear[aria-expanded="true"] { color: var(--k-on-ink); }
+.k-gear[aria-expanded="true"] .k-i { transform: rotate(90deg); }
+.k-gear:focus-visible { outline: none; box-shadow: var(--k-ink-rim), 0 0 0 3px var(--k-brand); }
+
+/* Tray: mic, gear and «+» live tucked up under the dock island; only the grip shows, as a thin strip
+   right under the island. A clip box that starts exactly at the island's bottom edge hides the rest,
+   so a short dock (one bot) never shows buttons above it.
+   Out: pointer over the dock (.k-dock:hover), keyboard focus inside it, an open gear menu, or a voice
+   flow in progress (.k-dock.is-voice — the hotkey brings it out with no pointer). Back: 380ms after the
+   last of these ends. Transform only.
+   Markup: <div class="k-dock"><div class="k-edge">…</div>
+             <div class="k-tray-clip"><div class="k-gear-tray">
+               <button class="k-mic">…</button><button class="k-gear">…</button><button class="k-tray-add">…</button>
+               <svg class="k-grip">…</svg></div></div></div> */
+.k-dock { display: flex; flex-direction: column; align-items: flex-end; }
+.k-dock--left { align-items: flex-start; }
+.k-dock > .k-edge { position: relative; z-index: 1; }
+.k-tray-clip {
+  position: relative;
+  z-index: 0;
+  width: var(--k-dock-width);
+  margin-top: calc(-1 * var(--k-fillet)); /* start at the island's bottom edge, behind the bottom fillet */
+  padding-top: 4px;
+  overflow: hidden;
+}
+.k-gear-tray {
+  --tray-peek: 12px; /* what stays visible under the island: the grip */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(calc(-100% - 4px + var(--tray-peek)));
+  transition: transform var(--k-dur-exit) var(--k-ease-in) 380ms; /* the delay is the «short wait» before hiding */
+}
+.k-dock:hover .k-gear-tray,
+.k-dock:focus-within .k-gear-tray,
+.k-dock.is-voice .k-gear-tray,
+.k-gear-tray:has(.k-gear[aria-expanded="true"]) {
+  transform: none;
+  transition: transform var(--k-dur-morph) var(--k-ease-spring) 0ms;
+}
+.k-gear-tray .k-gear, .k-gear-tray .k-mic, .k-gear-tray .k-tray-add { box-shadow: var(--k-ink-rim); } /* no own drop shadow */
+
+/* «+ Добавить бота» as the third tray button (proposed); the alternative is a dashed seat in the island. */
+.k-tray-add {
+  width: var(--k-gear); height: var(--k-gear); display: grid; place-items: center; padding: 0; border: 0;
+  border-radius: 50%; background: var(--k-ink); color: var(--k-on-ink-2); cursor: pointer;
+  transition: color var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-base) var(--k-ease-spring);
+}
+.k-tray-add .k-i { width: 18px; height: 18px; }
+.k-tray-add:hover { color: var(--k-on-ink); }
+.k-tray-add:active { transform: scale(0.92); }
+.k-tray-add:focus-visible { outline: none; box-shadow: var(--k-ink-rim), 0 0 0 3px var(--k-brand); }
+.k-seat-add {
+  width: var(--k-avatar); height: var(--k-avatar); margin: calc((var(--k-seat) - var(--k-avatar)) / 2);
+  display: grid; place-items: center; padding: 0; border: 1.5px dashed var(--k-on-ink-3); border-radius: 50%;
+  background: transparent; color: var(--k-on-ink-2); cursor: pointer;
+  transition: border-color var(--k-dur-fast) var(--k-ease-out), color var(--k-dur-fast) var(--k-ease-out);
+}
+.k-seat-add:hover { border-color: var(--k-on-ink); color: var(--k-on-ink); }
+.k-seat-add .k-i { width: 18px; height: 18px; }
+
+/* =====================================================================================
+   Mic and the voice flow. One button, six looks, set by data-state on .k-mic:
+   idle → recording → transcribing → sending → done, or error at any point.
+   Colours come from the --k-mic-* tokens of the chosen look (below); coral for errors. Nothing fades
+   to black and no hue tweens: states swap colour at once, motion is scale/translate only.
+   Markup: <button class="k-mic" data-state="idle">
+             <svg class="k-mic__icon">…mic…</svg>
+             <span class="k-mic__halo"></span><span class="k-mic__disc"></span>
+             <span class="k-mic__bars"><i></i><i></i><i></i><i></i><i></i></span>
+             <svg class="k-mic__check">…</svg><svg class="k-mic__alert">…</svg>
+             <span class="k-mic__rec"></span></button>
+   Bars: script sets --b on each <i> (0…1) and --lvl on the button from the recorder's level events;
+   nothing moves without sound.
+   ===================================================================================== */
+
+/* Mic looks. The owner picks one; switching the whole dock is one class on <body> (web/dock.html):
+   none = A, .k-mic-look-b, .k-mic-look-c. Tokens live on the elements that use them, so B can read
+   --k-voice-target, which the dock sets on its root for the bot the voice goes to.
+   A: inverted neutral. White disc, ink bars, soft white halo; badge a white mic.
+   B: the target bot's colour. Ink disc; bars, halo line, check and badge in the bot's ring colour.
+   C: ink with a REC dot. Ink disc, white bars, one small red-coral dot top right while recording. */
+.k-mic, .k-voice-fly, .k-seat__voice {
+  --k-mic-idle: var(--k-on-ink-2);
+  --k-mic-disc: #ffffff;
+  --k-mic-bar: var(--k-ink);
+  --k-mic-glyph: var(--k-ink);
+  --k-mic-halo: rgba(255, 255, 255, 0.16);
+  --k-mic-halo-line: transparent;
+  --k-mic-ring: #ffffff;
+  --k-mic-fly: #ffffff;
+  --k-mic-badge: #ffffff;
+  --k-mic-badge-fg: var(--k-ink);
+  --k-mic-rec: transparent;
+}
+.k-mic-look-b :is(.k-mic, .k-voice-fly, .k-seat__voice) {
+  --k-mic-disc: var(--k-ink);
+  --k-mic-bar: var(--k-voice-target);
+  --k-mic-glyph: var(--k-voice-target);
+  --k-mic-halo: transparent;
+  --k-mic-halo-line: var(--k-voice-target);
+  --k-mic-ring: var(--k-voice-target);
+  --k-mic-fly: var(--k-voice-target);
+  --k-mic-badge: var(--k-voice-target);
+  --k-mic-badge-fg: var(--k-ink);
+}
+.k-mic-look-c :is(.k-mic, .k-voice-fly, .k-seat__voice) {
+  --k-mic-disc: var(--k-ink);
+  --k-mic-bar: #ffffff;
+  --k-mic-glyph: #ffffff;
+  --k-mic-halo: transparent;
+  --k-mic-halo-line: rgba(255, 255, 255, 0.5);
+  --k-mic-fly: #ffffff;
+  --k-mic-badge: var(--k-rec);
+  --k-mic-badge-fg: #ffffff;
+  --k-mic-rec: var(--k-rec);
+}
+.k-mic {
+  --lvl: 0;
+  position: relative;
+  width: var(--k-gear);
+  height: var(--k-gear);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-ink);
+  color: var(--k-mic-idle);
+  cursor: pointer;
+  transition: transform var(--k-dur-base) var(--k-ease-spring);
+}
+.k-mic:active { transform: scale(0.92); }
+.k-mic:hover { color: var(--k-on-ink); }
+.k-mic:focus-visible { outline: none; box-shadow: var(--k-ink-rim), 0 0 0 3px var(--k-brand); }
+.k-mic > * { grid-area: 1 / 1; pointer-events: none; }
+.k-mic__icon { width: 19px; height: 19px; transition: transform var(--k-dur-base) var(--k-ease-out); }
+.k-mic:hover .k-mic__icon { transform: scale(1.08); }
+.k-mic__halo, .k-mic__disc { border-radius: 50%; transform: scale(0); }
+.k-mic__halo { width: 100%; height: 100%; background: var(--k-mic-halo); box-shadow: inset 0 0 0 1.5px var(--k-mic-halo-line); transition: transform 90ms linear; }
+.k-mic__disc { width: 32px; height: 32px; background: var(--k-mic-disc); transition: transform var(--k-dur-base) var(--k-ease-spring); }
+.k-mic__bars { display: flex; align-items: center; gap: 2.5px; height: 16px; }
+.k-mic__bars > i {
+  --b: 0;
+  width: 2.5px; height: 16px; border-radius: 2px; background: var(--k-mic-bar);
+  transform: scale(0);
+  transition: transform 90ms linear; /* follows level events (~30 per second); still when no sound */
+}
+.k-mic__check, .k-mic__alert { width: 16px; height: 16px; color: var(--k-mic-glyph); transform: scale(0); transition: transform var(--k-dur-base) var(--k-ease-spring); }
+.k-mic__alert { color: #fff; }
+/* look C: the REC dot, top right, only while recording; still, no blinking */
+.k-mic__rec {
+  place-self: start end; width: 7px; height: 7px; margin: 3px; border-radius: 50%;
+  background: var(--k-mic-rec); transform: scale(0); transition: transform var(--k-dur-base) var(--k-ease-spring);
+}
+.k-mic[data-state="recording"] .k-mic__rec { transform: scale(1); }
+
+/* every non-idle state: the mic icon shrinks away, the disc grows in its place */
+.k-mic:not([data-state="idle"]) .k-mic__icon { transform: scale(0); }
+.k-mic:not([data-state="idle"]) .k-mic__disc { transform: scale(1); }
+
+/* recording: bars from the real level, the halo breathes with the level */
+.k-mic[data-state="recording"] .k-mic__halo { transform: scale(calc(0.86 + var(--lvl) * 0.26)); }
+.k-mic[data-state="recording"] .k-mic__bars > i { transform: scaleY(calc(0.2 + var(--b) * 0.8)); }
+
+/* transcribing: bars drop to calm dots and a soft wave runs through them three times, then rests */
+.k-mic[data-state="transcribing"] .k-mic__bars > i {
+  transform: scaleY(0.22);
+  animation: k-mic-settle 520ms var(--k-ease-inout) 3 both;
+}
+.k-mic[data-state="transcribing"] .k-mic__bars > i:nth-child(2) { animation-delay: 80ms; }
+.k-mic[data-state="transcribing"] .k-mic__bars > i:nth-child(3) { animation-delay: 160ms; }
+.k-mic[data-state="transcribing"] .k-mic__bars > i:nth-child(4) { animation-delay: 240ms; }
+.k-mic[data-state="transcribing"] .k-mic__bars > i:nth-child(5) { animation-delay: 320ms; }
+@keyframes k-mic-settle { 0%, 100% { transform: scaleY(0.22); } 45% { transform: scaleY(0.62); } }
+.k-mic[data-state="transcribing"] .k-mic__halo { transform: scale(0.86); }
+
+/* sending: the dots are gone, the disc gives a small push (shrinks to 0.8) as the flying dot
+   (.k-voice-fly) leaves it for the bot's seat */
+.k-mic[data-state="sending"] .k-mic__disc { transform: scale(0.8); }
+
+/* done: a check in the look's glyph colour, then back to idle */
+.k-mic[data-state="done"] .k-mic__check { transform: scale(1); }
+
+/* error: coral disc, white «!», one short shake, and a tip beside the dock */
+.k-mic[data-state="error"] .k-mic__disc { background: var(--k-attention); }
+.k-mic[data-state="error"] .k-mic__alert { transform: scale(1); }
+.k-mic[data-state="error"] { animation: k-mic-shake 320ms var(--k-ease-out) 1; }
+@keyframes k-mic-shake { 20% { transform: translateX(-3px); } 45% { transform: translateX(3px); } 70% { transform: translateX(-2px); } }
+
+/* downloading (first press: the local speech model, ~0.6 GB): a thin ring around the mic fills with
+   --progress (0…1); the percent lives in the tip. loading (model into memory): a quarter arc runs round
+   three times, then the ring fills and rests — finite, then still. Markup inside .k-mic:
+   <svg class="k-mic__ring" viewBox="0 0 40 40"><circle class="k-mic__ring-track" cx="20" cy="20" r="18.5"/>
+   <circle class="k-mic__ring-arc" cx="20" cy="20" r="18.5" pathLength="100"/></svg> */
+.k-mic { --progress: 0; }
+.k-mic__ring { width: 100%; height: 100%; overflow: visible; transform: rotate(-90deg) scale(0); transition: transform var(--k-dur-base) var(--k-ease-spring); }
+.k-mic__ring-track { fill: none; stroke: var(--k-on-ink); stroke-opacity: 0.2; stroke-width: 2; }
+.k-mic__ring-arc {
+  fill: none; stroke: var(--k-mic-ring); stroke-width: 2; stroke-linecap: round;
+  stroke-dasharray: calc(var(--progress) * 100) 100;
+  transform-origin: 50% 50%;
+  transition: stroke-dasharray 300ms linear;
+}
+.k-mic[data-state="downloading"] .k-mic__ring, .k-mic[data-state="loading"] .k-mic__ring { transform: rotate(-90deg) scale(1); }
+.k-mic[data-state="downloading"] .k-mic__icon, .k-mic[data-state="loading"] .k-mic__icon { transform: scale(0.8); }
+.k-mic[data-state="downloading"] .k-mic__disc, .k-mic[data-state="loading"] .k-mic__disc { transform: scale(0); }
+.k-mic[data-state="loading"] .k-mic__ring-arc {
+  stroke-dasharray: 25 100;
+  animation: k-mic-turn 900ms linear 3, k-mic-fill 300ms var(--k-ease-out) 2700ms 1 forwards;
+}
+@keyframes k-mic-turn { to { transform: rotate(360deg); } }
+@keyframes k-mic-fill { to { stroke-dasharray: 100 100; } }
+
+/* the flying dot: placed by script at the mic, translated to the target seat (one shot) */
+.k-voice-fly {
+  position: absolute; z-index: 7; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+  background: var(--k-mic-fly); box-shadow: 0 0 0 2px var(--k-ink); pointer-events: none;
+}
+/* the target seat: a tiny mic badge while recording, one ring pulse on arrival */
+.k-seat__voice {
+  position: absolute; left: -1px; bottom: -1px; width: 16px; height: 16px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--k-mic-badge); color: var(--k-mic-badge-fg); box-shadow: 0 0 0 2px var(--k-ink);
+  transform: scale(0); transition: transform var(--k-dur-base) var(--k-ease-spring);
+}
+.k-seat__voice svg { width: 9px; height: 9px; }
+.k-seat.is-voice-target .k-seat__voice { transform: scale(1); }
+.k-seat.is-voice-hit .k-ring { animation: k-ring-pulse var(--k-dur-pulse) var(--k-ease-out) 1; }
+@keyframes k-ring-pulse { 40% { transform: scale(1.1); } }
+
+/* speaking: the bot reads its answer aloud. A thin outer ring in the bot's own colour, separated by a
+   hairline of ink, widens with --spk (0…1), which script sets from voice_state "speaking" level events
+   (~20 a second). No level, no motion; the colour is always the full ring colour, never dimmed. */
+.k-seat .k-ring { --spk: 0; border-radius: 50%; }
+.k-seat.is-speaking .k-ring {
+  box-shadow: 0 0 0 calc(1px + var(--spk) * 1.5px) var(--k-ink), 0 0 0 calc(2.5px + var(--spk) * 3.5px) var(--ring-color);
+  transition: transform var(--k-dur-base) var(--k-ease-spring), box-shadow 60ms linear;
+}
+
+/* error tip: small ink island beside the tray, coral dot, one line and an optional action */
+.k-voice-tip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 8px 7px 12px; border-radius: var(--k-radius-pill);
+  background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+  font: 400 var(--k-text-sm) / 1.3 var(--k-font-body); white-space: nowrap;
+}
+.k-voice-tip::before { content: ""; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--k-attention); }
+.k-voice-tip button {
+  height: 26px; padding: 0 10px; border: 0; border-radius: var(--k-radius-pill); background: var(--k-ink-3); color: var(--k-on-ink);
+  font: 600 var(--k-text-xs) / 1 var(--k-font-body); cursor: pointer;
+}
+
+/* Grip: the thin curved handle under the gear. */
+.k-grip { width: 28px; height: 10px; display: block; color: var(--k-ink); opacity: 0.75; cursor: grab; transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out); }
+.k-grip:hover { opacity: 1; transform: scaleX(1.15); }
+
+/* =====================================================================================
+   Status mark — one 16px glyph per state, shared by steps, runs and routines.
+   done: neutral check · fail: attention cross + a word · skip: dashed ring · next: hollow ring.
+   Running uses .k-pix, waiting for a person uses .k-pix--wait. Never green/red as the only signal.
+   ===================================================================================== */
+.k-mark { width: 16px; height: 16px; flex: none; display: inline-grid; place-items: center; border-radius: 50%; }
+.k-mark svg { width: 10px; height: 10px; }
+.k-mark--done { background: var(--k-text); color: var(--k-surface); }
+.k-mark--fail { background: var(--k-attention); color: #fff; }
+.k-mark--quiet { box-shadow: inset 0 0 0 1.5px var(--k-text-3); }
+.k-mark--skip { box-shadow: inset 0 0 0 1.5px var(--k-line-strong); background: repeating-linear-gradient(-45deg, transparent 0 2px, var(--k-line-strong) 2px 3px); }
+.k-mark--next { box-shadow: inset 0 0 0 1.5px var(--k-line-strong); }
+
+/* Meta chip: schedule, due date, cost — quiet capsule with an icon. */
+.k-meta {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2);
+  font: 400 var(--k-text-xs) / 1 var(--k-font-body); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.k-meta .k-i { width: 13px; height: 13px; color: var(--k-text-3); }
+
+/* =====================================================================================
+   Routine card — schedule, next run, last result, the last 14 runs as a dot strip.
+   ===================================================================================== */
+.k-routine {
+  display: flex; flex-direction: column; gap: var(--k-space-3);
+  padding: var(--k-space-4) var(--k-space-4) var(--k-space-3);
+  border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1);
+  transition: box-shadow var(--k-dur-base) var(--k-ease-out);
+}
+.k-routine:hover { box-shadow: var(--k-shadow-2); }
+.k-routine.is-paused { background: var(--k-surface-2); box-shadow: 0 0 0 1px var(--k-line); }
+.k-routine.is-paused .k-routine__title, .k-routine.is-paused .k-runs-strip { opacity: 0.55; }
+.k-routine__head { display: flex; align-items: center; gap: var(--k-space-3); }
+.k-routine__bot { width: 28px; height: 28px; flex: none; border-radius: 50%; background: #050505; box-shadow: inset 0 0 0 2px var(--bot, var(--k-bot-sky)); }
+.k-routine__title { flex: 1; min-width: 0; font: 800 16px / 1.25 var(--k-font-display); color: var(--k-text); overflow-wrap: anywhere; }
+.k-routine__metas { display: flex; flex-wrap: wrap; gap: 6px; }
+.k-routine__last { display: flex; align-items: flex-start; gap: var(--k-space-2); font: 400 var(--k-text-sm) / 1.45 var(--k-font-body); color: var(--k-text-2); }
+.k-routine__last .k-mark { margin-top: 2px; }
+.k-routine__when { color: var(--k-text-3); white-space: nowrap; }
+.k-routine__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); padding-top: var(--k-space-2); border-top: 1px solid var(--k-line); }
+
+/* Run strip: newest on the right. Dot = one run. Filled = reported, hollow = ran quietly,
+   coral = failed, hatched = skipped (limit, computer asleep). */
+.k-runs-strip { display: flex; gap: 4px; align-items: center; }
+.k-runs-strip > i { width: 8px; height: 8px; border-radius: 50%; background: var(--k-text-2); }
+.k-runs-strip > i.q { background: transparent; box-shadow: inset 0 0 0 1.5px var(--k-text-3); }
+.k-runs-strip > i.f { background: var(--k-attention); }
+.k-runs-strip > i.s { background: transparent; box-shadow: inset 0 0 0 1.5px var(--k-line-strong); }
+.k-runs-strip > i.now { background: transparent; box-shadow: inset 0 0 0 1.5px var(--bot, var(--k-brand)); }
+
+/* =====================================================================================
+   Goal — the target, progress as a row of dots (one per unit when it fits, else a bar),
+   and the bot's dated reports underneath.
+   ===================================================================================== */
+.k-goal { display: flex; flex-direction: column; gap: var(--k-space-4); padding: var(--k-space-5); border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
+.k-goal__title { font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); text-wrap: balance; }
+.k-goal__count { display: flex; align-items: baseline; gap: 8px; color: var(--k-text-3); font: 400 var(--k-text-sm) / 1 var(--k-font-body); }
+.k-goal__count b { font: 800 var(--k-text-2xl) / 1 var(--k-font-display); color: var(--k-text); font-variant-numeric: tabular-nums; }
+.k-dots { display: grid; grid-template-columns: repeat(auto-fill, 10px); gap: 5px; }
+.k-dots > i { width: 10px; height: 10px; border-radius: 50%; background: var(--k-surface-3); transition: transform var(--k-dur-base) var(--k-ease-spring); } /* colour switches at once, the pop is the motion */
+.k-dots > i.on { background: var(--bot, var(--k-text)); }
+.k-dots > i.new { transform: scale(1.25); }
+.k-reports { display: flex; flex-direction: column; }
+.k-report { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--k-space-3); padding: var(--k-space-3) 0; border-top: 1px solid var(--k-line); }
+.k-report__date { font: 600 var(--k-text-xs) / 1.5 var(--k-font-body); color: var(--k-text-3); font-variant-numeric: tabular-nums; }
+.k-report__text { font: 400 var(--k-text-sm) / 1.5 var(--k-font-body); color: var(--k-text); overflow-wrap: anywhere; }
+.k-report__delta { color: var(--k-text-3); white-space: nowrap; }
+
+/* =====================================================================================
+   Process — «Ход работы». Vertical steps joined by a wire; the wire fills with the bot's colour
+   up to the running step. States: done, run, wait (needs a person), fail, next.
+   ===================================================================================== */
+.k-process { --bot: var(--k-bot-tangerine); display: flex; flex-direction: column; gap: var(--k-space-4); padding: var(--k-space-5); border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
+.k-process__head { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); }
+.k-process__title { font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-process__bar { height: 4px; border-radius: 2px; background: var(--k-surface-3); overflow: hidden; }
+.k-process__bar > i { display: block; height: 100%; width: calc(var(--done, 0) * 100%); border-radius: inherit; background: var(--bot); transition: width var(--k-dur-ring) var(--k-ease-out); }
+.k-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.k-step { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--k-space-3); padding-bottom: var(--k-space-4); }
+.k-step:last-child { padding-bottom: 0; }
+/* the wire */
+.k-step::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: 2px; width: 2px; border-radius: 1px; background: var(--k-surface-3); }
+.k-step::after { content: ""; position: absolute; left: 9px; top: 22px; bottom: 2px; width: 2px; border-radius: 1px; background: var(--bot); transform-origin: top; transform: scaleY(0); transition: transform var(--k-dur-morph) var(--k-ease-morph); }
+.k-step.is-done::after { transform: scaleY(1); }
+.k-step:last-child::before, .k-step:last-child::after { display: none; }
+.k-step__node { width: 20px; height: 20px; display: grid; place-items: center; }
+.k-step__body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.k-step__name { font: 400 var(--k-text-md) / 1.35 var(--k-font-body); color: var(--k-text); overflow-wrap: anywhere; }
+.k-step__note { font: 400 var(--k-text-xs) / 1.45 var(--k-font-body); color: var(--k-text-3); overflow-wrap: anywhere; }
+.k-step__time { font: 400 var(--k-text-xs) / 1.6 var(--k-font-body); color: var(--k-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.k-step.is-done .k-step__name { color: var(--k-text-2); }
+.k-step.is-run .k-step__name { font-weight: 600; }
+.k-step.is-next .k-step__name { color: var(--k-text-3); }
+.k-step.is-fail .k-step__note { color: var(--k-attention-text); }
+.k-step.is-wait .k-step__body {
+  margin-top: -6px; padding: 8px 12px 12px; border-radius: var(--k-radius-md);
+  box-shadow: 0 0 0 1.5px var(--k-attention); gap: 8px;
+}
+.k-step__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.k-step.enter .k-step__body { animation: k-sharpen var(--k-dur-base) var(--k-ease-out) both; }
+
+/* =====================================================================================
+   Run timeline — every run of every routine, grouped by day, newest first.
+   ===================================================================================== */
+.k-timeline { display: flex; flex-direction: column; gap: var(--k-space-2); }
+.k-timeline__day { display: flex; align-items: baseline; justify-content: space-between; padding: var(--k-space-3) 0 var(--k-space-1); font: 800 var(--k-text-md) / 1.2 var(--k-font-display); color: var(--k-text); }
+.k-timeline__day span { font: 400 var(--k-text-xs) / 1 var(--k-font-body); color: var(--k-text-3); }
+.k-run {
+  position: relative; display: grid; grid-template-columns: 44px 16px minmax(0, 1fr) auto; align-items: start; column-gap: var(--k-space-3);
+  padding: 10px 12px; margin: 0 -12px; border-radius: var(--k-radius-md); cursor: pointer;
+  transition: background var(--k-dur-fast) var(--k-ease-out);
+}
+.k-run:hover { background: var(--k-surface-2); }
+.k-run__time { font: 400 var(--k-text-xs) / 1.6 var(--k-font-body); color: var(--k-text-3); font-variant-numeric: tabular-nums; }
+.k-run .k-mark { margin-top: 1px; }
+.k-run__what { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.k-run__name { font: 600 var(--k-text-sm) / 1.4 var(--k-font-body); color: var(--k-text); }
+.k-run__name i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--bot); vertical-align: 1px; }
+.k-run__out { font: 400 var(--k-text-sm) / 1.45 var(--k-font-body); color: var(--k-text-2); overflow-wrap: anywhere; }
+.k-run.is-fail .k-run__out { color: var(--k-attention-text); }
+.k-run__cost { font: 400 var(--k-text-xs) / 1.6 var(--k-font-body); color: var(--k-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+
+/* Content that arrives inside a growing shape: out of focus first, then sharp. */
+.k-sharpen-in { animation: k-sharpen var(--k-dur-base) var(--k-ease-out) 80ms both; }
+@keyframes k-sharpen { from { opacity: 0; filter: blur(var(--k-blur-in)); transform: translateY(3px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .k-pix > i::after { animation: none !important; }
+  .k-pix--think > i:nth-child(odd)::after, .k-pix--read > i:nth-child(3n + 1)::after, .k-pix--act > i:nth-child(odd)::after { opacity: 0.9; }
+  .k-pix--think > i:nth-child(even)::after, .k-pix--read > i:not(:nth-child(3n + 1))::after, .k-pix--act > i:nth-child(even)::after { opacity: 0; }
+  .k-sharpen-in { animation: none; }
+  .k-ring__arc, .k-tabs__thumb, .k-gear .k-i, .k-seat .k-ring { transition: none; }
+  /* the tray still reveals on hover and focus, just without travel */
+  .k-gear-tray, .k-dock:hover .k-gear-tray, .k-dock:focus-within .k-gear-tray, .k-dock.is-voice .k-gear-tray { transition: none; }
+  .k-mic, .k-mic *, .k-seat.is-voice-hit .k-ring { transition: none !important; animation: none !important; }
+  .k-seat.is-speaking .k-ring { box-shadow: 0 0 0 1px var(--k-ink), 0 0 0 3.5px var(--ring-color); transition: none; }
+}
+
+/* =====================================================================================
+   Base components for screens moving onto the kit (12.11.2026): form controls, modal,
+   settings group, list row, avatar, badges, empty/loading states, tooltip, toast host and
+   page layout. Same rules as above: paper tokens, ink islands, short finite transitions.
+   ===================================================================================== */
+
+/* Button: the loading mark replaces the leading icon. */
+.k-btn__pix { --px: 4px; }
+.k-btn__icon,
+.k-btn__icon svg { display: block; width: 16px; height: 16px; }
+.k-btn--icon .k-i,
+.k-btn--icon .k-i svg { display: block; width: 18px; height: 18px; }
+.k-btn--loading { cursor: progress; }
+.k-btn--loading:disabled { opacity: 0.7; }
+.k-btn--icon.k-btn--sm { width: 28px; }
+
+/* ---- Form controls ----------------------------------------------------------------- */
+
+.k-textarea {
+  height: auto;
+  min-height: 84px;
+  padding: 10px var(--k-space-3);
+  line-height: var(--k-leading-body);
+  resize: vertical;
+}
+.k-textarea.is-autosize { resize: none; overflow: hidden; }
+
+.k-select { position: relative; display: inline-flex; width: 100%; }
+.k-select__input {
+  width: 100%;
+  padding-right: 38px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.k-select__input:disabled { cursor: default; }
+.k-select__chevron {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  color: var(--k-text-3);
+  pointer-events: none;
+}
+
+.k-switch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: var(--k-text);
+  font: 400 var(--k-text-sm) / 1.3 var(--k-font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.k-switch-button .k-switch { margin-left: 0; }
+.k-switch-button:focus-visible { outline: none; }
+.k-switch-button:focus-visible .k-switch { box-shadow: var(--k-focus); }
+.k-switch-button:disabled { opacity: 0.4; cursor: default; }
+.k-switch__label { min-width: 0; }
+
+.k-check,
+.k-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  color: var(--k-text);
+  font: 400 var(--k-text-sm) / 1.35 var(--k-font-body);
+  cursor: pointer;
+}
+.k-check.is-disabled,
+.k-radio.is-disabled { opacity: 0.4; cursor: default; }
+.k-check__input,
+.k-radio__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.k-check__box,
+.k-radio__dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 1px solid var(--k-line-strong);
+  background: var(--k-surface);
+  color: var(--k-on-brand);
+  transition: background var(--k-dur-fast) var(--k-ease-out), border-color var(--k-dur-fast) var(--k-ease-out);
+}
+.k-check__box { border-radius: var(--k-radius-xs); }
+.k-radio__dot { border-radius: 50%; }
+.k-check__tick { width: 12px; height: 12px; opacity: 0; transition: opacity var(--k-dur-fast) var(--k-ease-out); }
+.k-check__input:checked + .k-check__box,
+.k-radio__input:checked + .k-radio__dot {
+  border-color: var(--k-brand);
+  background: var(--k-brand);
+}
+.k-check__input:checked + .k-check__box .k-check__tick { opacity: 1; }
+.k-radio__input:checked + .k-radio__dot::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--k-on-brand);
+}
+.k-check__box.is-indeterminate::after {
+  content: "";
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--k-on-brand);
+}
+.k-check__box.is-indeterminate .k-check__tick { opacity: 0; }
+.k-check__input:focus-visible + .k-check__box,
+.k-radio__input:focus-visible + .k-radio__dot { box-shadow: var(--k-focus); }
+.k-check__label,
+.k-radio__label { min-width: 0; }
+
+.k-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.k-radio-group > .k-label { margin-bottom: var(--k-space-1); }
+
+.k-slider { display: flex; flex-direction: column; gap: var(--k-space-2); }
+.k-slider__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--k-space-2); }
+.k-slider__value {
+  color: var(--k-text-2);
+  font: 600 var(--k-text-xs) / 1 var(--k-font-body);
+  font-variant-numeric: tabular-nums;
+}
+.k-slider__input {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.k-slider__input:disabled { opacity: 0.4; cursor: default; }
+.k-slider__input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-surface-3);
+}
+.k-slider__input::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-brand);
+  box-shadow: var(--k-shadow-1);
+  -webkit-appearance: none;
+  transition: transform var(--k-dur-fast) var(--k-ease-spring);
+}
+.k-slider__input:active::-webkit-slider-thumb { transform: scale(0.92); }
+.k-slider__input:focus-visible { outline: none; }
+.k-slider__input:focus-visible::-webkit-slider-thumb { box-shadow: var(--k-focus); }
+.k-slider__input::-moz-range-track {
+  height: 4px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-surface-3);
+}
+.k-slider__input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-brand);
+  box-shadow: var(--k-shadow-1);
+}
+.k-slider__input:focus-visible::-moz-range-thumb { box-shadow: var(--k-focus); }
+/* Засечки под дорожкой: бегунок 18px, поэтому крайние значения сдвинуты на его радиус. */
+.k-slider__marks { position: relative; display: block; height: 16px; margin-top: calc(var(--k-space-1) * -1); }
+.k-slider__mark {
+  position: absolute;
+  top: 0;
+  left: calc(9px + (100% - 18px) * var(--k-mark));
+  transform: translateX(-50%);
+  color: var(--k-text-3);
+  font: 400 var(--k-text-xs) / 1 var(--k-font-body);
+  font-variant-numeric: tabular-nums;
+}
+.k-slider__mark::before {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 4px;
+  margin: 0 auto 2px;
+  background: var(--k-line-strong);
+}
+
+/* ---- Modal / Sheet ---------------------------------------------------------------- */
+
+.k-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--k-z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--k-space-6);
+  background: var(--k-backdrop);
+  overflow: auto;
+}
+.k-modal.is-sheet { place-items: end center; padding: 0; }
+.k-modal__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: min(84vh, 780px);
+  border-radius: var(--k-radius-xl);
+  background: var(--k-surface);
+  color: var(--k-text);
+  box-shadow: var(--k-shadow-3);
+  outline: none;
+  overflow: hidden;
+}
+.k-modal__panel--sm { width: min(400px, 100%); }
+.k-modal__panel--lg { width: min(760px, 100%); }
+.k-modal__panel--sheet {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  border-radius: var(--k-radius-xl) var(--k-radius-xl) 0 0;
+}
+.k-modal__panel--sheet::before {
+  content: "";
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 0;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-surface-3);
+  flex: none;
+}
+.k-modal__head { display: flex; align-items: flex-start; gap: var(--k-space-4); padding: var(--k-space-5) var(--k-space-5) var(--k-space-3); }
+.k-modal__text { min-width: 0; flex: 1; }
+.k-modal__title { margin: 0; font: 800 var(--k-text-xl) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
+.k-modal__desc { margin: 6px 0 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
+.k-modal__close { flex: none; }
+.k-modal__body { padding: var(--k-space-1) var(--k-space-5) var(--k-space-5); overflow: auto; font: 400 var(--k-text-md) / var(--k-leading-body) var(--k-font-body); }
+.k-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--k-space-2);
+  padding: var(--k-space-3) var(--k-space-5) var(--k-space-5);
+  border-top: 1px solid var(--k-line);
+}
+
+/* ---- Settings group and row ------------------------------------------------------- */
+
+.k-section {
+  background: var(--k-surface);
+  border-radius: var(--k-radius-lg);
+  box-shadow: var(--k-shadow-1);
+  overflow: hidden;
+}
+.k-section__head { display: flex; align-items: flex-start; gap: var(--k-space-4); padding: var(--k-space-4) var(--k-space-5); }
+.k-section__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.k-section__title { margin: 0; font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-section__desc { margin: 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
+.k-section__actions { display: flex; align-items: center; gap: var(--k-space-2); flex: none; }
+.k-section__body { padding: 0 var(--k-space-5); border-top: 1px solid var(--k-line); }
+
+.k-row { display: flex; align-items: center; gap: var(--k-space-4); padding: var(--k-space-3) 0; border-bottom: 1px solid var(--k-line); }
+.k-row:last-child { border-bottom: 0; }
+.k-row__text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.k-row__label { font: 600 var(--k-text-sm) / 1.4 var(--k-font-body); color: var(--k-text); }
+.k-row__sub { font: 400 var(--k-text-xs) / 1.45 var(--k-font-body); color: var(--k-text-3); }
+.k-row__control { display: flex; align-items: center; gap: var(--k-space-2); flex: none; }
+
+/* ---- List item -------------------------------------------------------------------- */
+
+.k-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.k-list-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  min-height: 56px;
+  padding: 6px var(--k-space-2);
+  border-radius: var(--k-radius-md);
+  color: var(--k-text);
+  transition: background var(--k-dur-fast) var(--k-ease-out);
+}
+.k-list-item:hover { background: var(--k-surface-2); }
+.k-list-item.is-active { background: var(--k-surface-2); }
+.k-list-item.is-active .k-list-item__title { font-weight: 600; }
+.k-list-item__avatar { display: flex; flex: none; }
+.k-list-item__main {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focus); }
+.k-list-item__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.k-list-item__title { font: 600 var(--k-text-sm) / 1.35 var(--k-font-body); color: var(--k-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-list-item__sub { font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); color: var(--k-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-list-item__pin { width: 14px; height: 14px; flex: none; color: var(--k-text-3); }
+.k-list-item__unread { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--k-brand); }
+.k-list-item__meta { flex: none; padding-left: var(--k-space-2); color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.2 var(--k-font-body); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.k-list-item__badge { flex: none; }
+.k-list-item__context { flex: none; display: flex; }
+
+/* ---- Avatar ----------------------------------------------------------------------- */
+
+.k-avatar {
+  --avatar-size: 40px;
+  --ring-color: var(--k-bot-sky);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  flex: none;
+  border-radius: 50%;
+  background: var(--k-surface-2);
+  color: var(--k-text-2);
+  box-shadow: inset 0 0 0 1px var(--k-line);
+  overflow: hidden;
+}
+.k-avatar--ring { box-shadow: 0 0 0 2px var(--k-surface), 0 0 0 3.5px var(--ring-color); }
+.k-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.k-avatar__initials { font: 600 calc(var(--avatar-size) * 0.38) / 1 var(--k-font-body); letter-spacing: 0.02em; }
+.k-avatar__emoji { font-size: calc(var(--avatar-size) * 0.5); line-height: 1; }
+
+/* ---- Tabs, chips, badges ---------------------------------------------------------- */
+
+.k-tabs.is-instant .k-tabs__thumb { transition: none; }
+.k-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--k-radius-pill);
+  font: 600 var(--k-text-micro) / 1 var(--k-font-body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.k-badge--neutral { background: var(--k-surface-2); color: var(--k-text-2); }
+.k-badge--brand { background: var(--k-brand-tint); color: var(--k-brand-text); }
+.k-badge--ai { background: var(--k-ai-tint); color: var(--k-ai); }
+.k-badge--attention { background: var(--k-attention-tint); color: var(--k-attention-text); }
+.k-badge.is-dot { min-width: 8px; width: 8px; height: 8px; padding: 0; background: var(--k-brand); }
+.k-badge.is-dot.k-badge--neutral { background: var(--k-text-3); }
+.k-badge.is-dot.k-badge--ai { background: var(--k-ai); }
+.k-badge.is-dot.k-badge--attention { background: var(--k-attention); }
+
+/* ---- Empty, spinner, skeleton, tooltip -------------------------------------------- */
+
+.k-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--k-space-2); padding: var(--k-space-12) var(--k-space-6); }
+.k-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--k-surface-2);
+  color: var(--k-text-2);
+}
+.k-empty__icon svg { width: 24px; height: 24px; }
+.k-empty__title { margin: var(--k-space-1) 0 0; font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-empty__text { margin: 0; max-width: 46ch; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
+.k-empty__action { display: flex; gap: var(--k-space-2); margin-top: var(--k-space-2); }
+
+.k-spinner { display: inline-flex; align-items: center; }
+.k-spinner--sm .k-pix { --px: 3px; }
+.k-spinner--lg .k-pix { --px: 8px; }
+
+.k-skeleton {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: var(--k-radius-xs);
+  background: linear-gradient(90deg, var(--k-surface-2), var(--k-surface-3));
+  box-shadow: inset 0 0 0 1px var(--k-line);
+}
+.k-skeleton.is-circle { border-radius: 50%; }
+
+.k-tip { position: relative; display: inline-flex; max-width: 100%; }
+.k-tooltip {
+  position: absolute;
+  z-index: var(--k-z-tip);
+  left: 50%;
+  bottom: calc(100% + 6px);
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: var(--k-radius-sm);
+  background: var(--k-ink);
+  color: var(--k-on-ink);
+  box-shadow: var(--k-ink-rim), var(--k-shadow-2);
+  font: 400 var(--k-text-xs) / 1.35 var(--k-font-body);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out);
+}
+.k-tip:hover .k-tooltip,
+.k-tip:focus-within .k-tooltip { opacity: 1; transform: translate(-50%, 0); }
+.k-tip--bottom .k-tooltip { top: calc(100% + 6px); bottom: auto; transform: translate(-50%, -4px); }
+.k-tip--bottom:hover .k-tooltip,
+.k-tip--bottom:focus-within .k-tooltip { transform: translate(-50%, 0); }
+.k-tip--left .k-tooltip { left: auto; right: calc(100% + 6px); bottom: auto; top: 50%; transform: translate(4px, -50%); }
+.k-tip--left:hover .k-tooltip,
+.k-tip--left:focus-within .k-tooltip { transform: translate(0, -50%); }
+.k-tip--right .k-tooltip { left: calc(100% + 6px); bottom: auto; top: 50%; transform: translate(-4px, -50%); }
+.k-tip--right:hover .k-tooltip,
+.k-tip--right:focus-within .k-tooltip { transform: translate(0, -50%); }
+
+/* ---- Toast host ------------------------------------------------------------------- */
+
+.k-toast-portal { position: relative; }
+.k-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: var(--k-space-5);
+  z-index: var(--k-z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--k-space-2);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.k-toast-host .k-toast { pointer-events: auto; animation: k-toast-in var(--k-dur-base) var(--k-ease-out) both; }
+.k-toast__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes k-toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+}
+
+/* ---- Page layout ------------------------------------------------------------------ */
+
+.k-split {
+  display: grid;
+  grid-template-columns: var(--k-split-side, 300px) minmax(0, 1fr);
+  min-height: 240px;
+  height: 100%;
+  border-radius: var(--k-radius-lg);
+  background: var(--k-surface);
+  box-shadow: var(--k-shadow-1);
+  overflow: hidden;
+}
+.k-split__side {
+  min-width: 0;
+  padding: var(--k-space-3);
+  border-right: 1px solid var(--k-line);
+  background: var(--k-surface-2);
+  overflow: auto;
+}
+.k-split__main { min-width: 0; padding: var(--k-space-4); overflow: auto; }
+.k-split--right .k-split__side { order: 2; border-right: 0; border-left: 1px solid var(--k-line); }
+
+.k-toolbar { display: flex; align-items: center; gap: var(--k-space-4); padding: var(--k-space-2) 0 var(--k-space-4); }
+.k-toolbar__text { min-width: 0; flex: 1; }
+.k-toolbar__title { margin: 0; font: 800 var(--k-text-2xl) / 1.15 var(--k-font-display); color: var(--k-text); }
+.k-toolbar__sub { margin: 4px 0 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
+.k-toolbar__actions { display: flex; align-items: center; gap: var(--k-space-2); flex: none; }
+
+@media (max-width: 720px) {
+  .k-split { grid-template-columns: minmax(0, 1fr); }
+  .k-split__side { order: 0; border-right: 0; border-bottom: 1px solid var(--k-line); }
+  .k-split--right .k-split__side { order: 0; border-left: 0; border-bottom: 1px solid var(--k-line); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .k-modal,
+  .k-modal__panel,
+  .k-toast-host .k-toast,
+  .k-tip .k-tooltip,
+  .k-check__box,
+  .k-radio__dot,
+  .k-slider__input::-webkit-slider-thumb,
+  .k-list-item,
+  .k-select__input { transition: none !important; animation: none !important; }
+}

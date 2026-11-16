@@ -1,0 +1,64 @@
+﻿[package]
+name = "deloist"
+version = "0.3.6"
+edition = "2021"
+default-run = "deloist"
+description = "Команда AI-ботов в отдельном приложении: свои модели, инструменты, подтверждения, память и рутины."
+publish = false
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+ed25519-dalek = "2"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+rand = "0.8"
+regex = "1"
+rust-stemmers = "1"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "stream", "json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "native-tls"] }
+tokio-util = "0.7"
+# Снимок экрана в PNG и голос в JSON: обе на чистом Rust и уже были в дереве зависимостей.
+png = "0.17"
+base64 = "0.22"
+
+# Окно приложения и трей. Тот же движок, что у Tauri: WebView2 на Windows, WebKitGTK на Linux.
+# Не нужны серверной сборке (`--no-default-features`): без GTK и WebKit.
+tao = { version = "0.34", optional = true }
+tray-icon = { version = "0.21", optional = true }
+wry = { version = "0.53", optional = true }
+
+[features]
+default = ["desktop"]
+# Окно, трей, док и питомцы. Без него остаётся `deloist --server`.
+desktop = ["dep:tao", "dep:tray-icon", "dep:wry"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Networking_WinHttp", "Win32_Security", "Win32_Security_Cryptography", "Win32_Security_WinTrust", "Win32_Storage_Xps", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Микрофон для своей страницы в WebView2 и проверка поля пароля через UI Automation. Те же версии, что у wry.
+webview2-com = "0.38"
+windows-core = "0.61"
+windows = { version = "0.61", features = ["Data_Xml_Dom", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "UI_Notifications"] }
+
+[target."cfg(not(windows))".dependencies]
+chacha20poly1305 = "0.11"
+
+# prctl(PR_SET_DUMPABLE), geteuid, O_NOFOLLOW для файла мастер-ключа (уже в Cargo.lock через другие крейты).
+[target."cfg(unix)".dependencies]
+libc = "0.2"
+
+[profile.release]
+codegen-units = 4
+lto = "thin"
+opt-level = "s"
+strip = true
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

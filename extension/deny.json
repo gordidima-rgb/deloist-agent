@@ -1,0 +1,33 @@
+{
+  "deny": [
+    "*.sberbank.ru",
+    "online.sberbank.ru",
+    "*.tinkoff.ru",
+    "*.tbank.ru",
+    "*.vtb.ru",
+    "*.alfabank.ru",
+    "*.gazprombank.ru",
+    "*.raiffeisen.ru",
+    "paypal.com",
+    "*.paypal.com",
+    "*.stripe.com",
+    "*.yoomoney.ru",
+    "qiwi.com",
+    "accounts.google.com",
+    "myaccount.google.com",
+    "passwords.google.com",
+    "pay.google.com",
+    "login.microsoftonline.com",
+    "account.microsoft.com",
+    "id.yandex.ru",
+    "passport.yandex.ru",
+    "appleid.apple.com",
+    "*.1password.com",
+    "vault.bitwarden.com",
+    "*.lastpass.com",
+    "chromewebstore.google.com",
+    "chrome.google.com/webstore",
+    "*.gosuslugi.ru",
+    "*.nalog.gov.ru"
+  ]
+}

@@ -1,0 +1,11 @@
+target
+**/target
+.git
+node_modules
+**/node_modules
+data
+art
+notes
+RuBots
+graphify-out
+*.log

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "id": "app.yookassa",
+  "kind": "app",
+  "version": "1.0.0",
+  "category": "business",
+  "tier": "verified",
+  "title": { "ru": "ЮKassa", "en": "YooKassa" },
+  "summary": {
+    "ru": "Платежи и возвраты магазина: бот видит, но сам деньги не двигает.",
+    "en": "Your shop's payments and refunds: the bot can look, not move money."
+  },
+  "description": {
+    "ru": "Официальный MCP-сервер ЮKassa. Бот смотрит платежи, возвраты и чеки магазина и отвечает на вопросы о них. Создание платежей и возвраты без вашего подтверждения не выполняются: каждый вызов спрашивает вас. Ключ уходит только на mcp.yookassa.ru.",
+    "en": "The official YooKassa MCP server. The bot reads the shop's payments, refunds and receipts and answers questions about them. Nothing that creates a payment or a refund runs without your approval. The key goes only to mcp.yookassa.ru."
+  },
+  "icon": "emoji:💳",
+  "source": {
+    "name": "YooKassa",
+    "url": "https://yookassa.ru/developers/using-api/mcp",
+    "license": "LicenseRef-YooKassa-Terms",
+    "notice": "Hosted service by YooMoney; the manifest is by Deloist",
+    "modified": false
+  },
+  "app": {
+    "transport": "http",
+    "url": "https://mcp.yookassa.ru/mcp",
+    "install": { "kind": "none" },
+    "egress": ["mcp.yookassa.ru"],
+    "auth": {
+      "kind": "api_key",
+      "fields": [
+        {
+          "name": "YOOKASSA_MCP_TOKEN",
+          "label": { "ru": "MCP-токен ЮKassa", "en": "YooKassa MCP token" },
+          "secret": true,
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "help": {
+            "ru": "Личный кабинет ЮKassa → Интеграция → MCP → «Создать токен». Это отдельный токен, не секретный ключ магазина.",
+            "en": "YooKassa dashboard → Integration → MCP → \"Create token\". It is a separate token, not the shop's secret key."
+          },
+          "help_url": "https://yookassa.ru/my/merchant/integration/mcp"
+        }
+      ]
+    },
+    "tools_hint": ["payments_list", "payment_get", "refunds_list"]
+  },
+  "requires": { "apps": [], "builtin": [], "sites": [] }
+}

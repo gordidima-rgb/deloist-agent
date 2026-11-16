@@ -1,0 +1,1220 @@
+<title>Тушь и сигнал</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800&display=swap">
+<link rel="stylesheet" href="../../web/kit.css">
+<style>
+/* Page layout: one reading column 1080px wide; the dock stage is the hero, kit sections follow. */
+:root {
+  --old-surface: #ffffff; --old-line: #cbd5e1;
+  --wall-a: #ff7a1a; --wall-b: #ff2e7e; --wall-c: #3b5bff; --wall-d: #00c2a8; --wall-e: #ffd23f;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wall-a: #c2440a; --wall-b: #a0105a; --wall-c: #1d2fb8; --wall-d: #00806f; --wall-e: #b88a00; } }
+:root[data-theme="dark"] { --wall-a: #c2440a; --wall-b: #a0105a; --wall-c: #1d2fb8; --wall-d: #00806f; --wall-e: #b88a00; }
+
+:root {
+  --wallpaper:
+    radial-gradient(60% 70% at 12% 18%, var(--wall-e) 0%, transparent 60%),
+    radial-gradient(55% 65% at 85% 10%, var(--wall-b) 0%, transparent 62%),
+    radial-gradient(70% 70% at 25% 95%, var(--wall-c) 0%, transparent 65%),
+    radial-gradient(60% 60% at 95% 85%, var(--wall-d) 0%, transparent 60%),
+    var(--wall-a);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --old-surface: #111827; --old-line: #334155; } }
+:root[data-theme="dark"] { --old-surface: #111827; --old-line: #334155; }
+html { background: var(--k-canvas); }
+body {
+  background: var(--k-canvas);
+  color: var(--k-text);
+  font: 400 var(--k-text-md) / var(--k-leading-body) var(--k-font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+::selection { background: var(--k-brand); color: #fff; }
+.page { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+h1, h2, h3 { font-family: var(--k-font-display); font-weight: 800; margin: 0; text-wrap: balance; color: var(--k-text); }
+h1 { font-size: var(--k-text-3xl); line-height: 1.1; letter-spacing: -0.01em; }
+h2 { font-size: var(--k-text-xl); line-height: var(--k-leading-tight); }
+h3 { font-size: var(--k-text-lg); line-height: var(--k-leading-tight); }
+p { margin: 0; max-width: 64ch; color: var(--k-text-2); }
+section { display: flex; flex-direction: column; gap: 20px; }
+.lead { font-size: var(--k-text-lg); line-height: 1.45; }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px; padding-top: 40px; }
+.top-text { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1 1 420px; }
+.k-i { display: block; }
+
+/* ------------------------------------------------------------------ stage */
+.stage-row { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
+@media (max-width: 860px) { .stage-row { grid-template-columns: minmax(0, 1fr); } }
+.stage {
+  position: relative;
+  height: 600px;
+  border-radius: var(--k-radius-lg);
+  overflow: hidden;
+  background: var(--wallpaper);
+  isolation: isolate;
+}
+.fake-window {
+  position: absolute; left: 6%; top: 16%; width: min(380px, 62%);
+  border-radius: var(--k-radius-md); background: var(--k-surface); box-shadow: var(--k-shadow-3);
+  padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; z-index: 1;
+}
+.fake-window .bar { display: flex; gap: 6px; }
+.fake-window .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--k-surface-3); }
+.fake-window .ln { height: 9px; border-radius: 5px; background: var(--k-surface-2); }
+.fake-window .ln.s { width: 60%; }
+.fake-window.covering { left: auto; right: 0; top: 300px; width: 260px; z-index: 3; }
+.fake-note { font: 600 var(--k-text-xs)/1.3 var(--k-font-body); color: var(--k-text-3); }
+
+/* Dock layer. Everything is placed from the wall side so the edge switch only flips the side. */
+.dock { position: absolute; top: 36px; right: 0; z-index: 2; display: flex; flex-direction: column; align-items: flex-end;
+  transition: transform var(--k-dur-morph) var(--k-ease-spring); }
+.stage.left .dock { right: auto; left: 0; align-items: flex-start; }
+.stage.ontop .dock { z-index: 4; }
+.dock.tucked { transform: translateX(calc(100% - 6px)); transition: transform var(--k-dur-exit) var(--k-ease-in); }
+.stage.left .dock.tucked { transform: translateX(calc(-100% + 6px)); }
+.dock .k-island { display: flex; flex-direction: column; align-items: center; gap: var(--k-dock-gap); padding: 12px 0; }
+.strip { position: absolute; top: 0; bottom: 0; right: 0; width: 14px; z-index: 5; display: none; }
+.stage.left .strip { right: auto; left: 0; }
+.stage.tucking .strip { display: block; }
+
+.k-seat { position: relative; }
+.unread { position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-brand); box-shadow: 0 0 0 2px var(--k-ink);
+  transform: scale(0); transition: transform var(--k-dur-base) var(--k-ease-spring); }
+.unread.on { transform: scale(1); }
+.face { width: 100%; height: 100%; display: block; }
+.face .eyes { transition: transform var(--k-dur-morph) var(--k-ease-morph); }
+.face.busy .eyes { transform: translate(3px, -3px); }
+.face .mouth { transition: opacity var(--k-dur-base) var(--k-ease-out); }
+.face.busy .mouth { opacity: 0.25; }
+
+/* hover label: small ink island beside the dock */
+.tip {
+  position: absolute; right: 74px; z-index: 6; padding: 8px 12px; border-radius: var(--k-radius-md);
+  background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim), var(--k-shadow-island);
+  pointer-events: none; opacity: 0; transform: translateX(6px); white-space: nowrap;
+  transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out);
+}
+.stage.left .tip { right: auto; left: 74px; transform: translateX(-6px); }
+.tip.on { opacity: 1; transform: none; }
+.tip b { display: block; font: 800 14px/1.3 var(--k-font-display); }
+.tip span { font: 400 var(--k-text-xs)/1.4 var(--k-font-body); color: var(--k-on-ink-2); }
+
+/* step pill: grows out of the dock at the bot's seat, joined by concave fillets */
+.pill {
+  --join: 12px;
+  position: absolute; right: 61px; z-index: 2; height: 52px; width: 0; border-radius: 20px 0 0 20px;
+  background: var(--k-ink); color: var(--k-on-ink);
+  transition: width var(--k-dur-morph) var(--k-ease-morph), opacity var(--k-dur-base) var(--k-ease-out);
+}
+.stage.left .pill { right: auto; left: 61px; border-radius: 0 20px 20px 0; }
+.stage.ontop .pill { z-index: 4; }
+.pill::before, .pill::after { content: ""; position: absolute; right: 0; width: var(--join); height: var(--join); }
+.pill::before { bottom: 100%; background: radial-gradient(circle at 0 0, transparent calc(var(--join) - .5px), var(--k-ink) var(--join)); }
+.pill::after { top: 100%; background: radial-gradient(circle at 0 100%, transparent calc(var(--join) - .5px), var(--k-ink) var(--join)); }
+.stage.left .pill::before, .stage.left .pill::after { right: auto; left: 0; }
+.stage.left .pill::before { background: radial-gradient(circle at 100% 0, transparent calc(var(--join) - .5px), var(--k-ink) var(--join)); }
+.stage.left .pill::after { background: radial-gradient(circle at 100% 100%, transparent calc(var(--join) - .5px), var(--k-ink) var(--join)); }
+.pill.leaving { width: 0 !important; transition: width var(--k-dur-exit) var(--k-ease-in); }
+.pill-lines { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+.line { position: absolute; left: 16px; right: 14px; display: flex; align-items: center; gap: 9px; white-space: nowrap;
+  transition: transform 380ms var(--k-ease-morph), opacity var(--k-dur-base) var(--k-ease-out), filter var(--k-dur-base) var(--k-ease-out); }
+.stage.left .line { left: 14px; right: 16px; }
+.line.now { top: 24px; font: 600 14px/22px var(--k-font-body); }
+.line.was { top: 6px; font: 400 12px/18px var(--k-font-body); color: var(--k-on-ink-3); }
+.line.was .k-pix { display: none; }
+.line.enter { opacity: 0; transform: translateY(14px); filter: blur(4px); }
+.line.gone { opacity: 0; transform: translateY(-12px); filter: blur(4px); }
+.line .meta { color: var(--k-on-ink-3); font-weight: 400; }
+.measure { position: absolute; visibility: hidden; white-space: nowrap; font: 600 14px/22px var(--k-font-body); }
+
+/* gear menu: grows out of the gear (clip-path), content sharpens in after 80ms */
+.gmenu {
+  position: absolute; right: 58px; z-index: 6; width: 264px;
+  clip-path: inset(calc(100% - 40px) 0 0 calc(100% - 40px) round 20px);
+  opacity: 0; pointer-events: none;
+  transition: clip-path var(--k-dur-exit) var(--k-ease-in), opacity 0s linear var(--k-dur-exit);
+}
+.stage.left .gmenu { right: auto; left: 58px; clip-path: inset(calc(100% - 40px) calc(100% - 40px) 0 0 round 20px); }
+.gmenu.open { clip-path: inset(0 round 20px); opacity: 1; pointer-events: auto;
+  transition: clip-path var(--k-dur-morph) var(--k-ease-morph), opacity 0s; }
+.gmenu .k-menu { box-shadow: var(--k-ink-rim); }
+.gmenu .inner { transition: opacity 120ms var(--k-ease-out); }
+.gmenu:not(.open) .inner { opacity: 0; }
+.gmenu-title { padding: 8px 12px 6px; font: 800 14px/1.3 var(--k-font-display); color: var(--k-on-ink); }
+
+/* control panel */
+.panel { display: flex; flex-direction: column; gap: 16px; padding: 18px; border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
+.panel h3 { font-size: 15px; }
+.ctl { display: flex; flex-direction: column; gap: 8px; }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ctl p { font-size: var(--k-text-xs); color: var(--k-text-3); }
+
+/* ------------------------------------------------------------------ glyphs */
+.glyphs { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; }
+.glyph { display: flex; flex-direction: column; gap: 14px; padding: 20px; border-radius: var(--k-radius-lg); background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim); }
+.glyph .big { height: 72px; display: grid; place-items: center start; }
+.glyph b { font: 800 15px/1.2 var(--k-font-display); }
+.glyph span { font-size: var(--k-text-xs); color: var(--k-on-ink-2); line-height: 1.4; }
+.inline-demo { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.ink-pill { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px; border-radius: 999px; background: var(--k-ink); color: var(--k-on-ink); font: 600 14px/1 var(--k-font-body); box-shadow: var(--k-ink-rim); }
+.paper-typing { display: inline-flex; align-items: center; gap: 10px; color: var(--k-text-3); font-size: var(--k-text-sm); }
+
+/* ------------------------------------------------------------------ tokens */
+.sw-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+.sw-group { display: flex; flex-direction: column; gap: 8px; }
+.sw-group h3 { font-size: 15px; }
+.sw { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: var(--k-text-sm); }
+.sw i { width: 36px; height: 36px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.22); }
+.sw code { font: 400 var(--k-text-xs)/1 var(--k-font-mono); color: var(--k-text-3); }
+.sw span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bots { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; border-radius: var(--k-radius-md); background: var(--k-ink); }
+.bots i { width: 30px; height: 30px; border-radius: 50%; box-shadow: inset 0 0 0 3px currentColor, inset 0 0 0 30px #050505; }
+
+.scale { display: flex; flex-direction: column; border-top: 1px solid var(--k-line); }
+.scale-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--k-line); }
+.scale-row code { font: 400 var(--k-text-xs)/1.3 var(--k-font-mono); color: var(--k-text-3); }
+.scale-row div { min-width: 0; overflow-wrap: anywhere; }
+
+.measures { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+.radii, .spaces, .elev { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.radius-box { width: 64px; height: 64px; background: var(--k-surface); box-shadow: var(--k-shadow-1); display: grid; place-items: center; font: 400 var(--k-text-xs)/1 var(--k-font-mono); color: var(--k-text-3); }
+.space-bar { display: flex; flex-direction: column; align-items: center; gap: 6px; font: 400 var(--k-text-xs)/1 var(--k-font-mono); color: var(--k-text-3); }
+.space-bar i { display: block; width: 14px; background: var(--k-brand); border-radius: 3px; opacity: 0.8; }
+.elev-box { width: 96px; height: 72px; border-radius: var(--k-radius-md); background: var(--k-surface); display: grid; place-items: center; font: 400 var(--k-text-xs)/1 var(--k-font-mono); color: var(--k-text-3); }
+.elev-box.ink { background: var(--k-ink); color: var(--k-on-ink-2); }
+
+.motion { display: flex; flex-direction: column; gap: 10px; }
+.mrow { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; align-items: center; }
+.mrow .name { display: flex; flex-direction: column; gap: 2px; font-size: var(--k-text-sm); }
+.mrow code { font: 400 var(--k-text-xs)/1.3 var(--k-font-mono); color: var(--k-text-3); }
+.track { position: relative; height: 36px; border-radius: 999px; background: var(--k-surface-2); }
+.track i { position: absolute; left: 4px; top: 4px; width: 28px; height: 28px; border-radius: 50%; background: var(--k-ink); box-shadow: var(--k-ink-rim); }
+.track.go i { left: calc(100% - 32px); }
+@media (max-width: 560px) { .mrow, .scale-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* ------------------------------------------------------------------ components */
+.comp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.comp { display: flex; flex-direction: column; gap: 14px; padding: 20px; border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); min-width: 0; }
+.comp > h3 { font-size: 15px; }
+.comp .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.comp.wide { grid-column: 1 / -1; }
+.dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: var(--k-text-xs); line-height: 1.45; }
+.dodont div { padding: 10px 12px; border-radius: var(--k-radius-sm); background: var(--k-surface-2); color: var(--k-text-2); }
+.dodont b { display: block; margin-bottom: 2px; color: var(--k-text); }
+.dodont .dont b { color: var(--k-attention-text); }
+.ring-demo { display: flex; flex-wrap: wrap; gap: 18px; padding: 16px; border-radius: var(--k-radius-md); background: var(--k-ink); }
+.ring-demo .k-seat { cursor: default; }
+.toast-zone { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom, 0px)); z-index: 50; transform: translate(-50%, 140%); opacity: 0;
+  transition: transform var(--k-dur-morph) var(--k-ease-morph), opacity var(--k-dur-base) var(--k-ease-out); }
+.toast-zone.on { transform: translate(-50%, 0); opacity: 1; }
+.chat-sample { display: flex; flex-direction: column; gap: 10px; font-size: var(--k-text-md); }
+.chat-sample .me { align-self: flex-end; max-width: 80%; padding: 8px 12px; border-radius: 18px 18px 6px 18px; background: var(--k-brand-tint); color: var(--k-text); }
+.chat-sample .bot { color: var(--k-text); }
+footer { color: var(--k-text-3); font-size: var(--k-text-xs); }
+
+
+.voice-tip { position: absolute; right: 74px; z-index: 6; }
+.stage.left .voice-tip { right: auto; left: 74px; }
+.voice-tip[hidden] { display: none; }
+
+
+.vstates { display: flex; flex-wrap: wrap; gap: 12px; }
+.vstate { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 14px 14px; border-radius: var(--k-radius-lg); background: #0b0d14; min-width: 120px; flex: 1 1 120px; }
+.vstate .zoom { zoom: 2; }
+.vstate b { font: 600 var(--k-text-xs) / 1.3 var(--k-font-body); color: rgba(255, 255, 255, 0.82); text-align: center; }
+
+/* ------------------------------------------------------------------ 1:1 comparison */
+.compare { display: flex; flex-wrap: wrap; gap: 16px; }
+.cmp { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.cmp h3 { font-size: 15px; }
+.cmp p { font-size: var(--k-text-xs); color: var(--k-text-3); }
+.cmp-wall { position: relative; height: 330px; border-radius: var(--k-radius-lg); overflow: hidden; background: var(--wallpaper); }
+.cmp-wall .k-dock { position: absolute; top: 24px; right: 0; }
+.cmp-wall .k-island { display: flex; flex-direction: column; align-items: center; gap: var(--k-dock-gap); padding: 12px 0; }
+.old-dock { position: absolute; top: 24px; right: 0; display: flex; flex-direction: column; align-items: flex-end; filter: drop-shadow(0 4px 12px rgba(15, 23, 42, 0.16)); }
+.old-fillet { width: 18px; height: 18px; }
+.old-fillet.t { background: radial-gradient(circle at 0 0, transparent 17.5px, var(--old-surface) 18px); }
+.old-fillet.b { background: radial-gradient(circle at 0 100%, transparent 17.5px, var(--old-surface) 18px); }
+.old-body { width: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 8px 0; border-radius: 28px 0 0 28px; background: var(--old-surface); }
+.old-av { position: relative; width: 44px; height: 44px; flex: none; border-radius: 50%; }
+.old-av svg { position: absolute; inset: 5%; width: 90%; height: 90%; border-radius: 50%; }
+.old-add { width: 44px; height: 44px; flex: none; border: 1.5px dashed var(--old-line); border-radius: 50%; box-sizing: border-box; }
+.old-grip { align-self: stretch; height: 22px; display: grid; place-items: center; }
+.old-grip::before { content: ""; width: 20px; height: 4px; border-radius: 999px; background: var(--old-line); }
+.size-note { font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------ routines */
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.flow-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.flow-wide { grid-column: 1 / -1; padding: 8px 20px 16px; border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
+.flow-wide h3 { padding-top: 12px; font-size: 15px; }
+.flow .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.flow-switch { width: auto; min-height: 0; padding: 0; background: transparent !important; }
+.flow-rules { margin-top: 4px; }
+@media (max-width: 760px) { .flow { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="page">
+  <header class="top">
+    <div class="top-text">
+      <h1>Тушь и сигнал</h1>
+      <p class="lead">Новый кит Deloist. Спокойная бумага для чтения и решений, чёрные островки туши у края экрана и цвет только там, где он что-то сообщает: сколько осталось бюджета у бота и чем он сейчас занят.</p>
+    </div>
+    <div class="k-tabs" role="tablist" aria-label="Тема" id="theme-tabs">
+      <span class="k-tabs__thumb"></span>
+      <button class="k-tab" role="tab" data-theme-pick="system" aria-selected="true">Как в системе</button>
+      <button class="k-tab" role="tab" data-theme-pick="light" aria-selected="false">Светлая</button>
+      <button class="k-tab" role="tab" data-theme-pick="dark" aria-selected="false">Тёмная</button>
+    </div>
+  </header>
+
+  <!-- ============================================================ dock -->
+  <section aria-labelledby="dock-h">
+    <h2 id="dock-h">Док у края экрана</h2>
+    <p>Кольцо вокруг лица бота показывает, сколько осталось от его дневного бюджета. Точное число и какой предел сработал — в подсказке при наведении. Шестерёнка спрятана под доком, видна только ручка: наведите на док, и она выедет.</p>
+    <div class="stage-row">
+      <div class="stage" id="stage">
+        <div class="fake-window" id="fake-window">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="ln"></div><div class="ln s"></div><div class="ln"></div>
+          <span class="fake-note">Окно другой программы</span>
+        </div>
+        <div class="strip" id="strip"></div>
+        <div class="tip" id="tip"><b></b><span></span></div>
+        <div class="dock k-dock" id="dock">
+          <div class="k-edge" id="edge">
+            <i class="k-fillet k-fillet--top"></i>
+            <div class="k-island" id="seats"></div>
+            <i class="k-fillet k-fillet--bottom"></i>
+          </div>
+          <div class="k-tray-clip"><div class="k-gear-tray" id="tray">
+            <button class="k-mic" id="mic" data-state="idle" aria-label="Голос: начать запись"><svg class="k-mic__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg><svg class="k-mic__ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="k-mic__ring-track" cx="20" cy="20" r="18.5"/><circle class="k-mic__ring-arc" cx="20" cy="20" r="18.5" pathLength="100"/></svg><span class="k-mic__halo"></span><span class="k-mic__disc"></span><span class="k-mic__bars"><i></i><i></i><i></i><i></i><i></i></span><svg class="k-mic__check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8.3 3 3 6-6.6"/></svg><svg class="k-mic__alert" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v5.5"/><path d="M8 12.4v.1"/></svg></button>
+            <button class="k-gear" id="gear" aria-haspopup="menu" aria-expanded="false" aria-controls="gmenu" aria-label="Настройки дока">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1.03Z"/></svg>
+            </button>
+            <button class="k-tray-add" id="tray-add" aria-label="Добавить бота"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+            <svg class="k-grip" viewBox="0 0 28 10" aria-hidden="true"><path d="M3 3c5.5 4.5 16.5 4.5 22 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          </div>          </div>
+        </div>
+        <div class="gmenu" id="gmenu" role="menu" aria-label="Настройки дока">
+          <div class="k-menu"><div class="inner" id="gmenu-inner">
+            <div class="gmenu-title">Док</div>
+            <button class="k-menu__item" role="menuitemcheckbox" aria-checked="false" data-opt="tuck">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4"/><path d="M4 12h10"/><path d="m10 8 4 4-4 4"/></svg>
+              Прятать к краю<span class="k-switch"></span>
+            </button>
+            <button class="k-menu__item" role="menuitemcheckbox" aria-checked="true" data-opt="ontop">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="12" height="11" rx="2"/><rect x="9" y="4" width="12" height="11" rx="2"/></svg>
+              Поверх всех окон<span class="k-switch"></span>
+            </button>
+            <button class="k-menu__item" role="menuitem" data-opt="edge">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10"/><path d="m14 4 3 3-3 3"/><path d="M17 17H7"/><path d="m10 14-3 3 3 3"/></svg>
+              Край экрана<span class="k-menu__value" id="edge-value">Справа</span>
+            </button>
+            <button class="k-menu__item" role="menuitem" data-opt="voice" aria-haspopup="true">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>
+              Голос уходит<span class="k-menu__value" id="voice-value">Последнему</span>
+            </button>
+            <div class="k-menu__sep"></div>
+            <button class="k-menu__item" role="menuitem" data-opt="hide">
+              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3 3.9M6.3 6.3A17 17 0 0 0 2.5 12S6 19 12 19a9.6 9.6 0 0 0 5.7-1.8"/></svg>
+              Скрыть док
+            </button>
+          </div></div>
+        </div>
+        <div class="voice-tip k-voice-tip" id="voice-tip" hidden><span id="voice-tip-text"></span><button type="button" id="voice-tip-act"></button></div>
+        <span class="measure" id="measure"></span>
+      </div>
+
+      <aside class="panel" aria-label="Управление примером">
+        <div class="ctl">
+          <h3>Работа</h3>
+          <div class="ctl-row" id="run-buttons"></div>
+          <p>Бот берёт задачу: рядом с ним вырастает плашка с шагами, кольцо тает на потраченную долю.</p>
+        </div>
+        <div class="ctl">
+          <h3>Бюджет</h3>
+          <div class="ctl-row">
+            <button class="k-btn k-btn--sm" id="spend">Потратить 10 %</button>
+            <button class="k-btn k-btn--sm" id="refill">Новый день</button>
+          </div>
+          <p>Ниже 15 % кольцо становится коралловым. На нуле лицо гаснет.</p>
+        </div>
+        <div class="ctl">
+          <h3>Голос</h3>
+          <div class="ctl-row">
+            <button class="k-btn k-btn--ink k-btn--sm" id="hotkey">Ctrl + Space</button>
+            <button class="k-chip" aria-pressed="false" id="err-money">Нет денег</button>
+            <button class="k-chip" aria-pressed="false" id="err-mic">Нет микрофона</button>
+            <button class="k-chip" aria-pressed="true" id="model-reset">Модель не скачана</button>
+          </div>
+          <p>Клавиша запускает запись без мыши: лоток выезжает сам. Второе нажатие или щелчок по микрофону останавливает, Esc отменяет. Уровень звука здесь поддельный.</p>
+        </div>
+        <div class="ctl">
+          <h3>Вопрос владельцу: где «Добавить бота»?</h3>
+          <div class="ctl-row" id="add-place">
+            <button class="k-chip" aria-pressed="true" data-place="tray">В лотке, третьей кнопкой</button>
+            <button class="k-chip" aria-pressed="false" data-place="dock">В доке, после ботов</button>
+          </div>
+          <p>Предлагаем лоток: островок остаётся только для ботов.</p>
+        </div>
+        <div class="ctl">
+          <h3>Подложка</h3>
+          <div class="ctl-row">
+            <button class="k-chip" aria-pressed="false" id="cover">Окно рядом с доком</button>
+          </div>
+          <p>Покажет разницу между «поверх всех окон» и обычным режимом.</p>
+        </div>
+      </aside>
+    </div>
+    <div class="compare" aria-label="Сравнение размеров 1:1">
+      <div class="cmp">
+        <h3>Как сейчас</h3>
+        <div class="cmp-wall"><div class="old-dock" id="old-dock"><i class="old-fillet t"></i><div class="old-body" id="old-body"><span class="old-add"></span><span class="old-grip"></span></div><i class="old-fillet b"></i></div></div>
+        <p class="size-note">Островок 60 px, аватар 44 px, шаг 54 px.</p>
+      </div>
+      <div class="cmp">
+        <h3>Новый, тот же масштаб</h3>
+        <div class="cmp-wall"><div class="k-dock" id="cmp-dock"><div class="k-edge"><i class="k-fillet k-fillet--top"></i><div class="k-island" id="cmp-seats"></div><i class="k-fillet k-fillet--bottom"></i></div><div class="k-tray-clip"><div class="k-gear-tray"><button class="k-mic" tabindex="-1" data-state="idle" aria-label="Голос: начать запись"><svg class="k-mic__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg><svg class="k-mic__ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="k-mic__ring-track" cx="20" cy="20" r="18.5"/><circle class="k-mic__ring-arc" cx="20" cy="20" r="18.5" pathLength="100"/></svg><span class="k-mic__halo"></span><span class="k-mic__disc"></span><span class="k-mic__bars"><i></i><i></i><i></i><i></i><i></i></span><svg class="k-mic__check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8.3 3 3 6-6.6"/></svg><svg class="k-mic__alert" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v5.5"/><path d="M8 12.4v.1"/></svg></button><button class="k-gear" aria-label="Настройки дока" tabindex="-1"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg></button><svg class="k-grip" viewBox="0 0 28 10" aria-hidden="true"><path d="M3 3c5.5 4.5 16.5 4.5 22 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></div></div></div></div>
+        <p class="size-note">Островок 62 px, аватар те же 44 px, кольцо 2,5 px с зазором 1,5 px, шаг 58 px.</p>
+      </div>
+    </div>
+
+    <h3>Голос: шесть состояний одной кнопки</h3>
+    <div class="vstates" id="vstates"></div>
+    <p>Щелчок или Ctrl + Space начинает запись, повторный щелчок останавливает, Esc отменяет. Полоски двигаются только от настоящего уровня звука: тишина значит неподвижные точки. Распознавание — три спокойные волны и покой. Затем точка летит к боту, его кольцо отвечает одним толчком, галочка, и кнопка снова в покое.</p>
+    <p>В настоящем доке внутри кольца стоит аватар, который выбрал человек: слизь, стекло, аниме или светодиодное лицо. Точечное лицо здесь только заглушка для витрины.</p>
+  </section>
+
+  <!-- ============================================================ routines -->
+  <section aria-labelledby="flow-h">
+    <h2 id="flow-h">Рутины, цели и ход работы</h2>
+    <p>Всё, что бот делает сам по расписанию или к цели. Состояние читается знаком и словом, а не цветом: готово — тёмная галочка, тихий запуск без отчёта — пустой кружок, сбой — коралл с объяснением, пропуск — штриховка.</p>
+    <div class="flow">
+      <div class="k-process" id="process" style="--bot:var(--k-bot-tangerine)">
+        <div class="k-process__head">
+          <span class="k-process__title">Ход работы</span>
+          <span class="k-meta" id="proc-count">0 из 6</span>
+        </div>
+        <div class="k-process__bar"><i id="proc-bar"></i></div>
+        <ol class="k-steps" id="steps"></ol>
+        <div class="row"><button class="k-btn k-btn--ink k-btn--sm" id="proc-play">Запустить сверку</button><button class="k-btn k-btn--ghost k-btn--sm" id="proc-fail">Показать сбой</button></div>
+      </div>
+
+      <div class="flow-col">
+        <article class="k-routine" style="--bot:var(--k-bot-tangerine)">
+          <div class="k-routine__head"><span class="k-routine__bot"></span><span class="k-routine__title">Сверка остатков на складах</span>
+            <button class="k-menu__item flow-switch" role="switch" aria-checked="true" aria-label="Рутина включена"><span class="k-switch"></span></button></div>
+          <div class="k-routine__metas">
+            <span class="k-meta"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></svg>Будни, 09:00</span>
+            <span class="k-meta"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Следующий завтра в 09:00</span>
+          </div>
+          <div class="k-routine__last"><span class="k-mark k-mark--done"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span>Нашла расхождение в 14 коробок по К0567 и написала складу. <span class="k-routine__when">Сегодня, 09:04</span></span></div>
+          <div class="k-routine__foot"><span class="k-runs-strip" aria-label="Последние 14 запусков"><i></i><i class="q"></i><i class="q"></i><i></i><i class="s"></i><i class="q"></i><i></i><i class="q"></i><i class="f"></i><i></i><i class="q"></i><i class="q"></i><i></i><i></i></span><button class="k-btn k-btn--sm">Запустить сейчас</button></div>
+        </article>
+
+        <article class="k-routine" style="--bot:var(--k-bot-mint)">
+          <div class="k-routine__head"><span class="k-routine__bot"></span><span class="k-routine__title">Цены конкурентов на Ozon</span>
+            <button class="k-menu__item flow-switch" role="switch" aria-checked="true" aria-label="Рутина включена"><span class="k-switch"></span></button></div>
+          <div class="k-routine__metas">
+            <span class="k-meta"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></svg>Каждые 4 часа, ночью</span>
+            <span class="k-meta"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Следующий через 2 ч 14 мин</span>
+          </div>
+          <div class="k-routine__last"><span class="k-mark k-mark--fail"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3.5 3.5 5 5M8.5 3.5l-5 5"/></svg></span><span>Сбой: кончился лимит подписки, окно откроется в 14:00. Повторю сама. <span class="k-routine__when">Сегодня, 08:00</span></span></div>
+          <div class="k-routine__foot"><span class="k-runs-strip" aria-label="Последние 14 запусков"><i class="q"></i><i class="q"></i><i></i><i class="q"></i><i class="q"></i><i class="q"></i><i></i><i class="q"></i><i class="q"></i><i class="q"></i><i></i><i class="q"></i><i class="q"></i><i class="f"></i></span><button class="k-btn k-btn--sm">Запустить сейчас</button></div>
+        </article>
+
+        <article class="k-goal" style="--bot:var(--k-bot-lemon)">
+          <div class="k-goal__title">Вывести 30 карточек кружек на WB к 1 декабря</div>
+          <div class="k-goal__count"><b id="goal-n">18</b>из 30 · Лана, 20 дней в запасе</div>
+          <div class="k-dots" id="goal-dots" aria-hidden="true"></div>
+          <div class="k-reports">
+            <div class="k-report"><span class="k-report__date">10 ноября</span><span class="k-report__text">Выложила 4 карточки, две ждут модерацию WB. <span class="k-report__delta">+4</span></span></div>
+            <div class="k-report"><span class="k-report__date">9 ноября</span><span class="k-report__text">Собрала мокапы для К0601–К0606, у К0603 нет печатного листа, спросила у вас. <span class="k-report__delta">+0</span></span></div>
+            <div class="k-report"><span class="k-report__date">8 ноября</span><span class="k-report__text">Выложила 6 карточек по шаблону 3WB. <span class="k-report__delta">+6</span></span></div>
+          </div>
+          <div><button class="k-btn k-btn--sm" id="goal-step">Новый отчёт</button></div>
+        </article>
+      </div>
+
+      <div class="k-timeline flow-wide" aria-label="Запуски">
+        <h3>Запуски</h3>
+        <div class="k-timeline__day">Сегодня<span>4 запуска · $0.86</span></div>
+        <div class="k-run" style="--bot:var(--k-bot-tangerine)"><span class="k-run__time">09:00</span><span class="k-mark k-mark--done"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="k-run__what"><span class="k-run__name"><i></i>Сверка остатков · Мира</span><span class="k-run__out">Расхождение 14 коробок по К0567, письмо складу отправлено после вашего «да».</span></span><span class="k-run__cost">4 мин<br>$0.31</span></div>
+        <div class="k-run is-fail" style="--bot:var(--k-bot-mint)"><span class="k-run__time">08:00</span><span class="k-mark k-mark--fail"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3.5 3.5 5 5M8.5 3.5l-5 5"/></svg></span><span class="k-run__what"><span class="k-run__name"><i></i>Цены конкурентов · Рен</span><span class="k-run__out">Сбой: лимит подписки Claude, окно откроется в 14:00.</span></span><span class="k-run__cost">12 с<br>$0.00</span></div>
+        <div class="k-run" style="--bot:var(--k-bot-mint)"><span class="k-run__time">04:00</span><span class="k-mark k-mark--quiet"></span><span class="k-run__what"><span class="k-run__name"><i></i>Цены конкурентов · Рен</span><span class="k-run__out">Ничего не изменилось, отчёт не нужен.</span></span><span class="k-run__cost">2 мин<br>$0.18</span></div>
+        <div class="k-run" style="--bot:var(--k-bot-lemon)"><span class="k-run__time">02:30</span><span class="k-mark k-mark--done"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="k-run__what"><span class="k-run__name"><i></i>Карточки кружек · Лана</span><span class="k-run__out">Выложила 4 карточки, цель 18 из 30.</span></span><span class="k-run__cost">11 мин<br>$0.37</span></div>
+        <div class="k-timeline__day">Вчера<span>3 запуска · $0.52</span></div>
+        <div class="k-run" style="--bot:var(--k-bot-sky)"><span class="k-run__time">23:00</span><span class="k-mark k-mark--skip"></span><span class="k-run__what"><span class="k-run__name"><i></i>Разбор почты · Тим</span><span class="k-run__out">Пропущен: компьютер спал.</span></span><span class="k-run__cost">—</span></div>
+        <div class="k-run" style="--bot:var(--k-bot-tangerine)"><span class="k-run__time">09:00</span><span class="k-mark k-mark--done"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="k-run__what"><span class="k-run__name"><i></i>Сверка остатков · Мира</span><span class="k-run__out">Остатки сходятся на всех трёх складах.</span></span><span class="k-run__cost">3 мин<br>$0.24</span></div>
+      </div>
+    </div>
+    <div class="dodont flow-rules"><div><b>Да</b>Сбой объясняет причину и что будет дальше («повторю сама в 14:00»). Тихий запуск виден, но не шумит.</div><div class="dont"><b>Нет</b>Зелёная и красная точки без слов; уведомление о каждом запуске, где нечего сообщать.</div></div>
+  </section>
+
+  <!-- ============================================================ glyphs -->
+  <section aria-labelledby="pix-h">
+    <h2 id="pix-h">Девять пикселей</h2>
+    <p>Один знак «бот работает» на всю программу: в доке, в плашке шагов, в чате. Клетки 3×3 касаются друг друга, каждая плавно дышит яркостью, сдвиг по фазе даёт узор. Цвет говорит, чем бот занят.</p>
+    <div class="glyphs">
+      <div class="glyph"><div class="big"><span class="k-pix k-pix--xl k-pix--think" role="img" aria-label="Думает"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><b>Думает</b><span>Персик. Волна по диагонали от светлого угла.</span></div>
+      <div class="glyph"><div class="big"><span class="k-pix k-pix--xl k-pix--read" role="img" aria-label="Читает"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><b>Читает</b><span>Лёд. Столбцы пробегают слева направо, как взгляд по строке.</span></div>
+      <div class="glyph"><div class="big"><span class="k-pix k-pix--xl k-pix--act" role="img" aria-label="Действует"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><b>Действует</b><span>Янтарь. Шахматка меняется местами: инструмент, браузер, отправка.</span></div>
+      <div class="glyph"><div class="big"><span class="k-pix k-pix--xl k-pix--write" role="img" aria-label="Пишет"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><b>Пишет ответ</b><span>Фиалка. Огонёк бежит по краю, центр горит ровно.</span></div>
+      <div class="glyph"><div class="big"><span class="k-pix k-pix--xl k-pix--wait" role="img" aria-label="Ждёт"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><b>Ждёт вас</b><span>Белый плюс без движения. Ноль кадров, ноль нагрузки.</span></div>
+    </div>
+    <div class="inline-demo">
+      <span class="ink-pill"><span class="k-pix k-pix--think"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Думает</span>
+      <span class="ink-pill"><span class="k-pix k-pix--read"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Читает отчёт.xlsx</span>
+      <span class="paper-typing"><span class="k-pix k-pix--paper k-pix--think"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Мира думает</span>
+    </div>
+  </section>
+
+  <!-- ============================================================ colour -->
+  <section aria-labelledby="color-h">
+    <h2 id="color-h">Цвет</h2>
+    <p>Серые бумаги без оттенка, как у Arc: цвет есть только у ролей и ботов. Тушь одинаково чёрная в обеих темах; в тёмной у неё появляется тонкий светлый контур.</p>
+    <div class="sw-groups">
+      <div class="sw-group"><h3>Бумага</h3>
+        <div class="sw"><i style="background:var(--k-canvas)"></i><span>Фон окна</span><code>--k-canvas</code></div>
+        <div class="sw"><i style="background:var(--k-surface)"></i><span>Поверхность</span><code>--k-surface</code></div>
+        <div class="sw"><i style="background:var(--k-surface-2)"></i><span>Мягкая заливка</span><code>--k-surface-2</code></div>
+        <div class="sw"><i style="background:var(--k-line-strong)"></i><span>Линия</span><code>--k-line-strong</code></div>
+        <div class="sw"><i style="background:var(--k-text)"></i><span>Текст</span><code>--k-text</code></div>
+        <div class="sw"><i style="background:var(--k-text-3)"></i><span>Подписи</span><code>--k-text-3</code></div>
+      </div>
+      <div class="sw-group"><h3>Тушь</h3>
+        <div class="sw"><i style="background:var(--k-ink)"></i><span>Островок</span><code>--k-ink</code></div>
+        <div class="sw"><i style="background:var(--k-ink-2)"></i><span>Наведение</span><code>--k-ink-2</code></div>
+        <div class="sw"><i style="background:var(--k-ink-3)"></i><span>Нажато, выбрано</span><code>--k-ink-3</code></div>
+        <div class="sw"><i style="background:var(--k-ink);box-shadow:inset 0 0 0 9px var(--k-ink), inset 0 0 0 30px var(--k-on-ink-2)"></i><span>Вторичный на туши</span><code>--k-on-ink-2</code></div>
+      </div>
+      <div class="sw-group"><h3>Роли</h3>
+        <div class="sw"><i style="background:var(--k-brand)"></i><span>Действие, ссылка, фокус</span><code>--k-brand</code></div>
+        <div class="sw"><i style="background:var(--k-attention)"></i><span>Нужны вы, мало бюджета</span><code>--k-attention</code></div>
+        <div class="sw"><i style="background:var(--k-ai)"></i><span>Модель на бумаге</span><code>--k-ai</code></div>
+      </div>
+      <div class="sw-group"><h3>Цвет бота</h3>
+        <div class="bots">
+          <i style="color:var(--k-bot-tangerine)"></i><i style="color:var(--k-bot-mint)"></i><i style="color:var(--k-bot-lemon)"></i><i style="color:var(--k-bot-sky)"></i>
+          <i style="color:var(--k-bot-violet)"></i><i style="color:var(--k-bot-rose)"></i><i style="color:var(--k-bot-coral)"></i><i style="color:var(--k-bot-ice)"></i>
+        </div>
+        <p style="font-size:var(--k-text-xs)">Восемь цветов подобраны под чёрный экран. Это имя бота, не статус: зелёный не значит «хорошо».</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ type -->
+  <section aria-labelledby="type-h">
+    <h2 id="type-h">Шрифт</h2>
+    <p>Nunito 800 только для заголовков и имён ботов. Всё остальное системным Segoe UI, 400 и 600. Цифры в кольцах и счётчиках моноширинные по ширине (tabular-nums), чтобы 9 % и 73 % не прыгали.</p>
+    <div class="scale">
+      <div class="scale-row"><code>3xl · 36 / Nunito</code><div style="font:800 36px/1.1 var(--k-font-display)">Команда на сегодня</div></div>
+      <div class="scale-row"><code>2xl · 28 / Nunito</code><div style="font:800 28px/1.15 var(--k-font-display)">Ночная смена</div></div>
+      <div class="scale-row"><code>xl · 22 / Nunito</code><div style="font:800 22px/1.2 var(--k-font-display)">Мира закончила отчёт</div></div>
+      <div class="scale-row"><code>lg · 18 / Nunito</code><div style="font:800 18px/1.25 var(--k-font-display)">Отправить письмо поставщику?</div></div>
+      <div class="scale-row"><code>md · 15 / 400</code><div>Сверила остатки на трёх складах и нашла расхождение в 14 коробок по артикулу К0567.</div></div>
+      <div class="scale-row"><code>sm · 13 / 600</code><div style="font:600 13px/1.4 var(--k-font-body)">Прятать к краю</div></div>
+      <div class="scale-row"><code>xs · 12 / 400</code><div style="font-size:12px;color:var(--k-text-3)">Осталось $2.19 из $3.00 на сегодня</div></div>
+      <div class="scale-row"><code>micro · 11 / 600</code><div style="font:600 11px/1 var(--k-font-body);font-variant-numeric:tabular-nums">73 %</div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ measures -->
+  <section aria-labelledby="measure-h">
+    <h2 id="measure-h">Скругления, отступы, глубина</h2>
+    <p>Вложенные формы концентричны: внутренний радиус равен внешнему минус отступ. Глубина бывает двух видов: бумага лежит на тонкой линии, тушь висит на мягкой тени.</p>
+    <div class="measures">
+      <div class="radii">
+        <div class="radius-box" style="border-radius:6px">6</div><div class="radius-box" style="border-radius:10px">10</div>
+        <div class="radius-box" style="border-radius:14px">14</div><div class="radius-box" style="border-radius:20px">20</div>
+        <div class="radius-box" style="border-radius:28px">28</div>
+      </div>
+      <div class="spaces">
+        <div class="space-bar"><i style="height:4px"></i>4</div><div class="space-bar"><i style="height:8px"></i>8</div>
+        <div class="space-bar"><i style="height:12px"></i>12</div><div class="space-bar"><i style="height:16px"></i>16</div>
+        <div class="space-bar"><i style="height:20px"></i>20</div><div class="space-bar"><i style="height:24px"></i>24</div>
+        <div class="space-bar"><i style="height:32px"></i>32</div><div class="space-bar"><i style="height:48px"></i>48</div>
+      </div>
+      <div class="elev">
+        <div class="elev-box" style="box-shadow:var(--k-shadow-1)">1 · лежит</div>
+        <div class="elev-box" style="box-shadow:var(--k-shadow-2)">2 · меню</div>
+        <div class="elev-box" style="box-shadow:var(--k-shadow-3)">3 · окно</div>
+        <div class="elev-box ink" style="box-shadow:var(--k-ink-rim), var(--k-shadow-island)">тушь</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ motion -->
+  <section aria-labelledby="motion-h">
+    <h2 id="motion-h">Движение</h2>
+    <p>Форма вырастает из того, что её вызвало, и уходит обратно туда же. Содержимое приходит не в фокусе и резко собирается. Уход быстрее прихода. Бесконечно двигаются только девять пикселей, и только пока бот работает.</p>
+    <div class="motion" id="motion">
+      <div class="mrow"><div class="name">Рост формы<code>420 мс · morph</code></div><div class="track" data-ease="var(--k-ease-morph)" data-dur="420ms"><i></i></div></div>
+      <div class="mrow"><div class="name">Появление, смена значения<code>220 мс · out</code></div><div class="track" data-ease="var(--k-ease-out)" data-dur="220ms"><i></i></div></div>
+      <div class="mrow"><div class="name">Отпускание, док у стены<code>220 мс · spring</code></div><div class="track" data-ease="var(--k-ease-spring)" data-dur="220ms"><i></i></div></div>
+      <div class="mrow"><div class="name">Уход<code>260 мс · in</code></div><div class="track" data-ease="var(--k-ease-in)" data-dur="260ms"><i></i></div></div>
+      <div class="mrow"><div class="name">Кольцо бюджета<code>700 мс · out</code></div><div class="track" data-ease="var(--k-ease-out)" data-dur="700ms"><i></i></div></div>
+      <div><button class="k-btn k-btn--ink k-btn--sm" id="play">Проиграть</button></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ components -->
+  <section aria-labelledby="comp-h">
+    <h2 id="comp-h">Компоненты</h2>
+    <div class="comp-grid">
+      <div class="comp">
+        <h3>Кнопка</h3>
+        <div class="row">
+          <button class="k-btn k-btn--primary">Запустить</button>
+          <button class="k-btn">Отложить</button>
+          <button class="k-btn k-btn--ink">В док</button>
+          <button class="k-btn k-btn--ghost">Отмена</button>
+          <button class="k-btn" disabled>Нет доступа</button>
+        </div>
+        <div class="dodont"><div><b>Да</b>Одна синяя кнопка на экран, глагол действия.</div><div class="dont"><b>Нет</b>Две синие рядом; «ОК», «Подтвердить».</div></div>
+      </div>
+
+      <div class="comp">
+        <h3>Поле ввода</h3>
+        <div class="k-field"><label class="k-label" for="f1">Дневной бюджет</label><input class="k-input" id="f1" value="$3.00"><span class="k-hint">Бот остановится, когда потратит эту сумму.</span></div>
+        <div class="k-field"><label class="k-label" for="f2">Ключ провайдера</label><input class="k-input" id="f2" aria-invalid="true" placeholder="sk-…"><span class="k-hint is-error">Ключ не подошёл: провайдер ответил 401. Вставьте ключ заново.</span></div>
+      </div>
+
+      <div class="comp">
+        <h3>Фишка</h3>
+        <div class="row" id="chips">
+          <button class="k-chip" aria-pressed="true"><span class="k-dot" style="background:var(--k-bot-tangerine)"></span>Мира</button>
+          <button class="k-chip" aria-pressed="false"><span class="k-dot" style="background:var(--k-bot-mint)"></span>Рен</button>
+          <button class="k-chip" aria-pressed="false"><span class="k-dot" style="background:var(--k-bot-lemon)"></span>Лана</button>
+          <button class="k-chip" aria-pressed="false">Ночью</button>
+        </div>
+        <div class="dodont"><div><b>Да</b>Выбранная фишка становится тушью.</div><div class="dont"><b>Нет</b>Цветная заливка выбранной: цвет занят ботами.</div></div>
+      </div>
+
+      <div class="comp">
+        <h3>Вкладки</h3>
+        <div><div class="k-tabs" role="tablist" id="demo-tabs"><span class="k-tabs__thumb"></span>
+          <button class="k-tab" role="tab" aria-selected="true">Чат</button><button class="k-tab" role="tab" aria-selected="false">Рутины</button><button class="k-tab" role="tab" aria-selected="false">Память</button>
+        </div></div>
+        <div class="dodont"><div><b>Да</b>Чёрная капсула переезжает к выбранной вкладке.</div><div class="dont"><b>Нет</b>Подчёркивание, которое гаснет и вспыхивает.</div></div>
+      </div>
+
+      <div class="comp">
+        <h3>Ответ бота</h3>
+        <div class="chat-sample">
+          <div class="me">Сколько коробок К0567 на складе в Подольске?</div>
+          <div class="bot">Сорок две. В учёте числится 56, расхождение в 14 коробок появилось после поставки 6 ноября.</div>
+          <span class="paper-typing"><span class="k-pix k-pix--paper k-pix--read"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Мира читает накладную</span>
+        </div>
+        <div class="dodont"><div><b>Да</b>Ответ бота — просто текст, рамка только у вашей реплики.</div><div class="dont"><b>Нет</b>Пузырь у бота, три прыгающие точки.</div></div>
+      </div>
+
+      <div class="comp">
+        <h3>Карточка подтверждения</h3>
+        <div class="k-approval">
+          <div class="k-approval__head"><span class="k-pix k-pix--paper k-pix--wait"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="k-approval__title">Мира хочет отправить письмо</span></div>
+          <div class="k-approval__what">Кому: sklad@podolsk.example<br>Тема: Расхождение по К0567, 14 коробок</div>
+          <div class="k-approval__actions"><button class="k-btn k-btn--primary k-btn--sm">Отправить</button><button class="k-btn k-btn--sm">Всегда разрешать</button><button class="k-btn k-btn--ghost k-btn--sm">Не отправлять</button></div>
+        </div>
+        <div class="dodont"><div><b>Да</b>Единственная громкая карточка: коралловый контур, что именно произойдёт.</div><div class="dont"><b>Нет</b>Рамка у обычного ответа или у готовой работы.</div></div>
+      </div>
+
+      <div class="comp">
+        <h3>Меню</h3>
+        <div class="k-menu" role="menu" aria-label="Пример меню">
+          <button class="k-menu__item" role="menuitem"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 20h16M6 16l9.5-9.5a2.1 2.1 0 0 1 3 3L9 19H6v-3Z"/></svg>Переименовать</button>
+          <button class="k-menu__item" role="menuitemcheckbox" aria-checked="true"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM10 20a2 2 0 0 0 4 0"/></svg>Уведомлять<span class="k-switch"></span></button>
+          <div class="k-menu__sep"></div>
+          <button class="k-menu__item" role="menuitem"><svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Удалить бота</button>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h3>Уведомление</h3>
+        <p style="font-size:var(--k-text-sm)">Чёрная капсула снизу, одна строка и не больше одного действия. Уходит сама через 5 секунд.</p>
+        <div><button class="k-btn k-btn--sm" id="show-toast">Показать</button></div>
+      </div>
+
+      <div class="comp wide">
+        <h3>Кольцо бюджета и обод аватара</h3>
+        <p style="font-size:var(--k-text-sm)">Это один элемент. Цвет бота рисует и обод, и кольцо: тусклый круг — весь бюджет, яркая дуга — что осталось. Отдельного цветного обода у аватара в доке нет.</p>
+        <div class="ring-demo" id="ring-demo"></div>
+        <div class="dodont"><div><b>Да</b>Кольцо без подписи; точное число в подсказке. Коралл только ниже 15 %.</div><div class="dont"><b>Нет</b>Светофор: зелёное кольцо при полном бюджете, красное при пустом.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Кит «Тушь и сигнал» · web/kit.css · docs/design/kit.md</footer>
+</div>
+
+<div class="toast-zone" id="toast" role="status" aria-live="polite">
+  <div class="k-toast"><span class="k-pix k-pix--write"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Мира закончила отчёт по складу<button class="k-toast__action">Открыть</button></div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const NINE = '<i></i>'.repeat(9);
+
+  /* ---------------- theme */
+  function moveThumb(tabs) {
+    const sel = $('[aria-selected="true"]', tabs), thumb = $('.k-tabs__thumb', tabs);
+    if (!sel || !thumb) return;
+    thumb.style.width = sel.offsetWidth + 'px';
+    thumb.style.transform = `translateX(${sel.offsetLeft}px)`;
+  }
+  function wireTabs(tabs, onPick) {
+    $$('.k-tab', tabs).forEach((t) => t.addEventListener('click', () => {
+      $$('.k-tab', tabs).forEach((x) => x.setAttribute('aria-selected', String(x === t)));
+      moveThumb(tabs); onPick && onPick(t);
+    }));
+    moveThumb(tabs);
+    addEventListener('resize', () => moveThumb(tabs));
+    document.fonts && document.fonts.ready.then(() => moveThumb(tabs));
+  }
+  wireTabs($('#theme-tabs'), (t) => {
+    const v = t.dataset.themePick;
+    if (v === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', v);
+  });
+  wireTabs($('#demo-tabs'));
+
+  /* ---------------- LED face (dot matrix) */
+  function face(color) {
+    const dots = (cx, cy, cols, rows, r) => {
+      let s = '';
+      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) s += `<circle cx="${cx + x * 3.4}" cy="${cy + y * 3.4}" r="${r}"/>`;
+      return s;
+    };
+    return `<svg class="face" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" fill="#050505"/>
+      <g fill="#fff"><g class="eyes">${dots(10.3, 13, 2, 3, 1.3)}${dots(23.5, 13, 2, 3, 1.3)}</g>
+      <g class="mouth" opacity=".55">${dots(13.9, 28, 4, 1, 0.95)}</g></g></svg>`;
+  }
+  function ringMarkup(bot, size) {
+    return `<span class="k-ring" style="--ring-color:${bot.color};--left:${bot.left};${size ? `--ring-size:${size}px` : ''}">
+      <svg viewBox="0 0 52 52"><circle class="k-ring__track" cx="26" cy="26" r="24.75" pathLength="100"/><circle class="k-ring__arc" cx="26" cy="26" r="24.75" pathLength="100"/></svg>
+      <span class="k-ring__face">${face(bot.color)}</span></span>`;
+  }
+
+  /* ---------------- dock */
+  const bots = [
+    { id: 'mira', name: 'Мира', color: '#ff8a3d', left: 0.73, budget: 3, source: 'кошелёк Deloist' },
+    { id: 'ren', name: 'Рен', color: '#3ddc97', left: 0.21, budget: 5, source: 'подписка Claude, окно 5 часов' },
+    { id: 'lana', name: 'Лана', color: '#ffd23f', left: 0.52, budget: 2, source: 'лимит токенов на день' },
+    { id: 'tim', name: 'Тим', color: '#4fb4ff', left: 0.09, budget: 1.5, source: 'кошелёк Deloist' },
+  ];
+  const stage = $('#stage'), seatsEl = $('#seats'), tip = $('#tip');
+  const pct = (v) => Math.round(v * 100);
+
+  function paintRing(bot, animateFrom) {
+    // No number under the ring: the arc is the information, the exact value is in the hover tip.
+    const ring = $('.k-ring', bot.seat);
+    ring.style.setProperty('--left', bot.left);
+    ring.classList.toggle('is-low', bot.left > 0 && bot.left < 0.15);
+    ring.classList.toggle('is-empty', bot.left <= 0);
+    bot.seat.setAttribute('aria-label', `${bot.name}, осталось ${pct(bot.left)} %`);
+    if (tip.classList.contains('on') && tip.dataset.bot === bot.id) showTip(bot);
+  }
+
+  bots.forEach((bot) => {
+    const b = document.createElement('button');
+    b.className = 'k-seat';
+    b.type = 'button';
+    b.setAttribute('aria-label', bot.name);
+    b.innerHTML = `${ringMarkup(bot)}<span class="unread"></span><span class="k-seat__voice" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><rect x="8.5" y="3" width="7" height="11" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></span>`;
+    seatsEl.append(b);
+    bot.seat = b;
+    paintRing(bot);
+    b.addEventListener('mouseenter', () => showTip(bot));
+    b.addEventListener('focus', () => showTip(bot));
+    b.addEventListener('mouseleave', hideTip);
+    b.addEventListener('blur', hideTip);
+    b.addEventListener('click', () => { $('.unread', b).classList.remove('on'); if (!bot.busy) run(bot); });
+  });
+
+  function seatCenter(bot) {
+    const s = bot.seat.querySelector('.k-ring').getBoundingClientRect(), st = stage.getBoundingClientRect();
+    return s.top - st.top + s.height / 2;
+  }
+  function showTip(bot) {
+    if (bot.pill) return;
+    tip.dataset.bot = bot.id;
+    $('b', tip).textContent = bot.name;
+    const spent = bot.budget * (1 - bot.left);
+    $('span', tip).textContent = bot.left <= 0
+      ? `Бюджет на сегодня кончился · ${bot.source}`
+      : `Осталось ${pct(bot.left)} %: $${(bot.budget - spent).toFixed(2)} из $${bot.budget.toFixed(2)} · ${bot.source}`;
+    tip.style.top = (seatCenter(bot) - 26) + 'px';
+    tip.classList.add('on');
+  }
+  function hideTip() { tip.classList.remove('on'); }
+
+
+  /* ---------------- 1:1 comparison */
+  const oldBody = $('#old-body'), cmpSeats = $('#cmp-seats');
+  bots.slice(0, 3).forEach((bot) => {
+    const o = document.createElement('span');
+    o.className = 'old-av';
+    o.style.background = bot.color;
+    o.innerHTML = face(bot.color).replace('class="face"', '');
+    oldBody.insertBefore(o, oldBody.querySelector('.old-add'));
+    const n = document.createElement('span');
+    n.className = 'k-seat';
+    n.innerHTML = ringMarkup(bot);
+    cmpSeats.append(n);
+  });
+
+  /* ---------------- step pill */
+  const SCRIPTS = {
+    mira: [['think', 'Думает'], ['read', 'Читает остатки.xlsx', '219 строк'], ['act', 'Сверяет со складом'], ['write', 'Пишет ответ']],
+    ren: [['think', 'Думает'], ['act', 'Ищет в браузере'], ['read', 'Читает страницу', 'ozon.ru'], ['write', 'Пишет сводку']],
+    lana: [['think', 'Думает'], ['write', 'Пишет черновик письма']],
+    tim: [['think', 'Думает'], ['read', 'Читает почту', '12 писем'], ['write', 'Пишет ответ']],
+  };
+  const measure = $('#measure');
+  function lineEl(kind, text, meta) {
+    const l = document.createElement('div');
+    l.className = 'line now enter';
+    l.innerHTML = `<span class="k-pix k-pix--${kind}" role="img" aria-label="${text}">${NINE}</span><span class="tx"></span>${meta ? '<span class="meta"></span>' : ''}`;
+    $('.tx', l).textContent = text;
+    if (meta) $('.meta', l).textContent = meta;
+    return l;
+  }
+  function fitPill(pill) {
+    const now = $('.line.now:not(.gone)', pill);
+    measure.textContent = now ? now.textContent : '';
+    pill.style.width = Math.min(340, Math.max(150, measure.offsetWidth + 16 + 15 + 9 + 22 + 12)) + 'px';
+  }
+  function run(bot) {
+    hideTip();
+    bot.busy = true;
+    const faceEl = $('.face', bot.seat);
+    faceEl.classList.add('busy');
+    const pill = document.createElement('div');
+    pill.className = 'pill';
+    pill.style.top = (seatCenter(bot) - 26) + 'px';
+    pill.innerHTML = '<div class="pill-lines"></div>';
+    stage.append(pill);
+    bot.pill = pill;
+    const lines = $('.pill-lines', pill);
+    const script = SCRIPTS[bot.id];
+    let i = 0;
+    const next = () => {
+      const [kind, text, meta] = script[i];
+      const was = $('.line.was', lines), now = $('.line.now', lines);
+      if (was) { was.classList.add('gone'); setTimeout(() => was.remove(), 320); }
+      if (now) { now.classList.remove('now'); now.classList.add('was'); }
+      const l = lineEl(kind, text, meta);
+      lines.append(l);
+      requestAnimationFrame(() => requestAnimationFrame(() => l.classList.remove('enter')));
+      fitPill(pill);
+      i++;
+      if (i < script.length) bot.timer = setTimeout(next, 2300);
+      else bot.timer = setTimeout(() => finish(bot), 2600);
+    };
+    requestAnimationFrame(next);
+  }
+  function finish(bot) {
+    const pill = bot.pill;
+    pill.classList.add('leaving');
+    setTimeout(() => pill.remove(), 300);
+    bot.pill = null;
+    bot.busy = false;
+    $('.face', bot.seat).classList.remove('busy');
+    const from = bot.left;
+    bot.left = Math.max(0, +(bot.left - 0.06).toFixed(2));
+    paintRing(bot, from);
+    $('.unread', bot.seat).classList.add('on');
+    if (bot.id === 'mira') showToast();
+  }
+  const runRow = $('#run-buttons');
+  bots.forEach((bot) => {
+    const b = document.createElement('button');
+    b.className = 'k-chip';
+    b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = `<span class="k-dot" style="background:${bot.color}"></span>${bot.name}`;
+    b.addEventListener('click', () => { if (!bot.busy && bot.left > 0) run(bot); });
+    runRow.append(b);
+  });
+  $('#spend').addEventListener('click', () => bots.forEach((b) => { const f = b.left; b.left = Math.max(0, +(b.left - 0.1).toFixed(2)); paintRing(b, f); }));
+  $('#refill').addEventListener('click', () => bots.forEach((b) => { const f = b.left; b.left = 1; paintRing(b, f); }));
+
+  /* ---------------- gear menu */
+  const gear = $('#gear'), gmenu = $('#gmenu'), inner = $('#gmenu-inner'), dock = $('#dock');
+  function placeMenu() {
+    const g = gear.getBoundingClientRect(), st = stage.getBoundingClientRect();
+    gmenu.style.top = (g.bottom - st.top - gmenu.offsetHeight) + 'px';
+  }
+  function setMenu(open) {
+    gear.setAttribute('aria-expanded', String(open));
+    if (open) {
+      placeMenu();
+      gmenu.classList.add('open');
+      inner.classList.remove('k-sharpen-in'); void inner.offsetWidth; inner.classList.add('k-sharpen-in');
+      setTimeout(() => $('.k-menu__item', gmenu).focus({ preventScroll: true }), 60);
+    } else {
+      gmenu.classList.remove('open');
+    }
+  }
+  gear.addEventListener('click', (e) => { e.stopPropagation(); setMenu(gear.getAttribute('aria-expanded') !== 'true'); });
+  document.addEventListener('click', (e) => { if (!gmenu.contains(e.target) && e.target !== gear) setMenu(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && gmenu.classList.contains('open')) { setMenu(false); gear.focus(); } });
+
+  let tucked = false;
+  function applyTuck(state) { dock.classList.toggle('tucked', state); }
+  $('#strip').addEventListener('mouseenter', () => applyTuck(false));
+  stage.addEventListener('mouseleave', () => { if (tucked && !gmenu.classList.contains('open')) applyTuck(true); });
+
+  gmenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.k-menu__item');
+    if (!item) return;
+    const opt = item.dataset.opt;
+    if (opt === 'tuck' || opt === 'ontop') {
+      const on = item.getAttribute('aria-checked') !== 'true';
+      item.setAttribute('aria-checked', String(on));
+      if (opt === 'tuck') { tucked = on; stage.classList.toggle('tucking', on); }
+      if (opt === 'ontop') stage.classList.toggle('ontop', on);
+      return;
+    }
+    if (opt === 'edge') {
+      const left = !stage.classList.contains('left');
+      setMenu(false);
+      bots.forEach((b) => b.pill && finish(b));
+      dock.classList.add('tucked');
+      setTimeout(() => {
+        stage.classList.toggle('left', left);
+        $('#edge').classList.toggle('k-edge--left', left);
+        dock.classList.toggle('k-dock--left', left);
+        $('#edge-value').textContent = left ? 'Слева' : 'Справа';
+        requestAnimationFrame(() => requestAnimationFrame(() => dock.classList.remove('tucked')));
+      }, 280);
+      return;
+    }
+    if (opt === 'hide') {
+      setMenu(false);
+      dock.classList.add('tucked');
+      setTimeout(() => { if (!tucked) dock.classList.remove('tucked'); }, 1600);
+    }
+  });
+  stage.classList.add('ontop');
+
+
+  /* ---------------- voice states strip (static, 2x) */
+  const STATES = [['idle', 'Покой'], ['downloading', 'Скачиваю модель'], ['loading', 'Загружаю в память'], ['recording', 'Запись'], ['transcribing', 'Распознаю'], ['sending', 'Отправляю'], ['done', 'Готово'], ['error', 'Ошибка']];
+  const micTpl = $('#mic');
+  STATES.forEach(([st, name]) => {
+    const box = document.createElement('div');
+    box.className = 'vstate';
+    const z = document.createElement('div');
+    z.className = 'zoom';
+    const m = micTpl.cloneNode(true);
+    m.removeAttribute('id');
+    m.tabIndex = -1;
+    m.dataset.state = st;
+    m.style.animation = 'none';
+    if (st === 'downloading') m.style.setProperty('--progress', '0.42');
+    if (st === 'recording') {
+      m.style.setProperty('--lvl', '0.7');
+      [0.35, 0.8, 1, 0.6, 0.3].forEach((v, i) => m.querySelectorAll('.k-mic__bars > i')[i].style.setProperty('--b', v));
+    }
+    z.append(m);
+    const label = document.createElement('b');
+    label.textContent = name;
+    box.append(z, label);
+    $('#vstates').append(box);
+  });
+  $$('#vstates .k-mic').forEach((m) => m.addEventListener('click', () => {
+    if (m.dataset.state === 'transcribing') { m.dataset.state = 'sending'; requestAnimationFrame(() => { m.dataset.state = 'transcribing'; }); }
+  }));
+
+  /* ---------------- voice: mic in the tray, hotkey, flow states */
+  const mic = $('#mic'), tray = $('#tray'), vtip = $('#voice-tip');
+  const micBars = $$('.k-mic__bars > i', mic);
+  const LABELS = { idle: 'Голос: начать запись', downloading: 'Скачиваю модель речи', loading: 'Загружаю модель в память', recording: 'Идёт запись: нажмите, чтобы закончить', transcribing: 'Распознаю речь', sending: 'Отправляю боту', done: 'Отправлено', error: 'Голос: ошибка' };
+  const DATIVE = { mira: 'Мире', ren: 'Рену', lana: 'Лане', tim: 'Тиму' };
+  const TARGETS = ['last', 'mira', 'ren', 'lana', 'tim'];
+  let vState = 'idle', voiceTarget = 'last', lastBot = bots[0], levelTimer = null, flowTimer = null, tipTimer = null;
+  let errMode = null; // null | 'money' | 'mic'
+
+  const targetBot = () => (voiceTarget === 'last' ? lastBot : bots.find((b) => b.id === voiceTarget));
+  function setVoice(state) {
+    vState = state;
+    mic.dataset.state = state;
+    mic.setAttribute('aria-label', LABELS[state]);
+    dock.classList.toggle('is-voice', state !== 'idle');
+    const t = targetBot();
+    bots.forEach((b) => b.seat.classList.toggle('is-voice-target', state === 'recording' && b === t));
+    if (state !== 'error') hideVoiceTip();
+  }
+
+  // Fake level signal for the preview: speech-like bursts and pauses, ~30 events per second.
+  // In the app the recorder's level events call onLevel(level) instead, and nothing runs between them.
+  function onLevel(level) {
+    mic.style.setProperty('--lvl', level.toFixed(3));
+    micBars.forEach((bar, i) => {
+      const shape = [0.55, 0.85, 1, 0.8, 0.6][i];
+      const v = level <= 0.02 ? 0 : Math.min(1, level * shape * (1.1 + Math.random() * 0.6));
+      bar.style.setProperty('--b', v.toFixed(3));
+    });
+  }
+  function startFakeLevels() {
+    let level = 0, target = 0, until = 0;
+    levelTimer = setInterval(() => {
+      const now = performance.now();
+      if (now > until) {
+        const speaking = Math.random() < 0.72;
+        target = speaking ? 0.35 + Math.random() * 0.65 : 0;
+        until = now + (speaking ? 140 + Math.random() * 220 : 120 + Math.random() * 380);
+      }
+      level += (target - level) * 0.45;
+      onLevel(level);
+    }, 33);
+  }
+  function stopLevels() { clearInterval(levelTimer); levelTimer = null; onLevel(0); }
+
+  function showVoiceTip(text, action, onAction, sticky) {
+    $('#voice-tip-text').textContent = text;
+    const act = $('#voice-tip-act');
+    act.textContent = action;
+    act.hidden = !action;
+    act.onclick = () => { onAction && onAction(); toIdle(); };
+    const m = mic.getBoundingClientRect(), st = stage.getBoundingClientRect();
+    vtip.hidden = false;
+    vtip.style.top = (m.top - st.top + m.height / 2 - vtip.offsetHeight / 2) + 'px';
+    clearTimeout(tipTimer);
+    if (!sticky) tipTimer = setTimeout(toIdle, 4500);
+  }
+  function hideVoiceTip() { vtip.hidden = true; clearTimeout(tipTimer); }
+  function toIdle() { clearTimeout(flowTimer); clearTimeout(dlTimer); stopLevels(); setVoice('idle'); }
+  function fail(kind) {
+    stopLevels();
+    setVoice('error');
+    if (kind === 'mic') showVoiceTip('Микрофон недоступен', 'Настройки');
+    else showVoiceTip('Не хватает денег на распознавание', 'Пополнить');
+  }
+
+  // First press: the local speech model (~0.6 GB) is not on disk yet. It downloads with a progress ring
+  // (percent in the tip, cancellable), loads into memory, then recording starts by itself.
+  let modelReady = false, dlTimer = null;
+  function downloadModel() {
+    let p = 0;
+    setVoice('downloading');
+    mic.style.setProperty('--progress', 0);
+    const tick = () => {
+      p = Math.min(1, p + 0.03 + Math.random() * 0.04);
+      mic.style.setProperty('--progress', p.toFixed(3));
+      showVoiceTip(`Скачиваю модель речи, 0,6 ГБ · ${Math.round(p * 100)} %`, 'Отменить', null, true);
+      if (p < 1) { dlTimer = setTimeout(tick, 160); return; }
+      setVoice('loading');
+      showVoiceTip('Загружаю модель в память', '', null, true);
+      dlTimer = setTimeout(() => { modelReady = true; $('#model-reset').setAttribute('aria-pressed', 'false'); hideVoiceTip(); setVoice('recording'); startFakeLevels(); }, 1500);
+    };
+    tick();
+  }
+  function startRecording() {
+    if (dock.classList.contains('tucked')) dock.classList.remove('tucked');
+    if (errMode === 'mic') { setVoice('recording'); requestAnimationFrame(() => fail('mic')); return; }
+    if (!modelReady) { downloadModel(); return; }
+    setVoice('recording');
+    startFakeLevels();
+  }
+  function stopRecording() {
+    stopLevels();
+    setVoice('transcribing');
+    flowTimer = setTimeout(() => {
+      if (errMode === 'money') { fail('money'); return; }
+      send();
+    }, 1700);
+  }
+  function send() {
+    const bot = targetBot();
+    setVoice('sending');
+    const m = mic.getBoundingClientRect(), r = bot.seat.querySelector('.k-ring').getBoundingClientRect(), st = stage.getBoundingClientRect();
+    const fly = document.createElement('span');
+    fly.className = 'k-voice-fly';
+    const x0 = m.left - st.left + m.width / 2, y0 = m.top - st.top + m.height / 2;
+    const x1 = r.left - st.left + r.width / 2, y1 = r.top - st.top + r.height / 2;
+    fly.style.left = x0 + 'px';
+    fly.style.top = y0 + 'px';
+    stage.append(fly);
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const dx = x1 - x0, dy = y1 - y0, side = stage.classList.contains('left') ? 1 : -1;
+    const anim = fly.animate([
+      { transform: 'translate(0, 0) scale(1)' },
+      { transform: `translate(${dx * 0.5 + side * 26}px, ${dy * 0.5}px) scale(1.15)`, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.6)` },
+    ], { duration: reduce ? 1 : 460, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+    anim.onfinish = () => {
+      fly.remove();
+      bot.seat.classList.add('is-voice-hit');
+      setTimeout(() => bot.seat.classList.remove('is-voice-hit'), 400);
+      setVoice('done');
+      flowTimer = setTimeout(toIdle, 700);
+    };
+  }
+  function toggleVoice() {
+    if (vState === 'idle') startRecording();
+    else if (vState === 'recording') stopRecording();
+    else if (vState === 'error' || vState === 'downloading') toIdle();
+  }
+  mic.addEventListener('click', (e) => { e.stopPropagation(); toggleVoice(); });
+  $('#hotkey').addEventListener('click', (e) => { e.stopPropagation(); toggleVoice(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); toggleVoice(); }
+    if (e.key === 'Escape' && vState !== 'idle' && vState !== 'sending' && vState !== 'done') { toIdle(); }
+  });
+  const errChips = [['#err-money', 'money'], ['#err-mic', 'mic']];
+  errChips.forEach(([sel, kind]) => $(sel).addEventListener('click', () => {
+    errMode = errMode === kind ? null : kind;
+    errChips.forEach(([s2, k2]) => $(s2).setAttribute('aria-pressed', String(errMode === k2)));
+  }));
+  $('#model-reset').addEventListener('click', (e) => { modelReady = false; e.currentTarget.setAttribute('aria-pressed', 'true'); });
+  // the last bot you talked to: a click on its seat
+  bots.forEach((b) => b.seat.addEventListener('click', () => { lastBot = b; }));
+
+  // gear menu: «Голос уходит» cycles here; in the app it is a submenu with radio items
+  gmenu.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-opt="voice"]');
+    if (!item) return;
+    voiceTarget = TARGETS[(TARGETS.indexOf(voiceTarget) + 1) % TARGETS.length];
+    $('#voice-value').textContent = voiceTarget === 'last' ? 'Последнему' : DATIVE[voiceTarget];
+  });
+
+  // «Добавить бота»: third tray button (proposed) or a dashed seat in the island
+  const seatAdd = document.createElement('button');
+  seatAdd.className = 'k-seat-add';
+  seatAdd.type = 'button';
+  seatAdd.setAttribute('aria-label', 'Добавить бота');
+  seatAdd.innerHTML = '<svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+  $$('#add-place .k-chip').forEach((c) => c.addEventListener('click', () => {
+    $$('#add-place .k-chip').forEach((x) => x.setAttribute('aria-pressed', String(x === c)));
+    const inDock = c.dataset.place === 'dock';
+    $('#tray-add').hidden = inDock;
+    if (inDock) seatsEl.append(seatAdd); else seatAdd.remove();
+  }));
+
+
+  $('#cover').addEventListener('click', (e) => {
+    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    $('#fake-window').classList.toggle('covering', on);
+  });
+
+  /* ---------------- chips, motion, toast, rings */
+  $$('#chips .k-chip').forEach((c) => c.addEventListener('click', () => c.setAttribute('aria-pressed', String(c.getAttribute('aria-pressed') !== 'true'))));
+  $$('#motion .track').forEach((t) => { $('i', t).style.transition = `left ${t.dataset.dur} ${t.dataset.ease}`; });
+  $('#play').addEventListener('click', () => $$('#motion .track').forEach((t) => t.classList.toggle('go')));
+
+  let toastTimer;
+  function showToast() {
+    const t = $('#toast');
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('on'), 5000);
+  }
+  $('#show-toast').addEventListener('click', showToast);
+
+  const demo = $('#ring-demo');
+  [{ color: '#ff8a3d', left: 1, n: 'полный' }, { color: '#3ddc97', left: 0.21, n: '21 %' }, { color: '#a98bff', left: 0.52, n: '52 %' }, { color: '#4fb4ff', left: 0.09, n: 'мало' }, { color: '#ff6fb5', left: 0, n: 'пусто' }]
+    .forEach((d) => {
+      const w = document.createElement('div');
+      w.className = 'k-seat';
+      w.innerHTML = ringMarkup(d);
+      w.setAttribute('role', 'img');
+      w.setAttribute('aria-label', `Осталось ${pct(d.left)} %`);
+      w.title = `Осталось ${pct(d.left)} %`;
+      const ring = $('.k-ring', w);
+      if (d.left > 0 && d.left < 0.15) ring.classList.add('is-low');
+      if (d.left <= 0) ring.classList.add('is-empty');
+      demo.append(w);
+    });
+
+  /* ---------------- process «Ход работы» */
+  const CHECK = '<span class="k-mark k-mark--done"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span>';
+  const CROSS = '<span class="k-mark k-mark--fail"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3.5 3.5 5 5M8.5 3.5l-5 5"/></svg></span>';
+  const PLAN = [
+    { name: 'Открыть остатки.xlsx', kind: 'read', done: '219 строк, 3 склада', t: '0:04' },
+    { name: 'Выгрузить остатки WB', kind: 'act', done: 'Подольск, Коледино, Казань', t: '0:41' },
+    { name: 'Сверить с учётом', kind: 'think', done: 'Расхождение по К0567: 14 коробок', t: '1:12' },
+    { name: 'Написать складу', kind: 'write', done: 'Черновик готов', t: '0:20' },
+    { name: 'Отправить письмо', kind: 'wait', ask: 'Кому: sklad@podolsk.example. Тема: расхождение по К0567.', done: 'Отправлено', t: '0:03' },
+    { name: 'Записать итог в отчёт', kind: 'write', done: 'Отчёт за 11 ноября', t: '0:06' },
+  ];
+  const stepsEl = $('#steps'), procBar = $('#proc-bar'), procCount = $('#proc-count');
+  let procTimer = null, procAt = -1, failMode = false;
+  function renderSteps() {
+    stepsEl.innerHTML = '';
+    PLAN.forEach((s, i) => {
+      const li = document.createElement('li');
+      li.className = 'k-step ' + (s.state ? 'is-' + s.state : 'is-next');
+      let node = '<span class="k-mark k-mark--next"></span>', note = '', extra = '', time = '';
+      if (s.state === 'done') { node = CHECK; note = s.done; time = s.t; }
+      if (s.state === 'run') { node = `<span class="k-pix k-pix--paper k-pix--${s.kind === 'wait' ? 'act' : s.kind}" role="img" aria-label="Идёт">${NINE}</span>`; note = 'Идёт…'; }
+      if (s.state === 'wait') {
+        node = `<span class="k-pix k-pix--paper k-pix--wait" role="img" aria-label="Ждёт вас">${NINE}</span>`;
+        note = s.ask;
+        extra = '<span class="k-step__actions"><button class="k-btn k-btn--primary k-btn--sm" data-ok>Отправить</button><button class="k-btn k-btn--ghost k-btn--sm" data-no>Не отправлять</button></span>';
+      }
+      if (s.state === 'fail') { node = CROSS; note = 'Сбой: WB не ответил за 30 с. Повторю через 5 минут или нажмите «Повторить».'; extra = '<span class="k-step__actions"><button class="k-btn k-btn--sm" data-retry>Повторить</button></span>'; }
+      li.innerHTML = `<span class="k-step__node">${node}</span><span class="k-step__body"><span class="k-step__name"></span>${note ? '<span class="k-step__note"></span>' : ''}${extra}</span><span class="k-step__time">${time}</span>`;
+      $('.k-step__name', li).textContent = s.name;
+      if (note) $('.k-step__note', li).textContent = note;
+      if (i === procAt) li.classList.add('enter');
+      stepsEl.append(li);
+    });
+    const done = PLAN.filter((s) => s.state === 'done').length;
+    procBar.parentElement.style.setProperty('--done', done / PLAN.length);
+    procCount.textContent = `${done} из ${PLAN.length}`;
+  }
+  function advance() {
+    clearTimeout(procTimer);
+    if (procAt >= 0) PLAN[procAt].state = 'done';
+    procAt++;
+    if (procAt >= PLAN.length) { renderSteps(); $('#proc-play').textContent = 'Запустить заново'; return; }
+    const s = PLAN[procAt];
+    if (failMode && procAt === 1) { s.state = 'fail'; renderSteps(); return; }
+    s.state = s.kind === 'wait' ? 'wait' : 'run';
+    renderSteps();
+    if (s.state === 'run') procTimer = setTimeout(advance, 1800);
+  }
+  function startProc(fail) {
+    clearTimeout(procTimer);
+    PLAN.forEach((s) => { delete s.state; });
+    procAt = -1; failMode = fail;
+    $('#proc-play').textContent = 'Запустить сверку';
+    advance();
+  }
+  stepsEl.addEventListener('click', (e) => {
+    if (e.target.closest('[data-ok]')) advance();
+    if (e.target.closest('[data-no]')) { PLAN[procAt].state = 'fail'; PLAN[procAt].name = 'Письмо не отправлено'; renderSteps(); PLAN[procAt].name = 'Отправить письмо'; }
+    if (e.target.closest('[data-retry]')) { failMode = false; PLAN[procAt].state = 'run'; renderSteps(); procTimer = setTimeout(advance, 1800); }
+  });
+  $('#proc-play').addEventListener('click', () => startProc(false));
+  $('#proc-fail').addEventListener('click', () => startProc(true));
+  // Open on a meaningful still: three steps done, the fourth running... without a timer.
+  PLAN.slice(0, 3).forEach((s) => { s.state = 'done'; });
+  PLAN[3].state = 'run'; procAt = 3; renderSteps();
+
+  /* ---------------- goal dots and routine switches */
+  const dots = $('#goal-dots');
+  let goalN = 18;
+  for (let i = 0; i < 30; i++) { const d = document.createElement('i'); if (i < goalN) d.className = 'on'; dots.append(d); }
+  $('#goal-step').addEventListener('click', () => {
+    if (goalN >= 30) return;
+    const add = Math.min(3, 30 - goalN);
+    for (let i = goalN; i < goalN + add; i++) { const d = dots.children[i]; d.classList.add('on', 'new'); setTimeout(() => d.classList.remove('new'), 300); }
+    goalN += add; $('#goal-n').textContent = goalN;
+  });
+  $$('.flow-switch').forEach((sw) => sw.addEventListener('click', () => {
+    const on = sw.getAttribute('aria-checked') !== 'true';
+    sw.setAttribute('aria-checked', String(on));
+    sw.setAttribute('aria-label', on ? 'Рутина включена' : 'Рутина на паузе');
+    sw.closest('.k-routine').classList.toggle('is-paused', !on);
+  }));
+})();
+</script>

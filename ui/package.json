@@ -1,0 +1,19 @@
+{
+  "name": "deloist-ui",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node ../tools/check_ui_built.mjs --write",
+    "dev": "vite build --watch",
+    "check": "node ../tools/check_ui_built.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "jsdom": "31.0.0",
+    "svelte": "5.57.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

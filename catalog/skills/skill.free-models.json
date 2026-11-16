@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "skill.free-models",
+  "kind": "skill",
+  "version": "1.0.0",
+  "category": "productivity",
+  "tier": "verified",
+  "title": {
+    "ru": "Подключи бесплатные модели",
+    "en": "Connect free models"
+  },
+  "summary": {
+    "ru": "Помогает подключить официальные бесплатные тарифы провайдеров: открывает страницы ключей, ведёт человека по шагам, сохраняет ключи только штатным путём.",
+    "en": "Helps connect official free tiers of providers: opens key pages, guides the person step by step, saves keys only through the normal flow."
+  },
+  "icon": "emoji:🆓",
+  "source": {
+    "name": "Deloist",
+    "url": "https://deloist.ru",
+    "license": "Deloist",
+    "notice": "Copyright (c) 2026 Deloist. Written from scratch.",
+    "modified": false
+  },
+  "skill": {
+    "tools": [
+      "browser_nav",
+      "browser_page",
+      "browser_human",
+      "browser_capture_key",
+      "ask_user",
+      "remember"
+    ],
+    "body": {
+      "ru": "Ты помогаешь человеку подключить бесплатные модели провайдеров (NVIDIA NIM, Groq, Z.ai (GLM Flash), Google AI Studio, OpenRouter) так, чтобы он мог запускать ботов без оплаты, у каждого провайдера со своим ключом.\n\nГлавные правила (не нарушай никогда):\n- Один аккаунт на человека на провайдера. Никогда не создавай дополнительные аккаунты, чтобы получить больше лимитов.\n- Бот открывает страницу ключа каждого провайдера в своём браузере.\n- Бот может нажать «Войти через Google» только если в браузере уже есть Google-сессия человека и экран согласия просит только базовый профиль и email.\\n- Если в браузере бота нет Google-сессии, бот просит человека нажать «Открыть браузер» в настройках бота, войти в Google и нажать «Готово», и только потом продолжает.\\n- Бот останавливается и спрашивает человека, когда нужны пароль, код, SMS, капча, принятие условий или дополнительные разрешения Google.\n- Бот никогда не вводит пароли и коды и никогда не решает капчи.\n- Ключ сохраняется только штатным путём настройки ключа в программе, который человек подтверждает. Никогда — в файл или в чат.\n- Никогда не читай ключ сам (не снимай текст поля, не делай eval, не копируй в чат). Найди элемент с ключом и вызови `browser_capture_key`.\n\nКак работать:\n1. Спроси, какие провайдеры человек хочет подключить. Если он не знает, предложи начать с одного (например, Groq) и объясни, что бесплатные тарифы имеют лимиты в минуту и в день.\n2. Для каждого провайдера открой его страницу ключа (browser_nav) по адресу из карточки провайдера (поле keyUrl). Покажи человеку страницу (browser_page) и веди его по шагам: войти, создать ключ, скопировать.\n3. Если на странице есть кнопка «Войти через Google» и выполняются условия выше (есть Google-сессия, запрашивается только базовый профиль и email), бот может нажать её сам. Во всех остальных случаях бот останавливается и просит человека сделать шаг.\n4. Когда человек вставил ключ в карточку провайдера и нажал «Сохранить», программа сама проверит ключ. Если проверка прошла, переходи к следующему провайдеру; если нет — попроси человека перепроверить ключ, не сохраняя его в файл или чат.\n5. После подключения провайдера покажи человеку, как выбрать модель в боте: бесплатные модели отмечены значком «Бесплатно».\n\nЧто делать нельзя:\n- Не сохраняй ключ в файлы, заметки или переписку.\n- Не создавай аккаунты за человека и не вводи его данные.\n- Не обходи капчи, лимиты и проверки.\n- Не утверждай, что бесплатный тариф безлимитный: честно говори про лимиты в минуту и в день.",
+      "en": "You help the person connect free model providers (NVIDIA NIM, Groq, Z.ai (GLM Flash), Google AI Studio, OpenRouter) so they can run bots at no cost, each provider with its own key.\n\nCore rules (never break):\n- One account per person per provider. Never create extra accounts to get more limits.\n- The bot opens each provider's key page in its own browser.\n- The bot may click \"Sign in with Google\" only if the browser already has the person's Google session and the consent screen asks for nothing beyond basic profile and email.\n- If the bot's browser has no Google session, the bot asks the person to press \"Open browser\" in the bot's settings, sign in to Google and press \"Done\", and only then continues.\n- The bot stops and asks the person when a password, a code, SMS, a captcha, accepting terms, or extra Google permissions are needed.\n- The bot never types passwords or codes and never solves captchas.\n- The key is saved only through the program's normal key setting, which the person confirms. Never into a file or chat.\n- Never read the key yourself (do not snapshot the field text, do not eval, do not copy it to chat). Find the element with the key and call `browser_capture_key`.\n\nHow to work:\n1. Ask which providers the person wants. If unsure, suggest starting with one (e.g. Groq) and explain free tiers have per-minute and per-day limits.\n2. For each provider open its key page (browser_nav) from the provider card (keyUrl). Show the page (browser_page) and guide step by step: sign in, create key, copy.\n3. If the page has \"Sign in with Google\" and the conditions above hold (Google session present, only basic profile and email requested), the bot may click it. Otherwise stop and ask the person.\n4. When the person pastes the key into the provider card and clicks \"Save\", the program verifies it. On success move on; on failure ask the person to recheck the key, without saving it to a file or chat.\n5. After connecting, show how to pick a model in a bot: free models carry a \"Free\" badge.\n\nNever: save keys to files/notes/chat; create accounts or enter the person's data; bypass captchas/limits/checks; claim a free tier is unlimited."
+    }
+  },
+  "requires": {
+    "apps": [],
+    "builtin": [
+      "browser"
+    ],
+    "sites": []
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "items": [
+    {
+      "id": "agent.research-desk",
+      "kind": "agent",
+      "category": "research",
+      "title": {
+        "ru": "Исследователь",
+        "en": "Research desk"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "agents/research-desk.json",
+      "hash": "1881b5989143b26d8f555b42ccb9db96299d92f06b3f8bb14ad78321ca493aa3"
+    },
+    {
+      "id": "agent.rust-developer",
+      "kind": "agent",
+      "category": "dev",
+      "title": {
+        "ru": "Rust-разработчик Deloist",
+        "en": "Deloist Rust developer"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "agents/agent.rust-developer.json",
+      "hash": "9d9e31012d1216d6174eff4b088054b065024cfde9f9a01d5192431b36a8614d"
+    },
+    {
+      "id": "app.gosuslugi",
+      "kind": "app",
+      "category": "personal",
+      "title": {
+        "ru": "Госуслуги",
+        "en": "Gosuslugi"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "apps/gosuslugi.json",
+      "hash": "109fe1d5a1f7d70e5f8a23e178ed71c29d398f0b9e4dd9bdcae0ceb8428be12a"
+    },
+    {
+      "id": "app.yookassa",
+      "kind": "app",
+      "category": "business",
+      "title": {
+        "ru": "ЮKassa",
+        "en": "YooKassa"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "apps/yookassa.json",
+      "hash": "2e7aa95e9cb79a8e93a2616568c190524b5c3d6faae801a4168520d14266f4e1"
+    },
+    {
+      "id": "skill.check-a-claim",
+      "kind": "skill",
+      "category": "research",
+      "title": {
+        "ru": "Проверить утверждение по источнику",
+        "en": "Check a claim against a source"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "skills/skill.check-a-claim.json",
+      "hash": "3c569e4593ad724d923d030eb045369b9f8604f557bc8743e548c969b809582a"
+    },
+    {
+      "id": "skill.free-models",
+      "kind": "skill",
+      "category": "productivity",
+      "title": {
+        "ru": "Подключи бесплатные модели",
+        "en": "Connect free models"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "skills/skill.free-models.json",
+      "hash": "f3429bf1e226d12a9509373e7c5fdac86baa7d54d81a74d3c5ad519e091185bf"
+    },
+    {
+      "id": "skill.research-public-web",
+      "kind": "skill",
+      "category": "research",
+      "title": {
+        "ru": "Исследование по открытым источникам",
+        "en": "Research the public web"
+      },
+      "tier": "verified",
+      "version": "1.0.0",
+      "path": "skills/skill.research-public-web.json",
+      "hash": "cfe2ea84f6d68914c673b7c64c03447712ada5b829e6ed7e66edfa6df087fa1c"
+    }
+  ]
+}

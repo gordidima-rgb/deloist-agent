@@ -1,0 +1,5 @@
+# Линкуем встроенным в Rust lld и его же библиотеками mingw-w64: clang на машине не нужен.
+# crt-static вшивает libunwind в exe, иначе программа требует libunwind.dll рядом с собой.
+[target.x86_64-pc-windows-gnullvm]
+linker = "rust-lld"
+rustflags = ["-C", "linker-flavor=ld.lld", "-C", "link-self-contained=yes", "-C", "target-feature=+crt-static"]

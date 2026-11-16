@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header><span id="dot" class="dot"></span><strong id="status"></strong></header>
+<p id="error" class="error" hidden></p>
+<button id="reconnect" class="ghost" hidden></button>
+<section>
+  <h2 id="pair-title"></h2>
+  <p id="pair-status"></p>
+  <input id="pair-code" type="text" placeholder="">
+  <button id="pair-btn" class="ghost"></button>
+  <button id="unpair-btn" class="ghost"></button>
+</section>
+<section>
+  <h2 id="allowed-title"></h2>
+  <button id="allow-site" class="ghost"></button>
+  <button id="allow-secret" class="ghost"></button>
+  <ul id="allowed-list"></ul>
+</section>
+<section>
+  <h2 id="active-title"></h2>
+  <ul id="active"></ul>
+</section>
+<section>
+  <h2 id="sites-title"></h2>
+  <ul id="sites"></ul>
+</section>
+<button id="stop" class="stop"></button>
+<p id="note" class="note"></p>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

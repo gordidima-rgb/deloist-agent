@@ -1,0 +1,12 @@
+# Catalog files are hashed in catalog/index.json and bundled into the exe: keep LF on every platform.
+catalog/** text eol=lf
+THIRD_PARTY/** text eol=lf
+tools/check_catalog.mjs text eol=lf
+
+# Everything else: LF in the repository and in the working tree (12.11.2026).
+# Mixed CRLF/LF files cost the sessions more time than anything else; Windows scripts keep CRLF.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+private/catalog/** text eol=lf
