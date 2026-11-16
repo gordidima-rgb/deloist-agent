@@ -186,8 +186,8 @@
         aria-pressed={bot.pinned}
         onclick={() => onpin?.(bot.id, !bot.pinned)}
       >
-        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M6 2.5h4l-.6 3.2 2.1 2.1H4.5l2.1-2.1z" /><path d="M8 7.8V13" />
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 17v5" /><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
         </svg>
       </button>
     {/snippet}
@@ -302,11 +302,11 @@
 
   {#if main.length}
     {#if teams.length}
-      <h3 class="sb-head">{tr('Без команды')}</h3>
+      <h3 class="sb-head" data-drop="loose">{tr('Без команды')}</h3>
     {:else if pinned.length}
       <h3 class="sb-head">{tr('Боты')}</h3>
     {/if}
-    <ul class="k-list sb-list">
+    <ul class="k-list sb-list" data-drop={teams.length ? 'loose' : undefined}>
       {#each main as bot (bot.id)}{@render botRow(bot)}{/each}
     </ul>
   {/if}

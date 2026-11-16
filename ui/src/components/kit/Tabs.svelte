@@ -78,8 +78,17 @@
       tabindex={current === item.id ? 0 : -1}
       data-id={item.id}
       onclick={() => pick(item.id)}
+      aria-label={item.icon ? item.label : undefined}
+      title={item.icon ? item.label : undefined}
     >
-      {item.label}
+      {#if item.icon}
+        <svg class="k-tab__icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          {#each item.icon as d}<path {d} />{/each}
+        </svg>
+        <span class="k-tab__label">{item.label}</span>
+      {:else}
+        {item.label}
+      {/if}
     </button>
   {/each}
 </div>

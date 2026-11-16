@@ -344,7 +344,7 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
       islandBtn.className = 'sp-ibtn sp-island-min';
       islandBtn.title = tr('Свернуть чат');
       islandBtn.setAttribute('aria-label', tr('Свернуть чат'));
-      islandBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14"/></svg>';
+      islandBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19h14"/></svg>';
       head.append(islandBtn);
       head.setAttribute('aria-roledescription', 'draggable');
     }
@@ -553,14 +553,14 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
         <span class="sp-step" data-step></span>
         <details class="sp-more"><summary class="sp-ibtn" aria-label="${esc(tr('Дополнительно'))}" title="${esc(tr('Дополнительно'))}">⋯</summary><div class="sp-more-menu"><button type="button" class="sp-btn" data-window title="${esc(tr('Вывести настоящее окно браузера: например, для капчи, которой нужно окно'))}">${esc(tr('Открыть настоящее окно браузера'))}</button></div></details>
         <button type="button" class="sp-ibtn sp-max-btn" data-max title="${esc(tr('Развернуть'))}" aria-label="${esc(tr('Развернуть'))}">
-          <svg class="ic-max" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-          <svg class="ic-restore" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
+          <svg class="ic-max" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          <svg class="ic-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
         </button>
         <button type="button" class="sp-ibtn" data-min title="${esc(tr('Свернуть'))}" aria-label="${esc(tr('Свернуть'))}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19h14"/></svg>
         </button>
         <button type="button" class="sp-ibtn" data-close title="${esc(tr('Закрыть экран бота'))}" aria-label="${esc(tr('Закрыть экран бота'))}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </div>
       <div class="sp-bar">

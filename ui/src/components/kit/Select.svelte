@@ -37,7 +37,7 @@
       <option value={option.value} disabled={option.disabled}>{option.label}</option>
     {/each}
   </select>
-  <svg class="k-select__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="m4 6 4 4 4-4" />
+  <svg class="k-select__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="m6 9 6 6 6-6" />
   </svg>
 </span>

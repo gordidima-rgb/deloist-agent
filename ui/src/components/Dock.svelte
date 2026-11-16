@@ -226,7 +226,7 @@
             <span class="seat-dot"></span>
           {/if}
           <span class="k-seat__voice" aria-hidden="true"
-            ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+            ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
               ><rect x="8.5" y="3" width="7" height="11" rx="3.5" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg
             ></span
           >
@@ -251,7 +251,7 @@
         >
       </button>
       <button type="button" class="k-tray-add" aria-label={tr('Новый бот')} title={tr('Новый бот')} onclick={() => onadd?.()}>
-        <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
       <svg class="k-grip" bind:this={grip} viewBox="0 0 28 10" role="separator" aria-orientation="horizontal" aria-label={tr('Потяни вдоль края, чтобы сдвинуть, или от стены, чтобы перенести')}
         ><title>{tr('Потяни вдоль края, чтобы сдвинуть, или от стены, чтобы перенести')}</title><path d="M3 3c5.5 4.5 16.5 4.5 22 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" /></svg

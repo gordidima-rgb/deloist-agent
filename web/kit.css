@@ -387,6 +387,8 @@
   cursor: pointer;
   transition: color var(--k-dur-base) var(--k-ease-out);
 }
+.k-tab:has(.k-tab__icon) { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--k-space-3); }
+.k-tab__icon { flex: none; }
 .k-tab:hover { color: var(--k-text); }
 .k-tab[aria-selected="true"] { color: var(--k-on-ink); }
 .k-tab:focus-visible { outline: none; box-shadow: var(--k-focus); }

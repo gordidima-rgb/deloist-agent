@@ -34,11 +34,11 @@
   <span class="k-mic__bars">
     {#each bands as b, i (i)}<i style:--b={b}></i>{/each}
   </span>
-  <svg class="k-mic__check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-    ><path d="m3.5 8.3 3 3 6-6.6" /></svg
+  <svg class="k-mic__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+    ><path d="M20 6 9 17l-5-5" /></svg
   >
-  <svg class="k-mic__alert" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"
-    ><path d="M8 3.5v5.5" /><path d="M8 12.4v.1" /></svg
+  <svg class="k-mic__alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+    ><path d="M12 5v8" /><path d="M12 18.6v.1" /></svg
   >
   <span class="k-mic__rec"></span>
 </button>

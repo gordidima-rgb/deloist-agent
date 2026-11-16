@@ -711,7 +711,7 @@ function paintGuests() {
     const chip = document.createElement('span');
     chip.className = 'guest-chip';
     chip.dataset.id = guest.id;
-    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop" aria-label=""><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop" aria-label=""><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
     const open = chip.querySelector('.guest-open');
     open.textContent = guest.name;
     open.title = tr('Открыть чат специалиста');
@@ -1222,6 +1222,37 @@ function fillBubble(bubble, msg) {
   bubble.replaceChildren(title, hint, detail, fix);
 }
 
+// Запуск рутины приходит сообщением «[рутина] Название\nзадание». В чате это маленькая карточка:
+// название и первая строка задания; всё задание — по щелчку.
+function routineRun(msg) {
+  if (msg.role !== 'user') return null;
+  const m = /^\[рутина\] ([^\n]*)\n?([\s\S]*)$/.exec(String(msg.text || ''));
+  return m ? { title: m[1].trim(), prompt: m[2].trim() } : null;
+}
+
+function routineRunCard(msg, run) {
+  const card = document.createElement('details');
+  card.className = 'rt-runcard';
+  const summary = document.createElement('summary');
+  const gist = run.prompt.replace(/\s+/g, ' ').slice(0, 160);
+  summary.innerHTML = `
+    <span class="rt-run-icon">${svgIcon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}</span>
+    <span class="rt-run-text">
+      <span class="rt-run-title"><span class="rt-run-kind">${tr('Рутина')}</span>${escapeHtml(run.title)}</span>
+      ${gist ? `<span class="rt-run-gist">${escapeHtml(gist)}</span>` : ''}
+    </span>
+    <span class="rt-run-chev">${svgIcon('<path d="m6 9 6 6 6-6"/>')}</span>`;
+  summary.title = tr('Показать задание целиком');
+  card.append(summary);
+  if (run.prompt) {
+    const bubble = document.createElement('div');
+    bubble.className = 'rt-run-body';
+    fillBubble(bubble, { ...msg, text: run.prompt });
+    card.append(bubble);
+  }
+  return card;
+}
+
 function messageRow(msg) {
   if (msg.role === 'compacted') return compactedRow(msg);
   if (msg.role === 'task') return taskRow(msg);
@@ -1250,7 +1281,10 @@ function messageRow(msg) {
   // Файлы, которые бот сделал и назвал в ответе, показываем в самом чате, а не ссылкой file:///.
   const results = msg.role !== 'user' && !msg.error && msg.text ? Attach.extractResults(msg.text, attachOwner()) : null;
   const shownText = results ? results.text : msg.text;
-  if (shownText && shownText.trim()) {
+  const run = routineRun(msg);
+  if (run) {
+    col.append(routineRunCard(msg, run));
+  } else if (shownText && shownText.trim()) {
     const bubble = document.createElement('div');
     bubble.className = `bubble${msg.error ? ' error' : ''}`;
     fillBubble(bubble, { ...msg, text: shownText });
@@ -3099,7 +3133,7 @@ function handleEvent(ev) {
     case 'memory':
       if (sharedMemoryOpen()) loadSharedMemory();
       // Вкладка показывает факты одного бота: перечитываем, только если правка задела его память.
-      if (!$('#drawer').hidden && S.tab === 'memory' && (ev.scopes || []).includes(S.currentId)) S.drawerMemoryLoad?.();
+      if (drawerShown() && S.tab === 'memory' && (ev.scopes || []).includes(S.currentId)) S.drawerMemoryLoad?.();
       return;
 
     case 'memory_doctor':
@@ -3390,7 +3424,7 @@ function handleEvent(ev) {
         scheduleTeam();
         refreshCatalog();
         refreshWorkflowBots();
-        if (!$('#drawer').hidden && S.tab === 'goals') renderDrawer();
+        if (drawerShown() && S.tab === 'goals') renderDrawer();
       });
       break;
 
@@ -3782,7 +3816,7 @@ function onPermissionEvent(ev) {
     refreshGrantsLine();
     if ($('#modal-settings')?.open) loadRules();
   }
-  if (ev.type === 'activity_logged' && ev.botId === S.currentId && !$('#drawer').hidden && S.tab === 'profile') loadActivity(ev.botId);
+  if (ev.type === 'activity_logged' && ev.botId === S.currentId && drawerShown() && S.tab === 'profile') loadActivity(ev.botId);
 }
 
 // Заявка командной строки (`deloist team apply`) на добавление команды из файла. Карточка общая для всего окна:
@@ -3974,6 +4008,8 @@ async function refreshState() {
     paintModeSwitch();
     // Модель бота или настроек могли смениться: шапка открытого чата не должна показывать старую.
     if (S.view?.kind === 'bot') paintHeadModel(botById(S.view.id));
+    // Бот завёл рутину из разговора или её поправили в окне «Рутины»: вкладка панели показывает свежий список.
+    if (drawerShown() && S.tab === 'routines') renderDrawer();
   } catch {
     // сервер мог перезапускаться
   }
@@ -4519,7 +4555,7 @@ async function selectBot(id) {
   setSendState();
   renderSessionStats();
   loadSessionStats(id);
-  if (!$('#drawer').hidden) renderDrawer();
+  showDrawerForBot();
   input.focus();
 }
 
@@ -4883,13 +4919,57 @@ function autosize() {
 // Панель бота
 // ---------------------------------------------------------------------------
 
+// У бота панель не закрывается, а сворачивается в полосу значков, как левая колонка.
+// Свёрнута она или раскрыта — помнит localStorage; закрывается она только вместе с чатом бота.
+const DRAWER_RAIL_KEY = 'deloist-drawer-rail';
+const narrowWindow = () => window.matchMedia('(max-width: 820px)').matches;
+const drawerRail = () => document.body.classList.contains('drawer-rail');
+const drawerShown = () => !$('#drawer').hidden && !drawerRail();
+
+function savedDrawerRail() {
+  try {
+    return localStorage.getItem(DRAWER_RAIL_KEY) !== 'open';
+  } catch {
+    return true;
+  }
+}
+
+function setDrawerRail(rail, save = true) {
+  document.body.classList.toggle('drawer-rail', rail);
+  if (rail) setDrawerFull(false);
+  drawerHead?.update({ rail });
+  if (save) {
+    try { localStorage.setItem(DRAWER_RAIL_KEY, rail ? 'rail' : 'open'); } catch {}
+  }
+  renderDrawer();
+}
+
 function openDrawer(tab = 'profile') {
   if (!S.currentId) { selectFirst(); if (!S.currentId) return; }
   S.tab = tab;
   $('#drawer').hidden = false;
   document.body.classList.add('drawer-open');
   mountDrawerHead().update({ value: tab });
-  renderDrawer();
+  setDrawerRail(false);
+}
+
+// Открыли чат бота: панель уже на месте — перерисовать для него, нет — поставить так, как её оставили.
+// На узком окне панель ложится поверх чата, поэтому сама там не появляется.
+function showDrawerForBot() {
+  if (!$('#drawer').hidden) {
+    renderDrawer();
+    return;
+  }
+  if (narrowWindow()) return;
+  $('#drawer').hidden = false;
+  document.body.classList.add('drawer-open');
+  mountDrawerHead().update({ value: S.tab });
+  setDrawerRail(savedDrawerRail(), false);
+}
+
+function collapseDrawer() {
+  if (narrowWindow()) closeDrawer();
+  else setDrawerRail(true);
 }
 
 // Шапка панели (вкладки и «Закрыть») — компонент кита; вкладка в S.tab, содержимое рисует renderDrawer.
@@ -4898,16 +4978,239 @@ function mountDrawerHead() {
   if (drawerHead) return drawerHead;
   drawerHead = window.DeloistUI.mountDrawerHead($('#drawer-head'), {
     value: S.tab,
-    onchange: (tab) => { S.tab = tab; renderDrawer(); },
-    onclose: closeDrawer,
+    full: false,
+    rail: drawerRail(),
+    onchange: (tab) => {
+      S.tab = tab;
+      if (drawerRail()) {
+        drawerHead.update({ value: tab });
+        setDrawerRail(false);
+      } else {
+        renderDrawer();
+      }
+    },
+    onclose: collapseDrawer,
+    onexpand: () => setDrawerRail(false),
+    onfull: setDrawerFull,
   });
   return drawerHead;
+}
+
+// «Развернуть»: панель ложится поверх чата до боковой колонки, чат под ней не сжимается.
+function setDrawerFull(full) {
+  document.body.classList.toggle('drawer-full', full);
+  drawerHead?.update({ full });
 }
 
 function closeDrawer() {
   $('#drawer').hidden = true;
   document.body.classList.remove('drawer-open');
+  setDrawerFull(false);
   clearPicker();
+}
+
+// Состав команды из списка слева: бота тащат на строку команды или в «Без команды».
+// Из одной команды в другую — перенос; с Ctrl бот остаётся и в старой.
+async function setTeamMembers(roomId, botIds) {
+  await api(`/api/rooms/${roomId}`, { method: 'PATCH', body: { botIds } });
+}
+
+async function moveBotToTeam(botId, toId, fromId, copy = false) {
+  const to = toId ? roomById(toId) : null;
+  const from = fromId ? roomById(fromId) : null;
+  const name = botById(botId)?.name || '';
+  const leaving = from && !copy && from.id !== to?.id;
+  if (leaving && from.botIds.length <= 1) {
+    toast(tr('В команде нужен хотя бы один бот'));
+    return;
+  }
+  try {
+    if (to && !to.botIds.includes(botId)) await setTeamMembers(to.id, [...to.botIds, botId]);
+    if (leaving) await setTeamMembers(from.id, from.botIds.filter((id) => id !== botId));
+    await refreshState();
+    if (to) toast(tr('{name} в команде «{team}»', { name, team: to.name }));
+    else if (from) toast(tr('{name} больше не в команде «{team}»', { name, team: from.name }));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function bindTeamDrop() {
+  const list = $('#bot-list');
+  if (PANE || !list) return;
+  let drag = null;
+  let lit = null;
+  const light = (el) => {
+    if (lit === el) return;
+    lit?.classList.remove('sb-drop-on');
+    lit = el;
+    lit?.classList.add('sb-drop-on');
+  };
+  // Куда можно бросить: строка другой команды, где этого бота ещё нет, или «Без команды» для участника.
+  const targetAt = (el) => {
+    if (!drag || !el?.closest) return null;
+    const team = el.closest('#bot-list .sb-row[data-team]');
+    if (team) {
+      const room = roomById(team.dataset.team);
+      return room && !room.archived && !room.botIds.includes(drag.id) ? team : null;
+    }
+    const loose = el.closest('#bot-list [data-drop="loose"]');
+    return loose && drag.from ? loose : null;
+  };
+  list.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.('.sb-row[data-id]');
+    drag = row && !row.dataset.team && row.dataset.kind !== 'room' ? { id: row.dataset.id, from: row.dataset.parent || '' } : null;
+  });
+  list.addEventListener('dragover', (e) => {
+    const target = targetAt(e.target);
+    light(target);
+    if (!target) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = drag.from && !e.ctrlKey ? 'move' : 'copy';
+  });
+  list.addEventListener('dragleave', (e) => {
+    if (!list.contains(e.relatedTarget)) light(null);
+  });
+  list.addEventListener('drop', (e) => {
+    const target = targetAt(e.target);
+    const was = drag;
+    light(null);
+    drag = null;
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    moveBotToTeam(was.id, target.dataset.team || '', was.from, e.ctrlKey);
+  });
+  document.addEventListener('dragend', () => {
+    light(null);
+    drag = null;
+  });
+}
+
+// Файл или папку из вкладки «Файлы» бросают в чат: ссылка на них встаёт в сообщение.
+// В поле ввода её вставляет сам браузер (text/plain) туда, куда бросили; в остальной чат — в конец сообщения.
+const FILE_REF_MIME = 'application/x-deloist-file';
+
+function bindFileRefDrop() {
+  const chat = $('#chat');
+  const input = $('#input');
+  if (!chat || !input) return;
+  const carries = (e) => [...(e.dataTransfer?.types || [])].includes(FILE_REF_MIME);
+  const lit = (on) => chat.classList.toggle('file-ref-drop', on);
+  chat.addEventListener('dragover', (e) => {
+    if (!carries(e) || input.disabled) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    lit(true);
+  });
+  chat.addEventListener('dragleave', (e) => {
+    if (!chat.contains(e.relatedTarget)) lit(false);
+  });
+  chat.addEventListener('drop', (e) => {
+    lit(false);
+    if (!carries(e) || input.disabled) return;
+    let ref = '';
+    try {
+      ref = JSON.parse(e.dataTransfer.getData(FILE_REF_MIME)).ref || '';
+    } catch {}
+    if (!ref) return;
+    if (e.target === input) {
+      // Браузер сам вставит текст в место броска; поле только подровнять по высоте.
+      setTimeout(autosize);
+      return;
+    }
+    e.preventDefault();
+    const base = input.value.replace(/\s+$/, '');
+    input.value = base ? `${base} ${ref} ` : `${ref} `;
+    autosize();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+  document.addEventListener('dragend', () => lit(false));
+}
+
+// Ширину панели тянут за левый край; она в --drawer-w и в localStorage. Двойной щелчок — обычная ширина.
+const DRAWER_W_KEY = 'deloist-drawer-w';
+const DRAWER_MIN = 340;
+const DRAWER_CHAT_MIN = 360;
+
+function drawerMaxWidth() {
+  const side = $('#sidebar')?.getBoundingClientRect().right || 0;
+  return Math.max(DRAWER_MIN, window.innerWidth - side - DRAWER_CHAT_MIN - 24);
+}
+
+function setDrawerWidth(px, save = true) {
+  const body = document.body;
+  if (!px) {
+    body.style.removeProperty('--drawer-w');
+  } else {
+    px = Math.round(Math.min(drawerMaxWidth(), Math.max(DRAWER_MIN, px)));
+    body.style.setProperty('--drawer-w', `${px}px`);
+  }
+  $('#drawer-grip')?.setAttribute('aria-valuenow', String(Math.round($('#drawer')?.offsetWidth || px || 0)));
+  if (!save) return;
+  try {
+    if (px) localStorage.setItem(DRAWER_W_KEY, String(px));
+    else localStorage.removeItem(DRAWER_W_KEY);
+  } catch {}
+}
+
+function initDrawerResize() {
+  const grip = $('#drawer-grip');
+  if (!grip) return;
+  grip.setAttribute('aria-label', tr('Ширина панели бота'));
+  grip.title = tr('Ширина панели бота');
+  let saved = 0;
+  try { saved = Number(localStorage.getItem(DRAWER_W_KEY)) || 0; } catch {}
+  if (saved) setDrawerWidth(saved, false);
+
+  let dragging = false;
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || document.body.classList.contains('drawer-full')) return;
+    dragging = true;
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+    document.body.classList.add('drawer-drag');
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const right = $('#drawer').getBoundingClientRect().right;
+    setDrawerWidth(right - e.clientX, false);
+  });
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('drawer-drag');
+    setDrawerWidth($('#drawer').offsetWidth);
+  };
+  grip.addEventListener('pointerup', stop);
+  grip.addEventListener('pointercancel', stop);
+  grip.addEventListener('lostpointercapture', stop);
+  grip.addEventListener('dblclick', () => setDrawerWidth(0));
+  grip.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    const now = $('#drawer').offsetWidth;
+    let next = 0;
+    if (e.key === 'ArrowLeft') next = now + step;
+    else if (e.key === 'ArrowRight') next = now - step;
+    else if (e.key === 'Home') next = drawerMaxWidth();
+    else if (e.key === 'End') next = DRAWER_MIN;
+    else return;
+    e.preventDefault();
+    setDrawerWidth(next);
+  });
+  // Окно сузили — сохранённая ширина не должна съесть чат.
+  window.addEventListener('resize', () => {
+    const w = parseInt(document.body.style.getPropertyValue('--drawer-w'), 10);
+    if (w && w > drawerMaxWidth()) setDrawerWidth(w, false);
+  });
+  // Esc из «Развернуть» возвращает панель рядом с чатом; диалоги закрываются своим Esc.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !document.body.classList.contains('drawer-full')) return;
+    if (document.querySelector('dialog[open]')) return;
+    e.preventDefault();
+    setDrawerFull(false);
+  });
 }
 
 function clearPicker() {
@@ -5043,6 +5346,11 @@ function renderDrawer() {
   tabView?.destroy();
   tabView = null;
   body.innerHTML = '';
+  S.drawerMemoryLoad = null;
+  // Свёрнутая панель — только значки разделов: содержимое не рисуем.
+  if (drawerRail()) return;
+
+  if (S.tab === 'routines') renderDrawerRoutines(bot, body);
 
   if (S.tab === 'profile') {
     renderProfile(bot, body);
@@ -5065,7 +5373,7 @@ function renderDrawer() {
       checkin: (S.checkins || []).find((c) => c.botId === bot.id) || null,
       api,
       onchanged: () => refreshState().then(() => {
-        if (!$('#drawer').hidden && S.tab === 'goals') renderDrawer();
+        if (drawerShown() && S.tab === 'goals') renderDrawer();
       }),
     });
   }
@@ -5075,6 +5383,37 @@ function renderDrawer() {
     S.openFile = '';
     tabView = window.DeloistUI.mountDrawerFiles(body, { bot, api, initial, onquote: quoteToChat });
   }
+}
+
+// Вкладка «Рутины»: что этот бот делает сам по расписанию. Те же строки, что в окне «Рутины»;
+// новая — той же формой, где бот уже выбран. Боту можно и сказать в чате — рутина появится здесь.
+function renderDrawerRoutines(bot, body) {
+  const mine = ordinaryRoutines().filter((r) => r.botId === bot.id);
+  const head = document.createElement('div');
+  head.className = 'drawer-rt-head';
+  head.innerHTML = `
+    <p class="note">${mine.length
+      ? tr('Что {name} делает сам по расписанию.', { name: escapeHtml(bot.name) })
+      : tr('Рутин пока нет. Добавь здесь или скажи боту в чате, например: «каждое утро в 9 собирай новости».')}</p>
+    <button type="button" class="primary" id="drawer-rt-new">${tr('Новая рутина')}</button>`;
+  $('#drawer-rt-new', head).addEventListener('click', () => openRoutineFormFor(bot.id));
+  body.append(head);
+  if (!mine.length) return;
+  const list = document.createElement('div');
+  list.className = 'drawer-rt-list';
+  const rerender = () => {
+    if (drawerShown() && S.tab === 'routines') renderDrawer();
+    if (routinesOpen()) renderRoutines();
+  };
+  for (const r of mine) list.append(routineRow(r, rerender));
+  body.append(list);
+}
+
+function openRoutineFormFor(botId) {
+  openRoutines('routines');
+  $('#rt-new').open = true;
+  $('#routine-bot').value = botId;
+  $('#form-routine').title.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -6472,6 +6811,23 @@ function prepareNewBot() {
   const owned = [];
   const picker = mountLookPicker($('#nb-look'), { name: '', color: BOT_COLORS[0], skin: freeSkin() }, { prefix: 'nb', owned, size: 96 });
   newLook = { owned, pick: () => ({ skin: picker.skin }) };
+  fillNewBotTeams();
+}
+
+// «Команда» в окне нового бота: есть команды — можно сразу положить бота в одну из них.
+// Открыли из команды — она и выбрана.
+function fillNewBotTeams() {
+  const field = $('#nb-team-field');
+  const select = $('#nb-team');
+  if (!field || !select) return;
+  const rooms = S.rooms.filter((r) => !r.archived);
+  field.hidden = !rooms.length;
+  select.replaceChildren(
+    new Option(tr('Без команды'), ''),
+    ...rooms.map((r) => new Option(r.name, r.id)),
+  );
+  const here = currentRoom();
+  select.value = here && !here.archived ? here.id : '';
 }
 
 // Поля внешности для POST /api/bots: те же, что ящик бота сохраняет в профиле.
@@ -6689,61 +7045,69 @@ function routineParts(r) {
   return { gist, chips };
 }
 
+// Строка рутины: одна и та же в окне «Рутины» и во вкладке панели бота.
+function routineRow(r, rerender) {
+  const bot = botById(r.botId);
+  const el = document.createElement('div');
+  el.className = `routine${r.enabled ? '' : ' off'}`;
+  const icon = (body) => svgIcon(body);
+  const { gist, chips } = routineParts(r);
+  el.innerHTML = `
+    <div class="rt-text">
+      <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
+      ${gist ? `<div class="rt-gist" title="${escapeHtml(gist)}">${escapeHtml(gist)}</div>` : ''}
+    </div>
+    <div class="rt-actions">
+      <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' : '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>')}</button>
+      <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('<path d="M7 5v14l12-7z"/>')}</button>
+      <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
+      <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
+    </div>
+    <div class="rt-chips">${chips}</div>`;
+  $('.rt-run', el).addEventListener('click', () => runRoutine(r.id));
+  $('.rt-quiet', el).addEventListener('click', async () => {
+    try {
+      const { routine } = await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { quiet: !r.quiet } });
+      r.quiet = routine.quiet;
+      rerender();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  $('.switch input', el).addEventListener('change', async (e) => {
+    try {
+      await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { enabled: e.target.checked } });
+      r.enabled = e.target.checked;
+      rerender();
+    } catch (err) {
+      toast(err.message);
+      e.target.checked = r.enabled;
+    }
+  });
+  $('.rt-actions button:last-of-type', el).addEventListener('click', async () => {
+    try {
+      await api(`/api/routines/${r.id}`, { method: 'DELETE' });
+      S.routines = S.routines.filter((x) => x.id !== r.id);
+      rerender();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  return el;
+}
+
 function renderRoutines() {
   const list = $('#routines-list');
   list.innerHTML = '';
   if (!ordinaryRoutines().length) {
     list.innerHTML = `<p class="note">${tr('Пока ни одной. Добавь первую, и бот начнёт работать сам.')}</p>`;
   }
-  for (const r of ordinaryRoutines()) {
-    const bot = botById(r.botId);
-    const el = document.createElement('div');
-    el.className = `routine${r.enabled ? '' : ' off'}`;
-    const icon = (body) => svgIcon(body);
-    const { gist, chips } = routineParts(r);
-    el.innerHTML = `
-      <div class="rt-text">
-        <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
-        ${gist ? `<div class="rt-gist" title="${escapeHtml(gist)}">${escapeHtml(gist)}</div>` : ''}
-      </div>
-      <div class="rt-actions">
-        <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' : '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>')}</button>
-        <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('<path d="M7 5v14l12-7z"/>')}</button>
-        <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
-        <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
-      </div>
-      <div class="rt-chips">${chips}</div>`;
-    $('.rt-run', el).addEventListener('click', () => runRoutine(r.id));
-    $('.rt-quiet', el).addEventListener('click', async () => {
-      try {
-        const { routine } = await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { quiet: !r.quiet } });
-        r.quiet = routine.quiet;
-        renderRoutines();
-      } catch (err) {
-        toast(err.message);
-      }
-    });
-    $('.switch input', el).addEventListener('change', async (e) => {
-      try {
-        await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { enabled: e.target.checked } });
-        r.enabled = e.target.checked;
-        renderRoutines();
-      } catch (err) {
-        toast(err.message);
-        e.target.checked = r.enabled;
-      }
-    });
-    $('.rt-actions button:last-of-type', el).addEventListener('click', async () => {
-      try {
-        await api(`/api/routines/${r.id}`, { method: 'DELETE' });
-        S.routines = S.routines.filter((x) => x.id !== r.id);
-        renderRoutines();
-      } catch (err) {
-        toast(err.message);
-      }
-    });
-    list.append(el);
-  }
+  // Рутины поменялись здесь — вкладка панели бота показывает те же.
+  const both = () => {
+    renderRoutines();
+    if (drawerShown() && S.tab === 'routines') renderDrawer();
+  };
+  for (const r of ordinaryRoutines()) list.append(routineRow(r, both));
   syncRoutineTabs();
 }
 
@@ -7565,9 +7929,14 @@ function bindUi() {
   bindSharedMemory();
   $('#btn-compact').addEventListener('click', compactCurrent);
   bindRoutineForm();
+  // Рутины правили в окне «Рутины» — вкладка панели бота показывает то же.
+  $('#modal-routines').addEventListener('close', () => {
+    if (drawerShown() && S.tab === 'routines') renderDrawer();
+  });
   $('#btn-panel').addEventListener('click', () => {
     // У группы панель — это её настройки: профиля, памяти и файлов у неё нет.
     if (inRoom()) openRoomModal(currentRoom());
+    else if (drawerShown()) collapseDrawer();
     else openDrawer(S.tab);
   });
   $('#btn-menu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
@@ -7580,6 +7949,9 @@ function bindUi() {
   $$('#theme-switch [data-value]').forEach((btn) => btn.addEventListener('click', () => chooseTheme(btn.dataset.value)));
   $$('.theme-toggle').forEach((btn) => btn.addEventListener('click', toggleTheme));
   initSidebarCollapse();
+  initDrawerResize();
+  bindTeamDrop();
+  bindFileRefDrop();
   watchNewRows();
   Toc.init();
   window.addEventListener('keydown', arcShortcuts);
@@ -7683,12 +8055,21 @@ function bindUi() {
           ...newBotLookFields(),
         },
       });
+      const team = f.team?.value ? roomById(f.team.value) : null;
       $('#modal-new').close();
       f.reset();
       newBotPicker.picker.update({ value: { driver: '', model: '' } });
+      // Бот уже создан: если команда не приняла его, он просто остаётся «без команды».
+      if (team) {
+        try {
+          await setTeamMembers(team.id, [...team.botIds, bot.id]);
+        } catch (err) {
+          toast(err.message);
+        }
+      }
       await refreshState();
       await selectBot(bot.id);
-      toast(tr('{name} в команде', { name: bot.name }));
+      toast(team ? tr('{name} в команде «{team}»', { name: bot.name, team: team.name }) : tr('{name} в команде', { name: bot.name }));
     } catch (err) {
       toast(err.message);
     }
@@ -7818,6 +8199,7 @@ function bindRoutineForm() {
     try {
       const { routine } = await api('/api/routines', { method: 'POST', body });
       S.routines.push(routine);
+      if (drawerShown() && S.tab === 'routines') renderDrawer();
       renderRoutines();
       f.reset();
       $$('#rt-days .day-btn').forEach((b) => b.setAttribute('aria-pressed', 'false'));

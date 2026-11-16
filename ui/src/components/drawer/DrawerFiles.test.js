@@ -104,3 +104,28 @@ describe('DrawerFiles', () => {
     });
   });
 });
+
+describe('DrawerFiles drag to chat', () => {
+  it('a file row carries its path as text and as a file reference', async () => {
+    mount({ bot: { id: 'b1' }, api: fakeApi() });
+    await waitFor(() => expect(rowByName('a.txt')).toBeTruthy());
+    const row = rowByName('a.txt').closest('li');
+    expect(row.getAttribute('draggable')).toBe('true');
+    const data = new Map();
+    const event = new Event('dragstart', { bubbles: true });
+    event.dataTransfer = { setData: (type, value) => data.set(type, value), effectAllowed: '' };
+    row.dispatchEvent(event);
+    expect(data.get('text/plain')).toBe('`a.txt`');
+    expect(JSON.parse(data.get('application/x-deloist-file'))).toEqual({ botId: 'b1', path: 'a.txt', dir: false, ref: '`a.txt`' });
+  });
+
+  it('a folder reference ends with a slash', async () => {
+    mount({ bot: { id: 'b1' }, api: fakeApi() });
+    await waitFor(() => expect(rowByName('notes')).toBeTruthy());
+    const data = new Map();
+    const event = new Event('dragstart', { bubbles: true });
+    event.dataTransfer = { setData: (type, value) => data.set(type, value), effectAllowed: '' };
+    rowByName('notes').closest('li').dispatchEvent(event);
+    expect(data.get('text/plain')).toBe('`notes/`');
+  });
+});

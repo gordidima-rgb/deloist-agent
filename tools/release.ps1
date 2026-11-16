@@ -49,7 +49,14 @@ Copy-Item "$Target\release\deloist-setup.exe" "$out\Deloist-Setup.exe" -Force
 $url = "https://github.com/$Repo/releases/download/$tag/deloist.exe"
 & "$Target\release\examples\release_sign.exe" sign $Key "$out\deloist.exe" $version $url $Notes $out | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Подпись не прошла.' }
-gh release create $tag --repo $Repo --title "Deloist $version" --notes $Notes `
+# Публичная история — коммит за коммитом, без private/; метка выпуска встаёт на код, из которого собран файл.
+git fetch -q origin
+git merge-base --is-ancestor HEAD origin/main
+if ($LASTEXITCODE -ne 0) { throw 'Выпускаемый коммит ещё не в origin/main: сначала влей его.' }
+& pwsh -NoProfile -File (Join-Path $root 'private\tools\sync-public.ps1') -Source HEAD -Push
+if ($LASTEXITCODE -ne 0) { throw 'Публичная история не обновилась (private\tools\sync-public.ps1).' }
+$publicHead = (git rev-parse refs/public/head).Trim()
+gh release create $tag --repo $Repo --target $publicHead --title "Deloist $version" --notes $Notes `
   "$out\Deloist-Setup.exe" "$out\deloist.exe" "$out\latest.json" "$out\latest.json.sig"
 if ($LASTEXITCODE -ne 0) { throw 'Загрузка не прошла.' }
 "Готово: https://github.com/$Repo/releases/tag/$tag"

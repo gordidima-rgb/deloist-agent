@@ -16,7 +16,7 @@
         <div class="side-head">
           <div class="brand"><svg class="brand-mark" width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="brandMarkGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a85ff"/><stop offset="1" stop-color="#0d54f0"/></linearGradient></defs><path d="M56 26 V42 A14 14 0 0 1 42 56 H22 A14 14 0 0 1 8 42 V22 A14 14 0 0 1 22 8 H36" fill="none" stroke="url(#brandMarkGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 34 L28 43 L45 24" fill="none" stroke="url(#brandMarkGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 6 Q50 15 59 15 Q50 15 50 24 Q50 15 41 15 Q50 15 50 6 Z" fill="url(#brandMarkGrad)"/><path d="M60 4.5 Q60 8 63.5 8 Q60 8 60 11.5 Q60 8 56.5 8 Q60 8 60 4.5 Z" fill="url(#brandMarkGrad)"/></svg>Deloist</div>
           <div class="side-actions">
-            <button class="icon-btn" id="btn-search-toggle" type="button" title="Поиск (Ctrl+K)" aria-label="Поиск" aria-expanded="false" aria-controls="sidebar-search"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></button>
+            <button class="icon-btn" id="btn-search-toggle" type="button" title="Поиск (Ctrl+K)" aria-label="Поиск" aria-expanded="false" aria-controls="sidebar-search"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></button>
             <button class="icon-btn" id="btn-new" title="Создать" aria-label="Создать" aria-haspopup="menu" aria-expanded="false" data-menu-trigger><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
             <button class="icon-btn side-collapse" id="btn-side-collapse" type="button" title="Свернуть боковую панель (Ctrl+B)" aria-label="Свернуть боковую панель" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="4"/><path d="M9.5 4.5v15"/></svg></button>
           </div>
@@ -61,7 +61,7 @@
             Лимиты и расход
           </button>
           <div class="usage-rings" id="usage-rings" hidden></div>
-          <button type="button" class="ghost side-link side-menu-trigger" id="btn-side-menu" aria-expanded="false" aria-controls="side-menu" title="Настройки и подключения"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Настройки и подключения</span><svg class="i side-menu-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg></button>
+          <button type="button" class="ghost side-link side-menu-trigger" id="btn-side-menu" aria-expanded="false" aria-controls="side-menu" title="Настройки и подключения"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Настройки и подключения</span><svg class="i side-menu-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg></button>
           <div class="side-menu" id="side-menu" hidden>
             <div class="side-menu-actions">
             <button class="icon-btn" id="btn-settings" title="Настройки" aria-label="Настройки">
@@ -74,8 +74,8 @@
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.3A8 8 0 1 1 21 12z"/></svg><span>Ошибка или пожелание</span>
             </button>
             <button type="button" class="icon-btn theme-toggle" id="btn-theme-side" title="Сменить тему" aria-label="Сменить тему">
-              <svg class="i only-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
-              <svg class="i only-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg><span>Сменить тему</span>
+              <svg class="i only-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+              <svg class="i only-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg><span>Сменить тему</span>
             </button>
             </div>
           </div>
@@ -131,7 +131,7 @@
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M12 4.5v15"/></svg>
             </button>
             <button type="button" class="icon-btn" id="btn-pane-close">
-              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
             <button class="icon-btn" id="btn-panel" title="Профиль, память, файлы" aria-label="Профиль, память, файлы"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></svg></button>
           </div>
@@ -167,7 +167,7 @@
             <div class="in-field" id="in-field"><textarea id="input" rows="1" placeholder="Напиши, что нужно сделать" title="Enter отправляет, Shift+Enter переносит строку" disabled></textarea></div>
             <div class="in-chips" id="in-chips"></div>
           </div>
-          <button id="btn-stop" class="send stop" title="Остановить (Esc)" aria-label="Остановить" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>
+          <button id="btn-stop" class="send stop" title="Остановить (Esc)" aria-label="Остановить" hidden><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <button id="btn-send" class="send" title="Отправить" aria-label="Отправить" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button>
         </div>
         <div class="composer-bar">
@@ -184,6 +184,7 @@
       </main>
 
       <aside id="drawer" class="drawer" hidden>
+        <div class="drawer-grip" id="drawer-grip" role="separator" aria-orientation="vertical" tabindex="0"></div>
         <header class="drawer-head" id="drawer-head"></header>
         <div class="drawer-body" id="drawer-body"></div>
       </aside>
@@ -199,6 +200,10 @@
         <label class="field">
           <span>С чем должен помогать этот бот?</span>
           <input name="role" placeholder="ищет источники и проверяет факты" />
+        </label>
+        <label class="field" id="nb-team-field" hidden>
+          <span>Команда</span>
+          <select name="team" id="nb-team"></select>
         </label>
         <div class="field nb-look-field">
           <span id="nb-look-label">Внешность</span>

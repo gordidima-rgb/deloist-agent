@@ -1,4 +1,5 @@
 # Export the public tree: HEAD without the private/ folder (open core).
+# For the GitHub repository use private\tools\sync-public.ps1: it publishes history commit by commit, not one snapshot.
 #   pwsh -NoProfile -File tools\export-public.ps1 -Out C:\Projects\deloist-public
 # Only committed files are exported (git archive), so untracked and ignored files never leak.
 param(

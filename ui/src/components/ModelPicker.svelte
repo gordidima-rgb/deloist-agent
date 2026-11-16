@@ -201,7 +201,7 @@
           <span class="mp-rail-gap"></span>
           <Tooltip text={tr('Подключить ИИ')} placement="right">
             <button type="button" class="mp-rail-btn mp-add" aria-label={tr('Подключить ИИ')} onclick={addProvider}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
             </button>
           </Tooltip>
         </div>
@@ -254,7 +254,7 @@
           {/each}
           {#if !searching && shown.reduce((n, g) => n + g.models.length, 0) < 6}
             <button type="button" class="mp-connect" onclick={addProvider}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
               <span>{tr('Подключить новую ИИ…')}</span>
             </button>
           {/if}

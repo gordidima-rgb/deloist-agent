@@ -3138,20 +3138,20 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 .kit-sheet .routines-list,
 .kit-sheet .journal-list { max-height: none; overflow: visible; }
 /* Рутина: первая строка — название, о чём она и действия; вторая — чипы (бот, расписание, следующий и прошлый запуск). */
-.kit-sheet .routine { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--k-space-2) var(--k-space-3); }
-.kit-sheet .routine .rt-text { min-width: 0; display: flex; align-items: baseline; gap: var(--k-space-2); }
-.kit-sheet .routine .rt-title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kit-sheet .routine .rt-gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); }
-:is(.kit-sheet, .made-card) .rt-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-:is(.kit-sheet, .made-card) .rt-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
-:is(.kit-sheet, .made-card) .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
-:is(.kit-sheet, .made-card) .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
-.kit-sheet .rt-last.st-failed .i, .kit-sheet .rt-last.st-error .i, .kit-sheet .rt-last.st-limit .i, .kit-sheet .rt-last.st-needs .i { color: var(--k-attention-text, currentColor); }
-.kit-sheet .routine .rt-actions { margin-left: 0; gap: var(--k-space-2); }
-.kit-sheet .routine .rt-run,
-.kit-sheet .routine .rt-quiet { width: 28px; height: 28px; padding: 0; background: transparent; }
-.kit-sheet .routine .rt-quiet:not(.on) { color: var(--k-text-3); }
-.kit-sheet .routine .rt-quiet.on { color: var(--k-brand-text); }
+:is(.kit-sheet, .drawer-rt-list) .routine { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--k-space-2) var(--k-space-3); }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-text { min-width: 0; display: flex; align-items: baseline; gap: var(--k-space-2); }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); }
+:is(.kit-sheet, .made-card, .drawer-rt-list) .rt-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+:is(.kit-sheet, .made-card, .drawer-rt-list) .rt-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
+:is(.kit-sheet, .made-card, .drawer-rt-list) .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
+:is(.kit-sheet, .made-card, .drawer-rt-list) .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
+:is(.kit-sheet, .drawer-rt-list) .rt-last.st-failed .i, .kit-sheet .rt-last.st-error .i, .kit-sheet .rt-last.st-limit .i, .kit-sheet .rt-last.st-needs .i { color: var(--k-attention-text, currentColor); }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-actions { margin-left: 0; gap: var(--k-space-2); }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-run,
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-quiet { width: 28px; height: 28px; padding: 0; background: transparent; }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-quiet:not(.on) { color: var(--k-text-3); }
+:is(.kit-sheet, .drawer-rt-list) .routine .rt-quiet.on { color: var(--k-brand-text); }
 /* Значки разделов в капсуле вкладок. */
 .kit-sheet .k-tab { display: inline-flex; align-items: center; gap: 6px; }
 .kit-sheet .k-tab .i { width: 15px; height: 15px; flex: none; }
@@ -3944,3 +3944,113 @@ span.tm-main { cursor: inherit; }
 .made-open { flex: none; height: 28px; padding: 0 12px; font-size: var(--k-text-xs); }
 .made-card .rt-gist { color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .made-card .rt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ==================================================================== Ширина панели бота
+   Левый край панели тянется (--drawer-w из app.js), «Развернуть» кладёт её поверх чата до
+   боковой колонки. На узком окне (≤820px) панель и так во весь экран: ручки и кнопки нет. */
+
+.drawer-grip { display: none; }
+.drawer-tabs { scrollbar-width: none; }
+.drawer-head-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+#btn-drawer-full { display: none; }
+
+@media (min-width: 821px) {
+  body { --drawer-size: var(--drawer-w, min(430px, 40vw)); }
+  body.drawer-wide { --drawer-size: max(var(--drawer-w, 0px), min(860px, 70vw)); }
+  .drawer, body.drawer-wide .drawer { width: var(--drawer-size); container: drawer / inline-size; }
+  body.drawer-open #chat,
+  body.drawer-wide.drawer-open #chat,
+  body.drawer-open.split-row #chat { margin-right: calc(var(--drawer-size) + 16px); }
+
+  #btn-drawer-full { display: inline-flex; }
+  .drawer-grip {
+    display: block;
+    position: absolute;
+    top: 18px;
+    bottom: 18px;
+    left: 0;
+    width: 10px;
+    z-index: 3;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .drawer-grip::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 4px;
+    height: 44px;
+    border-radius: 999px;
+    background: var(--k-text-3);
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity var(--k-dur-base) var(--k-ease-out);
+  }
+  .drawer-grip:hover::after,
+  .drawer-grip:focus-visible::after,
+  body.drawer-drag .drawer-grip::after { opacity: 0.55; }
+  .drawer-grip:focus-visible { outline: none; }
+  body.drawer-drag { cursor: col-resize; user-select: none; }
+  body.drawer-drag .drawer { animation: none; }
+  body.drawer-drag iframe { pointer-events: none; }
+
+  html:not(.pane-mode) body.drawer-full .drawer {
+    left: var(--side-w, 296px);
+    width: auto;
+    z-index: 45;
+    box-shadow: var(--k-shadow-3);
+  }
+  body.drawer-full .drawer-grip { display: none; }
+}
+
+/* Узкая панель: у невыбранных вкладок остаётся только значок, подпись — в подсказке. */
+@container drawer (max-width: 480px) {
+  .drawer-tabs .k-tab:not([aria-selected="true"]) .k-tab__label { display: none; }
+}
+
+/* Бота тащат в команду: строка команды или «Без команды» подсвечивается, пока над ней держат бота. */
+#bot-list .sb-drop-on { background: var(--k-brand-tint); box-shadow: inset 0 0 0 1.5px var(--k-brand); border-radius: 12px; }
+#bot-list ul.sb-drop-on { padding-block: 2px; }
+
+/* ==================================================================== Свёрнутая панель бота
+   Панель у бота не закрывается: «Свернуть» оставляет столбик значков разделов, как у левой колонки. */
+.drawer-rail-icons { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.drawer-rail-icons .k-btn.is-current { background: var(--k-ink); color: var(--k-on-ink); }
+.drawer-rail-sep { width: 20px; height: 1px; margin: 4px 0; background: var(--k-line); }
+@media (min-width: 821px) {
+  body.drawer-rail { --drawer-size: 56px; }
+  body.drawer-rail .drawer-head { flex-direction: column; justify-content: flex-start; padding: var(--k-space-3) 0; border-bottom: 0; }
+  body.drawer-rail .drawer-body,
+  body.drawer-rail .drawer-grip { display: none; }
+}
+
+/* Вкладка «Рутины» в панели бота: подсказка и кнопка сверху, строки — те же, что в окне «Рутины». */
+.drawer-rt-head { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); }
+.drawer-rt-head .note { margin: 0; }
+.drawer-rt-head .primary { flex: none; }
+.drawer-rt-list { display: flex; flex-direction: column; }
+
+/* Запуск рутины в чате: маленькая карточка, задание целиком — по щелчку. */
+.rt-runcard { width: min(560px, 100%); margin-left: auto; border: 1px solid var(--k-line); border-radius: 18px; background: var(--k-surface); overflow: hidden; }
+.rt-runcard > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; list-style: none; cursor: pointer; }
+.rt-runcard > summary::-webkit-details-marker { display: none; }
+.rt-runcard > summary:hover { background: var(--k-surface-2); }
+.rt-runcard > summary:focus-visible { outline: none; box-shadow: inset var(--k-focus); }
+.rt-run-icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--k-brand-tint); color: var(--k-brand-text); }
+.rt-runcard svg.i { width: 15px; height: 15px; }
+.rt-run-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.rt-run-title { overflow: hidden; color: var(--k-text); font: 600 var(--k-text-sm) / 1.3 var(--k-font-body); text-overflow: ellipsis; white-space: nowrap; }
+.rt-run-kind { margin-right: 6px; color: var(--k-text-3); font-weight: 400; }
+.rt-run-gist { overflow: hidden; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); text-overflow: ellipsis; white-space: nowrap; }
+.rt-run-chev { flex: none; color: var(--k-text-3); transition: transform var(--k-dur-base) var(--k-ease-out); }
+.rt-runcard[open] .rt-run-chev { transform: rotate(180deg); }
+.rt-runcard[open] .rt-run-gist { display: none; }
+.rt-run-body { max-height: 50vh; overflow: auto; padding: 4px 16px 12px 48px; color: var(--k-text-2); font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); }
+.rt-run-body > :first-child { margin-top: 0; }
+/* В узкой панели название рутины стоит над её сутью, а не в одну строку с ней. */
+.drawer-rt-list .routine .rt-text { flex-direction: column; align-items: stretch; gap: 2px; }
+.drawer-rt-list .routine .rt-title { max-width: 100%; }
+
+/* Файл из вкладки «Файлы» несут в чат: чат обводится, отпустить можно в любом его месте. */
+#chat.file-ref-drop { box-shadow: inset 0 0 0 2px var(--k-brand); }

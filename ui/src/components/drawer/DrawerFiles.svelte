@@ -8,6 +8,7 @@
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';
   import FileViewer from './FileViewer.svelte';
+  import { FILE_MIME, fileRef } from '../../lib/fileRef.js';
 
   let { bot, api, initial = '', onquote } = $props();
 
@@ -34,6 +35,15 @@
     viewing = { name: item.name, path: item.path };
   }
 
+  // Файл или папку тащат в чат: в сообщение встаёт ссылка на них, писать путь руками не нужно.
+  // text/plain — чтобы и поле ввода само вставило её туда, куда бросили; свой тип — для остального чата.
+  function dragFile(event, item) {
+    const ref = fileRef(item);
+    event.dataTransfer?.setData('text/plain', ref);
+    event.dataTransfer?.setData(FILE_MIME, JSON.stringify({ botId: bot.id, path: item.path, dir: Boolean(item.dir), ref }));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+  }
+
   const up = () => load(path.split('/').slice(0, -1).join('/'));
   const crumbPath = (index) => crumbs.slice(0, index + 1).join('/');
 
@@ -50,7 +60,7 @@
 </script>
 
 {#snippet folderIcon()}
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
   </svg>
 {/snippet}
@@ -99,7 +109,14 @@
     <ul class="k-list">
       {#each items as item (item.path)}
         {#snippet icon()}{#if item.dir}{@render folderIcon()}{:else}{@render fileIcon(fileType(item.name))}{/if}{/snippet}
-        <ListItem title={item.name} avatar={icon} onclick={() => open(item)} />
+        <ListItem
+          title={item.name}
+          avatar={icon}
+          onclick={() => open(item)}
+          draggable="true"
+          data-path={item.path}
+          ondragstart={(e) => dragFile(e, item)}
+        />
       {/each}
     </ul>
   {/if}

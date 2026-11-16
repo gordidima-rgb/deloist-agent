@@ -179,7 +179,7 @@
       <span class="cmp-chip cmp-chip--{chip.kind}" data-kind={chip.kind}>
         <span class="cmp-chip-text">{chip.text}</span>
         <button type="button" class="cmp-chip-x" aria-label={chipLabel(chip)} title={chipLabel(chip)} onclick={() => remove(chip.kind)}>
-          <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </span>
     {/each}
