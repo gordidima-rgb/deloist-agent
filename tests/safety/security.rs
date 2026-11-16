@@ -2771,6 +2771,8 @@ async fn the_delegation_floor_reaches_the_bridge_tools_and_survives_two_hops() {
         ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string());
     }
     let (b, c) = (ids[0].clone(), ids[1].clone());
+    // Поручают только своей команде (вне команды — ведущий ведущему): все трое в одной.
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Цепочка", "botIds": [a, b, c], "lead": a }))).await;
     // Отправитель спрашивает; получатель по мосту создаёт рутину: карточка есть, хотя сам он «решает сам».
     let card = handoff_to_acp(&crew, &a, "передай Получатель рутина Цены").await;
     assert_eq!(card["botId"], b.as_str(), "{card}");
