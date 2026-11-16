@@ -246,6 +246,9 @@ struct HttpSession {
     /// Заголовки с подставленными секретами. Наружу не показываются.
     headers: Vec<(String, String)>,
     header_templates: BTreeMap<String, String>,
+    server_id: String,
+    /// Куда складывать ответ на 401 (`WWW-Authenticate`), чтобы предложить вход.
+    challenges: Arc<Mutex<HashMap<String, crate::oauth::Challenge>>>,
 }
 
 struct Reply {
@@ -441,6 +444,10 @@ impl HttpSession {
             .map(str::to_string);
 
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            if status == StatusCode::UNAUTHORIZED {
+                let header = response.headers().get(reqwest::header::WWW_AUTHENTICATE).and_then(|v| v.to_str().ok()).unwrap_or_default();
+                self.challenges.lock().unwrap().insert(self.server_id.clone(), crate::oauth::parse_challenge(header));
+            }
             // Ключ в заголовках уже есть: значит, он не подошёл или вход протух.
             let hint = if self.headers.is_empty() { ". Добавьте его в адрес сервера, например ?key=…" } else { ": проверьте ключ или войдите заново" };
             return Err(Failure::Fatal(format!("MCP «{}»: сервер требует ключ (HTTP {}){hint}", self.label, status.as_u16())));
@@ -735,7 +742,7 @@ async fn spawn_stdio(cfg: &McpServer, env: Vec<(String, String)>) -> Result<Arc<
     Ok(session)
 }
 
-async fn spawn_http(cfg: &McpServer, headers: Vec<(String, String)>) -> Result<Arc<HttpSession>, String> {
+async fn spawn_http(app: &App, cfg: &McpServer, headers: Vec<(String, String)>) -> Result<Arc<HttpSession>, String> {
     let url = cfg.url.trim().to_string();
     if !valid_http_url(&url) {
         return Err(format!("MCP «{}»: адрес сервера должен начинаться с http:// или https://", cfg.name));
@@ -758,6 +765,8 @@ async fn spawn_http(cfg: &McpServer, headers: Vec<(String, String)>) -> Result<A
         tools: Mutex::new(Vec::new()),
         headers,
         header_templates: cfg.headers.clone(),
+        server_id: cfg.id.clone(),
+        challenges: app.connectors.oauth.challenges.clone(),
     });
     session.handshake(None).await?;
     Ok(session)
@@ -790,7 +799,7 @@ async fn session_for(app: &Arc<App>, cfg: &McpServer) -> Result<Arc<Session>, St
         // Согласие, хост, свежий токен и секреты — до запуска процесса или первого запроса.
         let prepared = crate::connectors::prepare(app, cfg).await?;
         Ok::<_, String>(Arc::new(if cfg.is_http() {
-            Session::Http(spawn_http(cfg, prepared.headers).await?)
+            Session::Http(spawn_http(app, cfg, prepared.headers).await?)
         } else {
             Session::Stdio(spawn_stdio(cfg, prepared.env).await?)
         }))

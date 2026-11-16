@@ -264,6 +264,12 @@ struct Fake {
     issued: usize,
     registered: Vec<Value>,
     resource_seen: String,
+    /// Сервер авторизации без `registration_endpoint`.
+    no_registration: bool,
+    /// 401 с `WWW-Authenticate: Bearer resource_metadata=…`; стандартный адрес метаданных при этом молчит.
+    challenge: bool,
+    meta_hits: usize,
+    secret_seen: String,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -323,6 +329,7 @@ async fn token(State(fake): State<Shared>, body: Bytes) -> Response {
             return (StatusCode::BAD_REQUEST, axum::Json(json!({ "error": "invalid_grant" }))).into_response();
         }
     }
+    f.secret_seen = form.get("client_secret").cloned().unwrap_or_default();
     let n = f.token_calls;
     f.accept_auth = format!("Bearer at-{n}");
     axum::Json(json!({ "access_token": format!("at-{n}"), "refresh_token": format!("rt-{n}"), "expires_in": f.expires_in, "token_type": "Bearer" })).into_response()
@@ -334,7 +341,19 @@ async fn register(State(fake): State<Shared>, body: Bytes) -> Response {
     (StatusCode::CREATED, axum::Json(json!({ "client_id": "dyn-client-1" }))).into_response()
 }
 
+async fn custom_meta(State(fake): State<Shared>) -> Response {
+    fake.lock().unwrap().meta_hits += 1;
+    resource_meta_body(fake)
+}
+
 async fn resource_meta(State(fake): State<Shared>) -> Response {
+    if fake.lock().unwrap().challenge {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    resource_meta_body(fake)
+}
+
+fn resource_meta_body(fake: Shared) -> Response {
     let port = fake.lock().unwrap().port;
     axum::Json(json!({ "resource": format!("http://127.0.0.1:{port}/mcp"), "authorization_servers": [format!("http://127.0.0.1:{port}")] })).into_response()
 }
@@ -342,14 +361,17 @@ async fn resource_meta(State(fake): State<Shared>) -> Response {
 async fn as_meta(State(fake): State<Shared>) -> Response {
     let port = fake.lock().unwrap().port;
     let base = format!("http://127.0.0.1:{port}");
-    axum::Json(json!({
+    let mut meta = json!({
         "issuer": base,
         "authorization_endpoint": format!("{base}/authorize"),
         "token_endpoint": format!("{base}/token"),
         "registration_endpoint": format!("{base}/register"),
         "code_challenge_methods_supported": ["S256"],
-    }))
-    .into_response()
+    });
+    if fake.lock().unwrap().no_registration {
+        meta.as_object_mut().unwrap().remove("registration_endpoint");
+    }
+    axum::Json(meta).into_response()
 }
 
 async fn mcp(State(fake): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
@@ -358,6 +380,11 @@ async fn mcp(State(fake): State<Shared>, headers: HeaderMap, body: Bytes) -> Res
     if want.is_empty() || got != want {
         if fake.lock().unwrap().echo_bad_key {
             return (StatusCode::BAD_REQUEST, format!("bad key: {got}")).into_response();
+        }
+        if fake.lock().unwrap().challenge {
+            let port = fake.lock().unwrap().port;
+            let header = format!("Bearer realm=\"mcp\", resource_metadata=\"http://127.0.0.1:{port}/custom-meta\"");
+            return (StatusCode::UNAUTHORIZED, [("www-authenticate", header)], "нужен ключ").into_response();
         }
         return (StatusCode::UNAUTHORIZED, "нужен ключ").into_response();
     }
@@ -387,6 +414,7 @@ async fn start_fake() -> Shared {
         .route("/register", post(register))
         .route("/.well-known/oauth-protected-resource/mcp", get(resource_meta))
         .route("/.well-known/oauth-authorization-server", get(as_meta))
+        .route("/custom-meta", get(custom_meta))
         .route("/mcp", post(mcp))
         .with_state(fake.clone());
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -560,6 +588,97 @@ async fn mcp_oauth_finds_the_server_and_registers_a_client() {
     // Второй вход берёт того же клиента, если его порт свободен.
     crew.ok("POST", "/api/connectors/web/oauth/start", Some(json!({ "open": false }))).await;
     assert_eq!(fake.lock().unwrap().registered.len(), 1, "клиент не регистрируется заново");
+}
+
+/// Пройти вход «браузером» и дождаться, пока приложение сохранит токен.
+async fn finish_login(crew: &Crew, url: &str) {
+    let callback = follow_login(url).await;
+    let loopback = reqwest::Client::builder().no_proxy().build().unwrap();
+    assert_eq!(loopback.get(&callback).send().await.unwrap().status().as_u16(), 200);
+    crew.wait_event("вход", |e| e["type"] == "connector" && e["state"] == "ok").await;
+}
+
+#[tokio::test]
+async fn a_custom_server_asking_for_login_uses_the_resource_metadata_of_its_401() {
+    let fake = start_fake().await;
+    let port = fake.lock().unwrap().port;
+    fake.lock().unwrap().challenge = true;
+    let crew = Crew::start("mcp-401").await;
+    crew.listen().await;
+    let made = crew.ok("POST", "/api/mcp", Some(json!({ "name": "Свой", "url": format!("http://127.0.0.1:{port}/mcp") }))).await;
+    let id = made["server"]["id"].as_str().unwrap().to_string();
+
+    // Первый запрос без токена: 401 — сервер помечен «нужно войти», а не просто ошибкой.
+    let (status, body) = crew.send("POST", &format!("/api/mcp/{id}/check"), None).await;
+    assert_eq!(status, 502, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("нужно войти"), "{body}");
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["mcp"][0]["login"]["state"], "needs-login", "{state}");
+    assert_eq!(fake.lock().unwrap().meta_hits, 0, "без клика в сеть за входом не ходим");
+
+    // «Войти»: адрес метаданных берётся из заголовка, стандартный .well-known молчит.
+    let started = crew.ok("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false }))).await;
+    assert!(fake.lock().unwrap().meta_hits >= 1, "resource_metadata из WWW-Authenticate не использован");
+    let url = started["url"].as_str().unwrap();
+    let query = pairs(reqwest::Url::parse(url).unwrap().query().unwrap());
+    assert_eq!(query["client_id"], "dyn-client-1");
+    assert_eq!(query["resource"], format!("http://127.0.0.1:{port}/mcp"));
+    finish_login(&crew, url).await;
+
+    let checked = crew.ok("POST", &format!("/api/mcp/{id}/check"), None).await;
+    assert_eq!(checked["tools"], json!(["echo"]));
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["mcp"][0]["login"]["state"], "connected", "{state}");
+    // Токен только в хранилище: ни в ответах, ни в событиях, ни на диске открыто.
+    let all = format!("{}{}{}", state, started, text(&crew, "/api/state").await);
+    let events = serde_json::to_string(&*crew.events.lock().unwrap()).unwrap();
+    for secret in ["at-1", "rt-1"] {
+        assert!(!all.contains(secret) && !events.contains(secret), "{secret} утёк");
+        assert_not_on_disk(&crew.data_dir, secret);
+    }
+}
+
+#[tokio::test]
+async fn without_a_registration_endpoint_the_human_gives_a_client_id() {
+    let fake = start_fake().await;
+    let port = fake.lock().unwrap().port;
+    fake.lock().unwrap().no_registration = true;
+    let crew = Crew::start("mcp-manual-client").await;
+    crew.listen().await;
+    let made = crew.ok("POST", "/api/mcp", Some(json!({ "name": "Свой", "url": format!("http://127.0.0.1:{port}/mcp") }))).await;
+    let id = made["server"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = crew.send("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false }))).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["needsClientId"], true, "{body}");
+    assert_eq!(body["authHost"], "127.0.0.1");
+    assert!(fake.lock().unwrap().registered.is_empty());
+
+    let started = crew.ok("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false, "clientId": "my-client", "clientSecret": "shh-secret-71" }))).await;
+    let url = started["url"].as_str().unwrap();
+    assert_eq!(pairs(reqwest::Url::parse(url).unwrap().query().unwrap())["client_id"], "my-client");
+    assert!(!started.to_string().contains("shh-secret-71"));
+    finish_login(&crew, url).await;
+    assert_eq!(fake.lock().unwrap().secret_seen, "shh-secret-71", "секрет клиента ушёл серверу токенов");
+    assert!(fake.lock().unwrap().registered.is_empty(), "регистрироваться не пытались");
+    assert_eq!(crew.ok("POST", &format!("/api/mcp/{id}/check"), None).await["tools"], json!(["echo"]));
+    let shown = text(&crew, "/api/state").await;
+    assert!(!shown.contains("shh-secret-71") && !shown.contains("at-1"), "секрет в ответе");
+    assert_not_on_disk(&crew.data_dir, "shh-secret-71");
+    assert_not_on_disk(&crew.data_dir, "at-1");
+
+    // Второй вход берёт сохранённый client id без вопросов.
+    let again = crew.ok("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false }))).await;
+    assert_eq!(pairs(reqwest::Url::parse(again["url"].as_str().unwrap()).unwrap().query().unwrap())["client_id"], "my-client");
+}
+
+#[tokio::test]
+async fn a_manual_client_is_refused_for_a_stdio_server() {
+    let crew = Crew::start("mcp-oauth-stdio").await;
+    let made = crew.ok("POST", "/api/mcp", Some(json!({ "command": "srv" }))).await;
+    let id = made["server"]["id"].as_str().unwrap().to_string();
+    let (status, _) = crew.send("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false, "clientId": "x" }))).await;
+    assert_eq!(status, 400);
 }
 
 #[tokio::test]

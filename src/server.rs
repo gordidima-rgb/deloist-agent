@@ -593,7 +593,7 @@ async fn state(State(app): Shared) -> Response {
         "skills": app.store.skills(),
         // Адрес сервера отдаём без ключа: интерфейсу он нужен только чтобы показать, куда подключено.
         // Адрес без ключа, шаблоны без вписанных руками значений: секреты живут не здесь.
-        "mcp": app.store.mcp_servers().into_iter().map(shown_mcp).collect::<Vec<_>>(),
+        "mcp": app.store.mcp_servers().into_iter().map(|s| shown_mcp(&app, s)).collect::<Vec<_>>(),
         "routines": app.store.routines(),
         "goals": app.goals.list(),
         "checkins": app.goals.checkins(),
@@ -2796,13 +2796,29 @@ async fn room_reassign(State(app): Shared, Path(id): Path<String>, body: axum::b
 }
 
 /// Сервер для ответа API: адрес без ключа, env и заголовки без вписанных руками значений.
-fn shown_mcp(mut server: crate::store::McpServer) -> crate::store::McpServer {
+fn shown_mcp(app: &App, mut server: crate::store::McpServer) -> Value {
+    let login = crate::connectors::login_view(app, &server);
     if !server.url.is_empty() {
         server.url = crate::mcp::public_url(&server.url);
     }
     server.env = crate::connectors::masked_map(&server.env);
     server.headers = crate::connectors::masked_map(&server.headers);
-    server
+    // Адреса входа и client id в список не идут: только состояние.
+    server.login = None;
+    let mut shown = serde_json::to_value(&server).unwrap_or(Value::Null);
+    if let (Some(map), Some(login)) = (shown.as_object_mut(), login) {
+        map.insert("login".into(), login);
+    }
+    shown
+}
+
+/// Вход в свой HTTP-сервер: ту же ссылку входа, что у подключений каталога. Только окно (guard::human_only).
+async fn mcp_oauth_start(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    connector_result(crate::connectors::oauth_start(&app, &id, &body).await)
 }
 
 async fn add_mcp(
@@ -2825,7 +2841,7 @@ async fn add_mcp(
         return r;
     }
     match app.store.add_mcp(&body).await {
-        Ok(server) => created(json!({ "server": shown_mcp(server) })),
+        Ok(server) => created(json!({ "server": shown_mcp(&app, server) })),
         Err(e) => io_fail(e),
     }
 }
@@ -2867,11 +2883,16 @@ async fn patch_mcp(
     if let Err(r) = check_mcp_templates(&body, Some(&current)) {
         return r;
     }
+    let url_changed = body.get("url").and_then(Value::as_str).is_some_and(|u| u.trim() != current.url.trim());
     match app.store.update_mcp(&id, &body).await {
         Ok(Some(server)) => {
+            // Другой адрес — другой сервер: вход и токены прежнего ему не отдаём.
+            if url_changed && server.login.is_some() {
+                crate::connectors::forget_login(&app, &id).await;
+            }
             // Новые команда и аргументы действуют сразу: прежний процесс больше не нужен.
             crate::mcp::close(&app, &id);
-            ok(json!({ "server": shown_mcp(server) }))
+            ok(json!({ "server": shown_mcp(&app, server) }))
         }
         Ok(None) => fail(StatusCode::NOT_FOUND, "сервер не найден"),
         Err(e) => io_fail(e),
@@ -3589,6 +3610,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mcp", post(add_mcp))
         .route("/api/mcp/{id}", axum::routing::patch(patch_mcp).delete(remove_mcp))
         .route("/api/mcp/{id}/check", post(check_mcp))
+        .route("/api/mcp/{id}/oauth/start", post(mcp_oauth_start))
         .route("/api/catalog", get(catalog_list))
         .route("/api/dates/parse", get(dates_parse))
         .route("/api/catalog/{id}", get(catalog_item).delete(catalog_uninstall))

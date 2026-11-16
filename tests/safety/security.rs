@@ -774,6 +774,8 @@ async fn the_agent_key_cannot_install_or_feed_connectors() {
         call(reqwest::Method::POST, "/api/connectors/x/secret", Some(json!({ "name": "k", "value": "v" }))).await.unwrap(),
         call(reqwest::Method::POST, "/api/connectors/x/oauth/start", Some(json!({ "open": false }))).await.unwrap(),
         call(reqwest::Method::POST, "/api/connectors/x/check", None).await.unwrap(),
+        // Вход в свой MCP-сервер, client id и секрет клиента: только человек в окне.
+        call(reqwest::Method::POST, "/api/mcp/x/oauth/start", Some(json!({ "open": false, "clientId": "c", "clientSecret": "s" }))).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/connectors/x", None).await.unwrap(),
         // Каталожный сервер ключ не правит и через /api/mcp.
         call(reqwest::Method::PATCH, "/api/mcp/x", Some(json!({ "command": "evil" }))).await.unwrap(),

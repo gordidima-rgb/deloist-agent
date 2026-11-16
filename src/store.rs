@@ -634,6 +634,19 @@ pub struct McpServer {
     /// Сервер поставлен из манифеста каталога: закреплённая установка, согласие, вход.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connector: Option<crate::connectors::Meta>,
+    /// Свой HTTP-сервер (не из каталога), которому нужен вход: адреса сервера авторизации и client id.
+    /// Токены лежат в хранилище секретов, здесь их нет.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login: Option<Login>,
+}
+
+/// Вход в свой MCP-сервер по OAuth.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Login {
+    pub oauth: crate::oauth::Config,
+    /// Сервер ответил 401 или токен отозван: нужна кнопка «Войти».
+    pub needs_reauth: bool,
 }
 
 impl Default for McpServer {
@@ -650,6 +663,7 @@ impl Default for McpServer {
             env: BTreeMap::new(),
             headers: BTreeMap::new(),
             connector: None,
+            login: None,
         }
     }
 }
@@ -3050,6 +3064,7 @@ impl Store {
             env: string_map(input.get("env")),
             headers: string_map(input.get("headers")),
             connector: None,
+            login: None,
         };
         self.state.lock().unwrap().mcp.push(server.clone());
         self.persist().await?;

@@ -641,6 +641,7 @@ pub fn from_manifest(data_dir: &Path, manifest: &Value) -> Result<McpServer, Str
         env,
         headers,
         connector: Some(meta),
+        login: None,
     };
     check_templates(&server)?;
     check_egress(&server)?;
@@ -682,6 +683,14 @@ pub async fn prepare(app: &Arc<App>, server: &McpServer) -> Result<Prepared, Str
             }
             oauth::ensure_fresh(app, &server.id, &meta.auth.oauth).await?;
         }
+    } else if let Some(login) = server.login.as_ref().filter(|_| server.is_http()) {
+        // Свой сервер: пока входа не было, идём без токена (ответ 401 предложит войти).
+        if app.connectors.secrets.get(&server.id, oauth::ACCESS).is_some() {
+            if login.needs_reauth {
+                return Err("вход истёк: нажмите «Войти»".into());
+            }
+            oauth::ensure_fresh(app, &server.id, &login.oauth).await?;
+        }
     }
     let lookup = |name: &str| app.connectors.secrets.get(&server.id, name);
     let mut env = Vec::new();
@@ -701,7 +710,7 @@ pub async fn prepare(app: &Arc<App>, server: &McpServer) -> Result<Prepared, Str
 
 /// Токен живой сессии скоро истечёт: сессию надо открыть заново, обновив токен.
 pub fn token_expiring(app: &App, server: &McpServer) -> bool {
-    if !server.connector.as_ref().is_some_and(is_oauth) {
+    if !server.connector.as_ref().is_some_and(is_oauth) && server.login.is_none() {
         return false;
     }
     let expires: i64 = app.connectors.secrets.get(&server.id, oauth::EXPIRES).and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -723,10 +732,38 @@ pub fn scrub(app: &App, id: &str, text: &str) -> String {
     out
 }
 
+/// Свой HTTP-сервер ответил 401: если ключа от человека в заголовках нет, предлагаем войти.
+async fn custom_failure(app: &Arc<App>, server: &McpServer, error: String) -> String {
+    if !server.is_http() || !error.contains("HTTP 401") {
+        return error;
+    }
+    let own_key = server.headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("authorization") && !v.contains("{{secret:oauth."));
+    let bearer = app.connectors.oauth.challenges.lock().unwrap().get(&server.id).is_some_and(|c| c.bearer);
+    // Без заголовка Bearer и с ключом в адресе (`?key=…`) это скорее неверный ключ, а не вход.
+    let key_in_url = reqwest::Url::parse(server.url.trim()).is_ok_and(|u| u.query().is_some());
+    if own_key || (!bearer && key_in_url) {
+        return error;
+    }
+    // Сервер сам просит Bearer — говорим прямо; иначе оставляем его текст («требует ключ»), но «Войти» предлагаем.
+    let text = if bearer { "нужно войти: нажмите «Войти»".to_string() } else { error };
+    app.connectors.set_error(&server.id, &text);
+    if !server.login.as_ref().is_some_and(|l| l.needs_reauth) {
+        let _ = app
+            .store
+            .edit_mcp(&server.id, |s| {
+                s.login.get_or_insert_with(Default::default);
+                oauth::set_reauth(s, true);
+            })
+            .await;
+    }
+    announce(app, &server.id);
+    text
+}
+
 /// Ошибка запуска или запроса: текст без секретов; 401 у подключения с OAuth значит, что вход протух.
 pub async fn note_failure(app: &Arc<App>, server: &McpServer, error: &str) -> String {
     let error = scrub(app, &server.id, error);
-    let Some(meta) = &server.connector else { return error };
+    let Some(meta) = &server.connector else { return custom_failure(app, server, error).await };
     app.connectors.set_error(&server.id, &error);
     if is_oauth(meta) && error.contains("HTTP 401") && !meta.needs_reauth {
         oauth::mark_reauth(app, &server.id).await;
@@ -772,6 +809,11 @@ pub fn state_of(app: &App, server: &McpServer) -> (&'static str, String) {
             return ("needs-auth", error);
         }
     }
+    if let Some(login) = &server.login {
+        if login.needs_reauth || app.connectors.secrets.get(&server.id, oauth::ACCESS).is_none() {
+            return ("needs-auth", error);
+        }
+    }
     let missing = referenced(server).into_iter().filter(|n| !n.starts_with(secrets::RESERVED_PREFIX)).any(|n| app.connectors.secrets.get(&server.id, &n).is_none());
     let missing_field = server.connector.as_ref().is_some_and(|m| m.auth.fields.iter().any(|f| app.connectors.secrets.get(&server.id, &f.name).is_none()));
     if missing || missing_field {
@@ -784,6 +826,32 @@ pub fn state_of(app: &App, server: &McpServer) -> (&'static str, String) {
         return ("off", String::new());
     }
     ("ok", String::new())
+}
+
+/// Забыть вход в свой сервер: токены, секрет клиента, заголовок с токеном и найденные адреса.
+pub async fn forget_login(app: &Arc<App>, id: &str) {
+    for name in [oauth::ACCESS, oauth::REFRESH, oauth::EXPIRES, oauth::CLIENT_SECRET] {
+        let _ = app.connectors.secrets.delete(id, name);
+    }
+    app.connectors.oauth.challenges.lock().unwrap().remove(id);
+    let _ = app
+        .store
+        .edit_mcp(id, |s| {
+            s.login = None;
+            s.headers.retain(|k, v| !(k.eq_ignore_ascii_case("authorization") && v.contains("{{secret:oauth.")));
+        })
+        .await;
+    app.connectors.clear_error(id);
+    crate::mcp::close(app, id);
+}
+
+/// Вход в свой сервер для списка серверов: состояние без токенов.
+pub fn login_view(app: &App, server: &McpServer) -> Option<Value> {
+    let login = server.login.as_ref()?;
+    let connected = !login.needs_reauth && app.connectors.secrets.get(&server.id, oauth::ACCESS).is_some();
+    let error = app.connectors.errors.lock().unwrap().get(&server.id).cloned().unwrap_or_default();
+    let host = reqwest::Url::parse(&login.oauth.authorize_url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    Some(json!({ "state": if connected { "connected" } else { "needs-login" }, "error": error, "authHost": host }))
 }
 
 pub fn view(app: &App, server: &McpServer) -> Value {
@@ -1085,23 +1153,52 @@ pub async fn set_secret(app: &Arc<App>, id: &str, body: &Value) -> Result<Value,
 }
 
 pub async fn oauth_start(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, Fail> {
-    let server = connector(app, id)?;
-    let meta = server.connector.clone().unwrap();
-    if meta.consented_at == 0 {
-        return Err(fail(409, "сначала подтвердите подключение"));
-    }
-    let discovery = match meta.auth.kind.as_str() {
-        "oauth" => None,
-        "mcp-oauth" => Some(server.url.trim().to_string()),
-        _ => return Err(fail(400, "у этого подключения нет входа через OAuth")),
-    };
-    if discovery.is_none() {
-        // Пустой client id встроенного провайдера — не ошибка сети, а незаполненная настройка.
-        if let Err(e) = oauth::resolve(&meta.auth.oauth) {
-            return Err(fail(412, e));
+    let server = app.store.mcp_server(id).ok_or_else(|| fail(404, "подключение не найдено"))?;
+    // client id, который ввёл человек, когда у сервера авторизации нет регистрации клиента.
+    let manual = body.get("clientId").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(|client_id| oauth::Manual {
+        client_id: client_id.to_string(),
+        client_secret: body.get("clientSecret").and_then(Value::as_str).unwrap_or_default().to_string(),
+        redirect_port: body.get("redirectPort").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).unwrap_or(0),
+    });
+    let (cfg, discovery, egress, manual) = match &server.connector {
+        Some(meta) => {
+            if meta.consented_at == 0 {
+                return Err(fail(409, "сначала подтвердите подключение"));
+            }
+            let discovery = match meta.auth.kind.as_str() {
+                "oauth" => None,
+                "mcp-oauth" => Some(server.url.trim().to_string()),
+                _ => return Err(fail(400, "у этого подключения нет входа через OAuth")),
+            };
+            if discovery.is_none() {
+                // Пустой client id встроенного провайдера — не ошибка сети, а незаполненная настройка.
+                if let Err(e) = oauth::resolve(&meta.auth.oauth) {
+                    return Err(fail(412, e));
+                }
+            }
+            let manual = if discovery.is_some() { manual } else { None };
+            (meta.auth.oauth.clone(), discovery, Some(meta.egress.clone()), manual)
         }
-    }
-    let started = oauth::start(app, id, meta.auth.oauth.clone(), discovery, &meta.egress).await.map_err(|e| fail(502, e))?;
+        // Свой сервер по адресу: тот же вход, найти сервер авторизации по ответу 401 или по адресу.
+        None => {
+            if !server.is_http() {
+                return Err(fail(400, "вход через OAuth есть только у HTTP-серверов"));
+            }
+            let cfg = server.login.as_ref().map(|l| l.oauth.clone()).unwrap_or_default();
+            (cfg, Some(server.url.trim().to_string()), None, manual)
+        }
+    };
+    let started = match oauth::start(app, id, cfg, discovery, egress.as_deref(), manual).await {
+        Ok(started) => started,
+        Err(oauth::StartError::NeedsClientId(host)) => {
+            return Err(Fail(
+                409,
+                "сервер авторизации не умеет регистрировать клиентов: введите client ID".into(),
+                json!({ "needsClientId": true, "authHost": host }),
+            ))
+        }
+        Err(oauth::StartError::Failed(e)) => return Err(fail(502, e)),
+    };
     if body.get("open").and_then(Value::as_bool).unwrap_or(true) {
         crate::desktop::open_in_browser(&started.url);
     }

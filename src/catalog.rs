@@ -1104,7 +1104,15 @@ pub async fn connect(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, Fa
             }
             client.secret(&connector, name, str_of(body, "value")).await?
         }
-        "oauth" => json!({ "url": client.oauth_start(&connector).await? }),
+        "oauth" => {
+            let mut login = json!({});
+            for key in ["clientId", "clientSecret", "redirectPort"] {
+                if let Some(value) = body.get(key).filter(|v| v.is_string() || v.is_number()) {
+                    login[key] = value.clone();
+                }
+            }
+            json!({ "url": client.oauth_start(&connector, login).await? })
+        }
         "check" => {
             let tools = client.check(&connector).await?;
             record.status = "ready".into();

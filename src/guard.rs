@@ -542,6 +542,8 @@ fn human_only(path: &str) -> bool {
         || path.starts_with("/api/selfdev")
         // Подключения: согласие на запуск, ключи и входы — решение человека.
         || path.starts_with("/api/connectors")
+        // Вход в свой MCP-сервер по OAuth: ссылка входа, client id и секрет клиента — решение человека.
+        || (path.starts_with("/api/mcp/") && path.contains("/oauth/"))
         || path.starts_with("/api/know-me")
         // Токен своего бота Telegram, привязка чата и переписка от лица человека — только окно.
         || path.starts_with("/api/telegram")
