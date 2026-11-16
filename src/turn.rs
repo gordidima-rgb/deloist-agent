@@ -2778,7 +2778,7 @@ pub fn delegate_to_bot_with(
 
 /// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём и с теми же согласиями.
 /// Ждёт, пока бот освободится (до минуты). Возвращает последний ответ бота; `stop` останавливает ход.
-pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, unattended: bool, stop: CancellationToken) -> Result<String, String> {
+pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, attachments: Vec<Value>, unattended: bool, stop: CancellationToken) -> Result<String, String> {
     let Some(bot) = app.store.bot(bot_id) else {
         return Err("бот не найден".into());
     };
@@ -2807,7 +2807,7 @@ pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, unatten
             app.turns.stop_turn(&bot_id);
         })
     };
-    let (answer, _tokens) = run_turn_body(app.clone(), bot, text.to_string(), Vec::new(), opts, cancel).await;
+    let (answer, _tokens) = run_turn_body(app.clone(), bot, text.to_string(), attachments, opts, cancel).await;
     watcher.abort();
     if stop.is_cancelled() {
         return Err("остановлено".into());

@@ -175,6 +175,32 @@ pub async fn generate(app: &App, bot: &Bot, args: &Value) -> Result<String, Stri
     ))
 }
 
+/// Нарисовать картинку и отдать байты (для рабочих процессов): тот же сервис, ключ, предел в день и проверка `ready`.
+pub async fn generate_bytes(app: &App, prompt: &str, size: Option<&str>) -> Result<Vec<u8>, String> {
+    let settings = app.store.settings();
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        return Err("пустое описание".into());
+    }
+    if !ready(app) {
+        return Err("сервис картинок не настроен: Настройки → Картинки".into());
+    }
+    let data_dir = app.store.data_dir();
+    let daily = settings.image_daily.max(0);
+    if app.images.reserve(data_dir, daily).is_none() {
+        return Err(format!("на сегодня предел картинок исчерпан ({daily})"));
+    }
+    match request_image(&settings, &api_key(app), prompt, size).await {
+        Ok(bytes) => Ok(bytes),
+        Err(failure) => {
+            if !failure.charged {
+                app.images.release(data_dir);
+            }
+            Err(failure.message)
+        }
+    }
+}
+
 async fn request_image(settings: &Settings, key: &str, prompt: &str, size: Option<&str>) -> Result<Vec<u8>, Failure> {
     let base = settings.image_base_url.trim().trim_end_matches('/');
     let url = if base.ends_with("/images/generations") { base.to_string() } else { format!("{base}/images/generations") };

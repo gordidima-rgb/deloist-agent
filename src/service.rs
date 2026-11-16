@@ -75,12 +75,17 @@ pub async fn complete(app: &Arc<App>, bot: &Bot, system: &str, task: &str) -> Re
 
 /// Тот же запрос, но с видом закулисной работы для учёта: `memory` (сводки, доктор, извлечение), `helper`, `router`.
 pub async fn complete_as(kind: &str, app: &Arc<App>, bot: &Bot, system: &str, task: &str) -> Result<String, String> {
+    complete_with(kind, app, bot, system, json!(task)).await
+}
+
+/// То же, но сообщение человека может быть списком частей (текст и картинки), как у обычного хода.
+pub async fn complete_with(kind: &str, app: &Arc<App>, bot: &Bot, system: &str, user: Value) -> Result<String, String> {
     let settings = app.store.settings();
     let main = main_choice(app, bot, &settings);
     if !usable(&main.driver) {
         return Err("для этой работы нужна модель по API: демо и внешние агенты не подходят".to_string());
     }
-    let messages = vec![json!({ "role": "system", "content": system }), json!({ "role": "user", "content": task })];
+    let messages = vec![json!({ "role": "system", "content": system }), json!({ "role": "user", "content": user })];
     match call_once(app, bot, &main, &messages, kind).await {
         Ok(text) if !text.is_empty() => Ok(text),
         Ok(_) => Err("модель вернула пустой ответ".to_string()),

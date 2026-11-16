@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -27,6 +27,8 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/workflows/{id}/duplicate", post(duplicate))
         .route("/api/workflows/{id}/run", post(start))
         .route("/api/workflows/{id}/runs", get(runs))
+        .route("/api/workflows/{id}/assets", post(upload_asset).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)))
+        .route("/api/workflows/{id}/files/{*path}", get(serve_file))
         .route("/api/workflows/{id}/nodes/{node_id}/webhook", post(rotate_hook))
         .route("/hooks/workflows/{id}/{node_id}/{secret}", post(incoming_hook))
         .route("/api/workflows/{id}/nodes/{node_id}/run", post(start_solo))
@@ -423,4 +425,114 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
         Err(e) if e.status == 409 => reply(StatusCode::ACCEPTED, json!({ "skipped": "busy" })),
         Err(_) => fail(StatusCode::NOT_FOUND, "нет такого вебхука"),
     }
+}
+
+const MAX_ASSET_BYTES: usize = 20 * 1024 * 1024;
+/// Тело с запасом на base64 (4/3) и поля JSON.
+const UPLOAD_BODY_LIMIT: usize = 28 * 1024 * 1024;
+
+fn good_mime(mime: &str) -> bool {
+    let valid = |part: &str| !part.is_empty() && part.len() <= 64 && part.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'-'));
+    mime.split_once('/').is_some_and(|(a, b)| valid(a) && valid(b))
+}
+
+/// Загрузка файла для узла `asset`: JSON `{name, data (base64), mime?}` (охрана пускает тела только как JSON). Не больше 20 МБ.
+async fn upload_asset(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Response {
+    if app.workflows.lock().get(&id).is_none() {
+        return not_found();
+    }
+    let body = match body_of(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    use base64::Engine;
+    let encoded = body.get("data").and_then(Value::as_str).unwrap_or_default();
+    if encoded.len() > MAX_ASSET_BYTES / 3 * 4 + 16 {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "файл больше 20 МБ");
+    }
+    let Ok(data) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) else { return fail(StatusCode::BAD_REQUEST, "data не base64") };
+    let raw_name = body.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let mime = body.get("mime").and_then(Value::as_str).unwrap_or_default().to_string();
+    if data.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "пустой файл");
+    }
+    if data.len() > MAX_ASSET_BYTES {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "файл больше 20 МБ");
+    }
+    // Имя из окна — только имя: путь, диск и зарезервированные имена отклоняются.
+    let name = match crate::attach::clean_name(&raw_name).and_then(|n| crate::workflow_io::safe_name(&n).map(|()| n)) {
+        Ok(n) => n,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
+    };
+    let mime = if good_mime(mime.trim()) && mime.trim() != "application/octet-stream" {
+        mime.trim().to_ascii_lowercase()
+    } else {
+        crate::attach::image_mime(&name).or_else(|| crate::attach::media_mime(&name)).unwrap_or("application/octet-stream").to_string()
+    };
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, e)) if !stem.is_empty() => (stem.to_string(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    let size = data.len();
+    let (data_dir, wf) = (app.store.data_dir().to_path_buf(), id.clone());
+    let saved = tokio::task::spawn_blocking(move || {
+        // Занятое имя не затираем: берём следующий номер.
+        for counter in 1..=99 {
+            let file = if counter == 1 { name.clone() } else { format!("{stem}-{counter}{ext}") };
+            let rel = format!("assets/{file}");
+            let abs = crate::workflow_io::files_dir(&data_dir, &wf).join("assets").join(&file);
+            if abs.exists() {
+                continue;
+            }
+            return crate::workflow_io::write_bytes(&data_dir, &wf, &rel, &data).map(|_| (file, rel));
+        }
+        Err("слишком много файлов с таким именем".to_string())
+    })
+    .await;
+    match saved {
+        Ok(Ok((file, rel))) => {
+            changed(&app, &id);
+            reply(StatusCode::OK, json!({ "name": file, "path": rel, "mime": mime, "size": size }))
+        }
+        Ok(Err(e)) => fail(StatusCode::BAD_REQUEST, &e),
+        Err(_) => fail(StatusCode::INTERNAL_SERVER_ERROR, "не удалось сохранить файл"),
+    }
+}
+
+/// Файл из папки процесса для миниатюр и просмотра на холсте. Только внутри папки процесса.
+async fn serve_file(State(app): Shared, Path((id, rel)): Path<(String, String)>) -> Response {
+    if app.workflows.lock().get(&id).is_none() {
+        return not_found();
+    }
+    let (data_dir, wf, path) = (app.store.data_dir().to_path_buf(), id.clone(), rel.clone());
+    let read = tokio::task::spawn_blocking(move || {
+        let abs = crate::workflow_io::resolve_file(&data_dir, &wf, &path)?;
+        let size = std::fs::metadata(&abs).map_err(|e| e.to_string())?.len() as usize;
+        if size > MAX_ASSET_BYTES {
+            return Err("файл больше 20 МБ".to_string());
+        }
+        std::fs::read(&abs).map_err(|e| e.to_string())
+    })
+    .await;
+    let bytes = match read {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => return fail(StatusCode::NOT_FOUND, &e),
+        Err(_) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "не удалось прочитать файл"),
+    };
+    // Только картинки и мультимедиа показываются; всё остальное — вложением, и никакого угадывания типа (nosniff).
+    let shown = crate::attach::image_mime(&rel).filter(|m| *m != "image/svg+xml").or_else(|| crate::attach::media_mime(&rel));
+    let (mime, disposition) = match shown {
+        Some(m) => (m, "inline"),
+        None => ("application/octet-stream", "attachment"),
+    };
+    (
+        [
+            (header::CONTENT_TYPE, mime.to_string()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (header::CONTENT_DISPOSITION, disposition.to_string()),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
 }

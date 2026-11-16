@@ -241,7 +241,8 @@ fn apply_ops(graph: &mut Graph, title: &mut String, ops: &[Value]) -> Result<(),
             }
             "connect" => {
                 let branch = Some(text(op, "branch")).filter(|b| !b.is_empty()).map(str::to_string);
-                graph.edges.push(Edge { id: uid("e"), from: text(op, "from").to_string(), to: text(op, "to").to_string(), branch });
+                let edge_type = Some(text(op, "type")).filter(|t| !t.is_empty()).map(str::to_string);
+                graph.edges.push(Edge { id: uid("e"), from: text(op, "from").to_string(), to: text(op, "to").to_string(), edge_type, branch });
             }
             "disconnect" => {
                 let before = graph.edges.len();

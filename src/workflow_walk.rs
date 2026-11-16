@@ -30,6 +30,8 @@ pub struct Input {
     /// Откуда пришёл вход.
     pub from: String,
     pub step_id: String,
+    /// Что течёт по связи: text, image или file.
+    pub ty: String,
     /// Предыдущий шаг упал: во вход пойдёт текст об ошибке, а не ответ.
     pub failed: bool,
 }
@@ -131,16 +133,16 @@ fn edge_active(edge: &Edge, source: &Step) -> bool {
     source.status == "done" && edge.branch.as_ref().is_none_or(|b| source.branch.as_deref() == Some(b.as_str()))
 }
 
-fn collect_inputs(incoming: &[&Edge], latest: &HashMap<&str, &Step>) -> (Vec<Input>, usize) {
+fn collect_inputs(graph: &Graph, incoming: &[&Edge], latest: &HashMap<&str, &Step>) -> (Vec<Input>, usize) {
     let mut inputs = Vec::new();
     let mut active = 0;
     for edge in incoming {
         let Some(source) = latest.get(edge.from.as_str()) else { continue };
         if edge_active(edge, source) {
-            inputs.push(Input { from: edge.from.clone(), step_id: source.id.clone(), failed: false });
+            inputs.push(Input { from: edge.from.clone(), step_id: source.id.clone(), ty: crate::workflows::edge_type_of(graph, edge), failed: false });
             active += 1;
         } else if source.status == "failed" {
-            inputs.push(Input { from: edge.from.clone(), step_id: source.id.clone(), failed: true });
+            inputs.push(Input { from: edge.from.clone(), step_id: source.id.clone(), ty: "text".into(), failed: true });
         }
     }
     (inputs, active)
@@ -155,7 +157,7 @@ pub fn inputs_of(graph: &Graph, steps: &[Step], node_id: &str) -> Vec<Input> {
         }
     }
     let incoming: Vec<&Edge> = graph.edges.iter().filter(|e| e.to == node_id).collect();
-    collect_inputs(&incoming, &latest).0
+    collect_inputs(graph, &incoming, &latest).0
 }
 
 /// Что делать дальше. Узел стартует, когда все его прямые предки закончились; берётся «хватит одного активного входа».
@@ -205,7 +207,7 @@ pub fn next(graph: &Graph, steps: &[Step], plan: &Plan) -> Next {
             result.actions.push(Action::Skip { node: node.id.clone() });
             continue;
         }
-        let (inputs, active) = collect_inputs(&incoming, &latest);
+        let (inputs, active) = collect_inputs(graph, &incoming, &latest);
         let forced_start = last.is_none() && plan.forced.as_deref() == Some(node.id.as_str());
         if active == 0 {
             if incoming.is_empty() || forced_start {
@@ -272,7 +274,7 @@ mod tests {
     }
 
     fn edge(from: &str, to: &str, branch: Option<&str>) -> Edge {
-        Edge { id: format!("{from}>{to}{}", branch.unwrap_or("")), from: from.into(), to: to.into(), branch: branch.map(Into::into) }
+        Edge { id: format!("{from}>{to}{}", branch.unwrap_or("")), from: from.into(), to: to.into(), edge_type: None, branch: branch.map(Into::into) }
     }
 
     fn graph(nodes: &[(&str, &str)], edges: Vec<Edge>) -> Graph {

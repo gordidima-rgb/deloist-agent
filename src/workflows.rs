@@ -23,7 +23,7 @@ pub const KEEP_RUNS: usize = 50;
 pub const MIN_INTERVAL_MINUTES: f64 = 3.0;
 
 pub const ANNOTATIONS: [&str; 3] = ["note", "text", "shape"];
-pub const KINDS: [&str; 10] = ["trigger", "prompt", "bot", "approval", "output", "llm", "condition", "note", "text", "shape"];
+pub const KINDS: [&str; 12] = ["trigger", "prompt", "bot", "approval", "output", "llm", "condition", "asset", "image", "note", "text", "shape"];
 
 pub fn is_annotation(kind: &str) -> bool {
     ANNOTATIONS.contains(&kind)
@@ -88,6 +88,9 @@ pub struct Edge {
     pub id: String,
     pub from: String,
     pub to: String,
+    /// Что течёт по связи: `text` (по умолчанию), `image` или `file`. Не указан — то, что отдаёт источник.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub edge_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
 }
@@ -163,6 +166,9 @@ pub struct Step {
     pub seq: u64,
     /// Порядок конца шага; 0, пока шаг не закончен.
     pub end_seq: u64,
+    /// Файлы шага (asset, image): пути внутри папки файлов процесса.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// Ответ взят из прошлого запуска: настройки узла и входы с тех пор не менялись.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reused: bool,
@@ -238,6 +244,35 @@ const SCHEDULE_KINDS: [&str; 7] = ["hourly", "daily", "weekdays", "weekly", "mon
 
 fn parse_time(text: &str) -> Option<NaiveTime> {
     crate::schedule::parse_time(text)
+}
+
+/// Тип на выходе узла: текст, картинка или файл. У вывода и аннотаций выхода нет.
+pub fn natural_out(node: &Node) -> Option<&'static str> {
+    match node.kind.as_str() {
+        "trigger" | "prompt" | "bot" | "llm" | "condition" | "approval" => Some("text"),
+        "image" => Some("image"),
+        "asset" => {
+            let mime = node.text("mime");
+            let name = if node.text("path").is_empty() { node.text("name") } else { node.text("path") };
+            Some(if mime.starts_with("image/") || (mime.is_empty() && crate::attach::image_mime(&name).is_some()) { "image" } else { "file" })
+        }
+        _ => None,
+    }
+}
+
+/// Какие типы принимает узел на входе.
+pub fn accepts(kind: &str, ty: &str) -> bool {
+    match kind {
+        "llm" | "bot" | "output" => matches!(ty, "text" | "image" | "file"),
+        "image" => matches!(ty, "text" | "image"),
+        "condition" | "approval" => ty == "text",
+        _ => false,
+    }
+}
+
+/// Тип связи: указанный или тот, что отдаёт источник.
+pub fn edge_type_of(graph: &Graph, edge: &Edge) -> String {
+    edge.edge_type.clone().or_else(|| graph.node(&edge.from).and_then(natural_out).map(str::to_string)).unwrap_or_else(|| "text".into())
 }
 
 /// Интервал в минутах, если он задан верно.
@@ -376,6 +411,13 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
                 }
             }
         }
+        if node.kind == "asset" {
+            let path = node.text("path");
+            let ok = crate::workflow_io::safe_relative(&path).is_ok_and(|parts| parts.first().is_some_and(|p| p == "assets"));
+            if !ok {
+                return Err(err_node("bad_asset", "файл должен лежать в assets/ папки процесса", &node.id));
+            }
+        }
         if node.kind == "output" {
             let target = node.text("target");
             if !target.is_empty() && !TARGETS.contains(&target.as_str()) {
@@ -407,11 +449,23 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
         if is_annotation(from) || is_annotation(to) {
             return Err(err_edge("edge_annotation", "заметки и фигуры нельзя соединять", &edge.id));
         }
-        if matches!(*to, "trigger" | "prompt") {
+        if matches!(*to, "trigger" | "prompt" | "asset") {
             return Err(err_edge("edge_into_source", "в запуск и текст ничего не входит", &edge.id));
         }
         if *from == "output" {
             return Err(err_edge("edge_from_output", "из вывода ничего не выходит", &edge.id));
+        }
+        if edge.edge_type.as_deref().is_some_and(|t| !matches!(t, "text" | "image" | "file")) {
+            return Err(err_edge("port", "тип связи: text, image или file", &edge.id));
+        }
+        let source = graph.node(&edge.from).and_then(natural_out);
+        let ty = edge_type_of(graph, edge);
+        // Источник отдаёт ровно один тип; условие и согласие пропускают текст.
+        if source != Some(ty.as_str()) {
+            return Err(err_edge("port", format!("этот шаг отдаёт {}, а не {ty}", source.unwrap_or("ничего")), &edge.id));
+        }
+        if !accepts(to, &ty) {
+            return Err(err_edge("port", format!("этот шаг не принимает {ty}"), &edge.id));
         }
         let branch = edge.branch.as_deref();
         if *from == "condition" {
@@ -750,7 +804,7 @@ mod tests {
     }
 
     fn edge(id: &str, from: &str, to: &str, branch: Option<&str>) -> Edge {
-        Edge { id: id.into(), from: from.into(), to: to.into(), branch: branch.map(Into::into) }
+        Edge { id: id.into(), from: from.into(), to: to.into(), edge_type: None, branch: branch.map(Into::into) }
     }
 
     fn graph(nodes: Vec<Node>, edges: Vec<Edge>) -> Graph {

@@ -842,3 +842,199 @@ async fn the_team_file_carries_workflows_without_secrets_and_imports_them_disabl
     let bare = reqwest::Client::builder().no_proxy().build().unwrap();
     assert_eq!(bare.post(&guess).body("x").send().await.unwrap().status().as_u16(), 404);
 }
+
+// --- типизированные порты, файлы и картинки ---------------------------------------
+
+const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+fn png_bytes() -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.decode(PNG_B64).unwrap()
+}
+
+async fn upload(crew: &Crew, id: &str, name: &str, bytes: &[u8]) -> (u16, Value) {
+    use base64::Engine;
+    crew.send("POST", &format!("/api/workflows/{id}/assets"), Some(json!({ "name": name, "data": base64::engine::general_purpose::STANDARD.encode(bytes) }))).await
+}
+
+fn asset_node(id: &str, path: &str, mime: &str) -> Value {
+    node(id, "asset", json!({ "name": path, "path": path, "mime": mime }))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn typed_ports_are_checked_on_save() {
+    let crew = Crew::start("wf-ports").await;
+    let id = create(&crew, "Порты", json!({ "nodes": [], "edges": [] })).await;
+    let save = |graph: Value, rev: u64| {
+        let crew = &crew;
+        let id = id.clone();
+        async move { crew.send("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": rev, "graph": graph }))).await }
+    };
+    let typed = |from: &str, to: &str, ty: Option<&str>| {
+        let mut e = edge("e1", from, to);
+        if let Some(ty) = ty {
+            e["type"] = json!(ty);
+        }
+        e
+    };
+    let mut rev = 2;
+    // Допустимые: картинка из файла в бот и в модель, текст в картинку, картинка в вывод, файл в бот.
+    for (nodes, edges) in [
+        (vec![asset_node("a", "assets/p.png", "image/png"), node("b", "bot", json!({}))], vec![typed("a", "b", None)]),
+        (vec![asset_node("a", "assets/p.png", "image/png"), node("l", "llm", json!({}))], vec![typed("a", "l", Some("image"))]),
+        (vec![node("p", "prompt", json!({})), node("i", "image", json!({}))], vec![typed("p", "i", Some("text"))]),
+        (vec![node("i", "image", json!({})), node("o", "output", json!({}))], vec![typed("i", "o", None)]),
+        (vec![asset_node("a", "assets/r.pdf", "application/pdf"), node("b", "bot", json!({}))], vec![typed("a", "b", Some("file"))]),
+    ] {
+        let (status, body) = save(json!({ "nodes": nodes, "edges": edges }), rev).await;
+        assert_eq!(status, 200, "{body}");
+        rev = body["revision"].as_u64().unwrap();
+    }
+    // Недопустимые: код port и id связи.
+    for (nodes, edges) in [
+        (vec![asset_node("a", "assets/p.png", "image/png"), node("c", "condition", json!({}))], vec![typed("a", "c", None)]),
+        (vec![asset_node("a", "assets/p.png", "image/png"), node("l", "llm", json!({}))], vec![typed("a", "l", Some("text"))]),
+        (vec![asset_node("a", "assets/r.pdf", "application/pdf"), node("i", "image", json!({}))], vec![typed("a", "i", None)]),
+        (vec![node("p", "prompt", json!({})), node("b", "bot", json!({}))], vec![typed("p", "b", Some("image"))]),
+        (vec![node("i", "image", json!({})), node("a", "approval", json!({}))], vec![typed("i", "a", None)]),
+        (vec![node("p", "prompt", json!({})), node("b", "bot", json!({}))], vec![typed("p", "b", Some("video"))]),
+    ] {
+        let (status, body) = save(json!({ "nodes": nodes, "edges": edges }), rev).await;
+        assert_eq!((status, body["code"].as_str().unwrap_or(""), body["edge_id"].as_str().unwrap_or("")), (400, "port", "e1"), "{body}");
+    }
+    // В файл ничего не входит; путь файла только в assets/.
+    let (status, body) = save(json!({ "nodes": [node("p", "prompt", json!({})), asset_node("a", "assets/p.png", "image/png")], "edges": [typed("p", "a", None)] }), rev).await;
+    assert_eq!((status, body["code"].as_str().unwrap_or("")), (400, "edge_into_source"));
+    for path in ["../p.png", "other/p.png", "/etc/passwd", "assets/../../p.png", "C:/p.png"] {
+        let (status, body) = save(json!({ "nodes": [asset_node("a", path, "image/png")], "edges": [] }), rev).await;
+        assert_eq!((status, body["code"].as_str().unwrap_or("")), (400, "bad_asset"), "{path}: {body}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_are_limited_and_names_cannot_climb_out_and_files_are_served_only_from_the_folder() {
+    let crew = Crew::start("wf-assets").await;
+    let id = create(&crew, "Файлы", json!({ "nodes": [], "edges": [] })).await;
+    let (status, body) = upload(&crew, &id, "Фото товара.png", &png_bytes()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((body["path"].as_str().unwrap(), body["mime"].as_str().unwrap(), body["size"].as_u64().unwrap()), ("assets/Фото товара.png", "image/png", png_bytes().len() as u64));
+    let (_, second) = upload(&crew, &id, "Фото товара.png", &png_bytes()).await;
+    assert_eq!(second["path"], "assets/Фото товара-2.png", "занятое имя не затирается");
+
+    for bad in ["../x.png", "a/b.png", "a\\b.png", "C:\\x.png", "", "."] {
+        let (status, _) = upload(&crew, &id, bad, b"x").await;
+        assert_eq!(status, 400, "{bad:?}");
+    }
+    // Зарезервированное имя Windows либо отклоняется, либо получает безопасное имя.
+    for reserved in ["con.txt", "nul"] {
+        let (status, body) = upload(&crew, &id, reserved, b"x").await;
+        assert!(status == 400 || body["name"].as_str().unwrap().to_uppercase() != reserved.to_uppercase(), "{reserved}: {body}");
+    }
+    assert_eq!(upload(&crew, &id, "empty.txt", b"").await.0, 400);
+    assert_eq!(crew.send("POST", "/api/workflows/wf_nope/assets", Some(json!({ "name": "a.txt", "data": "eA==" }))).await.0, 404);
+    assert!(!crew.data_dir.join("workflows").join("files").join("x.png").exists());
+
+    // Размер: 9 МБ проходит (общий предел окна 8 МБ здесь не действует), больше 20 МБ — 413.
+    let nine = vec![7u8; 9 * 1024 * 1024];
+    assert_eq!(upload(&crew, &id, "big.bin", &nine).await.0, 200);
+    assert_eq!(upload(&crew, &id, "huge.bin", &vec![7u8; 20 * 1024 * 1024 + 1]).await.0, 413);
+
+    // Выдача: картинка со своим типом, чужое — только вложением, выход за папку — нет.
+    let got = crew.client.get(format!("{}/api/workflows/{id}/files/assets/{}", crew.base, "Фото%20товара.png")).header("cookie", &crew.cookie).send().await.unwrap();
+    assert_eq!(got.status().as_u16(), 200);
+    assert_eq!(got.headers()["content-type"], "image/png");
+    assert_eq!(got.bytes().await.unwrap().to_vec(), png_bytes());
+    let other = crew.client.get(format!("{}/api/workflows/{id}/files/assets/big.bin", crew.base)).header("cookie", &crew.cookie).send().await.unwrap();
+    assert_eq!(other.headers()["content-type"], "application/octet-stream");
+    assert!(other.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
+    std::fs::write(crew.data_dir.join("workflows").join("secret.txt"), "секрет").unwrap();
+    std::fs::write(crew.data_dir.join("secret2.txt"), "секрет").unwrap();
+    for bad in ["..%2fsecret.txt", "assets%2f..%2f..%2fsecret.txt", "%2e%2e/secret.txt", "..%5csecret.txt", "assets/../../secret.txt", "C%3A%5Cwindows%5Cwin.ini", "%2fetc%2fpasswd", "assets/nul"] {
+        let res = crew.client.get(format!("{}/api/workflows/{id}/files/{bad}", crew.base)).header("cookie", &crew.cookie).send().await.unwrap();
+        let (status, body) = (res.status().as_u16(), res.text().await.unwrap_or_default());
+        assert!(status != 200 && !body.contains("секрет"), "{bad}: {status} {body}");
+    }
+}
+
+#[derive(Clone, Default)]
+struct FakeImages {
+    calls: Arc<Mutex<Vec<Value>>>,
+}
+
+async fn images_reply(State(fake): State<FakeImages>, Json(body): Json<Value>) -> Response {
+    fake.calls.lock().unwrap().push(body);
+    Json(json!({ "data": [{ "b64_json": PNG_B64 }] })).into_response()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_image_step_draws_into_the_workflow_folder_and_respects_the_daily_limit() {
+    let fake = FakeImages::default();
+    let router = Router::new().route("/v1/images/generations", post(images_reply)).with_state(fake.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let crew = Crew::start("wf-image").await;
+    let graph = json!({
+        "nodes": [node("p", "prompt", json!({ "text": "рыжий кот" })), node("i", "image", json!({ "prompt": "Нарисуй", "size": "512x512" })), node("o", "output", json!({ "target": "file", "path": "note.txt" }))],
+        "edges": [edge("e1", "p", "i"), edge("e2", "i", "o")]
+    });
+    let id = create(&crew, "Рисую", graph).await;
+    // Сервис не настроен: шаг падает понятной причиной, ничего не списано.
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "failed").await;
+    assert!(step(&run, "i")["error"].as_str().unwrap().contains("не настроен"), "{run}");
+
+    crew.ok("PUT", "/api/settings", Some(json!({ "imageBaseUrl": format!("http://127.0.0.1:{port}/v1"), "imageModel": "fake-image", "imageApiKey": "k", "imageDaily": 1 }))).await;
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "done").await;
+    let drawn = step(&run, "i");
+    let rel = drawn["output"].as_str().unwrap().to_string();
+    assert!(rel.starts_with("images/") && rel.ends_with(".png"), "{rel}");
+    assert_eq!(drawn["files"], json!([rel]));
+    let sent = fake.calls.lock().unwrap()[0].clone();
+    assert!(sent["prompt"].as_str().unwrap().contains("Нарисуй") && sent["prompt"].as_str().unwrap().contains("рыжий кот"), "{sent}");
+    assert_eq!(sent["size"], "512x512");
+    let shown = crew.client.get(format!("{}/api/workflows/{id}/files/{rel}", crew.base)).header("cookie", &crew.cookie).send().await.unwrap();
+    assert_eq!(shown.bytes().await.unwrap().to_vec(), png_bytes());
+    // Предел в день: второй запуск отказывает.
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "failed").await;
+    assert!(step(&run, "i")["error"].as_str().unwrap().contains("предел"), "{run}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_reach_llm_and_bot_steps_the_way_chat_attachments_do() {
+    let (crew, fake) = crew_with_model("wf-files", "принял").await;
+    let id = create(&crew, "Файлы дальше", json!({ "nodes": [], "edges": [] })).await;
+    let (_, text_file) = upload(&crew, &id, "notes.txt", "уникальная заметка про кота".as_bytes()).await;
+    let (_, picture) = upload(&crew, &id, "cat.png", &png_bytes()).await;
+    let bot = crew.ok("GET", "/api/state", None).await["bots"][0]["id"].as_str().unwrap().to_string();
+    let graph = json!({
+        "nodes": [
+            asset_node("t", text_file["path"].as_str().unwrap(), "text/plain"),
+            asset_node("c", picture["path"].as_str().unwrap(), "image/png"),
+            node("l", "llm", json!({ "prompt": "Опиши" })),
+            node("b", "bot", json!({ "task": "Посмотри", "bot_id": bot })),
+        ],
+        "edges": [edge("e1", "t", "l"), edge("e2", "c", "l"), edge("e3", "c", "b")]
+    });
+    crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": 2, "graph": graph }))).await;
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "done").await;
+    assert_eq!(step(&run, "t")["files"], json!(["assets/notes.txt"]));
+    // Модель без зрения: текстовый файл выдержкой, картинка — только упоминанием.
+    let first = fake.requests.lock().unwrap()[0].to_string();
+    assert!(first.contains("уникальная заметка про кота") && !first.contains("image_url"), "{first}");
+    // Бот получил картинку вложением в свою рабочую папку.
+    let thread = std::fs::read_to_string(crew.data_dir.join("threads").join(format!("{bot}.jsonl"))).unwrap();
+    assert!(thread.contains("attachments/") && thread.contains("cat.png"), "{thread}");
+
+    // Модель со зрением получает картинку частью сообщения.
+    crew.ok("PUT", "/api/settings", Some(json!({ "vision": true }))).await;
+    fake.requests.lock().unwrap().clear();
+    let graph = json!({
+        "nodes": [asset_node("c", picture["path"].as_str().unwrap(), "image/png"), node("l", "llm", json!({ "prompt": "Опиши" }))],
+        "edges": [edge("e1", "c", "l")]
+    });
+    let rev = crew.ok("GET", &format!("/api/workflows/{id}"), None).await["workflow"]["revision"].as_u64().unwrap();
+    crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": rev, "graph": graph }))).await;
+    wait_run(&crew, &id, &run_wf(&crew, &id).await, "done").await;
+    let sent = fake.requests.lock().unwrap()[0].to_string();
+    assert!(sent.contains("image_url") && sent.contains("data:image/png;base64,"), "{sent}");
+}

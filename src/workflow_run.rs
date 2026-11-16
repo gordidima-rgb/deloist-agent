@@ -24,8 +24,9 @@ fn err(status: u16, message: impl Into<String>) -> RunError {
 
 /// Что нужно сделать вне блокировки состояния.
 enum Spawn {
-    Bot { run_id: String, step_id: String, workflow_id: String, bot_id: String, text: String, unattended: bool, token: CancellationToken },
-    Llm { run_id: String, step_id: String, system: String, task: String, provider: String, model: String, condition: bool, token: CancellationToken },
+    Bot { run_id: String, step_id: String, workflow_id: String, bot_id: String, text: String, files: Vec<String>, unattended: bool, token: CancellationToken },
+    Image { run_id: String, step_id: String, workflow_id: String, prompt: String, size: String, token: CancellationToken },
+    Llm { run_id: String, step_id: String, workflow_id: String, files: Vec<String>, system: String, task: String, provider: String, model: String, condition: bool, token: CancellationToken },
     Output { run_id: String, step_id: String, workflow_id: String, title: String, target: String, node: Node, input: String },
     Notice { workflow_id: String, run_id: String, step_id: String, title: String, question: String },
 }
@@ -67,18 +68,39 @@ fn new_step(run: &mut Run, node_id: &str, input: String, status: &str, attempt: 
     run.steps.len() - 1
 }
 
-fn input_text(run: &Run, inputs: &[walk::Input]) -> String {
-    let parts: Vec<String> = inputs
-        .iter()
-        .filter_map(|i| run.steps.iter().find(|s| s.id == i.step_id).map(|s| if i.failed { walk::failed_text(s.error.as_deref().unwrap_or("")) } else { s.output.clone() }))
-        .collect();
-    walk::join_inputs(&parts)
+/// Вход шага: весь текст, только текстовые части (для запроса модели) и файлы, пришедшие по связям image и file.
+struct Gathered {
+    text: String,
+    plain: String,
+    files: Vec<String>,
+}
+
+fn gather(run: &Run, inputs: &[walk::Input]) -> Gathered {
+    let (mut all, mut plain, mut files) = (Vec::new(), Vec::new(), Vec::new());
+    for input in inputs {
+        let Some(step) = run.steps.iter().find(|s| s.id == input.step_id) else { continue };
+        if input.failed {
+            let text = walk::failed_text(step.error.as_deref().unwrap_or(""));
+            all.push(text.clone());
+            plain.push(text);
+        } else if matches!(input.ty.as_str(), "image" | "file") {
+            files.extend(step.files.clone());
+            let names: Vec<&str> = step.files.iter().map(|f| f.rsplit('/').next().unwrap_or(f)).collect();
+            let extra = run.graph.node(&input.from).map(|n| n.text("text")).filter(|t| !t.trim().is_empty());
+            all.push(format!("Файлы: {}{}", names.join(", "), extra.map_or(String::new(), |t| format!("\n{t}"))));
+        } else {
+            all.push(step.output.clone());
+            plain.push(step.output.clone());
+        }
+    }
+    Gathered { text: walk::join_inputs(&all), plain: walk::join_inputs(&plain), files }
 }
 
 /// Начать шаг узла. Мгновенные виды заканчиваются здесь же, долгие уходят в `spawns`.
 fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input], attempt: u32, tokens: &mut Tokens, spawns: &mut Vec<Spawn>) {
     let Some(node) = run.graph.node(node_id).cloned() else { return };
-    let input = input_text(run, inputs);
+    let gathered = gather(run, inputs);
+    let input = gathered.text.clone();
     let kind = node.kind.clone();
     let status = if kind == "approval" { "approval" } else { "running" };
     let index = new_step(run, node_id, input.clone(), status, attempt);
@@ -109,7 +131,7 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
             let token = CancellationToken::new();
             tokens.insert(step_id.clone(), token.clone());
             run.steps[index].thread_id = Some(format!("bot:{bot_id}"));
-            spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), bot_id, text, unattended: run.source != "manual", token });
+            spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), bot_id, text, files: gathered.files, unattended: run.source != "manual", token });
         }
         "llm" | "condition" => {
             let condition = kind == "condition";
@@ -123,9 +145,32 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
             };
             let token = CancellationToken::new();
             tokens.insert(step_id.clone(), token.clone());
+            let files = if condition { Vec::new() } else { gathered.files.clone() };
             spawns.push(Spawn::Llm {
-                run_id: run.id.clone(), step_id, system, task, provider: node.text("provider"), model: node.text("model"), condition, token,
+                run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), files, system, task, provider: node.text("provider"), model: node.text("model"), condition, token,
             });
+        }
+        "asset" => {
+            let path = node.text("path");
+            let text = node.text("text");
+            let output = if text.trim().is_empty() { path.clone() } else { format!("{path}\n\n{text}") };
+            finish(run, index, "done", Some(output), None);
+            run.steps[index].files = vec![path];
+        }
+        "image" => {
+            let wanted = node.text("prompt");
+            let prompt = [wanted.as_str(), gathered.plain.as_str()].iter().filter(|p| !p.trim().is_empty()).copied().collect::<Vec<_>>().join("\n\n");
+            if prompt.trim().is_empty() {
+                finish(run, index, "failed", None, Some("нет описания картинки".into()));
+                return;
+            }
+            if !gathered.files.is_empty() {
+                // Сервис рисует только по описанию: правка по входной картинке ему недоступна.
+                run.steps[index].input.push_str("\n\n(Входная картинка не использована: сервис рисует только по описанию.)");
+            }
+            let token = CancellationToken::new();
+            tokens.insert(step_id.clone(), token.clone());
+            spawns.push(Spawn::Image { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), prompt, size: node.text("size"), token });
         }
         _ => finish(run, index, "failed", None, Some("неизвестный вид шага".into())),
     }
@@ -213,7 +258,7 @@ pub fn parse_branch(answer: &str) -> Option<&'static str> {
 
 /// Один вызов модели без инструментов через служебный путь программы (`service::complete_as`).
 /// Пустые провайдер и модель — модель по умолчанию из настроек.
-async fn call_model(app: &Arc<App>, provider: &str, model: &str, system: &str, task: &str) -> Result<String, String> {
+async fn call_model(app: &Arc<App>, provider: &str, model: &str, system: &str, task: &str, workflow_id: &str, files: &[String]) -> Result<String, String> {
     let mut bot = crate::store::Bot {
         id: "_workflow".into(), name: "Рабочие процессы".into(), role: "шаг процесса".into(), driver: provider.trim().into(), model: model.trim().into(),
         ..crate::store::Bot::default()
@@ -224,7 +269,8 @@ async fn call_model(app: &Arc<App>, provider: &str, model: &str, system: &str, t
         }
     }
     let system = if system.trim().is_empty() { "Ты шаг рабочего процесса. Выполни задание по входу и ответь по делу." } else { system };
-    crate::service::complete_as("workflow", app, &bot, system, task).await
+    let content = crate::workflow_io::llm_content(app, &bot, workflow_id, task, files);
+    crate::service::complete_with("workflow", app, &bot, system, content).await
 }
 
 /// Все, кто выше узла по графу (сам узел не входит).
@@ -335,14 +381,17 @@ fn with_run<T>(app: &Arc<App>, run_id: &str, f: impl FnOnce(&mut Run, &str, &mut
     Some(value)
 }
 
-fn complete(app: &Arc<App>, run_id: &str, step_id: &str, result: Result<(String, Option<String>), String>) {
+type Done = (String, Option<String>, Vec<String>);
+
+fn complete(app: &Arc<App>, run_id: &str, step_id: &str, result: Result<Done, String>) {
     with_run(app, run_id, |run, title, tokens, spawns| {
         tokens.remove(step_id);
         let Some(index) = run.steps.iter().position(|s| s.id == step_id && s.status == "running") else { return };
         match result {
-            Ok((output, branch)) => {
+            Ok((output, branch, files)) => {
                 finish(run, index, "done", Some(output), None);
                 run.steps[index].branch = branch;
+                run.steps[index].files = files;
             }
             Err(error) => finish(run, index, "failed", None, Some(error)),
         }
@@ -355,31 +404,42 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
         let app = app.clone();
         tokio::spawn(async move {
             match spawn {
-                Spawn::Bot { run_id, step_id, workflow_id, bot_id, text, unattended, token } => {
+                Spawn::Bot { run_id, step_id, workflow_id, bot_id, text, files, unattended, token } => {
+                    let attachments = match crate::workflow_io::attachments_for_bot(&app, &workflow_id, &bot_id, &files).await {
+                        Ok(list) => list,
+                        Err(e) => return complete(&app, &run_id, &step_id, Err(e)),
+                    };
                     app.workflows.lock().bot_steps.insert(bot_id.clone(), workflow_id);
-                    let result = crate::turn::run_workflow_step(&app, &bot_id, &text, unattended, token).await;
+                    let result = crate::turn::run_workflow_step(&app, &bot_id, &text, attachments, unattended, token).await;
                     app.workflows.lock().bot_steps.remove(&bot_id);
-                    complete(&app, &run_id, &step_id, result.map(|text| (text, None)));
+                    complete(&app, &run_id, &step_id, result.map(|text| (text, None, Vec::new())));
                 }
-                Spawn::Llm { run_id, step_id, system, task, provider, model, condition, token } => {
-                    let call = call_model(&app, &provider, &model, &system, &task);
+                Spawn::Image { run_id, step_id, workflow_id, prompt, size, token } => {
+                    let made = tokio::select! {
+                        () = token.cancelled() => Err("остановлено".to_string()),
+                        result = crate::workflow_io::make_image(&app, &workflow_id, &prompt, &size) => result,
+                    };
+                    complete(&app, &run_id, &step_id, made.map(|rel| (rel.clone(), None, vec![rel])));
+                }
+                Spawn::Llm { run_id, step_id, workflow_id, files, system, task, provider, model, condition, token } => {
+                    let call = call_model(&app, &provider, &model, &system, &task, &workflow_id, &files);
                     let answer = tokio::select! {
                         () = token.cancelled() => Err("остановлено".to_string()),
                         result = call => result,
                     };
                     let result = answer.and_then(|text| {
                         if !condition {
-                            return Ok((text, None));
+                            return Ok((text, None, Vec::new()));
                         }
                         let branch = parse_branch(&text).ok_or_else(|| "модель не ответила да/нет".to_string())?;
                         let input = app.workflows.lock().run(&run_id).and_then(|r| r.steps.iter().find(|s| s.id == step_id).map(|s| s.input.clone())).unwrap_or_default();
-                        Ok((input, Some(branch.to_string())))
+                        Ok((input, Some(branch.to_string()), Vec::new()))
                     });
                     complete(&app, &run_id, &step_id, result);
                 }
                 Spawn::Output { run_id, step_id, workflow_id, title, target, node, input } => {
                     let result = crate::workflow_io::deliver(&app, &workflow_id, &title, &target, &node, &input).await;
-                    complete(&app, &run_id, &step_id, result.map(|out| (out, None)));
+                    complete(&app, &run_id, &step_id, result.map(|out| (out, None, Vec::new())));
                 }
                 Spawn::Notice { workflow_id, run_id, step_id, title, question } => {
                     app.turns.emit(json!({ "type": "workflow_approval", "workflow_id": workflow_id, "run_id": run_id, "step_id": step_id, "title": title, "question": question }));
