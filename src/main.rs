@@ -260,6 +260,7 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     // До первого хода: отметки задач у новой версии начинаются с этой минуты.
     extract::init(&app).await;
     scheduler::start(app.clone());
+    providers::start(app.clone());
     update::start(app.clone());
     telegram::start(app.clone());
     discord::start(app.clone());

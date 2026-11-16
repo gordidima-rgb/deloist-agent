@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// Архив с заглушкой и реестр, где она стоит под именем `codex-acp` (на экране — ChatGPT).
-fn registry(dir: &Path, sha_ok: bool) -> PathBuf {
+fn registry_ver(dir: &Path, version: &str, sha_ok: bool) -> PathBuf {
     std::fs::create_dir_all(dir).unwrap();
     let fake = Path::new(BIN).parent().unwrap().join("examples").join("fake_acp.exe");
     std::fs::copy(&fake, dir.join("fake_acp.exe")).unwrap();
@@ -42,7 +42,7 @@ fn registry(dir: &Path, sha_ok: bool) -> PathBuf {
         "version": "1.0.0",
         "agents": [
             {
-                "id": "codex-acp", "name": "Codex", "version": "2.6.0", "description": "заглушка",
+                "id": "codex-acp", "name": "Codex", "version": version, "description": "заглушка",
                 "distribution": { "binary": { "windows-x86_64": binary.clone(), "windows-aarch64": binary } },
             },
             { "id": "py-agent", "name": "Py Agent", "version": "0.1.0", "distribution": { "uvx": { "package": "py-agent" } } },
@@ -52,6 +52,10 @@ fn registry(dir: &Path, sha_ok: bool) -> PathBuf {
     let path = dir.join("registry.json");
     std::fs::write(&path, data.to_string()).unwrap();
     path
+}
+
+fn registry(dir: &Path, sha_ok: bool) -> PathBuf {
+    registry_ver(dir, "2.6.0", sha_ok)
 }
 
 async fn start(name: &str, sha_ok: bool, auth: bool) -> (Crew, PathBuf) {
@@ -515,6 +519,98 @@ async fn a_tampered_managed_node_is_downloaded_again() {
     let restored = std::fs::read(&node).unwrap();
     assert_ne!(restored, b"tampered");
     assert_eq!(restored, original, "node.exe не восстановился из архива");
+}
+
+#[tokio::test]
+async fn a_broken_update_keeps_the_working_agent() {
+    let dir = common::temp_data_dir("prov-update-broken-registry");
+    let path = registry_ver(&dir, "1.0.0", true);
+    let registry_path = path.display().to_string();
+    let crew = Crew::start_with_env("prov-update-broken", &[("CREW_TEST_ACP_REGISTRY", &registry_path)]).await;
+    crew.listen().await;
+    crew.ok("POST", "/api/providers/codex-acp/install", None).await;
+    let view = wait_status(&crew, "connected").await;
+    assert_eq!(view["installed"], "1.0.0", "{view}");
+
+    // Реестр теперь предлагает версию 2 с неверной суммой.
+    registry_ver(&dir, "2.0.0", false);
+    crew.ok("POST", "/api/providers/codex-acp/install", None).await;
+
+    let started = std::time::Instant::now();
+    loop {
+        let view = chatgpt(&crew).await;
+        if view["error"].as_str().map(|s| s.contains("контрольной")).unwrap_or(false) {
+            break;
+        }
+        assert!(started.elapsed().as_secs() < 30, "{view}");
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    let view = chatgpt(&crew).await;
+    assert_eq!(view["installed"], "1.0.0", "{view}");
+
+    let agents_dir = crew.data_dir.join("agents");
+    assert!(agents_dir.join("codex-acp").join("fake_acp.exe").exists());
+    assert!(!agents_dir.join("codex-acp.staging").exists(), "остался staging");
+    assert!(!agents_dir.join("codex-acp.old").exists(), "остался old");
+}
+
+#[tokio::test]
+async fn a_good_update_replaces_the_files_and_leaves_no_leftovers() {
+    let dir = common::temp_data_dir("prov-update-good-registry");
+    let path = registry_ver(&dir, "1.0.0", true);
+    let registry_path = path.display().to_string();
+    let crew = Crew::start_with_env("prov-update-good", &[("CREW_TEST_ACP_REGISTRY", &registry_path)]).await;
+    crew.listen().await;
+    crew.ok("POST", "/api/providers/codex-acp/install", None).await;
+    wait_status(&crew, "connected").await;
+
+    registry_ver(&dir, "2.0.0", true);
+    crew.ok("POST", "/api/providers/codex-acp/install", None).await;
+
+    let started = std::time::Instant::now();
+    loop {
+        let view = chatgpt(&crew).await;
+        if view["installed"] == "2.0.0" {
+            break;
+        }
+        assert!(started.elapsed().as_secs() < 30, "{view}");
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    let view = chatgpt(&crew).await;
+    assert_eq!(view["installed"], "2.0.0", "{view}");
+
+    let agents_dir = crew.data_dir.join("agents");
+    assert!(agents_dir.join("codex-acp").join("fake_acp.exe").exists());
+    assert!(!agents_dir.join("codex-acp.staging").exists(), "остался staging");
+    assert!(!agents_dir.join("codex-acp.old").exists(), "остался old");
+}
+
+#[tokio::test]
+async fn the_hourly_check_shows_a_new_version_without_a_click() {
+    let dir = common::temp_data_dir("prov-update-hourly-registry");
+    let path = registry_ver(&dir, "1.0.0", true);
+    let registry_path = path.display().to_string();
+    let crew = Crew::start_with_env("prov-update-hourly", &[
+        ("CREW_TEST_ACP_REGISTRY", &registry_path),
+        ("CREW_TEST_PROVIDER_REFRESH_MS", "200"),
+    ]).await;
+    crew.listen().await;
+    crew.ok("POST", "/api/providers/codex-acp/install", None).await;
+    wait_status(&crew, "connected").await;
+
+    // Реестр теперь предлагает версию 2 — без клика «обновить».
+    registry_ver(&dir, "2.0.0", true);
+
+    let started = std::time::Instant::now();
+    loop {
+        let list = crew.ok("GET", "/api/providers", None).await;
+        let provider = list["providers"].as_array().unwrap().iter().find(|p| p["id"] == "codex-acp").cloned();
+        if provider.as_ref().map(|p| p["update"] == true).unwrap_or(false) {
+            break;
+        }
+        assert!(started.elapsed().as_secs() < 10, "{list}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 #[cfg(windows)]

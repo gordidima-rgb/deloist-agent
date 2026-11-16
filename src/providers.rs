@@ -28,6 +28,26 @@ pub const ANTIGRAVITY: &str = antigravity::ID;
 
 const REGISTRY_URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 const REGISTRY_TTL: Duration = Duration::from_secs(6 * 3600);
+const PROVIDER_REGISTRY_REFRESH_EVERY: Duration = Duration::from_secs(60 * 60);
+const PROVIDER_REGISTRY_FIRST: Duration = Duration::from_secs(5 * 60);
+
+fn provider_refresh_period() -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_PROVIDER_REFRESH_MS").ok().and_then(|v| v.parse().ok()) {
+            return Duration::from_millis(ms);
+        }
+    }
+    PROVIDER_REGISTRY_REFRESH_EVERY
+}
+
+fn provider_refresh_first() -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_PROVIDER_REFRESH_MS").ok().and_then(|v| v.parse().ok()) {
+            return Duration::from_millis(ms);
+        }
+    }
+    PROVIDER_REGISTRY_FIRST
+}
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Провайдеры на первом экране, в этом порядке, с привычными людям названиями.
@@ -1095,6 +1115,26 @@ impl Providers {
         }
     }
 
+    /// Обновить кэш реестра ACP и разослать события, чтобы флаг «обновить» стал виден без клика.
+    pub async fn refresh_registry(&self, app: &Arc<App>) {
+        *self.registry.lock().unwrap() = None;
+        if let Ok(data) = self.registry(app).await {
+            if let Some(agents) = data["agents"].as_array() {
+                for agent in agents {
+                    if let Some(id) = agent["id"].as_str() {
+                        // Только установленные (есть сохранённая версия): у них может измениться флаг update.
+                        if !self.entry(app, id)["version"].is_string() {
+                            continue;
+                        }
+                        if let Ok(view) = self.get(app, id).await {
+                            app.turns.emit(json!({ "type": "provider", "provider": view }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Начать работу над провайдером. Идёт другая — отказ, и её ход (этап, проценты) не меняется:
     /// обновление списка или повторное нажатие не должны сбивать вход или загрузку.
     fn begin_job(&self, id: &str, phase: &'static str, percent: Option<u8>) -> Option<CancellationToken> {
@@ -1164,6 +1204,10 @@ impl Providers {
         };
         let (me, app2, id2) = (self.clone(), app.clone(), id.to_string());
         tokio::spawn(async move {
+            let prev_saved = me.entry(&app2, &id2);
+            let prev_version = prev_saved["version"].clone();
+            let prev_command = prev_saved["command"].clone();
+            let had_prev = prev_version.is_string() && prev_command.is_string();
             let result = tokio::select! {
                 result = tokio::time::timeout(INSTALL_TIMEOUT, me.download(&app2, &id2, &agent)) => {
                     result.unwrap_or_else(|_| Err("скачивание не закончилось за 15 минут".into()))
@@ -1186,7 +1230,26 @@ impl Providers {
                     } else {
                         me.set_job(&id2, "checking", None);
                         me.emit(&app2, &id2).await;
-                        me.run_probe(&app2, &id2, false, &cancel).await;
+                        let probe_ok = me.run_probe(&app2, &id2, false, &cancel).await;
+                        let dir = agents_dir(&app2).join(safe_id(&id2).unwrap_or(&id2));
+                        let old = dir.parent().unwrap_or(dir.as_path()).join(format!("{}.old", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+                        if probe_ok {
+                            let _ = tokio::fs::remove_dir_all(&old).await;
+                        } else if old.exists() {
+                            let _ = tokio::fs::remove_dir_all(&dir).await;
+                            let _ = tokio::fs::rename(&old, &dir).await;
+                            if had_prev {
+                                me.update_entry(&app2, &id2, |e| {
+                                    e.insert("version".into(), prev_version);
+                                    e.insert("command".into(), prev_command);
+                                });
+                            } else {
+                                me.update_entry(&app2, &id2, |e| {
+                                    e.remove("version");
+                                    e.remove("command");
+                                });
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -1235,18 +1298,19 @@ impl Providers {
         }
     }
 
-    async fn run_probe(&self, app: &Arc<App>, id: &str, login: bool, cancel: &CancellationToken) {
+    async fn run_probe(&self, app: &Arc<App>, id: &str, login: bool, cancel: &CancellationToken) -> bool {
         if id == antigravity::ID {
             self.ag_probe_all(app, cancel).await;
-            return;
+            return true;
         }
-        let Some(command) = self.command(app, id) else { return };
+        let Some(command) = self.command(app, id) else { return false };
         let settings = app.store.settings();
         let hidden = ["OPENAI_API_KEY".to_string(), settings.api_key_env.clone()];
         let spec = acp::Spec { command: &command, env: &[], hidden_env: &hidden, mode: "", model: "", effort: "", options: &[], temp_root: None, auth: "" };
         let dir = agents_dir(app).join("_probe");
         let _ = std::fs::create_dir_all(&dir);
         let result = acp::probe(&spec, &dir, login, cancel).await;
+        let probe_ok = result.is_ok();
         self.update_entry(app, id, |e| {
             e.insert("checkedAt".into(), json!(crate::store::now()));
             match result {
@@ -1289,6 +1353,7 @@ impl Providers {
                 }
             }
         });
+        probe_ok
     }
 
     /// Видимость, «использовать» и «по умолчанию для новых ботов».
@@ -1460,46 +1525,64 @@ impl Providers {
             }
         }
         let cap = if strict { antigravity::SIZE_CAP } else { u64::MAX };
-        let _ = tokio::fs::remove_dir_all(dir).await;
-        tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
+        let parent = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+        let staging = parent.join(format!("{}.staging", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+        let old = parent.join(format!("{}.old", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+        let _ = tokio::fs::remove_dir_all(&staging).await;
+        tokio::fs::create_dir_all(&staging).await.map_err(|e| e.to_string())?;
         let name = url.rsplit('/').next().unwrap_or("agent.zip");
         let name = if name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".tar.xz") { name } else { "agent.zip" };
-        let archive = dir.join(format!("_download-{name}"));
+        let archive = staging.join(format!("_download-{name}"));
         let fetched = self.fetch_archive(app, id, url, local, &archive, cap).await;
         let actual = match fetched {
             Ok(actual) => actual,
             Err(e) => {
-                let _ = tokio::fs::remove_dir_all(dir).await;
+                let _ = tokio::fs::remove_dir_all(&staging).await;
                 return Err(e);
             }
         };
         if let Some(expected) = expected {
             if !actual.eq_ignore_ascii_case(expected) {
-                let _ = tokio::fs::remove_dir_all(dir).await;
+                let _ = tokio::fs::remove_dir_all(&staging).await;
                 return Err("архив агента не совпал с контрольной суммой: не ставлю".into());
             }
         }
         self.set_job(id, "unpacking", None);
         self.emit(app, id).await;
-        let unpacked = extract(&archive, dir).await;
+        let unpacked = extract(&archive, &staging).await;
         let _ = tokio::fs::remove_file(&archive).await;
         if let Err(e) = unpacked {
-            let _ = tokio::fs::remove_dir_all(dir).await;
+            let _ = tokio::fs::remove_dir_all(&staging).await;
             return Err(e);
         }
 
         let cmd = binary["cmd"].as_str().ok_or("в реестре нет команды запуска")?;
         let relative = cmd.trim_start_matches("./").trim_start_matches(".\\").replace('/', "\\");
-        let program = dir.join(&relative);
-        if !program.starts_with(dir) || relative.contains("..") {
-            let _ = tokio::fs::remove_dir_all(dir).await;
+        let program = staging.join(&relative);
+        if !program.starts_with(&staging) || relative.contains("..") {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
             return Err("команда агента указывает за пределы его папки".into());
         }
         if !program.exists() {
-            let _ = tokio::fs::remove_dir_all(dir).await;
+            let _ = tokio::fs::remove_dir_all(&staging).await;
             return Err(format!("в архиве нет {}", program.display()));
         }
-        Ok(command_line(&program.display().to_string(), binary["args"].as_array()))
+        // Swap старой и новой папок.
+        if dir.exists() {
+            let _ = tokio::fs::remove_dir_all(&old).await;
+            if let Err(_) = tokio::fs::rename(dir, &old).await {
+                let _ = tokio::fs::remove_dir_all(&staging).await;
+                return Err("агент сейчас запущен: обнови, когда он закончит".into());
+            }
+        }
+        if let Err(e) = tokio::fs::rename(&staging, dir).await {
+            if old.exists() {
+                let _ = tokio::fs::rename(&old, dir).await;
+            }
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err(format!("не смог переложить файлы: {e}"));
+        }
+        Ok(command_line(&dir.join(&relative).display().to_string(), binary["args"].as_array()))
     }
 
     /// Архив в файл с подсчётом sha256 на лету; больше `cap` байт не берём.
@@ -1631,6 +1714,19 @@ impl Providers {
         let view = self.view(app, agent, featured);
         app.turns.emit(json!({ "type": "provider", "provider": view }));
     }
+}
+
+/// Фоновая проверка реестра ACP раз в час: обновляет кэшированные версии, не устанавливая агентов.
+pub fn start(app: Arc<App>) {
+    let first = provider_refresh_first();
+    let period = provider_refresh_period();
+    tokio::spawn(async move {
+        tokio::time::sleep(first).await;
+        loop {
+            app.providers.refresh_registry(&app).await;
+            tokio::time::sleep(period).await;
+        }
+    });
 }
 
 fn safe_id(id: &str) -> Result<&str, String> {
