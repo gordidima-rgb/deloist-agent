@@ -870,6 +870,8 @@
     'разрешено': 'allowed',
     'истекло время': 'timed out',
     'ответ отправлен': 'answer sent',
+    'Бот сейчас работает. Новая модель включится со следующего сообщения в чате.': 'The bot is working now. The new model takes over from your next chat message.',
+    'Бот сейчас работает. Новое усилие включится со следующего сообщения в чате.': 'The bot is working now. The new effort applies from your next chat message.',
     'ход остановлен': 'turn stopped',
     'На запасной: {name}': 'On backup: {name}',
     'Демо-режим': 'Demo mode',

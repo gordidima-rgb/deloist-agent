@@ -846,6 +846,7 @@ function appendInFeed(node) {
   open.classList.remove('is-live');
   if (!open.querySelector('.work-body').children.length) open.remove();
   ensureWorkGroup();
+  splitLive(open);
   paintWorkNow('think', tr('Думает'));
 }
 
@@ -2229,10 +2230,33 @@ function startLive(turnId, step) {
   return S.live;
 }
 
+// Карточка встала посреди ответа (у внешнего агента весь ход — один шаг): сказанное до неё остаётся
+// над карточкой, а дальнейший текст и шаги идут новой строкой в новой группе под ней. Иначе слова
+// «человек подтвердил» дописывались в пузырь над вопросом, на который человек ещё не ответил.
+function splitLive(oldGroup) {
+  const live = S.live;
+  if (!live || !oldGroup.contains(live.row) || !workGroup) return;
+  live.bubble.classList.remove('cursor');
+  const said = live.text.slice(live.offset || 0);
+  if (said.trim()) live.bubble.innerHTML = md(said);
+  else live.bubble.remove();
+  live.col.querySelector('.tools.live')?.classList.remove('live');
+  const row = document.createElement('div');
+  row.className = 'msg bot';
+  const col = document.createElement('div');
+  col.className = 'msg-col';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble cursor';
+  col.append(bubble);
+  row.append(col);
+  workGroup.querySelector('.work-body').append(row);
+  Object.assign(live, { row, col, bubble, offset: live.text.length });
+}
+
 function appendDelta(ev) {
   const live = startLive(ev.turnId, ev.step);
   live.text += ev.text;
-  live.bubble.textContent = live.text;
+  live.bubble.textContent = live.text.slice(live.offset || 0);
   paintWorkNow('write', tr('Пишет ответ'));
   scrollBottom();
 }
@@ -2265,7 +2289,7 @@ function showActivity(ev) {
 
 function finalizeLive(ev) {
   const msg = ev.message;
-  const calls = messageCalls(msg);
+  const allCalls = messageCalls(msg);
   const live = S.live;
 
   if (!live || live.turnId !== ev.turnId || live.step !== ev.step) {
@@ -2276,8 +2300,16 @@ function finalizeLive(ev) {
 
   live.bubble.classList.remove('cursor');
   live.col.querySelector('.tools.live')?.remove();
-  if (msg.text) {
-    fillBubble(live.bubble, msg);
+  // Шаги до карточки уже стоят в группе над ней: в последнюю строку — только новые.
+  const calls = live.offset
+    ? allCalls.filter((c) => !c.id || !messagesEl().querySelector(`.tool[data-call-id="${CSS.escape(String(c.id))}"]`))
+    : allCalls;
+  // После карточки в последней строке только хвост ответа: начало уже стоит над карточкой.
+  const head = live.offset ? live.text.slice(0, live.offset) : '';
+  const tail = !head || msg.error ? msg.text
+    : String(msg.text || '').startsWith(head) ? String(msg.text).slice(head.length).replace(/^\s+/, '') : live.text.slice(live.offset).trim();
+  if (tail) {
+    fillBubble(live.bubble, { ...msg, text: tail });
     live.bubble.classList.toggle('error', Boolean(msg.error));
   } else {
     live.bubble.remove();
@@ -2942,11 +2974,16 @@ async function openHeadModelPopover() {
     loading: !DeloistProviders.snapshot(),
     ...props(),
     anchor: chip,
-    onselect: (next) => {
+    onselect: async (next) => {
       // Конкретная модель главнее уровня: уровень возвращаем в «Авто», как в профиле.
-      save(next.model ? { driver: next.driver, model: next.model, modelLevel: '' } : { driver: next.driver, model: next.model });
+      await save(next.model ? { driver: next.driver, model: next.model, modelLevel: '' } : { driver: next.driver, model: next.model });
+      // Идущий ход доработает на прежней модели: новая включится со следующего сообщения.
+      if (S.busy.has(bot.id)) toast(tr('Бот сейчас работает. Новая модель включится со следующего сообщения в чате.'), 5000);
     },
-    oneffort: (effort) => save({ effort }),
+    oneffort: async (effort) => {
+      await save({ effort });
+      if (S.busy.has(bot.id)) toast(tr('Бот сейчас работает. Новое усилие включится со следующего сообщения в чате.'), 5000);
+    },
     onoption: (id, valueId) => {
       const next = { ...(botById(bot.id)?.agentOptions || {}) };
       if (valueId) next[id] = valueId;

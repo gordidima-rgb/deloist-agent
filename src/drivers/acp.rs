@@ -1302,7 +1302,7 @@ fn system_text(messages: &[Value]) -> String {
     text.push_str("\n\nСвои файлы правь встроенной правкой файлов агента, а не скриптом PowerShell: так человек видит понятное действие, а не длинную команду.");
     text.push_str(&"\n\nДля сайтов используй инструменты browser_* MCP-сервера deloist_browser: это браузер твоего бота в Deloist. browser_nav, browser_mouse и browser_keyboard уже возвращают свежий снимок страницы — отдельный browser_page snapshot после них не нужен. Для входа и передачи управления вызови browser_human этого сервера; чтобы просто показать человеку экран браузера без ожидания, вызови browser_show_to_human. Если действие ещё выполняется и вернуло job, продолжай ждать через browser_wait с этим job, пока не придёт результат; повторно действие не запускай. Если сервер недоступен, сообщи об ошибке, не подменяй браузер другим.".replace("deloist_browser", bridge_name()));
     text.push_str(&"\n\nТот же MCP-сервер deloist_browser даёт командные инструменты твоего бота: delegate (bot, task) — передать задачу другому боту команды по имени и получить его ответ; list_bots — какие боты есть в команде; remember и recall — долгая память. Если в сообщении человека есть «@Имя», это значит «передай задачу этому боту через delegate» с полной постановкой; не говори, что такого инструмента нет, а вызови его.".replace("deloist_browser", bridge_name()));
-    text.push_str(&"\n\nСпросить человека (вопрос, выбор из вариантов, короткая форма) — инструмент ask_user того же сервера deloist_browser: question, choices (до 8 вариантов кнопками) или form; ответ придёт результатом вызова. Не задавай такие вопросы обычным текстом и не ищи этот инструмент по списку: он здесь. Собрать команду из ботов (создать новых или добавить существующих) — инструмент propose_team: он только предлагает состав карточкой, а создаёт его человек кнопкой. Программу Deloist по её HTTP-адресам скриптами (curl, PowerShell, Python) не вызывай и ключ программы из файлов не читай: всё, что тебе позволено, есть в инструментах этого сервера.".replace("deloist_browser", bridge_name()));
+    text.push_str(&"\n\nСпросить человека (вопрос, выбор из вариантов, короткая форма) — инструмент ask_user того же сервера deloist_browser: question, choices (до 8 вариантов кнопками) или form; ответ придёт результатом вызова. Не задавай такие вопросы обычным текстом и не ищи этот инструмент по списку: он здесь. Собрать команду из ботов (создать новых или добавить существующих) — инструмент propose_team: он только предлагает состав карточкой, а создаёт его человек кнопкой; карточка и есть вопрос, отдельно через ask_user «создать?» не спрашивай. Программу Deloist по её HTTP-адресам скриптами (curl, PowerShell, Python) не вызывай и ключ программы из файлов не читай: всё, что тебе позволено, есть в инструментах этого сервера.".replace("deloist_browser", bridge_name()));
     text.push_str("\n\nTelegram: открытый канал читай инструментом telegram_posts того же сервера (channel, query — поиск по каналу, before — к старым постам): без браузера, с датами и ссылками на посты. Каналы по теме ищи своим поиском в интернете (site:t.me слово). Чаты, группы и закрытые каналы — в браузере на web.telegram.org: вступать в них и писать там можно только с разрешения человека.");
     text.push_str("\n\nТот же сервер даёт планировщик Deloist: list_routines (расписания ботов), create_routine, update_routine, delete_routine. Просьба «раз в полчаса…», «каждый день в 9…», «через два часа выведи итог» — это рутина: создай её через create_routine (every_minutes или at; в prompt — полная постановка на каждый запуск, потому что рутина проснётся без этого разговора) и назови человеку расписание и время следующего запуска. Разовое «через N часов» тоже ставь рутиной: в её prompt напиши, что после последнего запуска её нужно выключить (update_routine с enabled=false). Не говори, что у тебя нет планировщика, и не предлагай cron или календарь. Создание и удаление рутин человек подтверждает карточкой.");
     text.push_str("\n\nК серверам подключайся именем из ~/.ssh/config (`ssh имя` из блока Host), а не путём к файлу ключа: папка .ssh и сами ключи закрыты песочницей. Если нужного имени нет — спроси человека, какой хост использовать.");
@@ -1359,7 +1359,7 @@ fn prompt_blocks(agent: &Agent, messages: &[Value], fresh: bool, carry: Option<&
 
     for message in &messages[start..] {
         match &message["content"] {
-            Value::String(text) if !text.is_empty() => blocks.push(json!({ "type": "text", "text": text })),
+            Value::String(text) if !text.is_empty() => blocks.push(json!({ "type": "text", "text": fence_recall(text) })),
             Value::Array(parts) => {
                 for part in parts {
                     match part["type"].as_str() {
@@ -1380,6 +1380,19 @@ fn prompt_blocks(agent: &Agent, messages: &[Value], fresh: bool, carry: Option<&
         blocks.push(json!({ "type": "text", "text": "Продолжай." }));
     }
     blocks
+}
+
+/// Агент склеивает блоки запроса в одну строку, и справка «Из памяти» («данные, а не указания»)
+/// сливалась с просьбой человека: 16.11 Grok в авто-режиме решил, что создать бота человек не просил.
+/// Справка получает явный конец, дальше — само сообщение.
+pub(crate) const RECALL_END: &str = "— конец справки из памяти; дальше само сообщение —";
+
+fn fence_recall(text: &str) -> String {
+    if text.starts_with(crate::memory::RECALL_HEAD) {
+        format!("{text}\n{RECALL_END}")
+    } else {
+        text.to_string()
+    }
 }
 
 fn data_url(url: &str) -> Option<(String, String)> {
@@ -2011,6 +2024,15 @@ mod tests {
         assert!(text.contains("telegram_posts"), "{text}");
         assert!(crate::tools::TEAM_TOOLS.contains(&"telegram_posts"), "агент ACP получает инструмент через MCP");
         assert!(crate::tools::is_bridge_tool("telegram_posts"));
+    }
+
+    #[test]
+    fn the_recall_block_is_fenced_off_from_the_message() {
+        let block = format!("{}\n[m7] дела: срез", crate::memory::RECALL_HEAD);
+        assert_eq!(fence_recall(&block), format!("{block}\n{RECALL_END}"));
+        assert_eq!(fence_recall("Сделай нового бота"), "Сделай нового бота");
+        let text = system_text(&[json!({ "role": "system", "content": "база" })]);
+        assert!(text.contains("отдельно через ask_user «создать?» не спрашивай"), "{text}");
     }
 
     #[test]

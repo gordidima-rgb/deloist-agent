@@ -6,19 +6,37 @@ import { resolve } from 'node:path';
 
 const source = readFileSync(resolve(process.cwd(), '../web/app.js'), 'utf8');
 const block = source.slice(source.indexOf('let workGroup = null;'), source.indexOf('function clearMessages()'));
+const liveBlock = source.slice(source.indexOf('function splitLive('), source.indexOf('// Строка хода агента'));
 
 function feed() {
   const root = document.createElement('div');
   document.body.replaceChildren(root);
+  const S = { live: null };
   const api = new Function(
-    'messagesEl', 'ICONS', 'tr', '$$', 'turnCard',
-    `${block}\nreturn { ensureWorkGroup, paintWorkNow, appendInFeed, finishWorkGroup, group: () => workGroup };`,
+    'messagesEl', 'ICONS', 'tr', '$$', 'turnCard', 'S', 'md', 'scrollBottom', 'startLive',
+    `${block}\n${liveBlock}\nreturn { ensureWorkGroup, paintWorkNow, appendInFeed, finishWorkGroup, appendDelta, group: () => workGroup };`,
   )(
     () => root,
     { chev: '<i></i>' },
     (s) => s,
     (sel, r = document) => [...r.querySelectorAll(sel)],
     { status() {} },
+    S,
+    (s) => s,
+    () => {},
+    function startLive(turnId, step) {
+      if (S.live) return S.live;
+      const row = document.createElement('div');
+      row.className = 'msg bot';
+      const col = document.createElement('div');
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble cursor';
+      col.append(bubble);
+      row.append(col);
+      api.ensureWorkGroup().querySelector('.work-body').append(row);
+      S.live = { turnId, step, row, col, bubble, text: '' };
+      return S.live;
+    },
   );
   const step = (text) => {
     const row = document.createElement('div');
@@ -63,6 +81,17 @@ describe('chronological feed', () => {
     api.ensureWorkGroup();
     card('approval');
     expect(shape(root)).toEqual(['question', 'group', 'approval']);
+  });
+
+  it('text streamed after a card goes below it, not into the bubble above', () => {
+    const { root, card, api } = feed();
+    api.appendDelta({ turnId: 't', step: 0, text: 'Сначала сверю файл.' });
+    card('question');
+    api.appendDelta({ turnId: 't', step: 0, text: ' Человек подтвердил.' });
+    expect(shape(root)).toEqual(['group', 'question', 'group*']);
+    expect(root.children[0].querySelector('.bubble').textContent).toBe('Сначала сверю файл.');
+    expect(root.children[0].querySelector('.bubble').classList.contains('cursor')).toBe(false);
+    expect(root.children[2].querySelector('.bubble').textContent).toBe(' Человек подтвердил.');
   });
 
   it('calms the live group when the turn ends', () => {
