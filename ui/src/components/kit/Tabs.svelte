@@ -2,6 +2,7 @@
   // Вкладки на .k-tabs: чёрная капсула переезжает к выбранной вкладке.
   // Стрелки, Home и End переключают без анимации (как требует docs/design/kit.md).
   import { tick } from 'svelte';
+  import Icon from './Icon.svelte';
 
   let { items = [], value = $bindable(''), label = '', class: className = '', onchange, ...rest } = $props();
 
@@ -82,9 +83,7 @@
       title={item.icon ? item.label : undefined}
     >
       {#if item.icon}
-        <svg class="k-tab__icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          {#each item.icon as d}<path {d} />{/each}
-        </svg>
+        <Icon name={item.icon} size={15} class="k-tab__icon" />
         <span class="k-tab__label">{item.label}</span>
       {:else}
         {item.label}

@@ -113,6 +113,7 @@
 - Сетка `viewBox="0 0 24 24"`, `fill="none"`, `stroke="currentColor"`, скруглённые концы и углы линий (`stroke-linecap="round"`, `stroke-linejoin="round"`).
 - Цвет иконка берёт у текста рядом.
 - Толщина линии 2 — у иконок в меню навигации и у кнопок поиска и справки справа.
+- Рисунки живут в одном месте — `ui/src/lib/icons.js` (только содержимое svg, без fill, stroke и цветов). В Svelte — `<Icon name="search" />` (`components/kit/Icon.svelte`), в обычных страницах — `DeloistUI.icon("search", { size, stroke, className })`, в статичном html — `<svg … data-icon="search"></svg>` (заполняет `DeloistUI.paintIcons()`). Рисовать `<path>` прямо в файле нельзя: это ловит `ui/src/lib/icons.test.js`.
 
 ## Проверка по киту перед выкаткой
 

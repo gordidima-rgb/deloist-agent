@@ -2,7 +2,7 @@
 (() => {
   const own = window.PET_BOT;
   const root = document.getElementById('pet');
-  const CLOSE_ICON = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>';
+  const CLOSE_ICON = DeloistUI.icon('close', { className: 'i' });
   const host = document.createElement('div');
   host.className = 'pet-avatar';
   root.append(host);

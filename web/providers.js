@@ -598,7 +598,7 @@ window.DeloistProviders = (() => {
   }
 
   function details(item) {
-    const head = `<div class="usage-title"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14l3.5-3.5"/><path d="M3.5 18a9 9 0 1 1 17 0"/></svg>${esc(tr('Использование'))}</div>`;
+    const head = `<div class="usage-title">${DeloistUI.icon('gauge', { className: 'i' })}${esc(tr('Использование'))}</div>`;
     const name = `<div class="usage-name">${item.id === 'deloist' ? DELOIST_MARK : `<img src="/api/providers/${encodeURIComponent(item.icon || item.id)}/icon?color=${iconColor()}" alt="">`}<b>${esc(item.name)}</b></div>`;
     if (item.wallet) {
       const { startKop, nowKop } = item.wallet;

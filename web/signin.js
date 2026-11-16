@@ -16,7 +16,7 @@ window.DeloistSignin = (() => {
     mark: '<svg width="56" height="56" viewBox="0 0 64 64" aria-hidden="true"><path d="M56 26 V42 A14 14 0 0 1 42 56 H22 A14 14 0 0 1 8 42 V22 A14 14 0 0 1 22 8 H36" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 34 L28 43 L45 24" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 6 Q50 15 59 15 Q50 15 50 24 Q50 15 41 15 Q50 15 50 6 Z" fill="currentColor"/></svg>',
     vk: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.9 17.5c-5.5 0-8.6-3.8-8.8-10h2.8c.1 4.6 2.1 6.5 3.7 6.9V7.5h2.6v3.9c1.6-.2 3.3-2 3.8-3.9h2.6c-.4 2.4-2.2 4.2-3.5 4.9 1.3.6 3.3 2.1 4.1 5.1h-2.9c-.6-1.9-2.1-3.4-4.1-3.6v3.6h-.3z"/></svg>',
     yandex: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.6 20.5h2.6V3.5h-3.8c-3.8 0-5.8 2-5.8 4.9 0 2.3 1.1 3.7 3.1 5.1L6.2 20.5h2.8l3.9-5.9-1.3-.9c-1.6-1.1-2.4-2-2.4-3.8 0-1.6 1.1-2.7 3.3-2.7h1.1v13.3z"/></svg>',
-    lock: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+    lock: DeloistUI.icon('lock', { className: 'i' }),
   };
 
   const $ = (sel) => root.querySelector(sel);
@@ -248,7 +248,7 @@ window.DeloistSignin = (() => {
         btn.tabIndex = i === index ? 0 : -1;
       });
       box.querySelector('#lang-title').textContent = lang.title;
-      box.querySelector('#lang-go').innerHTML = `${lang.go}<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
+      box.querySelector('#lang-go').innerHTML = `${lang.go}${DeloistUI.icon('arrow-right', { className: 'i' })}`;
       document.documentElement.lang = lang.code;
     };
 
@@ -371,7 +371,7 @@ window.DeloistSignin = (() => {
   });
   // Ряд из семи шаров над выбором: номера шаров из web/avatar.js.
   const ORB_ROW = [1, 4, 0, 5, 9, 11, 7];
-  const CHEVRON = '<svg class="i team-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+  const CHEVRON = DeloistUI.icon('chevron-right', { className: 'i team-chev' });
 
   function chooseTeam() {
     const box = document.createElement('div');

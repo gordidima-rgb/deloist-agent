@@ -1,4 +1,5 @@
 <script>
+  import Icon from './Icon.svelte';
   // Нативный select на токенах кита: рамка и фокус как у .k-input, своя стрелка.
   // options: строки или { value, label, disabled }.
   let {
@@ -37,7 +38,5 @@
       <option value={option.value} disabled={option.disabled}>{option.label}</option>
     {/each}
   </select>
-  <svg class="k-select__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="m6 9 6 6 6-6" />
-  </svg>
+  <Icon name="chevron-down" size={null} stroke={2.5} class="k-select__chevron" />
 </span>

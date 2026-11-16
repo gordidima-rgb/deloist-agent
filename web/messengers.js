@@ -16,12 +16,8 @@
     ['ask', 'Спросить'],
     ['allow', 'Можно'],
   ];
-  // Свои простые значки для трёх первых; у остальных круглая плашка с буквами.
-  const GLYPHS = {
-    telegram: '<path d="M20.5 4.5 3.8 11l5.2 1.9 1.9 5.6 2.7-3.4 4.4 3.2 2.5-13.8z"/><path d="m9 12.9 8.6-5.7"/>',
-    whatsapp: '<path d="M4 20l1.2-4A8 8 0 1 1 8 18.8z"/><path d="M9.2 8.8c0 3 2.8 5.8 5.8 5.8l1-1.6-2-1-.9.8a4 4 0 0 1-1.7-1.7l.8-.9-1-2z"/>',
-    max: '<path d="M5 18V6l7 8 7-8v12"/>',
-  };
+  // Свои простые значки для трёх первых (имена в lib/icons.js); у остальных круглая плашка с буквами.
+  const GLYPHS = { telegram: 'msg-telegram', whatsapp: 'msg-whatsapp', max: 'msg-max' };
 
   let botId = null;
   let list = [];
@@ -77,7 +73,7 @@
     const meta = registry.find((r) => r.id === m.id) || m;
     const glyph = GLYPHS[m.id];
     const inner = glyph
-      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`
+      ? DeloistUI.icon(glyph, { stroke: 1.9 })
       : `<span class="msg-abbr">${esc(meta.abbr || m.name.charAt(0))}</span>`;
     const style = glyph ? '' : ` style="background:${esc(meta.color || '#667')};color:#fff;border-color:transparent"`;
     return `<span class="msg-badge${glyph ? ' msg-glyph' : ''}"${style}>${inner}</span>`;

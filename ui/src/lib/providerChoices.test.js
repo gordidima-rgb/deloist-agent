@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { icon } from './icons.js';
 import { flushSync } from 'svelte';
 import { mountComponent } from './mount.svelte.js';
 import ChatModelPopover from '../components/ChatModelPopover.svelte';
@@ -10,7 +11,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((a, b)
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="modal-providers"></div><div id="prov-list"></div><div id="prov-detail"></div><input id="prov-search">';
-  window.DeloistUI = { mountComponent: () => ({ update() {} }) };
+  window.DeloistUI = { mountComponent: () => ({ update() {} }), icon };
   window.tr = (s) => s;
   window.eval(source);
 });

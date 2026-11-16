@@ -29,6 +29,7 @@
   import SplitView from './SplitView.svelte';
   import Toolbar from './Toolbar.svelte';
 
+  import Icon from './Icon.svelte';
   const themes = ['light', 'dark'];
   const photo = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%234fb4ff'/%3E%3Ccircle cx='20' cy='16' r='7' fill='%23ffffff'/%3E%3C/svg%3E";
 
@@ -54,23 +55,19 @@
 </script>
 
 {#snippet gearIcon()}
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4.4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4.4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z" />
-  </svg>
+  <Icon name="gear-simple" size={null} stroke={1.8} />
 {/snippet}
 
 {#snippet plusIcon()}
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+  <Icon name="plus" size={null} />
 {/snippet}
 
 {#snippet dotsIcon()}
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
+  <Icon name="more" size={null} stroke={2.5} />
 {/snippet}
 
 {#snippet emptyIcon()}
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z" /><path d="M4 7.5 12 12l8-4.5M12 12v9" />
-  </svg>
+  <Icon name="box" size={null} stroke={1.7} />
 {/snippet}
 
 {#snippet emptyAction()}

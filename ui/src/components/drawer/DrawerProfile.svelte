@@ -15,6 +15,7 @@
   import Button from '../kit/Button.svelte';
   import { tr } from '../../lib/i18n.js';
 
+  import Icon from '../kit/Icon.svelte';
   let {
     bot,
     skills = [],
@@ -262,7 +263,7 @@
             <li>
               <span>{site}</span>
               <button type="button" class="dp-x" title={tr('Забрать разрешение')} aria-label={tr('Забрать разрешение')} onclick={() => onrevokesite?.(site)}>
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                <Icon name="close" size={14} stroke={2.2} />
               </button>
             </li>
           {/each}

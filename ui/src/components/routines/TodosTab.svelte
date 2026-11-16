@@ -26,6 +26,7 @@
   import EmptyState from '../kit/EmptyState.svelte';
   import Menu from '../Menu.svelte';
 
+  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi } = $props();
 
   let todos = $state([]);
@@ -391,7 +392,7 @@
       aria-label={tr('Отметить: {title}', { title: todo.title })}
       onclick={() => toggle(todo)}
     >
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+      <Icon name="check" size={16} stroke={3} />
     </button>
     <button type="button" class="td-main" onclick={() => (selectedId = todo.id)} aria-label={tr('Открыть: {title}', { title: todo.title })}>
       <span class="td-title">{todo.title}</span>
@@ -406,7 +407,7 @@
     <div class="td-more">
       <IconButton label={tr('Действия: {title}', { title: todo.title })} size="sm" aria-haspopup="menu" aria-expanded={menuId === todo.id} data-menu-trigger onclick={() => (menuId = menuId === todo.id ? '' : todo.id)}>
         {#snippet icon()}
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
+          <Icon name="more" size={16} stroke={2.5} />
         {/snippet}
       </IconButton>
       {#if menuId === todo.id}
@@ -455,7 +456,7 @@
         <input bind:this={fileInput} class="td-hidden-input" type="file" multiple tabindex="-1" aria-hidden="true" onchange={(e) => { addFiles([...e.currentTarget.files]); e.currentTarget.value = ''; }} />
         {#if voiceReady}
           <button type="button" bind:this={micButton} class="td-mic" aria-label={tr('Сказать голосом')} title={tr('Сказать голосом')}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" /></svg>
+            <Icon name="mic" size={16} stroke={1.8} />
           </button>
         {/if}
       </div>
@@ -529,7 +530,7 @@
             {/if}
             {#if section.done.length}
               <button type="button" class="td-done-toggle" aria-expanded={doneOpen[b]} onclick={() => (doneOpen[b] = !doneOpen[b])}>
-                <svg class="td-caret" class:td-caret--open={doneOpen[b]} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                <Icon name="chevron-right" size={14} stroke={2.4} class={['td-caret', doneOpen[b] && 'td-caret--open']} />
                 {tr('Выполнено ({n})', { n: section.done.length })}
               </button>
               {#if doneOpen[b]}
@@ -896,15 +897,15 @@
     font: 600 var(--k-text-sm, 13px) / 1.3 var(--k-font-body, system-ui);
     cursor: pointer;
   }
-  .td-caret {
+  :global(.td-caret) {
     transition: transform 160ms var(--k-ease-out, ease);
   }
-  .td-caret--open {
+  :global(.td-caret--open) {
     transform: rotate(90deg);
   }
   @media (prefers-reduced-motion: reduce) {
     .td-check,
-    .td-caret {
+    :global(.td-caret) {
       transition: none;
     }
   }

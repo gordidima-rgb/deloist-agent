@@ -1,24 +1,12 @@
-// Значки привычек: имена из src/habits.rs (ICON_NAMES) -> разметка внутри svg 24x24 (штрих, без заливки).
+// Значки привычек: имена из src/habits.rs (ICON_NAMES) -> имя значка в lib/icons.js (штрих, без заливки).
 // Эмодзи вместо имени сервер тоже принимает: его показываем как текст.
-export const HABIT_ICONS = {
-  drop: '<path d="M12 3s6 6.2 6 10.5a6 6 0 0 1-12 0C6 9.2 12 3 12 3z"/>',
-  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
-  book: '<path d="M12 6c-1.5-1.3-3.5-2-6-2v14c2.5 0 4.5.7 6 2 1.5-1.3 3.5-2 6-2V4c-2.5 0-4.5.7-6 2zM12 6v14"/>',
-  pen: '<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19zM14.5 6.5l3 3"/>',
-  leaf: '<path d="M5 19C5 10 10 5 20 4c0 10-5 15-14 15zM5 19l8-8"/>',
-  coffee: '<path d="M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM16 10h2a2.5 2.5 0 0 1 0 5h-2M8 3v3M12 3v3"/>',
-  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
-  brain: '<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/>',
-  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 17l-5.2 2.7 1-5.9L3.5 9.7l5.9-.8z"/>',
-  home: '<path d="M4 11l8-7 8 7M6 10v10h12V10M10 20v-6h4v6"/>',
-  bed: '<path d="M3 18V6M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="11" r="1.5"/>',
-  apple: '<path d="M12 8c-2-1.5-6-1-6 3.5 0 4 2.5 8.5 5 8.5.7 0 .9-.4 1-.4s.3.4 1 .4c2.5 0 5-4.5 5-8.5C18 7 14 6.5 12 8zM12 8c0-2 1-3.5 3-4"/>',
-  dumbbell: '<path d="M6.5 6.5v11M3.5 9v6M17.5 6.5v11M20.5 9v6M6.5 12h11"/>',
-  run: '<circle cx="14" cy="5" r="2"/><path d="M5 20l3.5-5 3 1.5 2-4.5-3-2-3 2M11.5 16.5L13 20M14 11l3.5 1.5 2.5-1"/>',
-  music: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
-  phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>',
-};
+export const HABIT_ICON_NAMES = ['drop', 'sun', 'moon', 'book', 'pen', 'leaf', 'coffee', 'heart', 'brain', 'check', 'star', 'home', 'bed', 'apple', 'dumbbell', 'run', 'music', 'phone'];
 
-export const HABIT_ICON_NAMES = Object.keys(HABIT_ICONS);
+// Одинаковые рисунки берутся из общих значков.
+const SHARED = { moon: 'moon', check: 'check' };
+
+/// Имя значка в реестре для имени привычки; пустая строка, если имя не из набора (эмодзи).
+export function habitIconName(name) {
+  if (!HABIT_ICON_NAMES.includes(name)) return '';
+  return SHARED[name] ?? `habit-${name}`;
+}

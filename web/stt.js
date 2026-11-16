@@ -83,7 +83,7 @@
 
   // --- Раздел «Голос» в настройках --------------------------------------------------
 
-  const CHEVRON = '<svg class="i t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+  const CHEVRON = DeloistUI.icon('chevron-right', { className: 'i t-chev' });
   const ENGINES = [
     ['local', 'На этом компьютере', 'Бесплатно. Речь не уходит в интернет. Модель скачивается один раз.'],
     ['deloist', 'Через Deloist', 'Yandex SpeechKit, платно: списывается с баланса Deloist. Нужен вход в аккаунт.'],

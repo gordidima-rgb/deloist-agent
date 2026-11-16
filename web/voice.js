@@ -282,7 +282,7 @@
   }
 
   const MIC_ICON =
-    '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>';
+    DeloistUI.icon('mic-wide', { className: 'i' });
 
   /**
    * Кнопка микрофона: щелчок — слушать, второй щелчок — готово. Сама останавливается по тишине
@@ -656,7 +656,7 @@
     unavailable: 'Горячие клавиши работают, когда Deloist открыт как приложение.',
   };
   const CHEVRON =
-    '<svg class="i t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+    DeloistUI.icon('chevron-right', { className: 'i t-chev' });
 
   const MODIFIER_CODES = new Set(['ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight']);
 
@@ -933,7 +933,7 @@
       const vcLabel = tr('Голосовой разговор');
       vcBtn.title = vcLabel;
       vcBtn.setAttribute('aria-label', vcLabel);
-      vcBtn.innerHTML = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1-4.3 15.8L3.5 20.5l1.2-4A8.5 8.5 0 0 1 12 3.5z"/><path d="M9 10.2v3.6M12 8.2v7.6M15 10.2v3.6"/></svg>';
+      vcBtn.innerHTML = DeloistUI.icon('chat-wave', { className: 'i' });
       vcBtn.addEventListener('click', (e) => {
         e.preventDefault();
         window.DeloistVoiceChat?.openPanel?.();

@@ -84,16 +84,18 @@ const safeColor = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#7a8595');
 // Цвета аватаров. Только для них, не для интерфейса.
 const BOT_COLORS = window.CrewAvatar ? CrewAvatar.COLORS : ['#4f9ce6', '#8e6ac9', '#f2a93b', '#3fb8bd', '#d06ac0', '#4fbf8a'];
 
-const svgIcon = (body) =>
-  `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+// Значки: рисунки лежат в ui/src/lib/icons.js, сюда приходят готовой строкой через DeloistUI.icon (kit.js грузится раньше app.js).
+const ic = (name, opts = {}) => DeloistUI.icon(name, { className: 'i', ...opts });
 const ICONS = {
-  tool: svgIcon('<path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.6 2.6-2.4-.6-.6-2.4z"/>'),
-  send: svgIcon('<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>'),
-  stop: svgIcon('<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>'),
-  close: svgIcon('<path d="M18 6 6 18M6 6l12 12"/>'),
-  group: svgIcon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
-  chev: '<svg class="i t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
+  tool: ic('tool'),
+  send: ic('send'),
+  stop: ic('stop'),
+  close: ic('close'),
+  group: ic('group'),
+  chev: ic('chevron-right', { className: 'i t-chev' }),
 };
+// Значки статичной разметки index.html (svg с data-icon) заполняются сразу, до первой отрисовки.
+DeloistUI.paintIcons();
 
 const avatarInitial = (bot) => (bot.name || '?').trim().charAt(0).toUpperCase() || '?';
 
@@ -158,7 +160,7 @@ function paintBadges(el, bot) {
     badge.title = bot.preview.text;
     badge.setAttribute('role', 'img');
     badge.setAttribute('aria-label', tr('Последний ход не удался'));
-    badge.innerHTML = svgIcon('<path d="M6 6l12 12"/><path d="M18 6L6 18"/>');
+    badge.innerHTML = ic('close');
     box.append(badge);
   }
   el.append(box);
@@ -711,7 +713,7 @@ function paintGuests() {
     const chip = document.createElement('span');
     chip.className = 'guest-chip';
     chip.dataset.id = guest.id;
-    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop" aria-label=""><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop" aria-label="">${DeloistUI.icon('close', { size: 12, stroke: 2.4 })}</button>`;
     const open = chip.querySelector('.guest-open');
     open.textContent = guest.name;
     open.title = tr('Открыть чат специалиста');
@@ -1050,8 +1052,8 @@ function madeCard(kind, args, result) {
   const card = document.createElement('div');
   card.className = `made-card made-${kind}`;
   const icon = kind === 'routine'
-    ? svgIcon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')
-    : svgIcon('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m9 12 2 2 4-4"/>');
+    ? ic('repeat')
+    : ic('todo');
   let title;
   let gist = '';
   let chips = '';
@@ -1066,7 +1068,7 @@ function madeCard(kind, args, result) {
     if (day) {
       const d = new Date(`${day}T00:00:00`);
       const label = Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'short' });
-      chips = `<span class="rt-chip" title="${tr('Срок')}">${svgIcon('<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 10h16"/>')}${escapeHtml(label)}${time ? ` ${escapeHtml(time)}` : ''}</span>`;
+      chips = `<span class="rt-chip" title="${tr('Срок')}">${ic('calendar')}${escapeHtml(label)}${time ? ` ${escapeHtml(time)}` : ''}</span>`;
     }
   }
   card.innerHTML = `
@@ -1236,12 +1238,12 @@ function routineRunCard(msg, run) {
   const summary = document.createElement('summary');
   const gist = run.prompt.replace(/\s+/g, ' ').slice(0, 160);
   summary.innerHTML = `
-    <span class="rt-run-icon">${svgIcon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}</span>
+    <span class="rt-run-icon">${ic('repeat')}</span>
     <span class="rt-run-text">
       <span class="rt-run-title"><span class="rt-run-kind">${tr('Рутина')}</span>${escapeHtml(run.title)}</span>
       ${gist ? `<span class="rt-run-gist">${escapeHtml(gist)}</span>` : ''}
     </span>
-    <span class="rt-run-chev">${svgIcon('<path d="m6 9 6 6 6-6"/>')}</span>`;
+    <span class="rt-run-chev">${ic('chevron-down')}</span>`;
   summary.title = tr('Показать задание целиком');
   card.append(summary);
   if (run.prompt) {
@@ -1344,13 +1346,7 @@ function toolsNode(calls) {
 }
 
 // Строка действий под готовым ответом бота: копировать, озвучить, когда написан.
-const ACTION_ICONS = {
-  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
-  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  speak: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/>',
-  stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
-  branch: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8"/><path d="M18 10c0 4-4 6-8 6"/>',
-};
+const ACTION_ICONS = { copy: 'copy', check: 'check', speak: 'speak', stop: 'stop-small', branch: 'branch' };
 
 function actionButton(kind, label) {
   const btn = document.createElement('button');
@@ -1363,7 +1359,7 @@ function actionButton(kind, label) {
 }
 
 function setActionIcon(btn, kind) {
-  btn.innerHTML = `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACTION_ICONS[kind]}</svg>`;
+  btn.innerHTML = ic(ACTION_ICONS[kind]);
 }
 
 // «1 час назад»; старше недели — дата и время, как везде.
@@ -4095,16 +4091,7 @@ async function refreshState() {
 // Очередь текущего бота
 // ---------------------------------------------------------------------------
 
-const QUEUE_ICONS = {
-  grip:
-    '<circle cx="9" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="7" r="1" fill="currentColor" stroke="none"/>' +
-    '<circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/>' +
-    '<circle cx="9" cy="17" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="1" fill="currentColor" stroke="none"/>',
-  up: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
-  down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
-  edit: '<path d="M4 20h4l10-10-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
-  remove: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="m6 7 1 13h10l1-13"/>',
-};
+const QUEUE_ICONS = { grip: 'grip', up: 'arrow-up', down: 'arrow-down', edit: 'edit', remove: 'trash' };
 
 let queueDrag = null; // {id, pointerId, handle, row, startX, startY, started, beforeId, drop, clientY}
 let queueRenderPending = false;
@@ -4127,7 +4114,7 @@ function queueIcon(name, label, action, disabled = false) {
   btn.className = `queue-icon queue-icon-${name}`;
   btn.title = label;
   btn.setAttribute('aria-label', label);
-  btn.innerHTML = svgIcon(QUEUE_ICONS[name]);
+  btn.innerHTML = ic(QUEUE_ICONS[name]);
   btn.disabled = disabled;
   if (action) btn.addEventListener('click', action);
   return btn;
@@ -4139,7 +4126,7 @@ function queueGrip(id) {
   grip.className = 'queue-grip';
   grip.title = tr('Перетащить');
   grip.setAttribute('aria-label', tr('Перетащить'));
-  grip.innerHTML = svgIcon(QUEUE_ICONS.grip);
+  grip.innerHTML = ic(QUEUE_ICONS.grip);
   // С клавиатуры двигают стрелками, ручка нужна только мыши.
   grip.tabIndex = -1;
   grip.addEventListener('pointerdown', (e) => startQueueDrag(e, id, grip));
@@ -7108,15 +7095,15 @@ function routineParts(r) {
   const bot = botById(r.botId);
   const next = r.hook ? tr('по вебхуку') : r.enabled ? nextText(r.nextRun) : '';
   const last = STATUS_LABELS[r.lastStatus];
-  const icon = (body) => svgIcon(body);
+  const icon = (name) => ic(name);
   const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
   const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
   const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
   const chips = [
-    `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
-    `<span class="rt-chip" title="${tr('Когда')}">${icon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}${escapeHtml(scheduleText(r))}</span>`,
-    next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
-    r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? '<path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/>' : '<path d="m5 12 5 5 9-10"/>')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
+    `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('user')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
+    `<span class="rt-chip" title="${tr('Когда')}">${icon('repeat')}${escapeHtml(scheduleText(r))}</span>`,
+    next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? 'link' : 'clock')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
+    r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? 'alert-circle' : 'check-long')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
   ].join('');
   return { gist, chips };
 }
@@ -7126,7 +7113,7 @@ function routineRow(r, rerender) {
   const bot = botById(r.botId);
   const el = document.createElement('div');
   el.className = `routine${r.enabled ? '' : ' off'}`;
-  const icon = (body) => svgIcon(body);
+  const icon = (name) => ic(name);
   const { gist, chips } = routineParts(r);
   el.innerHTML = `
     <div class="rt-text">
@@ -7134,8 +7121,8 @@ function routineRow(r, rerender) {
       ${gist ? `<div class="rt-gist" title="${escapeHtml(gist)}">${escapeHtml(gist)}</div>` : ''}
     </div>
     <div class="rt-actions">
-      <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' : '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>')}</button>
-      <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('<path d="M7 5v14l12-7z"/>')}</button>
+      <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? 'bell' : 'bell-off')}</button>
+      <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('play')}</button>
       <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
       <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
     </div>
@@ -7388,15 +7375,9 @@ function mountRoutineTabs() {
     ],
     onchange: setRoutineTab,
   });
-  const tabIcons = {
-    routines: '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
-    journal: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
-    todos: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m9 12 2 2 4-4"/>',
-    reminders: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
-    habits: '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/>',
-  };
+  const tabIcons = { routines: 'repeat', journal: 'list-bullets', todos: 'todo', reminders: 'bell', habits: 'flame' };
   for (const tab of host.querySelectorAll('.k-tab[data-id]')) {
-    if (tabIcons[tab.dataset.id]) tab.insertAdjacentHTML('afterbegin', svgIcon(tabIcons[tab.dataset.id]));
+    if (tabIcons[tab.dataset.id]) tab.insertAdjacentHTML('afterbegin', ic(tabIcons[tab.dataset.id]));
   }
 }
 
@@ -8412,12 +8393,7 @@ const Split = (() => {
   const KEY = 'deloist-split';
   const MIME = 'application/x-deloist-view';
   const MIN = { row: 320, col: 240 };
-  const ICON = {
-    row: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M12 4.5v15"/>',
-    col: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 12h17"/>',
-    close: '<path d="M6 6l12 12M18 6 6 18"/>',
-    flip: '<path d="M7 4 3.5 7.5 7 11M3.5 7.5h13M17 13l3.5 3.5L17 20M20.5 16.5h-13"/>',
-  };
+  const ICON = { row: 'split-row', col: 'split-col', close: 'close', flip: 'split-flip' };
   let pane = null; // { kind: 'bot' | 'room', id }
   let orient = 'row';
   let ratio = 0.5;

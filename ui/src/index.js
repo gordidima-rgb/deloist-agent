@@ -81,6 +81,7 @@ import { plainPreview } from './lib/preview.js';
 import { offerEventsToShow } from './lib/pendingOffers.js';
 import * as screenLayoutLib from './lib/screenLayout.js';
 import ScreenControl from './components/ScreenControl.svelte';
+import { icon, ICONS, paintIcons } from './lib/icons.js';
 
 window.DeloistUI = {
   version: 1,
@@ -108,6 +109,10 @@ window.DeloistUI = {
   // Чат: карточка «Нужно разрешение» и разметка ответов (абзацы, списки, таблицы, ссылки со значком).
   mountApprovalCard: (target, props) => mountComponent(ApprovalCard, target, props),
   markdown,
+  // Значки интерфейса (lib/icons.js): icon(name, { size, stroke, className }) даёт готовую SVG-строку, ICONS — только содержимое, paintIcons() заполняет data-icon в html.
+  icon,
+  ICONS,
+  paintIcons,
   workspaceRef,
   turnDurations,
   durationText,

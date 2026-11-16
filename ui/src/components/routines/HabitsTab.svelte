@@ -15,6 +15,7 @@
   import HabitIcon from './HabitIcon.svelte';
   import ChannelChips from './ChannelChips.svelte';
 
+  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi, onopentelegram } = $props();
 
   let habits = $state([]);
@@ -304,7 +305,7 @@
             aria-label={tr('Отметить: {title}', { title: h.title })}
             onclick={() => toggle(h)}
           >
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+            <Icon name="check" size={22} stroke={2.6} />
           </button>
           <span class="hb-icon"><HabitIcon name={h.icon} size={20} /></span>
           <div class="hb-main">
@@ -314,7 +315,7 @@
               <span>{weekText(h)}</span>
               {#if h.remind_at}
                 <span class="hb-bell" title={tr('Напоминание в {time}', { time: h.remind_at })}>
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg>
+                  <Icon name="bell-small" size={12} stroke={2.2} />
                   {h.remind_at}
                 </span>
               {/if}
@@ -328,7 +329,7 @@
           </div>
           <IconButton label={tr('Изменить')} size="sm" onclick={() => openForm(h)}>
             {#snippet icon()}
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z" /></svg>
+              <Icon name="pencil" size={16} />
             {/snippet}
           </IconButton>
         </li>

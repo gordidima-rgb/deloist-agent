@@ -7,8 +7,12 @@
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';
+  import Icon from '../kit/Icon.svelte';
   import FileViewer from './FileViewer.svelte';
   import { FILE_MIME, fileRef } from '../../lib/fileRef.js';
+
+  // Тип файла (lib/fileType.js) -> значок из lib/icons.js; незнакомый тип рисуется общим листом.
+  const FILE_ICONS = Object.fromEntries(['image', 'audio', 'video', 'document', 'pdf', 'spreadsheet', 'presentation', 'archive', 'code', 'text'].map((type) => [type, `file-${type}`]));
 
   let { bot, api, initial = '', onquote } = $props();
 
@@ -60,31 +64,11 @@
 </script>
 
 {#snippet folderIcon()}
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
-    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-  </svg>
+  <Icon name="folder" size={18} stroke={1.8} />
 {/snippet}
 
 {#snippet fileIcon(type)}
-  <svg class="df-icon df-icon--{type}" data-file-type={type} viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    {#if type === 'image'}
-      <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>
-    {:else if type === 'audio'}
-      <path d="M10 17V5l8-2v12M10 8l8-2"/><ellipse cx="7" cy="18" rx="3" ry="2"/><ellipse cx="15" cy="16" rx="3" ry="2"/>
-    {:else if type === 'video'}
-      <rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>
-    {:else}
-      <path d="M6 3h8l4 4v14H6zM14 3v4h4" />
-      {#if type === 'spreadsheet'}<path d="M8 11h8M8 14h8M8 17h8M12 11v6"/>
-      {:else if type === 'presentation'}<path d="M8 10h8v6H8zM12 16v2m-2 0h4"/>
-      {:else if type === 'archive'}<path d="M11 4h2m-2 2h2m-2 2h2m-2 2h2m-2 2h2v3h-2z"/>
-      {:else if type === 'code'}<path d="m10 11-2 2 2 2m4-4 2 2-2 2m-1-5-2 7"/>
-      {:else if type === 'pdf'}<path d="M8 16c2-2 3-5 3-7 1 4 3 6 5 6-3 0-5 1-8 1z"/>
-      {:else if type === 'document'}<path d="M8 10h8M8 13h8M8 16h6M8 18h4"/>
-      {:else if type === 'text'}<path d="M8 11h8M8 14h8M8 17h5"/>
-      {/if}
-    {/if}
-  </svg>
+  <Icon name={FILE_ICONS[type] ?? 'file'} size={18} stroke={1.7} class="df-icon df-icon--{type}" data-file-type={type} />
 {/snippet}
 
 {#if viewing}
@@ -149,8 +133,8 @@
   .df-crumb:hover { background: var(--k-surface-2); color: var(--k-text); }
   .df-crumb:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .df-sep { color: var(--k-text-3); }
-  .df-icon { color: var(--k-text-2); }
-  .df-icon--image, .df-icon--presentation { color: var(--k-ai); }
-  .df-icon--audio, .df-icon--spreadsheet { color: var(--k-brand-text); }
-  .df-icon--video, .df-icon--pdf { color: var(--k-attention-text); }
+  :global(.df-icon) { color: var(--k-text-2); }
+  :global(.df-icon--image), :global(.df-icon--presentation) { color: var(--k-ai); }
+  :global(.df-icon--audio), :global(.df-icon--spreadsheet) { color: var(--k-brand-text); }
+  :global(.df-icon--video), :global(.df-icon--pdf) { color: var(--k-attention-text); }
 </style>

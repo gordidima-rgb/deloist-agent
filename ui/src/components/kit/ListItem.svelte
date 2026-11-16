@@ -3,6 +3,7 @@
   // avatar и context — сниппеты; context — место для кнопки меню «…».
   import Badge from './Badge.svelte';
 
+  import Icon from './Icon.svelte';
   let {
     avatar = null,
     title = '',
@@ -33,9 +34,7 @@
   {#if onclick}
     <button type="button" class="k-list-item__main" onclick={onclick}>
       {#if pinned}
-        <svg class="k-list-item__pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 17v5" /><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-        </svg>
+        <Icon name="pin" size={null} class="k-list-item__pin" />
       {/if}
       <span class="k-list-item__text">
         <span class="k-list-item__title">{title}</span>
@@ -45,9 +44,7 @@
   {:else}
     <div class="k-list-item__main">
       {#if pinned}
-        <svg class="k-list-item__pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 17v5" /><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-        </svg>
+        <Icon name="pin" size={null} class="k-list-item__pin" />
       {/if}
       <span class="k-list-item__text">
         <span class="k-list-item__title">{title}</span>

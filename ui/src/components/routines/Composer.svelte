@@ -9,6 +9,7 @@
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
   import MentionPopover from '../MentionPopover.svelte';
 
+  import Icon from '../kit/Icon.svelte';
   let {
     value = $bindable(''),
     placeholder = '',
@@ -179,7 +180,7 @@
       <span class="cmp-chip cmp-chip--{chip.kind}" data-kind={chip.kind}>
         <span class="cmp-chip-text">{chip.text}</span>
         <button type="button" class="cmp-chip-x" aria-label={chipLabel(chip)} title={chipLabel(chip)} onclick={() => remove(chip.kind)}>
-          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          <Icon name="close" size={10} stroke={3} />
         </button>
       </span>
     {/each}

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { icon } from './lib/icons.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // turn-card.js — обычный скрипт страницы: кладёт всё в window.CrewTurnCard.
@@ -18,6 +19,7 @@ let card;
 
 beforeEach(() => {
   vi.useFakeTimers();
+  window.DeloistUI = { icon };
   // eslint-disable-next-line no-new-func
   new Function(source).call(window);
   host = document.createElement('div');

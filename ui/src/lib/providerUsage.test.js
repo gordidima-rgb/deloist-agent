@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { icon } from './icons.js';
 
 const source = readFileSync('../web/providers.js', 'utf8');
 const helpers = source.slice(source.indexOf('  function windows('), source.indexOf('  async function renderUsage('));
-const details = new Function('esc', 'tr', 'iconColor', 'limitLabel', `${helpers}\nreturn details;`)(
+const details = new Function('esc', 'tr', 'iconColor', 'limitLabel', 'DeloistUI', `${helpers}\nreturn details;`)(
   (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;'),
   (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key] ?? ''),
-  () => 'ffffff', (label) => label,
+  () => 'ffffff', (label) => label, { icon },
 );
 const provider = { id: 'antigravity', name: 'Gemini', limits: [] };
 

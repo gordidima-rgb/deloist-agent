@@ -7,6 +7,7 @@
   import { tr } from '../lib/i18n.js';
   import MicButton from './MicButton.svelte';
 
+  import Icon from './kit/Icon.svelte';
   let {
     bots = [],
     side = 'right',
@@ -226,9 +227,7 @@
             <span class="seat-dot"></span>
           {/if}
           <span class="k-seat__voice" aria-hidden="true"
-            ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
-              ><rect x="8.5" y="3" width="7" height="11" rx="3.5" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg
-            ></span
+            ><Icon name="mic-round" size={null} stroke={3} /></span
           >
         </button>
       {/each}
@@ -244,14 +243,10 @@
         </span>
       {/if}
       <button type="button" class="k-gear" bind:this={gear} aria-haspopup="menu" aria-expanded={menuOpen} aria-label={tr('Настройки дока')} title={tr('Настройки дока')} onclick={openMenu}>
-        <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-          ><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" /><path
-            d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1.03Z"
-          /></svg
-        >
+        <Icon name="gear" size={null} stroke={1.8} class="k-i" />
       </button>
       <button type="button" class="k-tray-add" aria-label={tr('Новый бот')} title={tr('Новый бот')} onclick={() => onadd?.()}>
-        <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <Icon name="plus" size={null} stroke={1.8} class="k-i" />
       </button>
       <svg class="k-grip" bind:this={grip} viewBox="0 0 28 10" role="separator" aria-orientation="horizontal" aria-label={tr('Потяни вдоль края, чтобы сдвинуть, или от стены, чтобы перенести')}
         ><title>{tr('Потяни вдоль края, чтобы сдвинуть, или от стены, чтобы перенести')}</title><path d="M3 3c5.5 4.5 16.5 4.5 22 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" /></svg
@@ -265,27 +260,19 @@
         <div class="k-sharpen-in">
           <div class="dock-menu__title">{tr('Док')}</div>
           <button type="button" class="k-menu__item" role="menuitemcheckbox" aria-checked={settings.autohide} onclick={() => set({ dockAutohide: !settings.autohide })}>
-            <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              ><path d="M15 4h4v16h-4" /><path d="M4 12h10" /><path d="m10 8 4 4-4 4" /></svg
-            >
+            <Icon name="dock-hide" size={null} stroke={1.8} class="k-i" />
             {tr('Прятать к краю')}<span class="k-switch"></span>
           </button>
           <button type="button" class="k-menu__item" role="menuitemcheckbox" aria-checked={settings.layer !== 'normal'} onclick={() => set({ dockLayer: settings.layer === 'normal' ? 'top' : 'normal' })}>
-            <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              ><rect x="3" y="9" width="12" height="11" rx="2" /><rect x="9" y="4" width="12" height="11" rx="2" /></svg
-            >
+            <Icon name="layers" size={null} stroke={1.8} class="k-i" />
             {tr('Поверх всех окон')}<span class="k-switch"></span>
           </button>
           <button type="button" class="k-menu__item" role="menuitem" onclick={() => { closeMenu(); set({ dockEdge: left ? 'right' : 'left' }); }}>
-            <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              ><path d="M7 7h10" /><path d="m14 4 3 3-3 3" /><path d="M17 17H7" /><path d="m10 14-3 3 3 3" /></svg
-            >
+            <Icon name="arrows-swap" size={null} stroke={1.8} class="k-i" />
             {tr('Край экрана')}<span class="k-menu__value">{left ? tr('Слева') : tr('Справа')}</span>
           </button>
           <button type="button" class="k-menu__item" role="menuitem" aria-haspopup="true" aria-expanded={voiceListOpen} onclick={() => (voiceListOpen = !voiceListOpen)}>
-            <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              ><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" /></svg
-            >
+            <Icon name="mic" size={null} stroke={1.8} class="k-i" />
             {tr('Голос уходит')}<span class="k-menu__value">{targetName}</span>
           </button>
           {#if voiceListOpen}
@@ -302,9 +289,7 @@
           {/if}
           {#if hiddenBots.length}
             <button type="button" class="k-menu__item" role="menuitem" aria-haspopup="true" aria-expanded={showListOpen} onclick={() => (showListOpen = !showListOpen)}>
-              <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-                ><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" /><circle cx="12" cy="12" r="2.8" /></svg
-              >
+              <Icon name="eye" size={null} stroke={1.8} class="k-i" />
               {tr('Показать в доке…')}<span class="k-menu__value">{hiddenBots.length}</span>
             </button>
             {#if showListOpen}
@@ -319,9 +304,7 @@
           {/if}
           <div class="k-menu__sep"></div>
           <button type="button" class="k-menu__item" role="menuitem" onclick={() => { closeMenu(); onhide?.(); }}>
-            <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              ><path d="M3 3l18 18" /><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3 3.9M6.3 6.3A17 17 0 0 0 2.5 12S6 19 12 19a9.6 9.6 0 0 0 5.7-1.8" /></svg
-            >
+            <Icon name="eye-off" size={null} stroke={1.8} class="k-i" />
             {tr('Скрыть док')}
           </button>
         </div>

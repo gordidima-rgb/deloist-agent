@@ -1,4 +1,5 @@
 <script module>
+  import Icon from './Icon.svelte';
   let seq = 0;
 </script>
 
@@ -137,7 +138,7 @@
             {#if description}<p class="k-modal__desc" id={descId}>{description}</p>{/if}
           </div>
           <button type="button" class="k-btn k-btn--ghost k-btn--icon k-modal__close" aria-label={closeLabel || tr('Закрыть')} title={closeLabel || tr('Закрыть')} onclick={close}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            <Icon name="close" size={null} />
           </button>
         </header>
       {/if}

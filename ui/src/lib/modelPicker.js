@@ -3,6 +3,7 @@
 // Те же два поля бота и общих настроек, что раньше вводили руками: старые боты читаются без миграции.
 import { tr } from './i18n.js';
 import { PROVIDER_ICONS } from './providerIcons.js';
+import { icon } from './icons.js';
 
 /// Драйверы без списка моделей: человек вписывает имя сам (ключ API, Anthropic, Gemini, программа).
 const MANUAL = [
@@ -154,9 +155,9 @@ export function labelOf(groups, value) {
 
 /// Свои значки: Deloist, демо и программа. Строки зашиты в сборку, пользовательских данных тут нет.
 const OWN_ICONS = {
-  deloist: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><path d="m8.5 12.4 2.4 2.4 4.6-5" /></svg>',
-  demo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4" /><path d="m12 8.5 1.2 2.3 2.3 1.2-2.3 1.2L12 15.5l-1.2-2.3L8.5 12l2.3-1.2z" /></svg>',
-  cli: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.5" /><path d="m8 10 3 2.5L8 15M13 15h3.5" /></svg>',
+  deloist: () => icon('provider-deloist'),
+  demo: () => icon('provider-demo'),
+  cli: () => icon('provider-cli'),
 };
 
 /// Точные идентификаторы → ключ значка.
@@ -226,7 +227,7 @@ export function iconFor(group) {
 /// Строка SVG для значка группы (или null). Только зашитые константы.
 export function iconSvg(group) {
   const key = iconFor(group);
-  return key ? OWN_ICONS[key] || PROVIDER_ICONS[key] || null : null;
+  return key ? OWN_ICONS[key]?.() || PROVIDER_ICONS[key] || null : null;
 }
 
 /// Вторая строка в шапке панели: что за провайдер.

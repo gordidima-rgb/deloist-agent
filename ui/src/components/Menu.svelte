@@ -1,8 +1,10 @@
 <script>
   // Меню кита «Тушь и сигнал» (.k-menu, docs/design/kit.md): островок туши со строками.
   // Пункты — данные: { id, label, kind: 'item' | 'check' | 'sep' | 'note', checked, disabled, hint, danger, icon, autofocus }.
-  // icon — содержимое <svg viewBox="0 0 24 24"> (пути), hint — тихая подпись справа, disabled — серая строка, tip — её подсказка.
+  // icon — имя значка из lib/icons.js, hint — тихая подпись справа, disabled — серая строка, tip — её подсказка.
   // Стрелки, Home и End ходят по пунктам; Esc и щелчок мимо закрывают меню (onclose). Текст уже переведён вызывающим.
+  import Icon from './kit/Icon.svelte';
+
   let { items = [], label = '', onpick, onclose } = $props();
 
   let root = $state();
@@ -70,7 +72,7 @@
         onclick={() => pick(item)}
       >
         {#if item.icon}
-          <svg class="k-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{@html item.icon}</svg>
+          <Icon name={item.icon} size={null} stroke={1.8} class="k-i" />
         {/if}
         <span class="menu__label">{item.label}</span>
         {#if item.kind === 'check'}<span class="k-switch"></span>{:else if item.hint}<span class="k-menu__value">{item.hint}</span>{/if}

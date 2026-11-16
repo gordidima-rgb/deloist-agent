@@ -11,6 +11,7 @@
   import Badge from './kit/Badge.svelte';
   import TextInput from './kit/TextInput.svelte';
 
+  import Icon from './kit/Icon.svelte';
   let {
     providers = [],
     plan = null,
@@ -140,7 +141,6 @@
 
   const badgeText = (b) => (b === 'free' ? tr('Бесплатно') : b === 'sub' ? tr('Подписка') : b === 'default' ? tr('по умолчанию') : '');
   const isOpenMore = (g, more) => searching || expanded[g.id] || more.some((m) => isCurrent(g, m, value));
-  const CHECK = 'm5.5 12.5 4.2 4.2L18.5 7.6';
 </script>
 
 <svelte:window onpointerdown={outside} onresize={() => open && place()} />
@@ -159,7 +159,7 @@
 {/snippet}
 
 {#snippet check()}
-  <span class="mp-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={CHECK} /></svg></span>
+  <span class="mp-check" aria-hidden="true"><Icon name="check-soft" size={null} stroke={2.4} /></span>
 {/snippet}
 
 {#snippet modelRow(g, m)}
@@ -181,7 +181,7 @@
       {/if}
       <span class="mp-text" class:muted={!value.driver}>{current.text}</span>
     </span>
-    <svg class="mp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class:up={open}><path d="m6 9 6 6 6-6" /></svg>
+    <Icon name="chevron-down" size={null} class={['mp-chev', open && 'up']} />
   </button>
 
   {#if open}
@@ -201,7 +201,7 @@
           <span class="mp-rail-gap"></span>
           <Tooltip text={tr('Подключить ИИ')} placement="right">
             <button type="button" class="mp-rail-btn mp-add" aria-label={tr('Подключить ИИ')} onclick={addProvider}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <Icon name="plus" size={null} />
             </button>
           </Tooltip>
         </div>
@@ -214,7 +214,7 @@
           </div>
           <div class="mp-search">
             <TextInput type="search" bind:value={query} placeholder={tr('Поиск моделей')} aria-label={tr('Поиск моделей')} />
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+            <Icon name="search-short" size={null} />
           </div>
         </header>
         <div class="mp-list" role="group">
@@ -223,7 +223,7 @@
           {:else}
           {#if showDefault}
             <button type="button" class="mp-item" class:sel={!value.driver} role="menuitemradio" aria-checked={!value.driver} onclick={pickDefault}>
-              <span class="mp-logo mp-default" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg></span>
+              <span class="mp-logo mp-default" aria-hidden="true"><Icon name="sliders" size={null} /></span>
               <span class="mp-name">{defaultLabel || tr('как в настройках')}</span>
               {@render check()}
             </button>
@@ -242,7 +242,7 @@
             {/each}
             {#if parts.more.length}
               <button type="button" class="mp-more" aria-expanded={more} onclick={() => (expanded = { ...expanded, [g.id]: !more })}>
-                <svg class="mp-more-chev" class:down={more} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                <Icon name="chevron-right" size={null} class={['mp-more-chev', more && 'down']} />
                 <span>{tr('Ещё модели · {n}', { n: parts.more.length })}</span>
               </button>
               {#if more}
@@ -254,7 +254,7 @@
           {/each}
           {#if !searching && shown.reduce((n, g) => n + g.models.length, 0) < 6}
             <button type="button" class="mp-connect" onclick={addProvider}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <Icon name="plus" size={null} />
               <span>{tr('Подключить новую ИИ…')}</span>
             </button>
           {/if}
@@ -354,14 +354,14 @@
     font-size: var(--k-text-micro);
     font-weight: 700;
   }
-  .mp-chev {
+  :global(.mp-chev) {
     flex: none;
     width: 16px;
     height: 16px;
     color: var(--k-text-3);
     transition: transform var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-chev.up {
+  :global(.mp-chev.up) {
     transform: rotate(180deg);
   }
   .mp-pop {
@@ -446,7 +446,7 @@
     cursor: pointer;
     transition: background var(--k-dur-fast) var(--k-ease-out), color var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-rail-btn svg {
+  .mp-rail-btn :global(svg) {
     width: 18px;
     height: 18px;
   }
@@ -499,7 +499,7 @@
     flex: none;
     width: 168px;
   }
-  .mp-search svg {
+  .mp-search :global(svg) {
     position: absolute;
     right: 12px;
     top: 50%;
@@ -577,7 +577,7 @@
     place-items: center;
     color: transparent;
   }
-  .mp-check svg {
+  .mp-check :global(svg) {
     width: 16px;
     height: 16px;
   }
@@ -625,7 +625,7 @@
     font-size: var(--k-text-sm);
     cursor: pointer;
   }
-  .mp-connect svg {
+  .mp-connect :global(svg) {
     flex: none;
     width: 18px;
     height: 14px;
@@ -638,13 +638,13 @@
     outline: none;
     box-shadow: var(--k-focus);
   }
-  .mp-more-chev {
+  :global(.mp-more-chev) {
     flex: none;
     width: 18px;
     height: 14px;
     transition: transform var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-more-chev.down {
+  :global(.mp-more-chev.down) {
     transform: rotate(90deg);
   }
   @media (prefers-reduced-motion: reduce) {
@@ -652,8 +652,8 @@
       animation: none;
     }
     .mp-rail-dot,
-    .mp-chev,
-    .mp-more-chev,
+    :global(.mp-chev),
+    :global(.mp-more-chev),
     .mp-row,
     .mp-rail-btn,
     .mp-item,

@@ -1,7 +1,7 @@
 // Карточки обновлений: новая версия Deloist и подключённых программ. Ставится только по нажатию.
 window.DeloistUpdates = (() => {
   const KEY = 'deloist-update-dismissed';
-  const CLOSE_ICON = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  const CLOSE_ICON = DeloistUI.icon('close', { className: 'i' });
 
   let api = null;
   let toast = () => {};

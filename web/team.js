@@ -267,8 +267,8 @@
   // Карточка в чате ведущего
   // ---------------------------------------------------------------------------
 
-  const ICON_TEAM = '<svg class="tm-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12M12 12H5v4.8M12 12h7v4.8"/></svg>';
-  const ICON_CHEV = '<svg class="tm-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+  const ICON_TEAM = DeloistUI.icon('org-chart', { className: 'tm-ico' });
+  const ICON_CHEV = DeloistUI.icon('chevron-right', { className: 'tm-chev' });
   const MARKS = {
     done: 'M5.2 9.2l2.5 2.5 5.1-5.4',
     failed: 'M6.3 6.3l5.4 5.4M11.7 6.3l-5.4 5.4',

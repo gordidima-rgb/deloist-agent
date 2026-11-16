@@ -4,6 +4,7 @@ import { mountComponent } from './mount.svelte.js';
 import * as screenLayout from './screenLayout.js';
 import ScreenControl from '../components/ScreenControl.svelte';
 import { readFileSync } from 'node:fs';
+import { icon } from './icons.js';
 const screenSource = readFileSync('../web/screen.js', 'utf8');
 
 describe('screen control requests', () => {
@@ -11,7 +12,7 @@ describe('screen control requests', () => {
     const requests = [];
     vi.stubGlobal('EventSource', class { close() {} });
     vi.stubGlobal('fetch', vi.fn((url) => new Promise((resolve) => requests.push({ url, resolve }))));
-    window.DeloistUI = { screenLayout, mountScreenControl: (target, props) => mountComponent(ScreenControl, target, props) };
+    window.DeloistUI = { screenLayout, icon, mountScreenControl: (target, props) => mountComponent(ScreenControl, target, props) };
     window.eval(screenSource);
     const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); };
     window.DeloistScreen.open('first'); flushSync();

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { icon } from './icons.js';
 
 const source = readFileSync('../web/updates.js', 'utf8');
 const provider = { id: 'gemini', name: 'Gemini', installed: '1', latest: '2', update: true, status: 'connected' };
@@ -8,6 +9,7 @@ beforeEach(() => {
   localStorage.clear();
   document.body.innerHTML = '<div id="updates"></div>';
   window.tr = (s, vars = {}) => s.replace(/\{(\w+)\}/g, (_, key) => vars[key]);
+  window.DeloistUI = { icon };
   window.DeloistProviders = { update: vi.fn() };
   window.eval(source);
 });

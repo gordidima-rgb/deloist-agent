@@ -7,6 +7,7 @@
   import ConnectFlow from './ConnectFlow.svelte';
   import DiffView from './DiffView.svelte';
 
+  import Icon from '../kit/Icon.svelte';
   let { id, bots = [], onclose, onchanged, onopenbot } = $props();
 
   let item = $state.raw(null);
@@ -134,7 +135,7 @@
 <aside class="cat-drawer" aria-label={title || tr('Подробности')} tabindex="-1" bind:this={panel}>
   <header class="top">
     <button type="button" class="k-btn k-btn--ghost k-btn--icon" aria-label={tr('Закрыть')} title={tr('Закрыть')} onclick={() => onclose?.()}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      <Icon name="close" size={18} />
     </button>
   </header>
 

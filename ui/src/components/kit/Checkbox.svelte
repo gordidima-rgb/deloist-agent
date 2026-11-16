@@ -1,4 +1,5 @@
 <script>
+  import Icon from './Icon.svelte';
   // Флажок на токенах кита. Нативный input остаётся доступным и с клавиатуры,
   // видимая рамка — соседний .k-check__box.
   let {
@@ -29,9 +30,7 @@
     {...rest}
   />
   <span class="k-check__box" class:is-indeterminate={indeterminate} aria-hidden="true">
-    <svg class="k-check__tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
+    <Icon name="tick" size={null} stroke={3.3} class="k-check__tick" />
   </span>
   {#if label}<span class="k-check__label">{label}</span>{/if}
 </label>

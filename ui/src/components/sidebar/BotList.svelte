@@ -8,6 +8,7 @@
   import { tr } from '../../lib/i18n.js';
   import { plainPreview, teamSubtitle } from '../../lib/preview.js';
 
+  import Icon from '../kit/Icon.svelte';
   let {
     bots = [],
     rooms = [],
@@ -186,9 +187,7 @@
         aria-pressed={bot.pinned}
         onclick={() => onpin?.(bot.id, !bot.pinned)}
       >
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 17v5" /><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-        </svg>
+        <Icon name="pin" size={15} />
       </button>
     {/snippet}
   </ListItem>
@@ -242,7 +241,7 @@
               if (!searching) setTeamOpen(room.id, !open);
             }}
           >
-            <svg class="sb-chev" class:is-open={open} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+            <Icon name="chevron-right" size={14} class={['sb-chev', open && 'is-open']} />
           </button>
         {/if}
         <span class="avatar sb-avatar room-icon" style={room.color ? `--team-color: ${room.color}` : undefined}>
@@ -313,7 +312,7 @@
 
   {#if reserve.length}
     <button type="button" class="sb-head sb-toggle" aria-expanded={reserveOpen} onclick={toggleReserve}>
-      <svg class="sb-chev" class:is-open={reserveOpen} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+      <Icon name="chevron-right" size={14} class={['sb-chev', reserveOpen && 'is-open']} />
       {tr('Специалисты в запасе')}
       <span class="sb-count">{reserve.length}</span>
     </button>
@@ -332,7 +331,7 @@
       aria-label={tr('Архив команд · {n}', { n: archivedRooms.length })}
       onclick={toggleArchive}
     >
-      <svg class="sb-chev" class:is-open={archiveOpen} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+      <Icon name="chevron-right" size={14} class={['sb-chev', archiveOpen && 'is-open']} />
       {tr('Архив команд')}
       <span class="sb-count">{archivedRooms.length}</span>
     </button>
@@ -362,8 +361,8 @@
   .sb-toggle { min-height: 28px; border-radius: var(--k-radius-sm); cursor: pointer; }
   .sb-toggle:hover { color: var(--k-text); background: var(--k-surface-2); }
   .sb-toggle:focus-visible { outline: none; box-shadow: var(--k-focus); }
-  .sb-chev { transition: transform var(--k-dur-fast) var(--k-ease-out); }
-  .sb-chev.is-open { transform: rotate(90deg); }
+  :global(.sb-chev) { transition: transform var(--k-dur-fast) var(--k-ease-out); }
+  :global(.sb-chev.is-open) { transform: rotate(90deg); }
   .sb-count {
     margin-left: auto;
     padding: 1px 7px;
@@ -459,6 +458,6 @@
   :global(body.side-collapsed) .sb-roll { display: none; }
 
   @media (prefers-reduced-motion: reduce) {
-    .sb-chev, .sb-pin, .sb-branch { transition: none; }
+    :global(.sb-chev), .sb-pin, .sb-branch { transition: none; }
   }
 </style>

@@ -19,6 +19,7 @@
   import EmptyState from '../kit/EmptyState.svelte';
   import Skeleton from '../kit/Skeleton.svelte';
 
+  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi, today = mondayOf() } = $props();
 
   let data = $state(null);
@@ -110,11 +111,11 @@
   <div class="rp-nav">
     <div class="rp-nav-group">
       <button type="button" class="rp-step" aria-label={tr('Прошлая неделя')} disabled={!data || loading} onclick={() => go(addDays(data.weekStart, -7))}>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+        <Icon name="chevron-left" size={16} />
       </button>
       <span class="rp-range" aria-live="polite">{data ? weekLabel(data.weekStart, data.weekEnd, locale) : ''}</span>
       <button type="button" class="rp-step" aria-label={tr('Следующая неделя')} disabled={!data || loading || isCurrent} onclick={() => go(addDays(data.weekStart, 7))}>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+        <Icon name="chevron-right" size={16} />
       </button>
     </div>
     <Button variant="ghost" size="sm" disabled={!data || loading || isCurrent} onclick={() => go('')}>{tr('Сегодня')}</Button>
@@ -177,7 +178,7 @@
                 {#if fails.length}
                   <button type="button" class="rp-more" aria-expanded={!!open[bot.id]} aria-controls="rp-f-{bot.id}" onclick={() => toggle(bot.id)}>
                     {tr('Ошибки: {n}', { n: fails.length })}
-                    <svg class="rp-chev" class:rp-turn={open[bot.id]} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                    <Icon name="chevron-down" size={14} class={['rp-chev', open[bot.id] && 'rp-turn']} />
                   </button>
                 {/if}
               </div>
@@ -239,8 +240,8 @@
   .rp-meta { color: var(--k-text-3, #8d8f94); font-size: var(--k-text-xs, 12px); }
   .rp-pct { font: 800 var(--k-text-lg, 18px) / 1 var(--k-font-display, inherit); font-variant-numeric: tabular-nums; }
   .rp-more { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 0; border-radius: var(--k-radius-pill, 999px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font: 700 var(--k-text-xs, 12px) / 1 var(--k-font-body, inherit); cursor: pointer; }
-  .rp-chev { transition: transform 0.15s; }
-  .rp-turn { transform: rotate(180deg); }
+  :global(.rp-chev) { transition: transform 0.15s; }
+  :global(.rp-turn) { transform: rotate(180deg); }
   .rp-fails { list-style: none; margin: 0; padding: 0 var(--k-space-4, 16px) var(--k-space-3, 12px); display: flex; flex-direction: column; gap: var(--k-space-2, 8px); }
   .rp-fails li { display: flex; gap: var(--k-space-3, 12px); align-items: baseline; font-size: var(--k-text-sm, 13px); }
   .rp-time { flex: none; color: var(--k-text-3, #8d8f94); font-size: var(--k-text-xs, 12px); font-variant-numeric: tabular-nums; }
@@ -250,6 +251,6 @@
     .rp-fails li { flex-direction: column; gap: 2px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .rp-chev, .rp-body { transition: none; }
+    :global(.rp-chev), .rp-body { transition: none; }
   }
 </style>

@@ -8,6 +8,7 @@
   import { api as defaultApi } from '../../lib/api.js';
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
 
+  import Icon from '../kit/Icon.svelte';
   let { input = null, chipsHost = null, api = defaultApi, debounce = 200 } = $props();
 
   let value = $state('');
@@ -130,7 +131,7 @@
     <span class="cd-chip cd-chip--{chip.kind}" data-kind={chip.kind}>
       <span class="cd-chip-text">{chip.text}</span>
       <button type="button" class="cd-chip-x" aria-label={chipLabel(chip)} title={chipLabel(chip)} onclick={() => remove(chip.kind)}>
-        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        <Icon name="close" size={10} stroke={3} />
       </button>
     </span>
   {/each}
