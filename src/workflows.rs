@@ -156,6 +156,9 @@ pub struct Step {
     pub seq: u64,
     /// Порядок конца шага; 0, пока шаг не закончен.
     pub end_seq: u64,
+    /// Ответ взят из прошлого запуска: настройки узла и входы с тех пор не менялись.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reused: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -181,6 +184,9 @@ pub struct Run {
     pub trigger_node: Option<String>,
     /// Общий счётчик порядка шагов.
     pub counter: u64,
+    /// Запуск одного узла («выполнить шаг»): ниже по графу ничего не идёт.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub solo: bool,
     /// Почему запуск упал целиком («слишком много кругов»).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -296,12 +302,22 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
     if graph.strokes.len() > MAX_STROKES {
         return Err(err_plain("too_many_strokes", format!("штрихов не больше {MAX_STROKES}")));
     }
+    let mut stroke_ids: HashSet<&str> = HashSet::new();
     for stroke in &graph.strokes {
         if stroke.points.len() > MAX_POINTS {
             return Err(err_plain("too_many_points", format!("точек в штрихе не больше {MAX_POINTS}")));
         }
         if !matches!(stroke.brush.as_str(), "pen" | "marker") {
             return Err(err_plain("bad_brush", "кисть pen или marker"));
+        }
+        if stroke.id.trim().is_empty() || !stroke_ids.insert(stroke.id.as_str()) {
+            return Err(err_plain("bad_stroke_id", "у штриха нет id или он повторяется"));
+        }
+        if stroke.color.chars().count() > 64 || !stroke.width.is_finite() || stroke.width <= 0.0 || stroke.width > 200.0 {
+            return Err(err_plain("bad_stroke", "цвет до 64 знаков, толщина от 0 до 200"));
+        }
+        if stroke.points.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) {
+            return Err(err_plain("bad_stroke", "точки штриха должны быть числами"));
         }
     }
     let size = serde_json::to_vec(graph).map(|v| v.len()).unwrap_or(usize::MAX);
@@ -335,6 +351,19 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
             let trigger = node.text("trigger");
             if !trigger.is_empty() && !TRIGGERS.contains(&trigger.as_str()) {
                 return Err(err_node("bad_trigger", format!("неизвестный запуск «{trigger}»"), &node.id));
+            }
+        }
+        if node.kind == "shape" {
+            let shape = node.text("shape");
+            if !shape.is_empty() && !matches!(shape.as_str(), "rect" | "circle" | "diamond" | "triangle" | "oval" | "star") {
+                return Err(err_node("bad_shape", format!("неизвестная фигура «{shape}»"), &node.id));
+            }
+        }
+        if is_annotation(&node.kind) {
+            for key in ["color", "fill"] {
+                if node.text(key).chars().count() > 64 {
+                    return Err(err_node("bad_field", format!("поле «{key}» слишком длинное"), &node.id));
+                }
             }
         }
         if node.kind == "output" {
@@ -507,8 +536,23 @@ pub fn collect_due(stored: &mut Stored, now_ms: i64) -> (Vec<String>, bool) {
 // Хранилище
 // ---------------------------------------------------------------------------
 
+/// Сохранённое состояние графа: `auto` (при сохранении, не чаще раза в 5 минут), `run`, `restore`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Version {
+    pub v: u64,
+    pub kind: String,
+    pub at: i64,
+    pub revision: u64,
+    pub graph: Graph,
+}
+
+pub const KEEP_VERSIONS: usize = 50;
+pub const AUTO_VERSION_MS: i64 = 5 * 60_000;
+
 pub struct Inner {
     dir: PathBuf,
+    pub versions: HashMap<String, Vec<Version>>,
     pub items: Vec<Stored>,
     pub runs: HashMap<String, Vec<Run>>,
     /// Токены остановки идущих шагов (по id шага).
@@ -543,6 +587,36 @@ impl Inner {
         }
     }
 
+    fn versions_path(&self, id: &str) -> PathBuf {
+        self.dir.join(format!("{id}.versions.json"))
+    }
+
+    pub fn save_versions(&self, id: &str) {
+        let _ = std::fs::create_dir_all(&self.dir);
+        let empty = Vec::new();
+        if let Ok(text) = serde_json::to_string(self.versions.get(id).unwrap_or(&empty)) {
+            write_atomic(&self.versions_path(id), &text);
+        }
+    }
+
+    /// Положить версию. `auto` пишется, только если прошлая версия старше пяти минут; для `run` повтор той же ревизии не плодится.
+    pub fn push_version(&mut self, id: &str, kind: &str, graph: &Graph, revision: u64) -> Option<u64> {
+        let at = now();
+        let list = self.versions.entry(id.to_string()).or_default();
+        if let Some(last) = list.last() {
+            if (kind == "auto" && at - last.at < AUTO_VERSION_MS) || (kind == "run" && last.kind == "run" && last.revision == revision) {
+                return None;
+            }
+        }
+        let v = list.last().map_or(1, |l| l.v + 1);
+        list.push(Version { v, kind: kind.to_string(), at, revision, graph: graph.clone() });
+        while list.len() > KEEP_VERSIONS {
+            list.remove(0);
+        }
+        self.save_versions(id);
+        Some(v)
+    }
+
     pub fn save_runs(&self, id: &str) {
         let _ = std::fs::create_dir_all(&self.dir);
         let empty = Vec::new();
@@ -555,6 +629,7 @@ impl Inner {
     pub fn remove_files(&self, id: &str) {
         let _ = std::fs::remove_file(self.wf_path(id));
         let _ = std::fs::remove_file(self.runs_path(id));
+        let _ = std::fs::remove_file(self.versions_path(id));
     }
 
     pub fn get(&self, id: &str) -> Option<&Stored> {
@@ -588,11 +663,12 @@ impl Workflows {
         let dir = data_dir.join("workflows");
         let mut items: Vec<Stored> = Vec::new();
         let mut runs: HashMap<String, Vec<Run>> = HashMap::new();
+        let mut versions: HashMap<String, Vec<Version>> = HashMap::new();
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let Some(id) = name.strip_suffix(".json") else { continue };
-                if id.ends_with(".runs") {
+                if id.ends_with(".runs") || id.ends_with(".versions") {
                     continue;
                 }
                 let Some(stored) = std::fs::read_to_string(entry.path()).ok().and_then(|t| serde_json::from_str::<Stored>(&t).ok()) else {
@@ -601,11 +677,13 @@ impl Workflows {
                 };
                 let list: Vec<Run> = std::fs::read_to_string(dir.join(format!("{id}.runs.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
                 runs.insert(stored.wf.id.clone(), list);
+                let saved: Vec<Version> = std::fs::read_to_string(dir.join(format!("{id}.versions.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+                versions.insert(stored.wf.id.clone(), saved);
                 items.push(stored);
             }
         }
         items.sort_by_key(|s| s.wf.created_at);
-        Self { inner: Mutex::new(Inner { dir, items, runs, tokens: HashMap::new() }) }
+        Self { inner: Mutex::new(Inner { dir, versions, items, runs, tokens: HashMap::new() }) }
     }
 
     pub fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {

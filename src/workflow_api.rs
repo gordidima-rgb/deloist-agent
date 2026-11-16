@@ -27,6 +27,10 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/workflows/{id}/duplicate", post(duplicate))
         .route("/api/workflows/{id}/run", post(start))
         .route("/api/workflows/{id}/runs", get(runs))
+        .route("/api/workflows/{id}/nodes/{node_id}/run", post(start_solo))
+        .route("/api/workflows/{id}/versions", get(versions))
+        .route("/api/workflows/{id}/versions/{v}", get(version))
+        .route("/api/workflows/{id}/versions/{v}/restore", post(restore))
         .route("/api/workflow-runs/{run_id}/stop", post(stop_run))
         .route("/api/workflow-steps/{step_id}/stop", post(stop_step))
         .route("/api/workflow-steps/{step_id}/retry", post(retry_step))
@@ -154,12 +158,13 @@ async fn save_graph(State(app): Shared, Path(id): Path<String>, bytes: Bytes) ->
         if stored.wf.revision != base {
             return reply(StatusCode::CONFLICT, json!({ "conflict": true, "workflow": stored.wf }));
         }
-        stored.wf.graph = graph;
+        stored.wf.graph = graph.clone();
         stored.wf.revision += 1;
         stored.wf.updated_at = now();
         wf::refresh_slots(stored, now());
         let revision = stored.wf.revision;
         guard.save_wf(&id);
+        guard.push_version(&id, "auto", &graph, revision);
         revision
     };
     changed(&app, &id);
@@ -216,7 +221,7 @@ async fn start(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Resp
     };
     let request_id = body.get("request_id").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 100).map(str::to_string);
     let from_node = body.get("from_node").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
-    match run::start_run(&app, &id, "manual", request_id, from_node, None) {
+    match run::start_run(&app, &id, "manual", request_id, from_node, None, false) {
         Ok(run) => reply(StatusCode::OK, json!({ "run": run })),
         Err(e) => run_fail(e),
     }
@@ -279,4 +284,59 @@ async fn decide(State(app): Shared, Path(step_id): Path<String>, bytes: Bytes) -
     };
     let Some(approved) = body.get("approved").and_then(Value::as_bool) else { return fail(StatusCode::BAD_REQUEST, "нужно approved: true или false") };
     run_reply(run::decide(&app, &step_id, approved))
+}
+
+async fn start_solo(State(app): Shared, Path((id, node_id)): Path<(String, String)>, bytes: Bytes) -> Response {
+    let body = match body_of(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let request_id = body.get("request_id").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 100).map(str::to_string);
+    run_reply(run::start_run(&app, &id, "manual", request_id, Some(node_id), None, true))
+}
+
+async fn versions(State(app): Shared, Path(id): Path<String>) -> Response {
+    let guard = app.workflows.lock();
+    if guard.get(&id).is_none() {
+        return not_found();
+    }
+    let list: Vec<Value> = guard
+        .versions
+        .get(&id)
+        .map(|l| {
+            l.iter()
+                .rev()
+                .map(|v| json!({ "v": v.v, "kind": v.kind, "at": v.at, "revision": v.revision, "steps": v.graph.nodes.iter().filter(|n| !wf::is_annotation(&n.kind)).count() }))
+                .collect()
+        })
+        .unwrap_or_default();
+    reply(StatusCode::OK, json!({ "versions": list }))
+}
+
+async fn version(State(app): Shared, Path((id, v)): Path<(String, u64)>) -> Response {
+    let guard = app.workflows.lock();
+    match guard.versions.get(&id).and_then(|l| l.iter().find(|x| x.v == v)) {
+        Some(found) => reply(StatusCode::OK, json!({ "v": found.v, "kind": found.kind, "at": found.at, "revision": found.revision, "graph": found.graph })),
+        None => fail(StatusCode::NOT_FOUND, "такой версии нет"),
+    }
+}
+
+async fn restore(State(app): Shared, Path((id, v)): Path<(String, u64)>) -> Response {
+    let view = {
+        let mut guard = app.workflows.lock();
+        let Some(graph) = guard.versions.get(&id).and_then(|l| l.iter().find(|x| x.v == v)).map(|x| x.graph.clone()) else {
+            return fail(StatusCode::NOT_FOUND, "такой версии нет");
+        };
+        let Some(stored) = guard.get_mut(&id) else { return not_found() };
+        stored.wf.graph = graph.clone();
+        stored.wf.revision += 1;
+        stored.wf.updated_at = now();
+        wf::refresh_slots(stored, now());
+        let (view, revision) = (stored.wf.clone(), stored.wf.revision);
+        guard.save_wf(&id);
+        guard.push_version(&id, "restore", &graph, revision);
+        view
+    };
+    changed(&app, &id);
+    reply(StatusCode::OK, json!({ "workflow": view }))
 }

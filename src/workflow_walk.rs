@@ -53,7 +53,7 @@ fn runnable(graph: &Graph) -> impl Iterator<Item = &crate::workflows::Node> {
 
 /// Какой план у запуска. Ручной запуск — только ручные запускающие узлы (а если их нет, все);
 /// запуск по расписанию — только сработавший узел; «запустить отсюда» — всё, что не ниже этого узла, молчит.
-pub fn plan(graph: &Graph, from_node: Option<&str>, trigger_node: Option<&str>) -> Plan {
+pub fn plan(graph: &Graph, from_node: Option<&str>, trigger_node: Option<&str>, solo: bool) -> Plan {
     let mut plan = Plan::default();
     if let Some(from) = from_node {
         let mut reach: HashSet<&str> = HashSet::from([from]);
@@ -66,7 +66,7 @@ pub fn plan(graph: &Graph, from_node: Option<&str>, trigger_node: Option<&str>) 
                 }
             }
         }
-        plan.skip = runnable(graph).filter(|n| !reach.contains(n.id.as_str())).map(|n| n.id.clone()).collect();
+        plan.skip = runnable(graph).filter(|n| !reach.contains(n.id.as_str()) || (solo && n.id != from)).map(|n| n.id.clone()).collect();
         plan.forced = Some(from.to_string());
         return plan;
     }
@@ -430,13 +430,13 @@ mod tests {
         let mut g = graph(&[("m", "trigger"), ("s", "trigger"), ("a", "bot")], vec![edge("m", "a", None), edge("s", "a", None)]);
         g.nodes[0].fields.insert("trigger".into(), "manual".into());
         g.nodes[1].fields.insert("trigger".into(), "schedule".into());
-        assert_eq!(plan(&g, None, None).skip, HashSet::from(["s".to_string()]));
-        assert_eq!(plan(&g, None, Some("s")).skip, HashSet::from(["m".to_string()]));
+        assert_eq!(plan(&g, None, None, false).skip, HashSet::from(["s".to_string()]));
+        assert_eq!(plan(&g, None, Some("s"), false).skip, HashSet::from(["m".to_string()]));
         // Нет ручных узлов: «Запустить» поднимает всё.
         g.nodes[0].fields.insert("trigger".into(), "schedule".into());
-        assert!(plan(&g, None, None).skip.is_empty());
+        assert!(plan(&g, None, None, false).skip.is_empty());
         let mut sim = Sim::new();
-        sim.run(&g, &plan(&g, None, Some("s")), |_, _| "ok");
+        sim.run(&g, &plan(&g, None, Some("s"), false), |_, _| "ok");
         assert_eq!(sim.status("m"), vec!["skipped"]);
         assert_eq!(sim.status("a"), vec!["done"], "одного активного входа хватает");
     }
@@ -445,7 +445,7 @@ mod tests {
     fn run_from_a_node_skips_everything_not_below_it_and_feeds_it_empty_input() {
         let g = graph(&[("p", "prompt"), ("a", "bot"), ("b", "bot")], vec![edge("p", "a", None), edge("a", "b", None)]);
         let mut sim = Sim::new();
-        sim.run(&g, &plan(&g, Some("a"), None), |_, _| "ok");
+        sim.run(&g, &plan(&g, Some("a"), None, false), |_, _| "ok");
         assert_eq!(sim.status("p"), vec!["skipped"]);
         assert_eq!(sim.status("a"), vec!["done"]);
         assert_eq!(sim.status("b"), vec!["done"]);

@@ -224,7 +224,7 @@ async fn a_bot_step_runs_a_real_turn_and_a_failed_step_can_be_retried() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn llm_and_condition_steps_fail_with_a_stage_two_note_and_validation_covers_them() {
+async fn a_condition_without_a_usable_model_fails_the_step() {
     let crew = Crew::start("wf-stage2").await;
     let graph = json!({
         "nodes": [
@@ -237,10 +237,182 @@ async fn llm_and_condition_steps_fail_with_a_stage_two_note_and_validation_cover
     let id = create(&crew, "Условие", graph).await;
     let run_id = crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({}))).await["run"]["id"].as_str().unwrap().to_string();
     let run = wait_run(&crew, &id, &run_id, "failed").await;
-    assert_eq!(step(&run, "c")["error"], "будет на этапе 2");
+    assert!(step(&run, "c")["error"].as_str().unwrap().contains("нужна модель"), "{run}");
     assert_eq!(step(&run, "y")["status"], "skipped");
     // Пустой процесс не запускается.
     let empty = crew.ok("POST", "/api/workflows", Some(json!({ "title": "Пусто" }))).await["workflow"]["id"].as_str().unwrap().to_string();
     let (status, body) = crew.send("POST", &format!("/api/workflows/{empty}/run"), Some(json!({}))).await;
     assert_eq!(status, 400, "{body}");
+}
+
+// --- этап 2: модель, версии, одиночный шаг -------------------------------
+
+#[derive(Clone, Default)]
+struct Model {
+    requests: Arc<Mutex<Vec<Value>>>,
+    answer: Arc<Mutex<String>>,
+}
+
+async fn model_reply(State(fake): State<Model>, body: Bytes) -> Response {
+    fake.requests.lock().unwrap().push(serde_json::from_slice(&body).unwrap_or_default());
+    let text = fake.answer.lock().unwrap().clone();
+    Json(json!({ "choices": [{ "message": { "role": "assistant", "content": text } }] })).into_response()
+}
+
+async fn crew_with_model(name: &str, answer: &str) -> (Crew, Model) {
+    let fake = Model::default();
+    *fake.answer.lock().unwrap() = answer.to_string();
+    let router = Router::new().route("/v1/chat/completions", post(model_reply)).with_state(fake.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let sink = common::temp_data_dir("wf-model-sink").with_extension("txt");
+    let sink_text = sink.to_string_lossy().to_string();
+    let crew = Crew::start_with_env(name, &[("CREW_TEST_REMINDER_SINK", &sink_text)]).await;
+    crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "k" }))).await;
+    (crew, fake)
+}
+
+async fn run_wf(crew: &Crew, id: &str) -> String {
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({}))).await["run"]["id"].as_str().unwrap().to_string()
+}
+
+fn branching() -> Value {
+    json!({
+        "nodes": [
+            node("p", "prompt", json!({ "text": "Заказ на 5000" })),
+            node("c", "condition", json!({ "rule": "Сумма больше 1000?" })),
+            node("y", "output", json!({ "target": "notify" })),
+            node("n", "output", json!({ "target": "notify" })),
+        ],
+        "edges": [
+            edge("e1", "p", "c"),
+            { "id": "e2", "from": "c", "to": "y", "branch": "yes" },
+            { "id": "e3", "from": "c", "to": "n", "branch": "no" }
+        ]
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_condition_asks_the_model_and_routes_the_branch() {
+    let (crew, fake) = crew_with_model("wf-cond", " Да. ").await;
+    let id = create(&crew, "Условие", branching()).await;
+    let run_id = run_wf(&crew, &id).await;
+    let run = wait_run(&crew, &id, &run_id, "done").await;
+    assert_eq!(step(&run, "c")["branch"], "yes");
+    assert_eq!(step(&run, "c")["output"], "Заказ на 5000", "условие отдаёт вход как есть");
+    assert_eq!(step(&run, "y")["status"], "done");
+    assert_eq!(step(&run, "n")["status"], "skipped");
+    let sent = fake.requests.lock().unwrap()[0].to_string();
+    assert!(sent.contains("Сумма больше 1000?") && sent.contains("Заказ на 5000"), "{sent}");
+
+    *fake.answer.lock().unwrap() = "НЕТ!".into();
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "done").await;
+    assert_eq!(step(&run, "n")["status"], "done");
+    assert_eq!(step(&run, "y")["status"], "skipped");
+
+    *fake.answer.lock().unwrap() = "Возможно, зависит".into();
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "failed").await;
+    assert_eq!(step(&run, "c")["error"], "модель не ответила да/нет");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_llm_step_makes_one_toolless_call_with_its_own_model() {
+    let (crew, fake) = crew_with_model("wf-llm", "Краткое резюме").await;
+    let graph = json!({
+        "nodes": [
+            node("p", "prompt", json!({ "text": "длинный текст" })),
+            node("l", "llm", json!({ "prompt": "Сделай резюме", "system": "Ты редактор", "model": "model-x" })),
+        ],
+        "edges": [edge("e1", "p", "l")]
+    });
+    let id = create(&crew, "Модель", graph).await;
+    let run = wait_run(&crew, &id, &run_wf(&crew, &id).await, "done").await;
+    assert_eq!(step(&run, "l")["output"], "Краткое резюме");
+    let sent = fake.requests.lock().unwrap()[0].clone();
+    assert_eq!(sent["model"], "model-x");
+    let text = sent.to_string();
+    assert!(text.contains("Ты редактор") && text.contains("Сделай резюме") && text.contains("--- вход ---") && text.contains("длинный текст"), "{text}");
+    assert!(sent.get("tools").is_none_or(|t| t.as_array().is_none_or(Vec::is_empty)), "без инструментов");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_solo_step_reuses_unchanged_upstream_answers_and_versions_are_kept() {
+    let (crew, fake) = crew_with_model("wf-solo", "ответ модели").await;
+    let graph = json!({
+        "nodes": [
+            node("p", "prompt", json!({ "text": "вводные" })),
+            node("l", "llm", json!({ "prompt": "Обработай" })),
+            node("o", "output", json!({ "target": "notify" })),
+        ],
+        "edges": [edge("e1", "p", "l"), edge("e2", "l", "o")]
+    });
+    let id = create(&crew, "Одиночный", graph.clone()).await;
+    let first = run_wf(&crew, &id).await;
+    wait_run(&crew, &id, &first, "done").await;
+    assert_eq!(fake.requests.lock().unwrap().len(), 1);
+
+    // Одиночный запуск вывода: ответ модели берётся из прошлого запуска, модель не зовётся.
+    let solo = crew.ok("POST", &format!("/api/workflows/{id}/nodes/o/run"), Some(json!({ "request_id": "s1" }))).await["run"]["id"].as_str().unwrap().to_string();
+    let run = wait_run(&crew, &id, &solo, "done").await;
+    assert_eq!(step(&run, "o")["input"], "ответ модели");
+    assert_eq!(step(&run, "l")["reused"], true);
+    assert_eq!(fake.requests.lock().unwrap().len(), 1, "модель повторно не звали");
+    let again = crew.ok("POST", &format!("/api/workflows/{id}/nodes/o/run"), Some(json!({ "request_id": "s1" }))).await;
+    assert_eq!(again["run"]["id"], solo.as_str());
+    // «Запустить отсюда» тоже берёт неизменный верх.
+    let from_l = crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "from_node": "l" }))).await["run"]["id"].as_str().unwrap().to_string();
+    let run = wait_run(&crew, &id, &from_l, "done").await;
+    assert_eq!(step(&run, "p")["reused"], true);
+    assert_eq!(step(&run, "o")["status"], "done");
+
+    // Поменяли настройки узла модели: прошлый ответ устарел, вход пуст.
+    let mut changed = graph.clone();
+    changed["nodes"][1]["fields"]["prompt"] = json!("Другое задание");
+    crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": 2, "graph": changed }))).await;
+    let solo2 = crew.ok("POST", &format!("/api/workflows/{id}/nodes/o/run"), Some(json!({}))).await["run"]["id"].as_str().unwrap().to_string();
+    let run = wait_run(&crew, &id, &solo2, "done").await;
+    assert_eq!(step(&run, "o")["input"], "", "устаревший ответ не берём");
+    let from = crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "from_node": "l" }))).await["run"]["id"].as_str().unwrap().to_string();
+    let run = wait_run(&crew, &id, &from, "done").await;
+    assert_eq!(step(&run, "p")["reused"], true, "неизменный верх взят из прошлого запуска");
+    assert_eq!(step(&run, "l")["status"], "done");
+
+    // Версии: сохранение (раз в пять минут), запуски; восстановление создаёт новую ревизию.
+    let list = crew.ok("GET", &format!("/api/workflows/{id}/versions"), None).await["versions"].as_array().unwrap().clone();
+    let kinds: Vec<&str> = list.iter().map(|v| v["kind"].as_str().unwrap()).collect();
+    assert!(kinds.contains(&"auto") && kinds.contains(&"run"), "{kinds:?}");
+    assert_eq!(list.iter().filter(|v| v["kind"] == "auto").count(), 1, "частые сохранения не плодят версии");
+    assert_eq!(list[0]["steps"], 3);
+    let oldest = list.last().unwrap()["v"].as_u64().unwrap();
+    let old = crew.ok("GET", &format!("/api/workflows/{id}/versions/{oldest}"), None).await;
+    assert_eq!(old["graph"]["nodes"][1]["fields"]["prompt"], "Обработай");
+    let restored = crew.ok("POST", &format!("/api/workflows/{id}/versions/{oldest}/restore"), None).await;
+    assert_eq!(restored["workflow"]["graph"]["nodes"][1]["fields"]["prompt"], "Обработай");
+    assert_eq!(restored["workflow"]["revision"], 4);
+    let after = crew.ok("GET", &format!("/api/workflows/{id}/versions"), None).await["versions"].as_array().unwrap().clone();
+    assert_eq!(after[0]["kind"], "restore");
+    assert_eq!(crew.send("GET", &format!("/api/workflows/{id}/versions/9999"), None).await.0, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn strokes_and_annotation_fields_are_validated() {
+    let crew = Crew::start("wf-strokes").await;
+    let id = create(&crew, "Холст", json!({ "nodes": [], "edges": [] })).await;
+    let stroke = |name: &str, points: usize| json!({ "id": name, "brush": "pen", "color": "#ff0000", "width": 3, "points": vec![json!([1, 2]); points] });
+    let ok = json!({ "nodes": [json!({ "id": "f", "kind": "shape", "x": 0, "y": 0, "fields": { "shape": "star", "fill": "#fff" } })], "edges": [], "strokes": [stroke("s1", 2000)] });
+    let saved = crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": 2, "graph": ok }))).await;
+    assert_eq!(saved["revision"], 3);
+    let read = crew.ok("GET", &format!("/api/workflows/{id}"), None).await;
+    assert_eq!(read["workflow"]["graph"]["strokes"][0]["points"].as_array().unwrap().len(), 2000);
+    let many: Vec<Value> = (0..501).map(|i| stroke(&format!("s{i}"), 1)).collect();
+    for (graph, code) in [
+        (json!({ "nodes": [], "edges": [], "strokes": [stroke("a", 2001)] }), "too_many_points"),
+        (json!({ "nodes": [], "edges": [], "strokes": many }), "too_many_strokes"),
+        (json!({ "nodes": [], "edges": [], "strokes": [{ "id": "s", "brush": "brush", "color": "#000", "width": 1, "points": [] }] }), "bad_brush"),
+        (json!({ "nodes": [json!({ "id": "f", "kind": "shape", "x": 0, "y": 0, "fields": { "shape": "blob" } })], "edges": [] }), "bad_shape"),
+    ] {
+        let (status, body) = crew.send("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": 3, "graph": graph }))).await;
+        assert_eq!((status, body["code"].as_str().unwrap_or("")), (400, code), "{body}");
+    }
 }

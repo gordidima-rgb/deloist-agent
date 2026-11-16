@@ -1,7 +1,7 @@
 //! Движок запусков рабочих процессов: шаги, согласия, остановка, повтор, расписание.
 //! Состояние живёт в `Workflows` и на диске; решения «что дальше» принимает чистый обход `workflow_walk`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::json;
@@ -25,6 +25,7 @@ fn err(status: u16, message: impl Into<String>) -> RunError {
 /// Что нужно сделать вне блокировки состояния.
 enum Spawn {
     Bot { run_id: String, step_id: String, bot_id: String, text: String, unattended: bool, token: CancellationToken },
+    Llm { run_id: String, step_id: String, system: String, task: String, provider: String, model: String, condition: bool, token: CancellationToken },
     Output { run_id: String, step_id: String, title: String, body: String },
     Notice { workflow_id: String, run_id: String, step_id: String, title: String, question: String },
 }
@@ -110,7 +111,23 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
             run.steps[index].thread_id = Some(format!("bot:{bot_id}"));
             spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, bot_id, text, unattended: run.source != "manual", token });
         }
-        _ => finish(run, index, "failed", None, Some("будет на этапе 2".into())),
+        "llm" | "condition" => {
+            let condition = kind == "condition";
+            let (system, task) = if condition {
+                (
+                    "Ты проверяешь условие в рабочем процессе. Ответь строго одним словом: да или нет. Без пояснений.".to_string(),
+                    format!("{}\n\n--- вход ---\n{input}", node.text("rule")),
+                )
+            } else {
+                (node.text("system"), format!("{}\n\n--- вход ---\n{input}", node.text("prompt")))
+            };
+            let token = CancellationToken::new();
+            tokens.insert(step_id.clone(), token.clone());
+            spawns.push(Spawn::Llm {
+                run_id: run.id.clone(), step_id, system, task, provider: node.text("provider"), model: node.text("model"), condition, token,
+            });
+        }
+        _ => finish(run, index, "failed", None, Some("неизвестный вид шага".into())),
     }
 }
 
@@ -137,7 +154,7 @@ fn advance_core(run: &mut Run, title: &str, tokens: &mut Tokens, spawns: &mut Ve
         return;
     }
     loop {
-        let plan = walk::plan(&run.graph, run.from_node.as_deref(), run.trigger_node.as_deref());
+        let plan = walk::plan(&run.graph, run.from_node.as_deref(), run.trigger_node.as_deref(), run.solo);
         let next = walk::next(&run.graph, &run.steps, &plan);
         if next.overflow {
             stop_active(run, tokens, Some("запуск остановлен: слишком много кругов"));
@@ -149,14 +166,25 @@ fn advance_core(run: &mut Run, title: &str, tokens: &mut Tokens, spawns: &mut Ve
         if next.actions.is_empty() {
             break;
         }
+        let mut applied = false;
+        // Запуск одного шага: ниже и в стороне пропусков не пишем, а верх без готового ответа пропускаем, чтобы шаг мог начаться.
+        let above = if run.solo { run.from_node.as_deref().map(|f| ancestors_of(&run.graph, f)) } else { None };
         for action in next.actions {
             match action {
+                walk::Action::Skip { ref node } if above.as_ref().is_some_and(|a| !a.contains(node)) => {}
                 walk::Action::Skip { node } => {
+                    applied = true;
                     let index = new_step(run, &node, String::new(), "skipped", 1);
                     finish(run, index, "skipped", None, None);
                 }
-                walk::Action::Start { node, inputs } => start_node(run, title, &node, &inputs, 1, tokens, spawns),
+                walk::Action::Start { node, inputs } => {
+                    applied = true;
+                    start_node(run, title, &node, &inputs, 1, tokens, spawns);
+                }
             }
+        }
+        if !applied {
+            break;
         }
     }
     let running = run.steps.iter().any(|s| s.status == "running");
@@ -170,6 +198,97 @@ fn advance_core(run: &mut Run, title: &str, tokens: &mut Tokens, spawns: &mut Ve
     } else {
         run.status = walk::outcome(&run.graph, &run.steps).into();
         run.ended_at = Some(now());
+    }
+}
+
+/// Да или нет из ответа модели: регистр и знаки препинания не важны, берётся первое слово.
+pub fn parse_branch(answer: &str) -> Option<&'static str> {
+    let word: String = answer.trim().trim_start_matches(|c: char| !c.is_alphanumeric()).chars().take_while(|c| c.is_alphanumeric()).collect();
+    match word.to_lowercase().as_str() {
+        "yes" | "true" | "да" => Some("yes"),
+        "no" | "false" | "нет" => Some("no"),
+        _ => None,
+    }
+}
+
+/// Один вызов модели без инструментов через служебный путь программы (`service::complete_as`).
+/// Пустые провайдер и модель — модель по умолчанию из настроек.
+async fn call_model(app: &Arc<App>, provider: &str, model: &str, system: &str, task: &str) -> Result<String, String> {
+    let mut bot = crate::store::Bot {
+        id: "_workflow".into(), name: "Рабочие процессы".into(), role: "шаг процесса".into(), driver: provider.trim().into(), model: model.trim().into(),
+        ..crate::store::Bot::default()
+    };
+    if provider.trim().is_empty() && model.trim().is_empty() && !crate::service::can_serve(app, &bot) {
+        if let Some(house) = crate::service::house_bot(app) {
+            bot = house;
+        }
+    }
+    let system = if system.trim().is_empty() { "Ты шаг рабочего процесса. Выполни задание по входу и ответь по делу." } else { system };
+    crate::service::complete_as("workflow", app, &bot, system, task).await
+}
+
+/// Все, кто выше узла по графу (сам узел не входит).
+fn ancestors_of(graph: &crate::workflows::Graph, from: &str) -> HashSet<String> {
+    let mut ancestors: HashSet<String> = HashSet::new();
+    let mut stack = vec![from.to_string()];
+    while let Some(id) = stack.pop() {
+        for edge in graph.edges.iter().filter(|e| e.to == id) {
+            if ancestors.insert(edge.from.clone()) {
+                stack.push(edge.from.clone());
+            }
+        }
+    }
+    ancestors.remove(from);
+    ancestors
+}
+
+fn same_settings(a: &Node, b: &Node) -> bool {
+    a.kind == b.kind && a.fields == b.fields && a.schedule == b.schedule
+}
+
+fn incoming_of(graph: &crate::workflows::Graph, id: &str) -> Vec<(String, Option<String>)> {
+    let mut list: Vec<_> = graph.edges.iter().filter(|e| e.to == id).map(|e| (e.from.clone(), e.branch.clone())).collect();
+    list.sort();
+    list
+}
+
+/// Ответы предков узла из прошлого запуска, если ни их настройки, ни входы с тех пор не менялись.
+fn seed_reused(run: &mut Run, prev: &Run, from: &str) {
+    let ancestors = ancestors_of(&run.graph, from);
+    let mut latest: HashMap<&str, &Step> = HashMap::new();
+    for step in &prev.steps {
+        if latest.get(step.node_id.as_str()).is_none_or(|old| old.seq < step.seq) {
+            latest.insert(step.node_id.as_str(), step);
+        }
+    }
+    let mut valid: Vec<String> = Vec::new();
+    loop {
+        let mut grew = false;
+        for node in &run.graph.nodes {
+            if !ancestors.contains(&node.id) || valid.contains(&node.id) {
+                continue;
+            }
+            let (Some(old), Some(step)) = (prev.graph.node(&node.id), latest.get(node.id.as_str())) else { continue };
+            let preds_ok = run.graph.edges.iter().filter(|e| e.to == node.id).all(|e| valid.contains(&e.from));
+            if step.status == "done" && same_settings(old, node) && incoming_of(&run.graph, &node.id) == incoming_of(&prev.graph, &node.id) && preds_ok {
+                valid.push(node.id.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    let copies: Vec<Step> = valid.iter().map(|id| latest[id.as_str()].clone()).collect();
+    for mut copy in copies {
+        run.counter += 1;
+        copy.seq = run.counter;
+        run.counter += 1;
+        copy.end_seq = run.counter;
+        copy.id = uid("st");
+        copy.run_id = run.id.clone();
+        copy.reused = true;
+        run.steps.push(copy);
     }
 }
 
@@ -216,12 +335,15 @@ fn with_run<T>(app: &Arc<App>, run_id: &str, f: impl FnOnce(&mut Run, &str, &mut
     Some(value)
 }
 
-fn complete(app: &Arc<App>, run_id: &str, step_id: &str, result: Result<String, String>) {
+fn complete(app: &Arc<App>, run_id: &str, step_id: &str, result: Result<(String, Option<String>), String>) {
     with_run(app, run_id, |run, title, tokens, spawns| {
         tokens.remove(step_id);
         let Some(index) = run.steps.iter().position(|s| s.id == step_id && s.status == "running") else { return };
         match result {
-            Ok(output) => finish(run, index, "done", Some(output), None),
+            Ok((output, branch)) => {
+                finish(run, index, "done", Some(output), None);
+                run.steps[index].branch = branch;
+            }
             Err(error) => finish(run, index, "failed", None, Some(error)),
         }
         advance_core(run, title, tokens, spawns);
@@ -235,12 +357,28 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
             match spawn {
                 Spawn::Bot { run_id, step_id, bot_id, text, unattended, token } => {
                     let result = crate::turn::run_workflow_step(&app, &bot_id, &text, unattended, token).await;
+                    complete(&app, &run_id, &step_id, result.map(|text| (text, None)));
+                }
+                Spawn::Llm { run_id, step_id, system, task, provider, model, condition, token } => {
+                    let call = call_model(&app, &provider, &model, &system, &task);
+                    let answer = tokio::select! {
+                        () = token.cancelled() => Err("остановлено".to_string()),
+                        result = call => result,
+                    };
+                    let result = answer.and_then(|text| {
+                        if !condition {
+                            return Ok((text, None));
+                        }
+                        let branch = parse_branch(&text).ok_or_else(|| "модель не ответила да/нет".to_string())?;
+                        let input = app.workflows.lock().run(&run_id).and_then(|r| r.steps.iter().find(|s| s.id == step_id).map(|s| s.input.clone())).unwrap_or_default();
+                        Ok((input, Some(branch.to_string())))
+                    });
                     complete(&app, &run_id, &step_id, result);
                 }
                 Spawn::Output { run_id, step_id, title, body } => {
                     let list = crate::reminders::send_text(&app, &format!("Рабочий процесс «{title}»"), &body, &["windows".to_string()]).await;
                     let error = list.into_iter().find_map(|d| d.error);
-                    complete(&app, &run_id, &step_id, error.map_or_else(|| Ok(String::new()), |e| Err(format!("не удалось показать уведомление: {e}"))));
+                    complete(&app, &run_id, &step_id, error.map_or_else(|| Ok((String::new(), None)), |e| Err(format!("не удалось показать уведомление: {e}"))));
                 }
                 Spawn::Notice { workflow_id, run_id, step_id, title, question } => {
                     app.turns.emit(json!({ "type": "workflow_approval", "workflow_id": workflow_id, "run_id": run_id, "step_id": step_id, "title": title, "question": question }));
@@ -263,7 +401,7 @@ fn run_of_step(app: &Arc<App>, step_id: &str) -> Result<String, RunError> {
 // Команды
 // ---------------------------------------------------------------------------
 
-pub fn start_run(app: &Arc<App>, wf_id: &str, source: &str, request_id: Option<String>, from_node: Option<String>, trigger_node: Option<String>) -> Result<Run, RunError> {
+pub fn start_run(app: &Arc<App>, wf_id: &str, source: &str, request_id: Option<String>, from_node: Option<String>, trigger_node: Option<String>, solo: bool) -> Result<Run, RunError> {
     let run_id = {
         let mut guard = app.workflows.lock();
         let inner: &mut Inner = &mut guard;
@@ -285,10 +423,18 @@ pub fn start_run(app: &Arc<App>, wf_id: &str, source: &str, request_id: Option<S
         if source != "manual" && inner.has_open_run(wf_id) {
             return Err(err(409, "у процесса уже идёт запуск"));
         }
-        let run = Run {
+        let revision = stored.wf.revision;
+        let mut run = Run {
             id: uid("run"), workflow_id: wf_id.to_string(), status: "running".into(), source: source.to_string(), started_at: now(),
-            revision: stored.wf.revision, graph, request_id, from_node, trigger_node, ..Run::default()
+            revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, ..Run::default()
         };
+        if let Some(from) = &from_node {
+            let prev = inner.runs.get(wf_id).and_then(|l| l.iter().max_by_key(|r| r.started_at)).cloned();
+            if let Some(prev) = prev {
+                seed_reused(&mut run, &prev, from);
+            }
+        }
+        inner.push_version(wf_id, "run", &graph, revision);
         let id = run.id.clone();
         let list = inner.runs.entry(wf_id.to_string()).or_default();
         list.push(run);
@@ -465,9 +611,27 @@ pub fn tick(app: &Arc<App>) {
     };
     for (wf_id, node) in fire {
         // Пока у процесса есть открытый запуск, новый по расписанию не стартует (слот сгорает).
-        match start_run(app, &wf_id, "schedule", None, None, Some(node)) {
+        match start_run(app, &wf_id, "schedule", None, None, Some(node), false) {
             Ok(run) => change_event(app, &wf_id, Some(&run.id)),
             Err(e) => eprintln!("[workflows] запуск по расписанию не начат: {}", e.message),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_branch;
+
+    #[test]
+    fn the_model_answer_is_read_as_yes_or_no() {
+        for yes in ["да", " Да. ", "YES", "true", "\"Да\"", "Да, потому что"] {
+            assert_eq!(parse_branch(yes), Some("yes"), "{yes}");
+        }
+        for no in ["нет", "Нет!", "No", "FALSE"] {
+            assert_eq!(parse_branch(no), Some("no"), "{no}");
+        }
+        for other in ["", "не знаю", "возможно", "..."] {
+            assert_eq!(parse_branch(other), None, "{other}");
         }
     }
 }
