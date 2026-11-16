@@ -384,15 +384,33 @@ async fn cloud_sets_a_webhook_and_never_polls_and_the_secret_gates_delivery() {
     let n = thread["messages"].as_array().unwrap().iter().filter(|m| m["text"] == "[Telegram] привет по вебхуку").count();
     assert_eq!(n, 1, "повторная доставка создала дубль");
 
-    // Неверные секреты не доходят до бота; перебор ограничен.
-    assert_eq!(post_hook(&crew, &bot, Some("wrong"), &update(4, 555, "чужое")).await, 403);
+    // B1: сколько бы неверных запросов ни было, верный секрет проходит (за мостом адрес у всех один).
+    for _ in 0..11 {
+        assert_eq!(post_hook(&crew, &bot, Some("wrong"), &update(4, 555, "чужое")).await, 403);
+    }
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(4, 555, "после мусора")).await, 200);
+    // B3: номер обновления вне окна вокруг offset отвергается и offset не сдвигает.
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(i64::MAX, 555, "x")).await, 400);
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(1_000_000, 555, "x")).await, 400);
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(5, 555, "после больших номеров")).await, 200);
+    wait_until("обновление после больших номеров дошло", 20, || async {
+        let thread = crew.ok("GET", &format!("/api/bots/{bot}/thread?limit=50"), None).await;
+        thread["messages"].as_array().unwrap().iter().any(|m| m["text"] == "[Telegram] после больших номеров")
+    })
+    .await;
+    // B4: тело больше предела отсекается до проверки секрета.
+    let big = json!({ "update_id": 6, "pad": "x".repeat(200 * 1024) });
+    assert_eq!(post_hook(&crew, &bot, Some("wrong"), &big).await, 413);
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &big).await, 413);
+    // Перебор неверных секретов упирается в общий предел неудач, но верный секрет по-прежнему проходит.
     let mut limited = false;
-    for _ in 0..15 {
-        if post_hook(&crew, &bot, Some("wrong"), &update(5, 555, "чужое")).await == 429 {
+    for _ in 0..40 {
+        if post_hook(&crew, &bot, Some("wrong"), &update(6, 555, "чужое")).await == 429 {
             limited = true;
         }
     }
     assert!(limited, "перебор секрета не ограничен");
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(6, 555, "под троттлингом")).await, 200);
     assert_eq!(fake.called("getUpdates"), 0, "в облаке был getUpdates");
 }
 
@@ -414,4 +432,33 @@ async fn pc_mode_removes_a_leftover_webhook_then_polls() {
     // На ПК адрес вебхука закрыт.
     let status = crew.client.post(format!("{}/hooks/telegram/{bot}", crew.base)).header("content-type", "application/json").body("{}").send().await.unwrap().status().as_u16();
     assert_eq!(status, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cloud_puts_the_webhook_back_when_someone_removes_it() {
+    let (crew, fake, _bot, _) = setup_with("tg-cloud-recheck", &[("CREW_CLOUD", "1"), ("CREW_TEST_TELEGRAM_RECHECK_SECS", "1")]).await;
+    wait_until("вебхук поставлен", 20, || async { fake.webhook.lock().unwrap().is_some() }).await;
+    // ПК с тем же токеном снял вебхук.
+    *fake.webhook.lock().unwrap() = None;
+    wait_until("вебхук поставлен снова", 20, || async { fake.webhook.lock().unwrap().is_some() }).await;
+    assert!(fake.called("setWebhook") >= 2);
+    drop(crew);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pc_does_not_steal_a_bot_that_lives_in_the_cloud() {
+    let (base, fake) = fake_telegram().await;
+    *fake.webhook.lock().unwrap() = Some(json!({ "url": "https://8080-abc.Instabox.tech/hooks/telegram/x" }));
+    let crew = Crew::start_with_env("tg-pc-cloud-bot", &[("CREW_TEST_TELEGRAM_API", &base)]).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.ok("PUT", "/api/telegram", Some(json!({ "token": TOKEN, "botId": bot }))).await;
+    wait_until("ошибка «бот работает в облаке»", 20, || async {
+        crew.ok("GET", "/api/telegram", None).await["error"].as_str().unwrap_or("").contains("в облаке")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(fake.called("deleteWebhook"), 0, "облачный вебхук снят с ПК");
+    assert_eq!(fake.called("getUpdates"), 0, "ПК опрашивает бота из облака");
+    assert!(fake.webhook.lock().unwrap().is_some());
 }

@@ -1456,6 +1456,7 @@ impl Store {
     }
 
     /// Секрет вебхука: есть — отдаёт, нет (старые данные) — создаёт и сохраняет.
+    /// Проверка и создание — в одной секции замка, поэтому два вызова не получат разные секреты.
     pub async fn ensure_telegram_webhook_secret(&self) -> std::io::Result<String> {
         let (secret, created) = {
             let mut secrets = self.secrets.lock().unwrap();

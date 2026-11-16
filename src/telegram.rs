@@ -156,8 +156,11 @@ pub struct Telegram {
     poll: Mutex<Option<CancellationToken>>,
     /// Облако: обновления из вебхука идут в один обработчик по очереди, как из long poll.
     hook_tx: Mutex<Option<tokio::sync::mpsc::Sender<Value>>>,
-    /// Неудачные попытки вебхука по «адрес|бот»: число и начало окна (мс).
-    hook_fails: Mutex<HashMap<String, (u32, i64)>>,
+    /// Неудачные попытки вебхука: одно общее окно (число и начало, мс). За мостом docker/Instabox
+    /// адрес собеседника у всех один, поэтому по адресам не считаем; верный секрет не ограничивается.
+    hook_fails: Mutex<(u32, i64)>,
+    /// Почему мост стоит (например, бот уже работает в облаке); пусто — всё в порядке.
+    problem: Mutex<String>,
 }
 
 impl Telegram {
@@ -171,6 +174,14 @@ impl Telegram {
 
     pub fn clear_code(&self) {
         *self.code.lock().unwrap() = None;
+    }
+
+    pub fn problem(&self) -> String {
+        self.problem.lock().unwrap().clone()
+    }
+
+    fn set_problem(&self, text: &str) {
+        *self.problem.lock().unwrap() = text.to_string();
     }
 
     pub fn set_username(&self, username: String) {
@@ -352,7 +363,23 @@ async fn poll_loop(app: Arc<App>) {
             continue;
         }
         // ПК: если бот раньше жил в облаке, у Telegram остался вебхук, и getUpdates с ним не работает.
-        drop_webhook(&client, &token).await;
+        if !drop_webhook(&client, &token).await {
+            // Бот работает в облаке: опрос отнял бы у облака сообщения. Стоим, пока токен не сменят.
+            app.telegram.set_problem("бот работает в облаке");
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                }
+                if app.store.telegram_token() != token || !app.store.telegram().enabled {
+                    break;
+                }
+            }
+            app.telegram.set_problem("");
+            *app.telegram.poll.lock().unwrap() = None;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
         let mut delay = 1u64;
         loop {
             let settings = app.store.telegram();
@@ -396,7 +423,7 @@ async fn process_updates(app: &Arc<App>, client: &reqwest::Client, token: &str, 
             continue;
         }
         handle_update(app, client, token, update).await;
-        next = next.max(id + 1);
+        next = next.max(id.saturating_add(1));
     }
     if next != start {
         if let Err(e) = app.store.update_telegram(|t| t.offset = next).await {
@@ -470,8 +497,15 @@ async fn handle_update(app: &Arc<App>, client: &reqwest::Client, token: &str, up
 // секрет Telegram присылает в заголовке `X-Telegram-Bot-Api-Secret-Token`.
 
 const HOOK_QUEUE: usize = 256;
-const HOOK_BODY_MAX: usize = 1024 * 1024;
-const HOOK_FAILS_MAX: u32 = 10;
+/// 128 КиБ × очередь 256 = не больше 32 МиБ в памяти; настоящее обновление Telegram куда меньше.
+pub(crate) const HOOK_BODY_MAX: usize = 128 * 1024;
+/// Окно `update_id` вокруг offset: дальше — подделка или сбой, а огромный номер сдвинул бы offset навсегда.
+const HOOK_ID_AHEAD: i64 = 100_000;
+/// Как часто облако сверяет, что вебхук на месте.
+const HOOK_RECHECK_SECS: u64 = 300;
+/// Адреса облака Instabox: вебхук там снимать с ПК нельзя.
+const CLOUD_HOST_SUFFIX: &str = ".instabox.tech";
+const HOOK_FAILS_MAX: u32 = 30;
 const HOOK_FAILS_WINDOW_MS: i64 = 60 * 1000;
 pub const SECRET_HEADER: &str = "x-telegram-bot-api-secret-token";
 
@@ -481,10 +515,25 @@ fn webhook_url(bot_id: &str) -> Option<String> {
     Some(format!("{origin}/hooks/telegram/{bot_id}"))
 }
 
+/// Хост адреса вебхука в нижнем регистре.
+fn url_host(url: &str) -> String {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit('@').next().unwrap_or("");
+    host.split(':').next().unwrap_or("").to_ascii_lowercase()
+}
+
 /// Если у бота стоит вебхук, снять его (без потери накопленных обновлений).
-async fn drop_webhook(client: &reqwest::Client, token: &str) {
+/// `false` — вебхук стоит в облаке Instabox: его не трогаем, на ПК опрос не начинаем.
+async fn drop_webhook(client: &reqwest::Client, token: &str) -> bool {
     let set = match call(client, token, "getWebhookInfo", json!({})).await {
-        Ok(info) => !info["url"].as_str().unwrap_or("").is_empty(),
+        Ok(info) => {
+            let url = info["url"].as_str().unwrap_or("").to_string();
+            if url_host(&url).ends_with(CLOUD_HOST_SUFFIX) {
+                return false;
+            }
+            !url.is_empty()
+        }
         Err(_) => true,
     };
     if set {
@@ -492,12 +541,25 @@ async fn drop_webhook(client: &reqwest::Client, token: &str) {
             eprintln!("[telegram] deleteWebhook: {e}");
         }
     }
+    true
+}
+
+/// Интервал сверки вебхука; в отладочной сборке тест может его сократить.
+fn recheck_interval() -> Duration {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(secs) = std::env::var("CREW_TEST_TELEGRAM_RECHECK_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
+            return Duration::from_secs(secs.max(1));
+        }
+    }
+    Duration::from_secs(HOOK_RECHECK_SECS)
 }
 
 /// Облако: ставит вебхук и ждёт, пока токен, выключатель или отмена не сменятся; потом снимает вебхук.
 async fn webhook_session(app: &Arc<App>, client: &reqwest::Client, token: &str, cancel: &CancellationToken) {
     let mut delay = 1u64;
     let mut registered = false;
+    let mut last_check = std::time::Instant::now();
     loop {
         let settings = app.store.telegram();
         if cancel.is_cancelled() || app.store.telegram_token() != token || !settings.enabled {
@@ -533,6 +595,16 @@ async fn webhook_session(app: &Arc<App>, client: &reqwest::Client, token: &str, 
             _ = cancel.cancelled() => break,
             _ = tokio::time::sleep(Duration::from_secs(1)) => {}
         }
+        // Вебхук могли снять снаружи (ПК с тем же токеном): раз в несколько минут сверяем и ставим заново.
+        if registered && last_check.elapsed() >= recheck_interval() {
+            last_check = std::time::Instant::now();
+            let want = webhook_url(&settings.bot_id).unwrap_or_default();
+            if let Ok(info) = call(client, token, "getWebhookInfo", json!({})).await {
+                if info["url"].as_str().unwrap_or("") != want {
+                    registered = false;
+                }
+            }
+        }
     }
     if registered {
         if let Err(e) = call(client, token, "deleteWebhook", json!({ "drop_pending_updates": false })).await {
@@ -559,30 +631,22 @@ pub(crate) fn receive(app: &Arc<App>, bot: &str, peer: &str, secret: Option<&str
         return StatusCode::NOT_FOUND;
     }
     let at = now();
-    let key = format!("{peer}|{bot}");
-    {
-        let mut fails = app.telegram.hook_fails.lock().unwrap();
-        if fails.len() > 1000 {
-            fails.retain(|_, (_, since)| at - *since < HOOK_FAILS_WINDOW_MS);
-        }
-        if let Some((count, since)) = fails.get(&key) {
-            if at - *since < HOOK_FAILS_WINDOW_MS && *count >= HOOK_FAILS_MAX {
-                return StatusCode::TOO_MANY_REQUESTS;
-            }
-        }
-    }
+    let _ = peer;
     let expected = app.store.telegram_webhook_secret();
     let settings = app.store.telegram();
     // Секрет сравнивается за постоянное время, остальные проверки — после него.
     let secret_ok = !expected.is_empty() && crate::guard::same(secret.unwrap_or(""), &expected);
     let known = settings.enabled && !settings.bot_id.is_empty() && settings.bot_id == bot && !app.store.telegram_token().is_empty();
     if !(secret_ok && known) {
+        // Ограничиваем только неудачи, одним общим окном: верный секрет не троттлится никогда.
         let mut fails = app.telegram.hook_fails.lock().unwrap();
-        let entry = fails.entry(key).or_insert((0, at));
-        if at - entry.1 >= HOOK_FAILS_WINDOW_MS {
-            *entry = (0, at);
+        if at - fails.1 >= HOOK_FAILS_WINDOW_MS {
+            *fails = (0, at);
         }
-        entry.0 += 1;
+        if fails.0 >= HOOK_FAILS_MAX {
+            return StatusCode::TOO_MANY_REQUESTS;
+        }
+        fails.0 += 1;
         return StatusCode::FORBIDDEN;
     }
     if body.len() > HOOK_BODY_MAX {
@@ -591,7 +655,11 @@ pub(crate) fn receive(app: &Arc<App>, bot: &str, peer: &str, secret: Option<&str
     let Ok(update) = serde_json::from_slice::<Value>(body) else {
         return StatusCode::BAD_REQUEST;
     };
-    if update["update_id"].as_i64().is_none() {
+    let Some(id) = update["update_id"].as_i64() else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let start = settings.offset;
+    if start > 0 && (id < start.saturating_sub(1) || id > start.saturating_add(HOOK_ID_AHEAD)) {
         return StatusCode::BAD_REQUEST;
     }
     let tx = app.telegram.hook_tx.lock().unwrap().clone();

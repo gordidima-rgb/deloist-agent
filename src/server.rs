@@ -2032,6 +2032,7 @@ async fn telegram_status(State(app): Shared) -> Response {
         "botId": settings.bot_id,
         "chatPaired": !settings.chat_id.is_empty(),
         "username": username,
+        "error": app.telegram.problem(),
     }))
 }
 
@@ -3684,7 +3685,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/team/import-request/{id}/deny", post(import_request_deny))
         .route("/api/team/import-request/{handle}/cancel", post(import_request_cancel))
         .route("/api/import/hermes", get(hermes_profiles).post(import_hermes))
-        .route("/hooks/telegram/{bot}", post(telegram_hook))
+        .route(
+            "/hooks/telegram/{bot}",
+            post(telegram_hook).layer(DefaultBodyLimit::max(crate::telegram::HOOK_BODY_MAX)),
+        )
         .route("/hooks/{id}/{token}", post(hook))
         .merge(crate::screen::routes())
         .merge(crate::voice::routes())
