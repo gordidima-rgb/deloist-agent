@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn files_are_written_only_below_the_folder_and_limited() {
-        let dir = std::env::temp_dir().join(format!("wf-io-{}", now()));
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!("wf-io-{}", now()));
         let path = write_file(&dir, "wf_a", "out/report.txt", "привет").unwrap();
         assert!(path.starts_with(files_dir(&dir, "wf_a").canonicalize().unwrap_or_else(|_| files_dir(&dir, "wf_a"))) || path.starts_with(files_dir(&dir, "wf_a")));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "привет");
