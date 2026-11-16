@@ -65,6 +65,7 @@ async function api(path, { method = 'GET', body } = {}) {
   if (!res.ok) {
     const error = new Error(data.error || `HTTP ${res.status}`);
     error.status = res.status;
+    error.data = data;
     if (data.code) error.code = data.code;
     throw error;
   }
@@ -3262,6 +3263,10 @@ function handleEvent(ev) {
       try { sessionStorage.setItem('deloist-dev-view', JSON.stringify(S.view || null)); } catch {}
       location.reload();
       break;
+    case 'connector':
+      // Свой MCP-сервер вошёл или потерял вход: строка списка должна показать это.
+      refreshState().then(() => { if (!document.querySelector('.mcp-login-form')) renderMcp(); });
+      break;
     case 'state_changed':
       // Питомца могли убрать крестиком на столе: выбор на экране не должен врать.
       refreshState().then(() => {
@@ -5446,11 +5451,14 @@ function renderMcp() {
       <span class="m-name">${escapeHtml(s.name)}</span>
       ${mcpBadge(s)}
       <span class="m-cmd" title="${escapeHtml(address)}">${escapeHtml(address)}</span>
+      ${s.login ? `<span class="m-login" data-testid="mcp-login-state" data-state="${s.login.state}">${s.login.state === 'connected' ? tr('Вход выполнен') : tr('Нужно войти')}</span>` : ''}
       <div class="m-actions">
+        ${s.login ? `<button type="button" class="ghost rt-run" data-login>${s.login.state === 'connected' ? tr('Войти заново') : tr('Войти')}</button>` : ''}
         <button type="button" class="ghost rt-run" data-check>${tr('Проверить')}</button>
         <label class="switch"><input type="checkbox" ${s.enabled ? 'checked' : ''}><span></span></label>
         <button class="icon-btn" title="${tr('Удалить сервер')}" aria-label="${tr('Удалить сервер')}">${ICONS.close}</button>
       </div>`;
+    $('[data-login]', el)?.addEventListener('click', () => startMcpLogin(s, el));
     $('[data-check]', el).addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
@@ -5487,6 +5495,46 @@ function renderMcp() {
     });
     list.append(el);
   }
+}
+
+// Вход в свой HTTP-сервер по OAuth: ссылка открывается в браузере, а если у сервера нет регистрации
+// клиентов, под строкой сервера появляется форма для client ID (и секрета, если он есть).
+async function startMcpLogin(s, el, manual) {
+  try {
+    const data = await api(`/api/mcp/${s.id}/oauth/start`, { method: 'POST', body: { open: false, ...manual } });
+    el.querySelector('.mcp-login-form')?.remove();
+    window.open(data.url, '_blank', 'noopener');
+    toast(tr('Окно входа открылось в браузере. Вернитесь сюда: статус обновится сам.'), 6000);
+  } catch (err) {
+    if (err.data?.needsClientId) {
+      showMcpClientForm(s, el, err.data.authHost);
+      return;
+    }
+    toast(trServer(err.message), 8000);
+  }
+}
+
+function showMcpClientForm(s, el, host) {
+  el.querySelector('.mcp-login-form')?.remove();
+  el.classList.add('has-form');
+  const form = document.createElement('form');
+  form.className = 'mcp-login-form';
+  form.dataset.testid = 'mcp-client-form';
+  form.innerHTML = `
+    <p class="note">${escapeHtml(tr('Сервер входа {host} не умеет регистрировать приложения сам. Создайте приложение в его настройках и впишите client ID.', { host: host || '' }))}</p>
+    <input class="input" name="id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Client ID" required>
+    <input class="input" name="secret" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('Client secret (если есть)'))}" aria-label="Client secret">
+    <input class="input" name="port" inputmode="numeric" autocomplete="off" placeholder="${escapeHtml(tr('Порт возврата (если сервер просит точный адрес)'))}" aria-label="${escapeHtml(tr('Порт возврата (если сервер просит точный адрес)'))}">
+    <button type="submit" class="ghost rt-run">${tr('Продолжить вход')}</button>`;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    const manual = { clientId: String(data.get('id') || '').trim() };
+    if (data.get('secret')) manual.clientSecret = String(data.get('secret'));
+    if (data.get('port')) manual.redirectPort = Number(data.get('port')) || 0;
+    startMcpLogin(s, el, manual);
+  });
+  el.append(form);
 }
 
 // Переключатель «Команда / URL»: у HTTP-сервера нет команды и аргументов.

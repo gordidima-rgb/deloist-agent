@@ -3830,3 +3830,11 @@ span.tm-main { cursor: inherit; }
 .team-import-card .team-code { margin: 4px 0; }
 .team-import-card .team-code b { font: 800 var(--k-text-xl) / 1 var(--k-font-display); letter-spacing: 0.18em; padding: 0 6px; }
 .team-import-card .team-excerpt { margin: 2px 0 4px; font-style: italic; overflow-wrap: anywhere; }
+
+/* Вход в свой MCP-сервер: статус и форма client ID. */
+.mcp-item .m-login { flex: none; padding: 1px 8px; border: 1px solid var(--color-border-default); border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-muted); }
+.mcp-item .m-login[data-state="needs-login"] { color: var(--color-text-primary); border-color: currentColor; }
+.mcp-item.has-form { flex-wrap: wrap; }
+.mcp-login-form { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.mcp-login-form .note { margin: 0; }
+.mcp-login-form button { align-self: flex-start; }

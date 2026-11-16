@@ -10,7 +10,7 @@
 
   const card = $derived(item.card || {});
   const fields = $derived(card.auth?.fields || []);
-  const oauth = $derived(card.auth?.kind === 'oauth');
+  const oauth = $derived(card.auth?.kind === 'oauth' || card.auth?.kind === 'mcp-oauth');
   // consent, then auth (key or OAuth), then done. A half-finished connect resumes at auth.
   let step = $state(untrack(() => (item.state?.status === 'pending' ? 'auth' : 'consent')));
   let busy = $state(false);
@@ -19,6 +19,10 @@
   let values = $state({});
   let saved = $state({});
   let oauthUrl = $state('');
+  // The sign-in server has no client registration: ask for a client ID (and optional secret) once.
+  let needClient = $state(false);
+  let authHost = $state('');
+  let client = $state({ id: '', secret: '', port: '' });
   let tools = $state.raw([]);
 
   const base = $derived(`/api/catalog/${encodeURIComponent(item.id)}`);
@@ -54,9 +58,26 @@
 
   const startOauth = () =>
     run(async () => {
-      const data = await api(`${base}/connect`, { method: 'POST', body: { step: 'oauth' } });
-      oauthUrl = data.url;
-      window.open(data.url, '_blank', 'noopener');
+      const body = { step: 'oauth' };
+      if (needClient && client.id.trim()) {
+        body.clientId = client.id.trim();
+        if (client.secret) body.clientSecret = client.secret;
+        if (client.port) body.redirectPort = Number(client.port) || 0;
+      }
+      try {
+        const data = await api(`${base}/connect`, { method: 'POST', body });
+        oauthUrl = data.url;
+        needClient = false;
+        client = { id: '', secret: '', port: '' };
+        window.open(data.url, '_blank', 'noopener');
+      } catch (err) {
+        if (err.data?.needsClientId) {
+          needClient = true;
+          authHost = err.data.authHost || '';
+          return;
+        }
+        throw err;
+      }
     });
 
   const check = () =>
@@ -123,9 +144,17 @@
           {#if field.helpUrl}<a class="k-hint cat-link" href={field.helpUrl} target="_blank" rel="noopener noreferrer">{tr('Где взять')}</a>{/if}
         </label>
       {/each}
+      {#if oauth && needClient}
+        <div class="k-field" data-testid="client-form">
+          <span class="k-hint">{tr('Сервер входа {host} не умеет регистрировать приложения сам. Создайте приложение в его настройках и впишите client ID.', { host: authHost })}</span>
+          <label class="k-field"><span class="k-label">{tr('Client ID')}</span><input class="k-input" autocomplete="off" spellcheck="false" bind:value={client.id} /></label>
+          <label class="k-field"><span class="k-label">{tr('Client secret (если есть)')}</span><input class="k-input" type="password" autocomplete="off" spellcheck="false" bind:value={client.secret} /></label>
+          <label class="k-field"><span class="k-label">{tr('Порт возврата (если сервер просит точный адрес)')}</span><input class="k-input" inputmode="numeric" placeholder="http://127.0.0.1:PORT/cb" bind:value={client.port} /></label>
+        </div>
+      {/if}
       {#if oauth}
-        <button type="button" class="k-btn k-btn--ink" disabled={busy || unavailable || step !== 'auth'} onclick={startOauth}>
-          {tr('Войти через {name}', { name: card.title })}
+        <button type="button" class="k-btn k-btn--ink" disabled={busy || unavailable || step !== 'auth' || (needClient && !client.id.trim())} onclick={startOauth}>
+          {needClient ? tr('Продолжить вход') : tr('Войти через {name}', { name: card.title })}
         </button>
         {#if oauthUrl}<p class="k-hint">{tr('Окно входа открылось в браузере. Вернитесь сюда и нажмите «Проверить».')}</p>{/if}
       {/if}
