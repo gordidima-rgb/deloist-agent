@@ -544,6 +544,8 @@ fn human_only(path: &str) -> bool {
         || path.starts_with("/api/connectors")
         // Вход в свой MCP-сервер по OAuth: ссылка входа, client id и секрет клиента — решение человека.
         || (path.starts_with("/api/mcp/") && path.contains("/oauth/"))
+        // «Начать бесплатно»: вход в OpenRouter открывает браузер и кладёт ключ в хранилище.
+        || (path.starts_with("/api/providers/") && (path.ends_with("/connect") || path.ends_with("/cancel")))
         || path.starts_with("/api/know-me")
         // Токен своего бота Telegram, привязка чата и переписка от лица человека — только окно.
         || path.starts_with("/api/telegram")

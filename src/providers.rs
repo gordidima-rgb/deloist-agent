@@ -322,7 +322,7 @@ pub struct Providers {
     release: Mutex<Option<(Instant, Value)>>,
     release_failed: Mutex<Option<Instant>>,
     /// Идущий вход в OpenRouter через браузер («Начать бесплатно»).
-    pub(crate) login: Mutex<Option<tokio::task::AbortHandle>>,
+    pub(crate) login: Mutex<Option<(u64, tokio::task::AbortHandle)>>,
 }
 
 fn saved_path(app: &App) -> PathBuf {

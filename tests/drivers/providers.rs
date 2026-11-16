@@ -728,3 +728,81 @@ async fn start_free_shows_an_error_and_can_be_cancelled() {
     let view = list["providers"].as_array().unwrap().iter().find(|p| p["id"] == "openrouter").cloned().unwrap();
     assert_eq!(view["signingIn"], false);
 }
+
+fn openrouter_view(list: &Value) -> Value {
+    list["providers"].as_array().unwrap().iter().find(|p| p["id"] == "openrouter").cloned().unwrap()
+}
+
+fn callback_port(auth: &std::collections::HashMap<String, String>) -> u16 {
+    reqwest::Url::parse(&auth["callback_url"]).unwrap().port().unwrap()
+}
+
+#[tokio::test]
+async fn a_slow_client_on_the_callback_port_does_not_block_a_valid_return() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fake = fake_openrouter(seen.clone()).await;
+    let crew = Crew::start_with_env("prov-openrouter-slow", &[("CREW_TEST_OPENROUTER_URL", &fake)]).await;
+    crew.listen().await;
+    let started = crew.ok("POST", "/api/providers/openrouter/connect", None).await;
+    let auth = query_of(started["authUrl"].as_str().unwrap());
+    let port = callback_port(&auth);
+    // Клиент открыл соединение и молча держит его (начало запроса без конца).
+    let mut slow = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    tokio::io::AsyncWriteExt::write_all(&mut slow, b"GET /cb?c").await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(3)).build().unwrap();
+    let right = client.get(format!("http://127.0.0.1:{port}/cb?code=good-code&state={}", auth["state"])).send().await.unwrap();
+    assert_eq!(right.status().as_u16(), 200);
+    crew.wait_event("OpenRouter подключён", |e| e["type"] == "provider" && e["provider"]["id"] == "openrouter" && e["provider"]["status"] == "connected").await;
+    drop(slow);
+}
+
+#[tokio::test]
+async fn a_second_start_cancels_the_first_which_can_no_longer_save_a_key() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fake = fake_openrouter(seen.clone()).await;
+    let crew = Crew::start_with_env("prov-openrouter-twice", &[("CREW_TEST_OPENROUTER_URL", &fake)]).await;
+    crew.listen().await;
+    let first = query_of(crew.ok("POST", "/api/providers/openrouter/connect", None).await["authUrl"].as_str().unwrap());
+    let second = query_of(crew.ok("POST", "/api/providers/openrouter/connect", None).await["authUrl"].as_str().unwrap());
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let client = reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(3)).build().unwrap();
+    // Старый вход отменён: порт закрыт либо ключа не будет.
+    let old = client.get(format!("http://127.0.0.1:{}/cb?code=good-code&state={}", callback_port(&first), first["state"])).send().await;
+    assert!(old.map_or(true, |r| r.status().as_u16() != 200), "старый вход ещё принимает ответ");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!common::read_secrets(&crew.data_dir).contains(OPENROUTER_TEST_KEY), "отменённый вход сохранил ключ");
+    assert!(seen.lock().unwrap().is_empty(), "обмен начат отменённым входом");
+    // Новый вход жив и после старого остаётся «входим».
+    let view = openrouter_view(&crew.ok("GET", "/api/providers", None).await);
+    assert_eq!(view["signingIn"], true, "{view}");
+    let right = client.get(format!("http://127.0.0.1:{}/cb?code=good-code&state={}", callback_port(&second), second["state"])).send().await.unwrap();
+    assert_eq!(right.status().as_u16(), 200);
+    crew.wait_event("OpenRouter подключён", |e| e["type"] == "provider" && e["provider"]["id"] == "openrouter" && e["provider"]["status"] == "connected").await;
+    assert!(common::read_secrets(&crew.data_dir).contains(OPENROUTER_TEST_KEY));
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_keeps_an_already_connected_openrouter_connected() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fake = fake_openrouter(seen.clone()).await;
+    let crew = Crew::start_with_env("prov-openrouter-keep", &[("CREW_TEST_OPENROUTER_URL", &fake)]).await;
+    crew.listen().await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let auth = query_of(crew.ok("POST", "/api/providers/openrouter/connect", None).await["authUrl"].as_str().unwrap());
+    client.get(format!("http://127.0.0.1:{}/cb?code=good-code&state={}", callback_port(&auth), auth["state"])).send().await.unwrap();
+    crew.wait_event("OpenRouter подключён", |e| e["type"] == "provider" && e["provider"]["id"] == "openrouter" && e["provider"]["status"] == "connected").await;
+    // Второй вход проваливается: ключ на месте, статус остаётся «подключён», ошибка видна.
+    let auth = query_of(crew.ok("POST", "/api/providers/openrouter/connect", None).await["authUrl"].as_str().unwrap());
+    client.get(format!("http://127.0.0.1:{}/cb?code=bad-code&state={}", callback_port(&auth), auth["state"])).send().await.unwrap();
+    let started = std::time::Instant::now();
+    let view = loop {
+        let view = openrouter_view(&crew.ok("GET", "/api/providers", None).await);
+        if view["signingIn"] == false && view["error"].is_string() {
+            break view;
+        }
+        assert!(started.elapsed().as_secs() < 20, "ошибка входа не появилась: {view}");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    assert_eq!(view["status"], "connected", "{view}");
+    assert!(common::read_secrets(&crew.data_dir).contains(OPENROUTER_TEST_KEY), "ключ пропал");
+}
