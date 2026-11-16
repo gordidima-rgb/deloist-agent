@@ -177,4 +177,48 @@
     if (sec < 86400) return tr('{n} ч назад', { n: Math.round(sec / 3600) });
     return tr('{n} дн назад', { n: Math.round(sec / 86400) });
   }
+
+  export function sourceLabel(source) {
+    switch (source) {
+      case 'schedule':
+        return tr('По расписанию');
+      case 'webhook':
+        return tr('Вебхук');
+      case 'telegram':
+        return 'Telegram';
+      case 'discord':
+        return 'Discord';
+      case 'slack':
+        return 'Slack';
+      case 'node':
+        return tr('Один шаг');
+      default:
+        return tr('Вручную');
+    }
+  }
+
+  export function versionKindLabel(kind) {
+    switch (kind) {
+      case 'run':
+        return tr('Перед запуском');
+      case 'restore':
+        return tr('До восстановления');
+      case 'manual':
+        return tr('Сохранено вручную');
+      default:
+        return tr('Автосохранение');
+    }
+  }
+
+  // Время события: «сегодня в 12:04», «вчера в 09:30» или дата.
+  export function whenText(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const day = new Date();
+    if (d.toDateString() === day.toDateString()) return tr('сегодня в {t}', { t: time });
+    day.setDate(day.getDate() - 1);
+    if (d.toDateString() === day.toDateString()) return tr('вчера в {t}', { t: time });
+    return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${time}`;
+  }
 </script>

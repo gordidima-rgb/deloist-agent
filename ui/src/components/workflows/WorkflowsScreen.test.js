@@ -21,6 +21,8 @@ beforeAll(() => {
 
 let host;
 let instance;
+let firstNode = '';
+const starterNodeId = () => firstNode;
 async function drain(n = 25) {
   for (let i = 0; i < n; i += 1) {
     flushSync();
@@ -31,6 +33,7 @@ async function drain(n = 25) {
 
 function backend(over = {}) {
   const wf = { id: 'w1', title: 'Первый', revision: 2, graph: starterGraph(), last_run: { status: 'done', at: 1700000000 } };
+  firstNode = wf.graph.nodes[0].id;
   const state = { wf, calls: [], list: [{ id: 'w1', title: 'Первый', steps: 3, last_run: wf.last_run }] };
   const api = vi.fn(async (path, opts = {}) => {
     const method = opts.method || 'GET';
@@ -143,5 +146,56 @@ describe('WorkflowsScreen', () => {
     window.dispatchEvent(new CustomEvent('deloist:event', { detail: { type: 'workflows', workflow_id: 'w1', run_id: 'r1' } }));
     await drain();
     expect(state.calls.filter((c) => c.endsWith('/runs?limit=1')).length).toBeGreaterThan(before);
+  });
+
+  it('previews a version read-only and restores it', async () => {
+    const restored = { id: 'w1', title: 'Первый', revision: 9, graph: starterGraph() };
+    const { api, state } = backend({
+      'GET /api/workflows/w1/versions': async () => [{ v: 3, kind: 'auto', at: 1700000000000, revision: 1, steps: 3 }],
+      'GET /api/workflows/w1/versions/3': async () => ({ graph: { nodes: [], edges: [], strokes: [] } }),
+      'POST /api/workflows/w1/versions/3/restore': async () => ({ workflow: restored }),
+    });
+    await render(api);
+    host.querySelector('[aria-label="Версии"]').click();
+    await drain();
+    host.querySelector('.wf-hp__row').click();
+    await drain();
+    expect(state.calls).toContain('GET /api/workflows/w1/versions/3');
+    expect(host.querySelector('.wfs-preview')).not.toBeNull();
+    const restore = [...host.querySelectorAll('.wfs-preview button')].find((b) => b.textContent.includes('Сделать текущей'));
+    restore.click();
+    await drain();
+    expect(state.calls).toContain('POST /api/workflows/w1/versions/3/restore');
+    expect(host.querySelector('.wfs-preview')).toBeNull();
+    expect(host.querySelectorAll('.svelte-flow__node').length).toBe(3);
+  });
+
+  it('closing the preview changes nothing on the server', async () => {
+    const { api, state } = backend({
+      'GET /api/workflows/w1/versions': async () => [{ v: 1, kind: 'auto', at: 1700000000000, steps: 3 }],
+      'GET /api/workflows/w1/versions/1': async () => ({ graph: { nodes: [], edges: [], strokes: [] } }),
+    });
+    await render(api);
+    host.querySelector('[aria-label="Версии"]').click();
+    await drain();
+    host.querySelector('.wf-hp__row').click();
+    await drain();
+    host.querySelector('.wfs-preview [aria-label="Закрыть просмотр"]').click();
+    await drain();
+    expect(host.querySelector('.wfs-preview')).toBeNull();
+    expect(state.calls.some((c) => c.startsWith('POST') || c.startsWith('PUT'))).toBe(false);
+  });
+
+  it('shows an old run from history without touching the latest one', async () => {
+    const old = { id: 'old', workflow_id: 'w1', status: 'done', source: 'manual', started_at: 1700000000000, ended_at: 1700000005000, steps: [{ id: 's', run_id: 'old', node_id: starterNodeId(), attempt: 1, status: 'done', output: 'старый результат', started_at: 1700000000000, ended_at: 1700000001000 }] };
+    const { api } = backend({
+      'GET /api/workflows/w1/runs?limit=20': async () => ({ runs: [old], next_before: null }),
+    });
+    await render(api);
+    host.querySelector('[aria-label="История"]').click();
+    await drain();
+    host.querySelector('.wf-hp__row').click();
+    await drain();
+    expect(host.textContent).toContain('Показан прошлый запуск');
   });
 });

@@ -3056,6 +3056,10 @@ function handleEvent(ev) {
       refreshState();
       return;
 
+    case 'workflow_approval':
+      workflowApprovalEvent(ev);
+      break;
+
     default:
       break;
   }
@@ -6970,6 +6974,41 @@ function markWorkflowsNav() {
   $('#btn-workflows').classList.toggle('on', workflowsOpen());
 }
 
+// Раздел собран отдельным файлом (web/ui/workflows.js): грузим при первом открытии, а не на каждой странице.
+function loadWorkflowsBundle() {
+  if (window.DeloistWorkflows) return Promise.resolve();
+  if (S.workflowsLoad) return S.workflowsLoad;
+  S.workflowsLoad = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = '/ui/workflows.css';
+    document.head.append(css);
+    const script = document.createElement('script');
+    script.src = '/ui/workflows.js';
+    script.onload = resolve;
+    script.onerror = () => {
+      S.workflowsLoad = null;
+      reject(new Error('workflows.js'));
+    };
+    document.head.append(script);
+  });
+  return S.workflowsLoad;
+}
+
+// Выбор модели для шагов «Модель»: тот же список провайдеров, что в окне настроек.
+function workflowModels() {
+  return { ...(DeloistProviders.snapshot() || { providers: [], plan: null, loading: true }), settings: S.settings };
+}
+
+function workflowProps() {
+  return {
+    bots: workflowBots(),
+    models: workflowModels,
+    onconnect: () => DeloistProviders.open(),
+    onmenu: () => $('#sidebar').classList.toggle('open'),
+  };
+}
+
 function showWorkflows() {
   if (!workflowsOpen()) {
     clearChatView();
@@ -6980,17 +7019,37 @@ function showWorkflows() {
     }
     $('#workflows').hidden = false;
   }
-  if (!window.DeloistUI?.mountWorkflows) {
-    $('#workflows-root').textContent = tr('Рабочие процессы не загрузились: перезапусти приложение.');
-  } else if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
+  S.wfApprovals?.clear();
+  markWorkflowsDot();
+  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
   else {
-    S.workflowsUi = window.DeloistUI.mountWorkflows($('#workflows-root'), {
-      bots: workflowBots(),
-      onmenu: () => $('#sidebar').classList.toggle('open'),
-    });
+    loadWorkflowsBundle()
+      .then(() => {
+        if (!S.workflowsUi) S.workflowsUi = window.DeloistWorkflows.mount($('#workflows-root'), workflowProps());
+      })
+      .catch(() => {
+        $('#workflows-root').textContent = tr('Рабочие процессы не загрузились: перезапусти приложение.');
+      });
   }
   renderSidebar();
   markWorkflowsNav();
+}
+
+// Бот просит решения шага «Одобрение», а человек на другом экране: значок на кнопке и уведомление.
+function markWorkflowsDot() {
+  const dot = $('#workflows-dot');
+  if (dot) dot.hidden = !(S.wfApprovals?.size && !workflowsOpen());
+}
+
+function workflowApprovalEvent(ev) {
+  (S.wfApprovals ||= new Set()).add(ev.step_id);
+  markWorkflowsDot();
+  if (workflowsOpen()) return;
+  const what = ev.question || ev.title || '';
+  window.DeloistUI?.toast?.(what ? tr('Процесс ждёт решения: {q}', { q: what }) : tr('Процесс ждёт вашего решения'), {
+    action: { label: tr('Открыть'), onclick: () => showWorkflows() },
+    duration: 9000,
+  });
 }
 
 // Экран остаётся смонтированным, но спрятанным: холст не перестраивается при возврате.
@@ -6998,6 +7057,7 @@ function hideWorkflows() {
   if (!workflowsOpen()) return;
   $('#workflows').hidden = true;
   markWorkflowsNav();
+  markWorkflowsDot();
 }
 
 function leaveWorkflows() {

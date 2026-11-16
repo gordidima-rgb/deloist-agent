@@ -6,13 +6,18 @@ export const KINDS = {
   trigger: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'sky' },
   prompt: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'lemon' },
   bot: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'violet' },
-  llm: { inputs: 1, outputs: 1, stage: 2, group: 'steps', tone: 'mint' },
-  condition: { inputs: 1, outputs: 1, stage: 2, group: 'flow', tone: 'tangerine', branches: ['yes', 'no'] },
+  llm: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'mint' },
+  condition: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'tangerine', branches: ['yes', 'no'] },
   approval: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'coral' },
   output: { inputs: 1, outputs: 0, stage: 1, group: 'flow', tone: 'rose' },
   note: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
   text: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
+  shape: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
 };
+
+export const SHAPES = ['rect', 'circle', 'diamond', 'triangle', 'oval', 'star'];
+export const BRUSH_COLORS = ['ink', 'sky', 'mint', 'lemon', 'tangerine', 'rose', 'violet'];
+export const BRUSHES = { pen: { width: 3 }, marker: { width: 14 } };
 
 export const ANNOTATION_COLORS = ['lemon', 'mint', 'sky', 'rose', 'violet', 'tangerine'];
 export const MAX_NODES = 200;
@@ -53,6 +58,8 @@ export function defaultFields(kind) {
       return { text: '', color: 'lemon' };
     case 'text':
       return { text: '' };
+    case 'shape':
+      return { shape: 'rect', fill: 'sky', text: '' };
     default:
       return {};
   }
@@ -65,6 +72,7 @@ export function defaultSchedule() {
 export function makeNode(kind, x, y, extra = {}) {
   const node = { id: newId(), kind, x: Math.round(x), y: Math.round(y), fields: defaultFields(kind), ...extra };
   if (kind === 'note') Object.assign(node, { w: 220, h: 160 });
+  if (kind === 'shape') Object.assign(node, { w: 160, h: 120 });
   return node;
 }
 
@@ -103,6 +111,11 @@ export function kindsFor(fromKind, side) {
   });
 }
 
+// Что можно вставить в ребро между двумя видами: нужен и вход, и выход.
+export function kindsBetween(sourceKind, targetKind) {
+  return Object.keys(KINDS).filter((k) => isEnabled(k) && !isAnnotation(k) && !connectionProblem(sourceKind, k) && !connectionProblem(k, targetKind));
+}
+
 // ---- перевод графа <-> узлы и рёбра Svelte Flow ----
 
 export function toFlow(graph) {
@@ -110,14 +123,14 @@ export function toFlow(graph) {
   const nodes = (g.nodes || []).map((n) => {
     const node = {
       id: n.id,
-      type: isAnnotation(n.kind) ? 'wfnote' : 'wfnode',
+      type: n.kind === 'shape' ? 'wfshape' : isAnnotation(n.kind) ? 'wfnote' : 'wfnode',
       position: { x: Number(n.x) || 0, y: Number(n.y) || 0 },
       data: { kind: n.kind, fields: { ...(n.fields || {}) }, schedule: n.schedule ? { ...n.schedule } : undefined, locked: Boolean(n.locked) },
     };
     if (n.w) node.width = n.w;
     if (n.h) node.height = n.h;
     if (n.locked) node.draggable = false;
-    if (n.kind === 'note') node.zIndex = -1;
+    if (n.kind === 'note' || n.kind === 'shape') node.zIndex = -1;
     return node;
   });
   const edges = (g.edges || []).map((e) => ({
@@ -143,7 +156,7 @@ export function toGraph(nodes, edges, strokes = []) {
     };
     const w = n.width ?? n.measured?.width;
     const h = n.height ?? n.measured?.height;
-    if (kind === 'note' || kind === 'text') {
+    if (kind === 'note' || kind === 'text' || kind === 'shape') {
       if (w) out.w = Math.round(w);
       if (h) out.h = Math.round(h);
     }
@@ -255,6 +268,8 @@ export function stepSeconds(step, now = Date.now()) {
 // Ребро «течёт», если из него вышел шаг в работе, или оно ведёт в работающий шаг.
 export function edgeFlow(edge, steps) {
   const from = steps.get(edge.source);
+  // Условие выбрало другую ветку: эта линия в запуске не участвовала.
+  if (from?.branch && edge.branch && from.status === 'done' && from.branch !== edge.branch) return 'off';
   const to = steps.get(edge.target);
   if (to && (to.status === 'running' || to.status === 'approval') && from && from.status === 'done') return 'live';
   if (from && from.status === 'done' && to && to.status === 'done') return 'done';

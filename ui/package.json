@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "build": "vite build && node ../tools/check_ui_built.mjs --write",
+    "build": "vite build && vite build --config vite.workflows.config.js && node ../tools/check_ui_built.mjs --write",
     "dev": "vite build --watch",
     "check": "node ../tools/check_ui_built.mjs",
     "test": "vitest run"

@@ -41,7 +41,6 @@ import RemindersTab from './components/routines/RemindersTab.svelte';
 import TodosTab from './components/routines/TodosTab.svelte';
 import HabitsTab from './components/routines/HabitsTab.svelte';
 import Report from './components/report/Report.svelte';
-import WorkflowsScreen from './components/workflows/WorkflowsScreen.svelte';
 import { bindReportEntry } from './lib/reportEntry.js';
 
 import Button from './components/kit/Button.svelte';
@@ -149,8 +148,6 @@ window.DeloistUI = {
   mountRemindersTab: (target, props) => mountComponent(RemindersTab, target, props),
   mountHabitsTab: (target, props) => mountComponent(HabitsTab, target, props),
   mountReport: (target, props) => mountComponent(Report, target, props),
-  // Раздел «Рабочие процессы»: список и холст на Svelte Flow (web/app.js, main#workflows).
-  mountWorkflows: (target, props) => mountComponent(WorkflowsScreen, target, props),
   mountTodosTab: (target, props) => mountComponent(TodosTab, target, props),
   shouldShowSignIn: signInLib.shouldShowSignIn,
   // Окно «Подключить свою ИИ»: список слева (строки кита, логотипы как в выборе модели).

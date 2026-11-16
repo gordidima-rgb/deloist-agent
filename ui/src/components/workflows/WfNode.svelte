@@ -10,6 +10,7 @@
   import WfIcon from './WfIcon.svelte';
   import BotPicker from './BotPicker.svelte';
   import ScheduleEditor from './ScheduleEditor.svelte';
+  import { buildGroups, labelOf } from '../../lib/modelPicker.js';
 
   let { id, data, selected = false } = $props();
 
@@ -22,6 +23,15 @@
   const enabled = $derived(isEnabled(kind));
   const invalid = $derived(ctx.model.invalid.node_id === id);
   const hit = $derived(ctx.hits.has(id));
+  const locked = $derived(Boolean(data.locked));
+  const attempts = $derived(ctx.stepList(id));
+  const pickAt = $derived(ctx.pickIndex(id));
+  const modelText = $derived.by(() => {
+    const value = { driver: fields.provider || '', model: fields.model || '' };
+    const m = ctx.models();
+    return labelOf(buildGroups({ providers: m.providers || [], plan: m.plan || null, settings: m.settings || {}, value }), value).text;
+  });
+  let systemOpen = $state(false);
   const trig = $derived(ctx.triggers.get(id));
   const outText = $derived(typeof step?.output === 'string' ? step.output : step?.output == null ? '' : JSON.stringify(step.output, null, 2));
   const errText = $derived(step?.error ? String(step.error) : '');
@@ -67,8 +77,11 @@
   <header class="wfn-head">
     <span class="wfn-badge"><WfIcon name={kind} size={16} /></span>
     <span class="wfn-title">{kindTitle(kind)}</span>
-    {#if !enabled}
-      <span class="wfn-soon">{tr('скоро')}</span>
+    {#if step?.branch && kind === 'condition'}
+      <span class="wfn-branch wfn-branch--{step.branch}">{step.branch === 'yes' ? tr('Да') : tr('Нет')}</span>
+    {/if}
+    {#if locked}
+      <button type="button" class="wfn-lock nodrag" title={tr('Разблокировать')} aria-label={tr('Разблокировать')} onclick={() => ctx.model.toggleLock(id)}><WfIcon name="lock" size={13} /></button>
     {/if}
     <span class="wfn-state" aria-label={statusLabel(status)} title={statusLabel(status)}>
       {#if status === 'running'}
@@ -124,6 +137,27 @@
           <button type="button" class="wfn-btn wfn-btn--no" onclick={() => ctx.decide(step, false)}>{tr('Отклонить')}</button>
         </div>
       {/if}
+    {:else if kind === 'llm'}
+      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
+        <WfIcon name="llm" size={14} />
+        <span>{modelText}</span>
+        <WfIcon name="chevron" size={14} />
+      </button>
+      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что спросить у модели')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)}></textarea>
+      <button type="button" class="wfn-more nodrag" aria-expanded={systemOpen || Boolean(fields.system)} onclick={() => (systemOpen = !systemOpen)}>
+        <WfIcon name="chevron" size={13} />
+        <span>{tr('Системная инструкция')}</span>
+      </button>
+      {#if systemOpen || fields.system}
+        <textarea class="wfn-area wfn-area--sys nodrag nowheel" rows="2" placeholder={tr('Роль и правила для модели')} value={fields.system || ''} oninput={(e) => set('system', e.currentTarget.value)}></textarea>
+      {/if}
+    {:else if kind === 'condition'}
+      <textarea class="wfn-area nodrag nowheel" rows="2" placeholder={tr('Условие: например, в ответе есть ошибка')} value={fields.rule || ''} oninput={(e) => set('rule', e.currentTarget.value)}></textarea>
+      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
+        <WfIcon name="llm" size={14} />
+        <span>{modelText}</span>
+        <WfIcon name="chevron" size={14} />
+      </button>
     {:else if kind === 'output'}
       <div class="wfn-target">
         <WfIcon name="bell" size={15} />
@@ -146,9 +180,17 @@
     {#if hasResult}
       <div class="wfn-res nodrag nowheel" class:is-err={Boolean(errText)} class:is-open={resultOpen}>
         <div class="wfn-res-head">
+          {#if attempts.length > 1}
+            <span class="wfn-pager nodrag">
+              <button type="button" aria-label={tr('Предыдущий результат')} disabled={pickAt <= 0} onclick={() => ctx.pick(id, pickAt - 1)}><WfIcon name="chevron" size={12} /></button>
+              <span>{pickAt + 1}/{attempts.length}</span>
+              <button type="button" aria-label={tr('Следующий результат')} disabled={pickAt >= attempts.length - 1} onclick={() => ctx.pick(id, pickAt + 1)}><WfIcon name="chevron" size={12} /></button>
+            </span>
+          {/if}
           <button type="button" class="wfn-res-toggle" aria-expanded={resultOpen} onclick={() => (resultOpen = !resultOpen)}>
             <span>{errText ? tr('Ошибка') : tr('Результат')}</span>
             <span class="wfn-sec">{seconds(elapsed)}</span>
+            {#if step?.reused}<span class="wfn-reused" title={tr('Результат взят из прошлого запуска')}>{tr('из прошлого запуска')}</span>{/if}
             <WfIcon name="chevron" size={14} />
           </button>
           <button type="button" class="wfn-icon" title={copied ? tr('Скопировано') : tr('Скопировать')} aria-label={tr('Скопировать')} onclick={copy}>
@@ -169,8 +211,10 @@
     <Handle type="source" position={Position.Right} id="out" class="wfn-port" />
   {/if}
   {#if kind === 'condition'}
-    <Handle type="source" position={Position.Right} id="yes" style="top: 38%" class="wfn-port wfn-port--yes" />
-    <Handle type="source" position={Position.Right} id="no" style="top: 70%" class="wfn-port wfn-port--no" />
+    <Handle type="source" position={Position.Right} id="yes" style="top: 34%" class="wfn-port wfn-port--yes" />
+    <Handle type="source" position={Position.Right} id="no" style="top: 66%" class="wfn-port wfn-port--no" />
+    <span class="wfn-out wfn-out--yes" style="top: 34%">{tr('Да')}</span>
+    <span class="wfn-out wfn-out--no" style="top: 66%">{tr('Нет')}</span>
   {/if}
 </div>
 
@@ -178,7 +222,7 @@
   .wfn {
     --tone: var(--k-bot-sky);
     position: relative;
-    width: 288px;
+    width: 304px;
     border-radius: 20px;
     border: 1px solid var(--k-line);
     background: var(--k-surface);
@@ -228,9 +272,11 @@
   .wfn[data-status='failed'] {
     border-color: var(--k-attention);
   }
-  .wfn[data-status='skipped'],
+  .wfn[data-status='skipped'] {
+    opacity: 0.5;
+  }
   .wfn[data-status='waiting'] {
-    opacity: 0.6;
+    opacity: 0.92;
   }
 
   .wfn-head {
@@ -251,7 +297,7 @@
   .wfn-title {
     flex: 1;
     min-width: 0;
-    font: 800 15px/1.2 var(--k-font-display);
+    font: 800 16px/1.2 var(--k-font-display);
     letter-spacing: -0.01em;
   }
   .wfn-soon {
@@ -310,7 +356,7 @@
   .wfn-hint,
   .wfn-next {
     margin: 0;
-    font: 400 12px/1.4 var(--k-font-body);
+    font: 400 12.5px/1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfn-next {
@@ -379,7 +425,7 @@
     border-radius: 12px;
     background: var(--k-surface-2);
     color: var(--k-text);
-    font: 400 13px/1.45 var(--k-font-body);
+    font: 400 13.5px/1.45 var(--k-font-body);
     resize: none;
     padding: 9px 11px;
     transition:
@@ -414,8 +460,148 @@
     padding: 0 11px;
     border-radius: 12px;
     background: var(--k-surface-2);
-    font: 600 13px/1 var(--k-font-body);
+    font: 600 13.5px/1 var(--k-font-body);
     color: var(--k-text-2);
+  }
+  .wfn-model {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--k-line);
+    border-radius: 12px;
+    background: var(--k-surface-2);
+    color: var(--k-text);
+    font: 600 13px/1 var(--k-font-body);
+    cursor: pointer;
+    transition:
+      background 150ms var(--k-ease-out, ease),
+      transform 300ms var(--k-ease-spring, ease);
+  }
+  .wfn-model:hover {
+    background: var(--k-surface-3);
+  }
+  .wfn-model:active {
+    transform: scale(0.97);
+  }
+  .wfn-model span {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .wfn-more {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px;
+    border: 0;
+    background: transparent;
+    color: var(--k-text-2);
+    font: 600 12px/1 var(--k-font-body);
+    cursor: pointer;
+  }
+  .wfn-more :global(.wf-ico) {
+    transition: transform 220ms var(--k-ease-out, ease);
+    transform: rotate(-90deg);
+  }
+  .wfn-more[aria-expanded='true'] :global(.wf-ico) {
+    transform: none;
+  }
+  .wfn-area--sys {
+    min-height: 48px;
+  }
+  .wfn-hint--branches {
+    padding-right: 36px;
+    text-align: right;
+  }
+  .wfn-branch {
+    padding: 2px 9px;
+    border-radius: 999px;
+    font: 700 11.5px/1.5 var(--k-font-body);
+    animation: wfn-pop 0.45s var(--k-ease-spring, ease) both;
+  }
+  .wfn-branch--yes {
+    background: color-mix(in oklab, var(--k-bot-mint) 24%, var(--k-surface));
+    color: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-text));
+  }
+  .wfn-branch--no {
+    background: var(--k-attention-tint);
+    color: var(--k-attention-text);
+  }
+  .wfn-lock {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--k-text-3);
+    cursor: pointer;
+  }
+  .wfn-lock:hover {
+    background: var(--k-surface-2);
+    color: var(--k-text);
+  }
+  .wfn-out {
+    position: absolute;
+    right: 14px;
+    translate: 0 -50%;
+    font: 700 11.5px/1 var(--k-font-body);
+    pointer-events: none;
+  }
+  .wfn-out--yes {
+    color: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-text));
+  }
+  .wfn-out--no {
+    color: var(--k-attention-text);
+  }
+  .wfn-reused {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--k-surface-3);
+    color: var(--k-text-3);
+    font: 500 10.5px/1.5 var(--k-font-body);
+    white-space: nowrap;
+  }
+  .wfn-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 2px 0 6px;
+    font: 600 11px/1 var(--k-font-body);
+    color: var(--k-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .wfn-pager button {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .wfn-pager button:first-child :global(.wf-ico) {
+    transform: rotate(90deg);
+  }
+  .wfn-pager button:last-child :global(.wf-ico) {
+    transform: rotate(-90deg);
+  }
+  .wfn-pager button:hover:not(:disabled) {
+    background: color-mix(in oklab, currentColor 14%, transparent);
+  }
+  .wfn-pager button:disabled {
+    opacity: 0.3;
+    cursor: default;
   }
   .wfn-decide {
     display: grid;

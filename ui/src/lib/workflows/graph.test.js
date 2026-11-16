@@ -79,7 +79,7 @@ describe('kindsFor', () => {
     expect(k).toContain('output');
     expect(k).not.toContain('trigger');
     expect(k).not.toContain('note');
-    expect(k).not.toContain('llm');
+    expect(k).toContain('llm');
   });
   it('after dragging from an input only kinds with an output are offered', () => {
     const k = kindsFor('bot', 'target');

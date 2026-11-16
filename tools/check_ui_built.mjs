@@ -24,7 +24,7 @@ function sources() {
     }
   };
   walk(join(ui, 'src'));
-  for (const name of ['package.json', 'package-lock.json', 'vite.config.js', 'svelte.config.js']) files.push(join(ui, name));
+  for (const name of ['package.json', 'package-lock.json', 'vite.config.js', 'vite.workflows.config.js', 'svelte.config.js']) files.push(join(ui, name));
   return files.map((f) => relative(root, f).replace(/\\/g, '/')).sort();
 }
 
@@ -46,7 +46,7 @@ if (process.argv.includes('--write')) {
 }
 
 const problems = [];
-for (const name of ['kit.js', 'kit.css']) {
+for (const name of ['kit.js', 'kit.css', 'workflows.js', 'workflows.css']) {
   if (!existsSync(join(out, name))) problems.push(`web/ui/${name} нет: выполни npm run build в ui/`);
 }
 if (!existsSync(hashFile)) problems.push('web/ui/.source-hash нет: выполни npm run build в ui/');

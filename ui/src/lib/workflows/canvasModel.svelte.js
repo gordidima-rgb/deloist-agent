@@ -14,12 +14,16 @@ import {
   toFlow,
   toGraph,
   connectionProblem,
+  kindsBetween,
 } from './graph.js';
+import { MAX_STROKES, limitPoints } from './strokes.js';
 
 export class CanvasModel {
   nodes = $state.raw([]);
   edges = $state.raw([]);
-  strokes = [];
+  strokes = $state.raw([]);
+  // Буфер обмена внутри окна: копия узлов и связей между ними.
+  clipboard = null;
   canUndo = $state(false);
   canRedo = $state(false);
   // Узел или ребро, на которые указал сервер при отказе сохранить.
@@ -214,6 +218,113 @@ export class CanvasModel {
   removeEdge(id) {
     this.edges = this.edges.filter((e) => e.id !== id);
     this.commit();
+  }
+
+  // ---- штрихи ----
+
+  addStroke(stroke) {
+    if (this.strokes.length >= MAX_STROKES) return false;
+    this.strokes = [...this.strokes, { ...stroke, points: limitPoints(stroke.points) }];
+    this.commit();
+    return true;
+  }
+
+  removeStrokes(ids) {
+    const gone = new Set(ids);
+    if (!this.strokes.some((s) => gone.has(s.id))) return;
+    this.strokes = this.strokes.filter((s) => !gone.has(s.id));
+    this.commit();
+  }
+
+  // ---- буфер обмена ----
+
+  copy() {
+    const ids = this.selectedIds;
+    if (!ids.length) return false;
+    const c = cloneSelection(this.nodes, this.edges, ids, 0, 0);
+    this.clipboard = { nodes: c.nodes, edges: c.edges, pasted: 0 };
+    return true;
+  }
+
+  cut() {
+    if (!this.copy()) return false;
+    this.removeSelected();
+    return true;
+  }
+
+  // Вставка: если задано `at` (точка потока), левый верхний угол группы встаёт туда, иначе сдвиг на 40 px при каждой вставке.
+  paste(at = null) {
+    const clip = this.clipboard;
+    if (!clip || !clip.nodes.length) return [];
+    if (this.nodes.length + clip.nodes.length > MAX_NODES) return [];
+    clip.pasted += 1;
+    const minX = Math.min(...clip.nodes.map((n) => n.position.x));
+    const minY = Math.min(...clip.nodes.map((n) => n.position.y));
+    const dx = at ? at.x - minX : 40 * clip.pasted;
+    const dy = at ? at.y - minY : 40 * clip.pasted;
+    const ids = new Map();
+    const nodes = clip.nodes.map((n) => {
+      const id = newId();
+      ids.set(n.id, id);
+      return { ...n, id, selected: true, position: { x: n.position.x + dx, y: n.position.y + dy }, data: { ...n.data, fields: { ...n.data.fields }, schedule: n.data.schedule ? { ...n.data.schedule } : undefined } };
+    });
+    const edges = clip.edges.map((e) => ({ ...e, id: newId('e'), source: ids.get(e.source), target: ids.get(e.target), selected: false }));
+    this.nodes = [...this.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...nodes];
+    this.edges = [...this.edges, ...edges];
+    this.commit();
+    return nodes.map((n) => n.id);
+  }
+
+  // ---- порядок, размер, вставка в ребро ----
+
+  bringToFront(id) {
+    const n = this.nodes.find((x) => x.id === id);
+    if (!n) return;
+    this.nodes = [...this.nodes.filter((x) => x.id !== id), n];
+    this.commit();
+  }
+
+  sendToBack(id) {
+    const n = this.nodes.find((x) => x.id === id);
+    if (!n) return;
+    this.nodes = [n, ...this.nodes.filter((x) => x.id !== id)];
+    this.commit();
+  }
+
+  resetSize(id) {
+    this.nodes = this.nodes.map((n) => {
+      if (n.id !== id) return n;
+      const { width, height, ...rest } = n;
+      return { ...rest, ...(n.data.kind === 'note' ? { width: 220, height: 160 } : n.data.kind === 'shape' ? { width: 160, height: 120 } : {}) };
+    });
+    this.commit();
+  }
+
+  // Новый узел посреди ребра: ребро превращается в два (ветка условия остаётся у первого).
+  insertIntoEdge(edgeId, kind) {
+    const e = this.edges.find((x) => x.id === edgeId);
+    const a = e && this.nodes.find((n) => n.id === e.source);
+    const b = e && this.nodes.find((n) => n.id === e.target);
+    if (!a || !b || !kindsBetween(kindOf(a), kindOf(b)).includes(kind)) return null;
+    if (this.nodes.length >= MAX_NODES || this.edges.length + 1 > MAX_EDGES) return null;
+    const mid = (n) => ({ x: n.position.x + (n.measured?.width || n.width || 288) / 2, y: n.position.y + (n.measured?.height || n.height || 120) / 2 });
+    const ma = mid(a);
+    const mb = mid(b);
+    const node = this.addNode(kind, (ma.x + mb.x) / 2 - 144, (ma.y + mb.y) / 2 - 60, {}, { commit: false });
+    const first = { ...e, target: node.id };
+    const second = { id: newId('e'), source: node.id, target: b.id, type: 'wf', sourceHandle: kind === 'condition' ? 'yes' : 'out', data: kind === 'condition' ? { branch: 'yes' } : {} };
+    this.edges = [...this.edges.filter((x) => x.id !== e.id), first, second];
+    this.commit();
+    return node;
+  }
+
+  // Следующий узел для Tab: слева направо, сверху вниз (только то, что связано шагами, аннотации тоже).
+  neighbour(dir = 1) {
+    const list = [...this.nodes].sort((p, q) => p.position.x - q.position.x || p.position.y - q.position.y);
+    if (!list.length) return null;
+    const at = list.findIndex((n) => n.selected);
+    if (at < 0) return dir > 0 ? list[0] : list[list.length - 1];
+    return list[(at + dir + list.length) % list.length];
   }
 
   // Узел, найденный по тексту: для поиска на холсте.

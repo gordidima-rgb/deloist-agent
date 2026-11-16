@@ -12,7 +12,7 @@
   const ctx = getContext(WF);
   const geometry = $derived(getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, curvature: 0.35 }));
   const path = $derived(geometry[0]);
-  const flow = $derived(edgeFlow({ source, target }, ctx.steps));
+  const flow = $derived(edgeFlow({ source, target, branch: data?.branch }, ctx.steps));
   const branch = $derived(data?.branch);
 </script>
 
@@ -21,7 +21,7 @@
   <path d={path} pathLength="100" class="wfe-comet" fill="none" />
 {/if}
 {#if branch}
-  <EdgeLabel x={geometry[1]} y={geometry[2]} class="wfe-branch wfe-branch--{branch}">{branch === 'yes' ? tr('да') : tr('нет')}</EdgeLabel>
+  <EdgeLabel x={geometry[1]} y={geometry[2]} class="wfe-branch wfe-branch--{branch}">{branch === 'yes' ? tr('Да') : tr('Нет')}</EdgeLabel>
 {/if}
 {#if selected}
   <EdgeLabel x={geometry[1]} y={geometry[2]} class="wfe-del">
@@ -47,6 +47,10 @@
   }
   :global(.svelte-flow__edge-path.wfe--live) {
     stroke: color-mix(in oklab, var(--k-brand) 60%, var(--k-line-strong));
+  }
+  :global(.svelte-flow__edge-path.wfe--off) {
+    stroke-dasharray: 3 7;
+    opacity: 0.45;
   }
   :global(.svelte-flow__edge-path.wfe--sel) {
     stroke: var(--k-brand);

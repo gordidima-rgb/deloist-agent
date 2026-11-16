@@ -5,14 +5,15 @@
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import { tr, trServer } from '../../lib/i18n.js';
   import { api as realApi } from '../../lib/api.js';
-  import { toast } from '../../lib/toast.js';
-  import { isRunOpen, newId, starterGraph } from '../../lib/workflows/graph.js';
+  import { toast } from '../../lib/workflows/notify.js';
+  import { isRunOpen, newId, starterGraph, toMs } from '../../lib/workflows/graph.js';
+  import { versionKindLabel, whenText } from './Labels.svelte';
   import WorkflowList from './WorkflowList.svelte';
   import WorkflowCanvas from './WorkflowCanvas.svelte';
   import WfIcon from './WfIcon.svelte';
 
   /** api(path,{method,body}); bots [{id,name,color,emoji}]; onmenu() открывает боковую панель на узком окне. */
-  let { api = realApi, bots = [], onmenu } = $props();
+  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu } = $props();
 
   const POLL_MS = 3000;
   const request = (path, opts) => untrack(() => api)(path, opts);
@@ -23,6 +24,8 @@
   let workflow = $state.raw(null);
   let triggers = $state.raw([]);
   let run = $state.raw(null);
+  let viewRun = $state.raw(null);
+  let previewV = $state.raw(null);
   let epoch = $state(0);
   let loadError = $state('');
   let listOpen = $state(false);
@@ -69,6 +72,8 @@
     remember(id);
     listOpen = false;
     run = null;
+    viewRun = null;
+    previewV = null;
     try {
       const res = await request(`/api/workflows/${encodeURIComponent(id)}`);
       if (selected !== id) return;
@@ -141,10 +146,47 @@
 
   // ---- запуск ----
 
+  async function startStep(nodeId) {
+    if (!workflow) return;
+    try {
+      const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/nodes/${encodeURIComponent(nodeId)}/run`, { method: 'POST', body: { request_id: newId('r') } });
+      viewRun = null;
+      run = res.run ?? run;
+      loadList();
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  // ---- версии ----
+
+  async function openVersion(v) {
+    try {
+      const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(v.v)}`);
+      previewV = { v: v.v, label: `${versionKindLabel(v.kind)} · ${whenText(toMs(v.at))}`, graph: res.graph || res.workflow?.graph || { nodes: [], edges: [], strokes: [] } };
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  async function restoreVersion() {
+    if (!previewV || !workflow) return;
+    const v = previewV.v;
+    try {
+      const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(v)}/restore`, { method: 'POST' });
+      previewV = null;
+      adopt(res.workflow);
+      toast(tr('Версия восстановлена'));
+    } catch (err) {
+      fail(err);
+    }
+  }
+
   async function startRun() {
     if (!workflow) return;
     try {
       const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/run`, { method: 'POST', body: { request_id: newId('r') } });
+      viewRun = null;
       run = res.run ?? run;
       loadList();
     } catch (err) {
@@ -241,9 +283,15 @@
             {workflow}
             {triggers}
             {bots}
-            {run}
+            run={viewRun ?? run}
+            viewing={Boolean(viewRun)}
+            {models}
+            {onconnect}
             api={request}
             {actions}
+            onview={(r) => (viewRun = r)}
+            onpreview={openVersion}
+            onrunstep={startStep}
             onrun={startRun}
             onstop={stopRun}
             onrename={(t) => rename(workflow.id, t)}
@@ -253,6 +301,21 @@
           />
         </SvelteFlowProvider>
       {/key}
+      {#if previewV}
+        <div class="wfs-preview">
+          {#key previewV.v}
+            <SvelteFlowProvider>
+              <WorkflowCanvas
+                workflow={{ id: workflow.id, title: workflow.title, revision: workflow.revision, graph: previewV.graph }}
+                {bots}
+                {models}
+                api={request}
+                preview={{ label: previewV.label, onrestore: restoreVersion, onclose: () => (previewV = null) }}
+              />
+            </SvelteFlowProvider>
+          {/key}
+        </div>
+      {/if}
     {:else if !listLoading}
       <div class="wfs-empty">
         <div class="wfs-empty__ico"><WfIcon name="graph" size={30} /></div>
@@ -291,6 +354,13 @@
   }
   .wfs-scrim {
     display: none;
+  }
+  .wfs-preview {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background: var(--k-canvas);
+    animation: wfs-in 0.4s var(--k-ease-spring, ease) both;
   }
   .wfs-empty {
     display: grid;
