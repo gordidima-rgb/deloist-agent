@@ -5,14 +5,14 @@
    everything that lives at the screen edge (dock, step pill, gear menu, toasts), and colour only as
    signal light — limit rings, 9-pixel status glyphs, the bot's own rim.
 
-   Fonts: Nunito 800 for headings only; the system face (Segoe UI) at 400/600, never heavier.
+   Fonts: Onest (variable) for headings; the system face (Segoe UI) at 400/600, never heavier.
    Every name is prefixed with --k- / .k- so the kit can sit next to style.css while it is adopted. */
 
 :root {
   color-scheme: light;
 
   /* ---- type ---- */
-  --k-font-display: "Nunito", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --k-font-display: "Onest", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --k-font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
   --k-font-mono: "Cascadia Code", ui-monospace, Consolas, monospace;
   --k-text-micro: 11px;   /* ring percent, counters */
@@ -342,7 +342,7 @@
   box-shadow: 0 0 0 1.5px var(--k-attention), 0 14px 32px -16px rgba(255, 90, 60, 0.45);
 }
 .k-approval__head { display: flex; align-items: center; gap: var(--k-space-2); }
-.k-approval__title { font: 800 var(--k-text-lg) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
+.k-approval__title { font: 700 var(--k-text-lg) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
 .k-approval__what {
   padding: var(--k-space-2) var(--k-space-3);
   border-radius: var(--k-radius-sm);
@@ -984,7 +984,7 @@
 .k-routine.is-paused .k-routine__title, .k-routine.is-paused .k-runs-strip { opacity: 0.55; }
 .k-routine__head { display: flex; align-items: center; gap: var(--k-space-3); }
 .k-routine__bot { width: 28px; height: 28px; flex: none; border-radius: 50%; background: #050505; box-shadow: inset 0 0 0 2px var(--bot, var(--k-bot-sky)); }
-.k-routine__title { flex: 1; min-width: 0; font: 800 16px / 1.25 var(--k-font-display); color: var(--k-text); overflow-wrap: anywhere; }
+.k-routine__title { flex: 1; min-width: 0; font: 700 16px / 1.25 var(--k-font-display); color: var(--k-text); overflow-wrap: anywhere; }
 .k-routine__metas { display: flex; flex-wrap: wrap; gap: 6px; }
 .k-routine__last { display: flex; align-items: flex-start; gap: var(--k-space-2); font: 400 var(--k-text-sm) / 1.45 var(--k-font-body); color: var(--k-text-2); }
 .k-routine__last .k-mark { margin-top: 2px; }
@@ -1005,9 +1005,9 @@
    and the bot's dated reports underneath.
    ===================================================================================== */
 .k-goal { display: flex; flex-direction: column; gap: var(--k-space-4); padding: var(--k-space-5); border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
-.k-goal__title { font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); text-wrap: balance; }
+.k-goal__title { font: 700 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); text-wrap: balance; }
 .k-goal__count { display: flex; align-items: baseline; gap: 8px; color: var(--k-text-3); font: 400 var(--k-text-sm) / 1 var(--k-font-body); }
-.k-goal__count b { font: 800 var(--k-text-2xl) / 1 var(--k-font-display); color: var(--k-text); font-variant-numeric: tabular-nums; }
+.k-goal__count b { font: 700 var(--k-text-2xl) / 1 var(--k-font-display); color: var(--k-text); font-variant-numeric: tabular-nums; }
 .k-dots { display: grid; grid-template-columns: repeat(auto-fill, 10px); gap: 5px; }
 .k-dots > i { width: 10px; height: 10px; border-radius: 50%; background: var(--k-surface-3); transition: transform var(--k-dur-base) var(--k-ease-spring); } /* colour switches at once, the pop is the motion */
 .k-dots > i.on { background: var(--bot, var(--k-text)); }
@@ -1024,7 +1024,7 @@
    ===================================================================================== */
 .k-process { --bot: var(--k-bot-tangerine); display: flex; flex-direction: column; gap: var(--k-space-4); padding: var(--k-space-5); border-radius: var(--k-radius-lg); background: var(--k-surface); box-shadow: var(--k-shadow-1); }
 .k-process__head { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); }
-.k-process__title { font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-process__title { font: 700 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
 .k-process__bar { height: 4px; border-radius: 2px; background: var(--k-surface-3); overflow: hidden; }
 .k-process__bar > i { display: block; height: 100%; width: calc(var(--done, 0) * 100%); border-radius: inherit; background: var(--bot); transition: width var(--k-dur-ring) var(--k-ease-out); }
 .k-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -1055,7 +1055,7 @@
    Run timeline — every run of every routine, grouped by day, newest first.
    ===================================================================================== */
 .k-timeline { display: flex; flex-direction: column; gap: var(--k-space-2); }
-.k-timeline__day { display: flex; align-items: baseline; justify-content: space-between; padding: var(--k-space-3) 0 var(--k-space-1); font: 800 var(--k-text-md) / 1.2 var(--k-font-display); color: var(--k-text); }
+.k-timeline__day { display: flex; align-items: baseline; justify-content: space-between; padding: var(--k-space-3) 0 var(--k-space-1); font: 700 var(--k-text-md) / 1.2 var(--k-font-display); color: var(--k-text); }
 .k-timeline__day span { font: 400 var(--k-text-xs) / 1 var(--k-font-body); color: var(--k-text-3); }
 .k-run {
   position: relative; display: grid; grid-template-columns: 44px 16px minmax(0, 1fr) auto; align-items: start; column-gap: var(--k-space-3);
@@ -1341,7 +1341,7 @@
 }
 .k-modal__head { display: flex; align-items: flex-start; gap: var(--k-space-4); padding: var(--k-space-5) var(--k-space-5) var(--k-space-3); }
 .k-modal__text { min-width: 0; flex: 1; }
-.k-modal__title { margin: 0; font: 800 var(--k-text-xl) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
+.k-modal__title { margin: 0; font: 700 var(--k-text-xl) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
 .k-modal__desc { margin: 6px 0 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
 .k-modal__close { flex: none; }
 .k-modal__body { padding: var(--k-space-1) var(--k-space-5) var(--k-space-5); overflow: auto; font: 400 var(--k-text-md) / var(--k-leading-body) var(--k-font-body); }
@@ -1364,7 +1364,7 @@
 }
 .k-section__head { display: flex; align-items: flex-start; gap: var(--k-space-4); padding: var(--k-space-4) var(--k-space-5); }
 .k-section__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.k-section__title { margin: 0; font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-section__title { margin: 0; font: 700 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
 .k-section__desc { margin: 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
 .k-section__actions { display: flex; align-items: center; gap: var(--k-space-2); flex: none; }
 .k-section__body { padding: 0 var(--k-space-5); border-top: 1px solid var(--k-line); }
@@ -1478,7 +1478,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
   color: var(--k-text-2);
 }
 .k-empty__icon svg { width: 24px; height: 24px; }
-.k-empty__title { margin: var(--k-space-1) 0 0; font: 800 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
+.k-empty__title { margin: var(--k-space-1) 0 0; font: 700 var(--k-text-lg) / 1.25 var(--k-font-display); color: var(--k-text); }
 .k-empty__text { margin: 0; max-width: 46ch; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
 .k-empty__action { display: flex; gap: var(--k-space-2); margin-top: var(--k-space-2); }
 
@@ -1571,7 +1571,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 
 .k-toolbar { display: flex; align-items: center; gap: var(--k-space-4); padding: var(--k-space-2) 0 var(--k-space-4); }
 .k-toolbar__text { min-width: 0; flex: 1; }
-.k-toolbar__title { margin: 0; font: 800 var(--k-text-2xl) / 1.15 var(--k-font-display); color: var(--k-text); }
+.k-toolbar__title { margin: 0; font: 700 var(--k-text-2xl) / 1.15 var(--k-font-display); color: var(--k-text); }
 .k-toolbar__sub { margin: 4px 0 0; font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); color: var(--k-text-3); }
 .k-toolbar__actions { display: flex; align-items: center; gap: var(--k-space-2); flex: none; }
 
