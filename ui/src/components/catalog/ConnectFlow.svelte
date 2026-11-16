@@ -62,11 +62,13 @@
       if (needClient && client.id.trim()) {
         body.clientId = client.id.trim();
         if (client.secret) body.clientSecret = client.secret;
-        if (client.port) body.redirectPort = Number(client.port) || 0;
+        const port = String(client.port).trim();
+        if (port) body.redirectPort = /^\d+$/.test(port) ? Number(port) : port;
       }
       try {
         const data = await api(`${base}/connect`, { method: 'POST', body });
         oauthUrl = data.url;
+        authHost = data.authHost || authHost;
         needClient = false;
         client = { id: '', secret: '', port: '' };
         window.open(data.url, '_blank', 'noopener');
@@ -156,7 +158,7 @@
         <button type="button" class="k-btn k-btn--ink" disabled={busy || unavailable || step !== 'auth' || (needClient && !client.id.trim())} onclick={startOauth}>
           {needClient ? tr('Продолжить вход') : tr('Войти через {name}', { name: card.title })}
         </button>
-        {#if oauthUrl}<p class="k-hint">{tr('Окно входа открылось в браузере. Вернитесь сюда и нажмите «Проверить».')}</p>{/if}
+        {#if oauthUrl}<p class="k-hint">{authHost ? tr('Вход открылся на {host}. Вернитесь сюда и нажмите «Проверить».', { host: authHost }) : tr('Окно входа открылось в браузере. Вернитесь сюда и нажмите «Проверить».')}</p>{/if}
       {/if}
       <button type="button" class="k-btn k-btn--primary" disabled={busy || unavailable || step !== 'auth' || (!oauth && !allSaved)} onclick={check}>
         {tr('Проверить')}

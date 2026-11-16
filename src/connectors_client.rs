@@ -105,13 +105,14 @@ impl Connectors {
     }
 
     /// `login` — client id и секрет клиента, если у сервера авторизации нет регистрации клиентов.
-    pub async fn oauth_start(&self, id: &str, login: Value) -> Result<String, ConnectorError> {
+    pub async fn oauth_start(&self, id: &str, login: Value) -> Result<(String, String), ConnectorError> {
         let data = self.call(reqwest::Method::POST, &format!("/api/connectors/{}/oauth/start", seg(id)), Some(login)).await?;
         let url = data.get("url").and_then(Value::as_str).unwrap_or_default().to_string();
         if !url.starts_with("https://") && !url.starts_with("http://127.0.0.1") {
             return Err(ConnectorError { status: 502, message: "модуль коннекторов вернул странный адрес входа".into(), data });
         }
-        Ok(url)
+        let host = data.get("authHost").and_then(Value::as_str).unwrap_or_default().to_string();
+        Ok((url, host))
     }
 
     pub async fn check(&self, id: &str) -> Result<Value, ConnectorError> {

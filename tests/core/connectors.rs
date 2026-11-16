@@ -270,6 +270,12 @@ struct Fake {
     challenge: bool,
     meta_hits: usize,
     secret_seen: String,
+    /// Подмена в метаданных: `resource` защищаемого ресурса, `issuer`, хост адреса токенов.
+    prm_resource: String,
+    issuer: String,
+    token_host: String,
+    /// Метаданные без `code_challenge_methods_supported`.
+    no_pkce: bool,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -355,7 +361,8 @@ async fn resource_meta(State(fake): State<Shared>) -> Response {
 
 fn resource_meta_body(fake: Shared) -> Response {
     let port = fake.lock().unwrap().port;
-    axum::Json(json!({ "resource": format!("http://127.0.0.1:{port}/mcp"), "authorization_servers": [format!("http://127.0.0.1:{port}")] })).into_response()
+    let resource = Some(fake.lock().unwrap().prm_resource.clone()).filter(|r| !r.is_empty()).unwrap_or(format!("http://127.0.0.1:{port}/mcp"));
+    axum::Json(json!({ "resource": resource, "authorization_servers": [format!("http://127.0.0.1:{port}")] })).into_response()
 }
 
 async fn as_meta(State(fake): State<Shared>) -> Response {
@@ -370,6 +377,19 @@ async fn as_meta(State(fake): State<Shared>) -> Response {
     });
     if fake.lock().unwrap().no_registration {
         meta.as_object_mut().unwrap().remove("registration_endpoint");
+    }
+    let (issuer, token_host, no_pkce) = {
+        let f = fake.lock().unwrap();
+        (f.issuer.clone(), f.token_host.clone(), f.no_pkce)
+    };
+    if !issuer.is_empty() {
+        meta["issuer"] = json!(issuer);
+    }
+    if !token_host.is_empty() {
+        meta["token_endpoint"] = json!(format!("http://{token_host}:{port}/token"));
+    }
+    if no_pkce {
+        meta.as_object_mut().unwrap().remove("code_challenge_methods_supported");
     }
     axum::Json(meta).into_response()
 }
@@ -651,7 +671,7 @@ async fn without_a_registration_endpoint_the_human_gives_a_client_id() {
     let (status, body) = crew.send("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false }))).await;
     assert_eq!(status, 409, "{body}");
     assert_eq!(body["needsClientId"], true, "{body}");
-    assert_eq!(body["authHost"], "127.0.0.1");
+    assert_eq!(body["authHost"], format!("127.0.0.1:{port}"), "хост входа с портом");
     assert!(fake.lock().unwrap().registered.is_empty());
 
     let started = crew.ok("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false, "clientId": "my-client", "clientSecret": "shh-secret-71" }))).await;
@@ -670,6 +690,116 @@ async fn without_a_registration_endpoint_the_human_gives_a_client_id() {
     // Второй вход берёт сохранённый client id без вопросов.
     let again = crew.ok("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false }))).await;
     assert_eq!(pairs(reqwest::Url::parse(again["url"].as_str().unwrap()).unwrap().query().unwrap())["client_id"], "my-client");
+}
+
+/// Вход со свеженастроенной заглушкой: ответ на «Войти» и признак «клиент не регистрировался».
+async fn custom_login_error(fake: &Shared, name: &str, body: Value) -> (u16, Value, Crew, String) {
+    let port = fake.lock().unwrap().port;
+    let crew = Crew::start(name).await;
+    crew.listen().await;
+    let made = crew.ok("POST", "/api/mcp", Some(json!({ "name": "Свой", "url": format!("http://127.0.0.1:{port}/mcp") }))).await;
+    let id = made["server"]["id"].as_str().unwrap().to_string();
+    let (status, answer) = crew.send("POST", &format!("/api/mcp/{id}/oauth/start"), Some(body)).await;
+    (status, answer, crew, id)
+}
+
+#[tokio::test]
+async fn login_metadata_for_another_resource_or_issuer_is_refused() {
+    // Метаданные защищаемого ресурса описывают другой сервер.
+    let fake = start_fake().await;
+    fake.lock().unwrap().prm_resource = "https://other.example/mcp".into();
+    let (status, body, _crew, _) = custom_login_error(&fake, "mcp-prm-mismatch", json!({ "open": false })).await;
+    assert_eq!(status, 502, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("другой ресурс"), "{body}");
+    assert!(fake.lock().unwrap().registered.is_empty(), "клиент не регистрировали");
+
+    // Издатель не совпадает с адресом, по которому нашли метаданные.
+    let fake = start_fake().await;
+    fake.lock().unwrap().issuer = "https://evil.example".into();
+    let (status, body, _crew, _) = custom_login_error(&fake, "mcp-issuer-mismatch", json!({ "open": false })).await;
+    assert_eq!(status, 502, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("издатель"), "{body}");
+    assert!(fake.lock().unwrap().registered.is_empty());
+
+    // Нет объявления PKCE.
+    let fake = start_fake().await;
+    fake.lock().unwrap().no_pkce = true;
+    let (status, body, _crew, _) = custom_login_error(&fake, "mcp-no-pkce", json!({ "open": false })).await;
+    assert_eq!(status, 502, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("PKCE"), "{body}");
+}
+
+#[tokio::test]
+async fn a_custom_server_whose_token_endpoint_is_on_another_host_is_refused() {
+    let fake = start_fake().await;
+    fake.lock().unwrap().token_host = "localhost".into();
+    let (status, body, _crew, _) = custom_login_error(&fake, "mcp-token-host", json!({ "open": false })).await;
+    assert_eq!(status, 502, "{body}");
+    let error = body["error"].as_str().unwrap();
+    assert!(error.contains("разных хостах") && error.contains("localhost") && error.contains("127.0.0.1"), "{body}");
+    assert!(fake.lock().unwrap().registered.is_empty(), "до регистрации и секрета дело не дошло");
+}
+
+#[tokio::test]
+async fn a_hint_on_the_own_host_with_another_port_is_not_exempt_and_a_bad_return_port_is_400() {
+    let fake = start_fake().await;
+    let port = fake.lock().unwrap().port;
+    fake.lock().unwrap().challenge = true;
+    let crew = Crew::start("mcp-hint-port").await;
+    let made = crew.ok("POST", "/api/mcp", Some(json!({ "name": "Свой", "url": format!("http://127.0.0.1:{port}/mcp") }))).await;
+    let id = made["server"]["id"].as_str().unwrap().to_string();
+    let (status, _) = crew.send("POST", &format!("/api/mcp/{id}/check"), None).await;
+    assert_eq!(status, 502);
+    assert_eq!(fake.lock().unwrap().meta_hits, 0);
+
+    // Порт возврата: не число, мал, велик — 400, а не «любой порт».
+    for bad in [json!("abc"), json!(80), json!(70000), json!(-1), json!(0)] {
+        let (status, body) = crew.send("POST", &format!("/api/mcp/{id}/oauth/start"), Some(json!({ "open": false, "clientId": "c", "redirectPort": bad.clone() }))).await;
+        assert_eq!(status, 400, "{bad}: {body}");
+    }
+    assert!(fake.lock().unwrap().registered.is_empty());
+}
+
+#[tokio::test]
+async fn a_typed_client_secret_is_not_stored_when_the_start_fails() {
+    let fake = start_fake().await;
+    fake.lock().unwrap().no_registration = true;
+    fake.lock().unwrap().no_pkce = true;
+    let (status, body, crew, id) =
+        custom_login_error(&fake, "mcp-secret-not-saved", json!({ "open": false, "clientId": "my-client", "clientSecret": "shh-typed-91" })).await;
+    assert_eq!(status, 502, "{body}");
+    assert_not_on_disk(&crew.data_dir, "shh-typed-91");
+    let path = format!("/api/mcp/{id}/oauth/start");
+    // Вход без секрета: введённый при неудачной попытке до сервера токенов не доходит (его нигде нет).
+    fake.lock().unwrap().no_pkce = false;
+    let first = crew.ok("POST", &path, Some(json!({ "open": false, "clientId": "my-client" }))).await;
+    assert_eq!(first["authHost"], format!("127.0.0.1:{}", fake.lock().unwrap().port), "куда откроется вход — в ответе");
+    finish_login(&crew, first["url"].as_str().unwrap()).await;
+    assert_eq!(fake.lock().unwrap().secret_seen, "", "секрет из неудачной попытки не сохранён");
+    // Успешный вход с секретом сохраняет его: следующий вход берёт его сам.
+    let typed = crew.ok("POST", &path, Some(json!({ "open": false, "clientId": "my-client", "clientSecret": "shh-typed-91" }))).await;
+    finish_login(&crew, typed["url"].as_str().unwrap()).await;
+    assert_eq!(fake.lock().unwrap().secret_seen, "shh-typed-91");
+    // Ответ браузеру уходит раньше, чем вход дописывает секрет: даём ему закончиться.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let again = crew.ok("POST", &path, Some(json!({ "open": false }))).await;
+    finish_login(&crew, again["url"].as_str().unwrap()).await;
+    assert_eq!(fake.lock().unwrap().secret_seen, "shh-typed-91", "после входа секрет в хранилище");
+}
+
+#[tokio::test]
+async fn a_manifest_may_reference_only_the_access_token_among_the_oauth_secrets() {
+    let fake = start_fake().await;
+    let port = fake.lock().unwrap().port;
+    let crew = Crew::start("conn-oauth-refs").await;
+    let (status, body) = crew
+        .send(
+            "POST",
+            "/api/connectors/install",
+            Some(json!({ "manifest": http_manifest(port, json!({ "kind": "mcp-oauth" }), json!({ "X-Leak": "{{secret:oauth.refresh_token}}" }), "127.0.0.1") })),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
 }
 
 #[tokio::test]

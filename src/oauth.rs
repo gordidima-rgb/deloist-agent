@@ -243,6 +243,8 @@ pub fn resolve(cfg: &Config) -> Result<(Config, String), String> {
 
 pub struct Started {
     pub url: String,
+    /// Куда откроется вход: хост (и порт) сервера авторизации, чтобы человек видел это до браузера.
+    pub host: String,
 }
 
 /// Client id (и секрет), которые ввёл человек: у сервера авторизации нет регистрации клиента.
@@ -314,6 +316,55 @@ fn host_of(url: &str) -> String {
     reqwest::Url::parse(url.trim()).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default()
 }
 
+/// Хост с портом, если порт не стандартный: то, что человек видит в карточке.
+pub fn host_port_of(url: &str) -> String {
+    match reqwest::Url::parse(url.trim()) {
+        Ok(u) => match (u.host_str(), u.port()) {
+            (Some(host), Some(port)) => format!("{}:{port}", host.to_ascii_lowercase()),
+            (Some(host), None) => host.to_ascii_lowercase(),
+            _ => String::new(),
+        },
+        Err(_) => String::new(),
+    }
+}
+
+/// Канонический вид ресурса (RFC 8707 / 9728): схема, хост, порт и путь без хвостового «/»;
+/// без логина, запроса и фрагмента. Пусто — адрес не разобрался.
+pub fn canonical_resource(url: &str) -> String {
+    match reqwest::Url::parse(url.trim()) {
+        Ok(u) if u.host_str().is_some() => format!("{}{}", u.origin().ascii_serialization(), u.path().trim_end_matches('/')),
+        _ => String::new(),
+    }
+}
+
+/// Схема, хост и порт совпадают.
+fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str().map(str::to_ascii_lowercase) == b.host_str().map(str::to_ascii_lowercase)
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// Клиент для запроса к адресу, который назвал удалённый сервер. Свой адрес MCP-сервера (`own`: схема,
+/// хост и порт те же) человек выбрал сам. Любой другой — только внешние адреса, закреплённые перед
+/// запросом: подмена DNS между проверкой и запросом не уведёт на внутреннюю сеть.
+async fn pinned_client(url: &reqwest::Url, own: Option<&reqwest::Url>) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("deloist/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(20));
+    if !own.is_some_and(|o| same_origin(o, url)) {
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let port = url.port_or_known_default().unwrap_or(443);
+        let addrs = public_addrs(&host, port).await;
+        let Some(first) = addrs.first() else {
+            return Err(format!("адрес {host} не найден или во внутренней сети"));
+        };
+        builder = builder.resolve(&host, *first);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
 /// Все адреса хоста, если ни один не во внутренней сети. Пусто — нельзя ходить.
 async fn public_addrs(host: &str, port: u16) -> Vec<std::net::SocketAddr> {
     let bare = host.trim_start_matches('[').trim_end_matches(']');
@@ -334,6 +385,19 @@ pub fn save_cfg_into(server: &mut crate::store::McpServer, cfg: Config) {
     }
 }
 
+/// Свой сервер: секрет клиента уходит на сервер токенов, поэтому адреса авторизации, токенов и регистрации
+/// (если есть) — на одном и том же хосте, который человек увидит в карточке.
+fn same_host(authorize: &str, token: &str, registration: &str) -> Result<(), String> {
+    let first = host_of(authorize);
+    for (name, url) in [("токенов", token), ("регистрации", registration)] {
+        let host = host_of(url);
+        if !url.is_empty() && host != first {
+            return Err(format!("адреса входа на разных хостах: {first} (авторизация) и {host} (адрес {name}). Секрет клиента не отправляем на хост, который вы не видели"));
+        }
+    }
+    Ok(())
+}
+
 /// Начать вход: поднять обратный адрес и вернуть ссылку для браузера.
 /// `mcp_discovery` — адрес MCP-сервера: найти сервер авторизации и зарегистрировать клиента на лету.
 /// `egress` — хосты подключения из каталога; у своего сервера (`None`) сервер авторизации должен быть
@@ -341,11 +405,15 @@ pub fn save_cfg_into(server: &mut crate::store::McpServer, cfg: Config) {
 pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<String>, egress: Option<&[String]>, manual: Option<Manual>) -> Result<Started, StartError> {
     app.connectors.oauth.cancel(id);
     let mut cfg = cfg;
+    let mut typed_secret: Option<String> = None;
     if let Some(server_url) = mcp_discovery.as_deref() {
         let challenge = app.connectors.oauth.challenges.lock().unwrap().get(id).cloned().unwrap_or_default();
         if cfg.authorize_url.is_empty() || cfg.token_url.is_empty() {
             let hint = Some(challenge.resource_metadata.as_str()).filter(|u| !u.is_empty());
-            let found = discover(server_url, hint).await?;
+            let found = discover(server_url, hint, egress).await?;
+            if egress.is_none() {
+                same_host(&found.authorize_url, &found.token_url, &found.registration_url)?;
+            }
             let server_host = host_of(server_url);
             for url in [&found.authorize_url, &found.token_url, &found.registration_url] {
                 let host = host_of(url);
@@ -356,7 +424,7 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
                     Some(list) if !crate::connectors::host_allowed(&host, list) => {
                         return Err(format!("сервер авторизации {host} не входит в разрешённые хосты подключения (egress)").into());
                     }
-                    None if public_addrs(&host, 443).await.is_empty() => {
+                    None if public_addrs(&host, reqwest::Url::parse(url).ok().and_then(|u| u.port_or_known_default()).unwrap_or(443)).await.is_empty() => {
                         return Err(format!("сервер авторизации {host} не найден или во внутренней сети").into());
                     }
                     _ => {}
@@ -374,7 +442,12 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
         if cfg.scopes.is_empty() {
             cfg.scopes = challenge.scopes;
         }
-        cfg.resource = crate::mcp::public_url(server_url);
+        cfg.resource = canonical_resource(server_url);
+        // Свой сервер: секрет клиента уходит на сервер токенов, поэтому все адреса входа — на одном хосте,
+        // который человек видит в карточке. Подключения из каталога ограничены списком egress.
+        if egress.is_none() {
+            same_host(&cfg.authorize_url, &cfg.token_url, &cfg.registration_url)?;
+        }
     }
     if let Some(manual) = &manual {
         let client_id = manual.client_id.trim();
@@ -387,13 +460,12 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
         cfg.client_id = client_id.to_string();
         cfg.manual_client = true;
         cfg.redirect_port = manual.redirect_port;
-        let secret = manual.client_secret.trim();
-        let stored = if secret.is_empty() { app.connectors.secrets.delete(id, CLIENT_SECRET) } else { app.connectors.secrets.set(id, CLIENT_SECRET, secret) };
-        stored?;
+        // В хранилище секрет попадёт только после успешного входа (finish).
+        typed_secret = Some(manual.client_secret.trim().to_string());
     }
     let needs_client = |cfg: &Config| mcp_discovery.is_some() && !cfg.manual_client && cfg.client_id.is_empty() && cfg.registration_url.is_empty();
     if needs_client(&cfg) {
-        return Err(StartError::NeedsClientId(host_of(&cfg.authorize_url)));
+        return Err(StartError::NeedsClientId(host_port_of(&cfg.authorize_url)));
     }
     // Порт, под который зарегистрирован клиент; занят — для MCP регистрируемся заново.
     let mut listener = None;
@@ -417,9 +489,10 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
     let redirect_uri = format!("http://127.0.0.1:{port}/cb");
     if mcp_discovery.is_some() && cfg.client_id.is_empty() {
         if needs_client(&cfg) {
-            return Err(StartError::NeedsClientId(host_of(&cfg.authorize_url)));
+            return Err(StartError::NeedsClientId(host_port_of(&cfg.authorize_url)));
         }
-        cfg.client_id = register(&cfg.registration_url, &redirect_uri).await?;
+        let own = reqwest::Url::parse(mcp_discovery.as_deref().unwrap_or_default()).ok();
+        cfg.client_id = register(&cfg.registration_url, &redirect_uri, own.as_ref()).await?;
         cfg.redirect_port = port;
     }
     // Найденное и зарегистрированное запоминаем: в следующий раз не регистрируемся заново.
@@ -428,7 +501,9 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
         let _ = app.store.edit_mcp(id, |server| save_cfg_into(server, saved)).await;
     }
     let (full, mut client_secret) = resolve(&cfg)?;
-    if full.manual_client {
+    if let Some(typed) = &typed_secret {
+        client_secret = typed.clone();
+    } else if full.manual_client {
         client_secret = app.connectors.secrets.get(id, CLIENT_SECRET).unwrap_or_default();
     }
     let verifier = new_verifier();
@@ -453,10 +528,11 @@ pub async fn start(app: &Arc<App>, id: &str, cfg: Config, mcp_discovery: Option<
             query.append_pair(key, value);
         }
     }
-    let flow = Flow { id: id.to_string(), state, verifier, redirect_uri, cfg: full, client_secret };
+    let host = host_port_of(&full.authorize_url);
+    let flow = Flow { id: id.to_string(), state, verifier, redirect_uri, cfg: full, client_secret, typed_secret };
     let task = tokio::spawn(listen(app.clone(), listener, flow));
     app.connectors.oauth.active.lock().unwrap().insert(id.to_string(), task.abort_handle());
-    Ok(Started { url: url.to_string() })
+    Ok(Started { url: url.to_string(), host })
 }
 
 struct Flow {
@@ -466,6 +542,8 @@ struct Flow {
     redirect_uri: String,
     cfg: Config,
     client_secret: String,
+    /// Секрет, который ввёл человек: сохраняется, только если вход удался.
+    typed_secret: Option<String>,
 }
 
 fn same(a: &str, b: &str) -> bool {
@@ -481,7 +559,7 @@ async fn listen(app: Arc<App>, listener: TcpListener, flow: Flow) {
             Ok(Ok((socket, _))) => socket,
             Ok(Err(_)) => continue,
             Err(_) => {
-                finish(&app, &flow.id, Err("вход не завершён за 10 минут".into())).await;
+                finish(&app, &flow, Err("вход не завершён за 10 минут".into())).await;
                 break;
             }
         };
@@ -523,13 +601,13 @@ async fn listen(app: Arc<App>, listener: TcpListener, flow: Flow) {
         };
         if iss_bad {
             respond(&mut socket, 400, say("Ответ не прошёл проверку издателя (iss).", "The answer failed the issuer (iss) check.")).await;
-            finish(&app, &flow.id, Err("ответ сервера авторизации не прошёл проверку iss".into())).await;
+            finish(&app, &flow, Err("ответ сервера авторизации не прошёл проверку iss".into())).await;
             break;
         }
         if let Some(error) = params.get("error") {
             let text: String = error.chars().take(80).collect();
             respond(&mut socket, 400, say("Вход отменён. Вернитесь в приложение.", "Sign-in cancelled. Return to the app.")).await;
-            finish(&app, &flow.id, Err(format!("провайдер отказал: {text}"))).await;
+            finish(&app, &flow, Err(format!("провайдер отказал: {text}"))).await;
             break;
         }
         let Some(code) = params.get("code").filter(|c| !c.is_empty()) else {
@@ -545,7 +623,7 @@ async fn listen(app: Arc<App>, listener: TcpListener, flow: Flow) {
             Ok(tokens) => save_tokens(&app, &flow.id, &tokens, None),
             Err(e) => Err(e),
         };
-        finish(&app, &flow.id, saved).await;
+        finish(&app, &flow, saved).await;
         break;
     }
     app.connectors.oauth.active.lock().unwrap().remove(&flow.id);
@@ -596,6 +674,16 @@ impl From<String> for TokenError {
     }
 }
 
+/// Клиент для POST на адрес входа. Найденные по адресу сервера (есть `resource`) закрепляются, как в `get_json`;
+/// фиксированные адреса провайдера из манифеста человек уже одобрил в карточке согласия.
+async fn client_for(url: &str, resource: &str) -> Result<reqwest::Client, String> {
+    if resource.is_empty() {
+        return Ok(http());
+    }
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "неверный адрес сервера авторизации".to_string())?;
+    pinned_client(&parsed, reqwest::Url::parse(resource).ok().as_ref()).await
+}
+
 async fn token_request(cfg: &Config, client_secret: &str, mut form: Vec<(&str, String)>) -> Result<Tokens, TokenError> {
     form.push(("client_id", cfg.client_id.clone()));
     if !client_secret.is_empty() {
@@ -604,7 +692,8 @@ async fn token_request(cfg: &Config, client_secret: &str, mut form: Vec<(&str, S
     if !cfg.resource.is_empty() {
         form.push(("resource", cfg.resource.clone()));
     }
-    let response = http()
+    let client = client_for(&cfg.token_url, &cfg.resource).await.map_err(TokenError::from)?;
+    let response = client
         .post(&cfg.token_url)
         .header("Accept", "application/json")
         .form(&form)
@@ -658,7 +747,13 @@ fn save_tokens(app: &App, id: &str, tokens: &Tokens, keep_refresh: Option<&str>)
 }
 
 /// Итог входа: пометка «нужно переподключить» снимается или ставится, страница узнаёт событием.
-async fn finish(app: &Arc<App>, id: &str, result: Result<(), String>) {
+async fn finish(app: &Arc<App>, flow: &Flow, result: Result<(), String>) {
+    let id = flow.id.as_str();
+    let result = result.and_then(|()| match &flow.typed_secret {
+        Some(secret) if secret.is_empty() => app.connectors.secrets.delete(id, CLIENT_SECRET),
+        Some(secret) => app.connectors.secrets.set(id, CLIENT_SECRET, secret),
+        None => Ok(()),
+    });
     let ok = result.is_ok();
     let _ = app
         .store
@@ -767,27 +862,17 @@ fn well_known(base: &reqwest::Url, name: &str) -> Vec<String> {
     out
 }
 
-/// Метаданные по адресу. Хост самого MCP-сервера человек выбрал сам; любой другой хост (адрес из
-/// `resource_metadata`, сервер авторизации) назвал удалённый сервер, поэтому: только https (http — на этой
-/// машине), только внешние адреса (проверка и закрепление адреса против подмены DNS), без редиректов,
+/// Метаданные по адресу. Адрес самого MCP-сервера (схема, хост и порт) человек выбрал сам; любой другой
+/// (адрес из `resource_metadata`, сервер авторизации, даже тот же хост на другом порту) назвал удалённый сервер,
+/// поэтому: только https (http — на этой машине), только внешние адреса (проверка и закрепление адреса против подмены DNS), без редиректов,
 /// не больше 256 КБ.
-async fn get_json(url: &str, server_host: &str) -> Option<Value> {
+async fn get_json(url: &str, own: &reqwest::Url) -> Option<Value> {
     if !url_ok(url) {
         return None;
     }
     let parsed = reqwest::Url::parse(url.trim()).ok()?;
-    let host = parsed.host_str()?.to_ascii_lowercase();
-    let mut builder = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("deloist/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(20));
-    if host != server_host {
-        let addrs = public_addrs(&host, parsed.port_or_known_default()?).await;
-        let first = addrs.first()?;
-        builder = builder.resolve(&host, *first);
-    }
-    let mut response = builder.build().ok()?.get(parsed).header("Accept", "application/json").send().await.ok()?;
+    let client = pinned_client(&parsed, Some(own)).await.ok()?;
+    let mut response = client.get(parsed).header("Accept", "application/json").send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -803,16 +888,31 @@ async fn get_json(url: &str, server_host: &str) -> Option<Value> {
 
 /// RFC 9728 → RFC 8414 / OpenID: сначала адрес из `WWW-Authenticate` (`hint`), если он есть, иначе
 /// догадка по адресу сервера. Спецификация MCP: modelcontextprotocol.io/specification/draft/basic/authorization.
-async fn discover(server_url: &str, hint: Option<&str>) -> Result<Found, String> {
+async fn discover(server_url: &str, hint: Option<&str>, egress: Option<&[String]>) -> Result<Found, String> {
     let server = reqwest::Url::parse(server_url).map_err(|_| "неверный адрес MCP-сервера".to_string())?;
-    let server_host = server.host_str().unwrap_or_default().to_ascii_lowercase();
     let mut auth_base = server.clone();
     auth_base.set_path("");
     auth_base.set_query(None);
+    if let Some(hint) = hint {
+        // Адрес из ответа 401 назвал сервер: у подключения из каталога он тоже должен быть среди его хостов.
+        let foreign = reqwest::Url::parse(hint).ok().filter(|u| !same_origin(u, &server));
+        if let (Some(list), Some(u)) = (egress, foreign) {
+            let host = u.host_str().unwrap_or_default().to_ascii_lowercase();
+            if !crate::connectors::host_allowed(&host, list) {
+                return Err(format!("сервер указал адрес метаданных на {host}, которого нет среди разрешённых хостов подключения (egress)"));
+            }
+        }
+    }
     let mut candidates: Vec<String> = hint.map(str::to_string).into_iter().collect();
     candidates.extend(well_known(&server, "oauth-protected-resource"));
     for url in candidates {
-        if let Some(meta) = get_json(&url, &server_host).await {
+        if let Some(meta) = get_json(&url, &server).await {
+            // RFC 9728: `resource` в метаданных должен быть этим сервером, иначе чужие метаданные подменят вход.
+            if let Some(resource) = meta["resource"].as_str() {
+                if canonical_resource(resource) != canonical_resource(server_url) {
+                    return Err(format!("метаданные входа описывают другой ресурс ({resource}), а не этот сервер: вход отменён"));
+                }
+            }
             if let Some(first) = meta["authorization_servers"].as_array().and_then(|a| a.first()).and_then(Value::as_str) {
                 auth_base = reqwest::Url::parse(first).map_err(|_| "неверный адрес сервера авторизации".to_string())?;
             }
@@ -822,7 +922,7 @@ async fn discover(server_url: &str, hint: Option<&str>) -> Result<Found, String>
     let mut metadata = None;
     for name in ["oauth-authorization-server", "openid-configuration"] {
         for url in well_known(&auth_base, name) {
-            if let Some(found) = get_json(&url, &server_host).await {
+            if let Some(found) = get_json(&url, &server).await {
                 metadata = Some(found);
                 break;
             }
@@ -840,10 +940,15 @@ async fn discover(server_url: &str, hint: Option<&str>) -> Result<Found, String>
         issuer: text("issuer"),
         iss_required: meta["authorization_response_iss_parameter_supported"].as_bool().unwrap_or(false),
     };
-    if let Some(methods) = meta["code_challenge_methods_supported"].as_array() {
-        if !methods.iter().any(|m| m == "S256") {
-            return Err("сервер авторизации не поддерживает PKCE S256".into());
-        }
+    // RFC 8414 §3.3: издатель в метаданных совпадает с адресом, по которому их нашли.
+    let normal = |url: &str| reqwest::Url::parse(url.trim()).map(|u| u.to_string()).unwrap_or_else(|_| url.trim().to_string()).trim_end_matches('/').to_string();
+    if found.issuer.is_empty() || normal(&found.issuer) != normal(auth_base.as_str()) {
+        return Err(format!("издатель в метаданных ({}) не совпадает с адресом сервера авторизации ({}): вход отменён", found.issuer, auth_base.as_str().trim_end_matches('/')));
+    }
+    // Спецификация MCP: сервер обязан объявить PKCE; без объявления не входим.
+    let pkce = meta["code_challenge_methods_supported"].as_array().is_some_and(|methods| methods.iter().any(|m| m == "S256"));
+    if !pkce {
+        return Err("сервер авторизации не объявил поддержку PKCE S256: вход отменён".into());
     }
     if !url_ok(&found.authorize_url) || !url_ok(&found.token_url) {
         return Err("сервер авторизации дал адреса не по https".into());
@@ -855,7 +960,7 @@ async fn discover(server_url: &str, hint: Option<&str>) -> Result<Found, String>
     Ok(found)
 }
 
-async fn register(registration_url: &str, redirect_uri: &str) -> Result<String, String> {
+async fn register(registration_url: &str, redirect_uri: &str, own: Option<&reqwest::Url>) -> Result<String, String> {
     let body = json!({
         "client_name": "Deloist Боты",
         "redirect_uris": [redirect_uri],
@@ -863,7 +968,9 @@ async fn register(registration_url: &str, redirect_uri: &str) -> Result<String, 
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     });
-    let response = http().post(registration_url).json(&body).send().await.map_err(|e| format!("регистрация клиента: {}", e.without_url()))?;
+    let target = reqwest::Url::parse(registration_url.trim()).map_err(|_| "неверный адрес регистрации клиента".to_string())?;
+    let client = pinned_client(&target, own).await.map_err(|e| format!("регистрация клиента: {e}"))?;
+    let response = client.post(target).json(&body).send().await.map_err(|e| format!("регистрация клиента: {}", e.without_url()))?;
     let status = response.status();
     let value: Value = response.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -914,6 +1021,28 @@ mod tests {
         // Имя параметра внутри другого значения не считается.
         assert_eq!(parse_challenge(r#"Bearer realm="my_resource_metadata=x""#).resource_metadata, "");
         assert!(!parse_challenge("Basic realm=x").bearer);
+    }
+
+    #[test]
+    fn resource_is_canonical_and_origins_include_the_port() {
+        assert_eq!(canonical_resource("https://Mcp.Example.com/"), "https://mcp.example.com");
+        assert_eq!(canonical_resource("https://mcp.example.com:443/v1/?x=1#f"), "https://mcp.example.com/v1");
+        assert_eq!(canonical_resource("http://127.0.0.1:8080/mcp/"), "http://127.0.0.1:8080/mcp");
+        assert_eq!(host_port_of("http://127.0.0.1:8080/x"), "127.0.0.1:8080");
+        assert_eq!(host_port_of("https://A.example.com:443/x"), "a.example.com");
+        let own = reqwest::Url::parse("http://127.0.0.1:5000/mcp").unwrap();
+        assert!(same_origin(&own, &reqwest::Url::parse("http://127.0.0.1:5000/meta").unwrap()));
+        assert!(!same_origin(&own, &reqwest::Url::parse("http://127.0.0.1:5001/meta").unwrap()), "другой порт — не свой");
+        assert!(!same_origin(&own, &reqwest::Url::parse("https://127.0.0.1:5000/meta").unwrap()), "другая схема — не свой");
+    }
+
+    #[tokio::test]
+    async fn a_foreign_origin_on_the_own_host_is_not_exempt_from_the_public_check() {
+        let own = reqwest::Url::parse("http://127.0.0.1:5000/mcp").unwrap();
+        assert!(pinned_client(&reqwest::Url::parse("http://127.0.0.1:5000/m").unwrap(), Some(&own)).await.is_ok());
+        let other_port = reqwest::Url::parse("http://127.0.0.1:5001/m").unwrap();
+        assert!(pinned_client(&other_port, Some(&own)).await.is_err(), "тот же хост, другой порт: внутренняя сеть");
+        assert!(get_json("http://127.0.0.1:5001/m", &own).await.is_none());
     }
 
     #[test]

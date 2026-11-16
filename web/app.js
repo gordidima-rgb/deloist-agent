@@ -5503,8 +5503,8 @@ async function startMcpLogin(s, el, manual) {
   try {
     const data = await api(`/api/mcp/${s.id}/oauth/start`, { method: 'POST', body: { open: false, ...manual } });
     el.querySelector('.mcp-login-form')?.remove();
+    toast(data.authHost ? tr('Откроется вход на {host}. Вернитесь сюда: статус обновится сам.', { host: data.authHost }) : tr('Окно входа открылось в браузере. Вернитесь сюда: статус обновится сам.'), 8000);
     window.open(data.url, '_blank', 'noopener');
-    toast(tr('Окно входа открылось в браузере. Вернитесь сюда: статус обновится сам.'), 6000);
   } catch (err) {
     if (err.data?.needsClientId) {
       showMcpClientForm(s, el, err.data.authHost);
@@ -5531,7 +5531,8 @@ function showMcpClientForm(s, el, host) {
     const data = new FormData(form);
     const manual = { clientId: String(data.get('id') || '').trim() };
     if (data.get('secret')) manual.clientSecret = String(data.get('secret'));
-    if (data.get('port')) manual.redirectPort = Number(data.get('port')) || 0;
+    const port = String(data.get('port') || '').trim();
+    if (port) manual.redirectPort = /^\d+$/.test(port) ? Number(port) : port;
     startMcpLogin(s, el, manual);
   });
   el.append(form);

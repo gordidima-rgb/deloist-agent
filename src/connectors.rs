@@ -648,7 +648,7 @@ pub fn from_manifest(data_dir: &Path, manifest: &Value) -> Result<McpServer, Str
     // Каждая ссылка на секрет должна вести к полю ввода или к входу через OAuth.
     let known: Vec<String> = server.connector.as_ref().unwrap().auth.fields.iter().map(|f| f.name.clone()).collect();
     for name in referenced(&server) {
-        let from_oauth = oauth_login && name.starts_with(secrets::RESERVED_PREFIX);
+        let from_oauth = oauth_login && name == oauth::ACCESS;
         if !from_oauth && !known.contains(&name) {
             return Err(format!("ссылка на секрет «{name}», которого нет среди полей auth.fields"));
         }
@@ -850,7 +850,7 @@ pub fn login_view(app: &App, server: &McpServer) -> Option<Value> {
     let login = server.login.as_ref()?;
     let connected = !login.needs_reauth && app.connectors.secrets.get(&server.id, oauth::ACCESS).is_some();
     let error = app.connectors.errors.lock().unwrap().get(&server.id).cloned().unwrap_or_default();
-    let host = reqwest::Url::parse(&login.oauth.authorize_url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    let host = oauth::host_port_of(&login.oauth.authorize_url);
     Some(json!({ "state": if connected { "connected" } else { "needs-login" }, "error": error, "authHost": host }))
 }
 
@@ -1155,10 +1155,18 @@ pub async fn set_secret(app: &Arc<App>, id: &str, body: &Value) -> Result<Value,
 pub async fn oauth_start(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, Fail> {
     let server = app.store.mcp_server(id).ok_or_else(|| fail(404, "подключение не найдено"))?;
     // client id, который ввёл человек, когда у сервера авторизации нет регистрации клиента.
+    // Порт возврата: либо не задан, либо число 1024–65535; иное — ошибка, а не молчаливый «любой порт».
+    let redirect_port = match body.get("redirectPort").filter(|v| !v.is_null()) {
+        None => 0,
+        Some(v) => match v.as_u64().and_then(|p| u16::try_from(p).ok()).filter(|p| *p >= 1024) {
+            Some(port) => port,
+            None => return Err(fail(400, "порт возврата должен быть числом от 1024 до 65535")),
+        },
+    };
     let manual = body.get("clientId").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(|client_id| oauth::Manual {
         client_id: client_id.to_string(),
         client_secret: body.get("clientSecret").and_then(Value::as_str).unwrap_or_default().to_string(),
-        redirect_port: body.get("redirectPort").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).unwrap_or(0),
+        redirect_port,
     });
     let (cfg, discovery, egress, manual) = match &server.connector {
         Some(meta) => {
@@ -1202,7 +1210,7 @@ pub async fn oauth_start(app: &Arc<App>, id: &str, body: &Value) -> Result<Value
     if body.get("open").and_then(Value::as_bool).unwrap_or(true) {
         crate::desktop::open_in_browser(&started.url);
     }
-    Ok(json!({ "url": started.url }))
+    Ok(json!({ "url": started.url, "authHost": started.host }))
 }
 
 pub async fn check(app: &Arc<App>, id: &str) -> Result<Value, Fail> {

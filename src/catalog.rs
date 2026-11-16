@@ -1111,7 +1111,8 @@ pub async fn connect(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, Fa
                     login[key] = value.clone();
                 }
             }
-            json!({ "url": client.oauth_start(&connector, login).await? })
+            let (url, host) = client.oauth_start(&connector, login).await?;
+            json!({ "url": url, "authHost": host })
         }
         "check" => {
             let tools = client.check(&connector).await?;

@@ -2883,13 +2883,14 @@ async fn patch_mcp(
     if let Err(r) = check_mcp_templates(&body, Some(&current)) {
         return r;
     }
+    // Другой адрес — другой сервер: вход и токены прежнего ему не отдаём. Забываем вход до записи нового
+    // адреса: заголовок с токеном и сам токен исчезают раньше, чем адрес сменится, окна для утечки нет.
     let url_changed = body.get("url").and_then(Value::as_str).is_some_and(|u| u.trim() != current.url.trim());
+    if url_changed && current.login.is_some() {
+        crate::connectors::forget_login(&app, &id).await;
+    }
     match app.store.update_mcp(&id, &body).await {
         Ok(Some(server)) => {
-            // Другой адрес — другой сервер: вход и токены прежнего ему не отдаём.
-            if url_changed && server.login.is_some() {
-                crate::connectors::forget_login(&app, &id).await;
-            }
             // Новые команда и аргументы действуют сразу: прежний процесс больше не нужен.
             crate::mcp::close(&app, &id);
             ok(json!({ "server": shown_mcp(&app, server) }))

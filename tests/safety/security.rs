@@ -1021,6 +1021,7 @@ async fn the_agent_key_cannot_create_enable_or_repoint_mcp_servers() {
     let path = format!("/api/mcp/{id}");
     for body in [
         json!({ "url": "https://evil.example/mcp" }),
+        json!({ "url": "https://evil.example/mcp", "headers": { "Authorization": "Bearer {{secret:oauth.access_token}}" } }),
         json!({ "command": "evil" }),
         json!({ "args": ["x"] }),
         json!({ "enabled": true }),
