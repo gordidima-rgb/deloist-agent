@@ -12,16 +12,18 @@ export function fileUrlFor(workflowId, path) {
   return `/api/workflows/${encodeURIComponent(workflowId)}/files/${rel}`;
 }
 
-export function toBase64(file) {
+export function toDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error || new Error('read'));
-    reader.onload = () => {
-      const text = String(reader.result || '');
-      resolve(text.slice(text.indexOf(',') + 1));
-    };
+    reader.onload = () => resolve(String(reader.result || ''));
     reader.readAsDataURL(file);
   });
+}
+
+export async function toBase64(file) {
+  const text = await toDataUrl(file);
+  return text.slice(text.indexOf(',') + 1);
 }
 
 /** POST /api/workflows/{id}/assets {name, data, mime} → {name, path, mime, size}. */

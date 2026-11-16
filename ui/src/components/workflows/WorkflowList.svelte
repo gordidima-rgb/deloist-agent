@@ -261,6 +261,7 @@
     align-items: center;
     gap: 5px;
     padding: 1px 8px;
+    white-space: nowrap;
     border-radius: 999px;
     background: var(--k-surface-3);
     color: var(--k-text-2);

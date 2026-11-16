@@ -89,7 +89,7 @@
     <p class="wft-warn wft-warn--soft">{tr('Старый адрес после этого перестанет работать.')}</p>
   {/if}
 {:else if isMessenger(kind)}
-  <input class="wft-input nodrag" type="text" placeholder={tr('Только сообщения с этим текстом (необязательно)')} value={fields.text || ''} oninput={(e) => ctx.model.setField(id, 'text', e.currentTarget.value)} />
+  <input class="wft-input nodrag" type="text" placeholder={tr('Только с этим текстом (необязательно)')} value={fields.text || ''} oninput={(e) => ctx.model.setField(id, 'text', e.currentTarget.value)} />
   {#if !linked}
     <LinkHint name={triggerLabel(kind)} onopen={() => ctx.openSettings(kind)} />
   {:else}

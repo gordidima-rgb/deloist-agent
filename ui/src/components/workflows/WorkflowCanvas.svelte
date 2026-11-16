@@ -6,7 +6,7 @@
   import { SvelteFlow, Background, MiniMap, Panel, useSvelteFlow, useViewport, getNodesBounds } from '@xyflow/svelte';
   import { tr, trServer } from '../../lib/i18n.js';
   import { toast } from '../../lib/workflows/notify.js';
-  import { fileUrlFor, uploadAssetTo } from '../../lib/workflows/assets.js';
+  import { fileUrlFor, uploadAssetTo, toDataUrl } from '../../lib/workflows/assets.js';
   import { CanvasModel } from '../../lib/workflows/canvasModel.svelte.js';
   import { Saver } from '../../lib/workflows/saver.js';
   import { SHAPE_CHOICES, canConnect, connectionProblem, typeProblem, isRunOpen, kindOf, kindsFor, kindsBetween, latestSteps, stepSeconds, toMs, newId } from '../../lib/workflows/graph.js';
@@ -214,7 +214,6 @@
     clearAsset: (id) => {
       model.setFields(id, { name: '', path: '', mime: '', size: 0, text: '' });
       const { [id]: gone, ...rest } = previews;
-      if (gone) URL.revokeObjectURL(gone);
       previews = rest;
     },
     zoomImage: (url) => (lightbox = url),
@@ -224,13 +223,13 @@
   const edgeTypes = { wf: WfEdge };
 
   untrack(() => onready)?.({
-    pending: () => saver.pending,
+    pending: () => saver.pending || model.typing,
     revision: () => saver.revision,
     flush: () => saver.flush(),
     inflight: () => saver.inFlight,
     // Чужая правка: подменить граф на месте, если своих несохранённых правок нет. Иначе false.
     remote: (fresh) => {
-      if (!fresh || saver.pending || saver.dead) return false;
+      if (!fresh || saver.pending || saver.dead || model.typing) return false;
       model.applyRemote(fresh.graph);
       saver.revision = fresh.revision;
       title = fresh.title ?? title;
@@ -262,9 +261,11 @@
 
   async function assetFromFile(id, file) {
     const meta = { name: file.name, mime: file.type || '', size: file.size };
-    if (file.type.startsWith('image/')) {
-      const url = URL.createObjectURL(file);
-      previews = { ...previews, [id]: url };
+    // Страница не пускает blob: в картинки (CSP), поэтому показ до загрузки идёт через data:.
+    if (file.type.startsWith('image/') && file.size <= 8 * 1024 * 1024) {
+      try {
+        previews = { ...previews, [id]: await toDataUrl(file) };
+      } catch {}
     }
     if ((TEXTLIKE.test(file.type) || /\.(txt|md|csv|json|log)$/i.test(file.name)) && file.size <= 20000) {
       try {
@@ -1463,6 +1464,16 @@
     }
     .wf-canvas :global(.svelte-flow__minimap) {
       margin-bottom: 128px !important;
+    }
+  }
+  @media (max-width: 1500px) {
+    .wf-en span {
+      display: none;
+    }
+  }
+  @media (max-width: 1300px) {
+    .wf-save {
+      display: none;
     }
   }
   @media (max-width: 820px) {

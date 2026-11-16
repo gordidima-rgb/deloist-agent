@@ -48,6 +48,11 @@ export class CanvasModel {
     this.#flags();
   }
 
+  // Идёт набор текста: правка ещё не зафиксирована, сохранение не запланировано.
+  get typing() {
+    return Boolean(this.#typingTimer);
+  }
+
   getGraph() {
     // Уходящие узлы (затухают после чужой правки) в граф не попадают.
     return toGraph(

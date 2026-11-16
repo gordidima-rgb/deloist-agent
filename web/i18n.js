@@ -156,7 +156,7 @@
     'Новый адрес': 'New address',
     'Создать адрес': 'Create address',
     'Старый адрес после этого перестанет работать.': 'The old address stops working after this.',
-    'Только сообщения с этим текстом (необязательно)': 'Only messages containing this text (optional)',
+    'Только с этим текстом (необязательно)': 'Only with this text (optional)',
     'Срабатывает на сообщения из привязанного чата.': 'Fires on messages from the linked chat.',
     'Процесс выключен: такой запуск не сработает': 'The workflow is off: this kind of start will not fire',
     'Процесс включён: расписание, вебхук и мессенджеры запускают его': 'Workflow is on: schedule, webhook and messengers start it',

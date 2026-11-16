@@ -231,12 +231,17 @@ describe('WorkflowsScreen', () => {
     state.wf = { ...state.wf, revision: 5, graph: { ...g, nodes: g.nodes.map((n, i) => ({ ...n, id: state.wf.graph.nodes[i].id })) } };
     window.dispatchEvent(new CustomEvent('deloist:event', { detail: { type: 'workflows', workflow_id: 'w1' } }));
     await drain();
-    // тот же узел остался в DOM (холст не пересобирали), а удалённый затухает и исчезает позже
+    // тот же узел остался в DOM (холст не пересобирали), а удалённый затухает и исчезает чуть позже
     expect(host.contains(nodeEl)).toBe(true);
-    expect(host.querySelector('.wfn.is-leaving')).not.toBeNull();
+    await new Promise((r) => setTimeout(r, 700));
+    await drain(5);
+    expect(host.querySelectorAll('.svelte-flow__node').length).toBe(2);
+    expect(host.contains(nodeEl)).toBe(true);
   });
 
   it('does not overwrite unsaved local edits when someone else changes the workflow', async () => {
+    const toast = vi.fn();
+    window.DeloistUI = { toast };
     const { api, state } = backend();
     await render(api);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -253,5 +258,8 @@ describe('WorkflowsScreen', () => {
     await drain(5);
     expect(host.querySelectorAll('.svelte-flow__node').length).toBe(3);
     expect(host.querySelector('.wfn-area').value).toBe('моя правка');
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][1].action.label).toBe('Загрузить свежую');
+    delete window.DeloistUI;
   });
 });
