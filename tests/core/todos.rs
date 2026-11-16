@@ -293,3 +293,15 @@ async fn a_file_is_stored_under_the_task_and_bad_files_are_refused() {
     let (status, _) = crew.send("POST", "/api/todos/nope/files", Some(json!({ "name": "a.txt", "data": "0L/RgNC40LLQtdGC" }))).await;
     assert_eq!(status, 404);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn plus_name_in_a_phrase_assigns_the_bot_without_a_model() {
+    let crew = Crew::start("todos-plus-name").await;
+    let beta = crew.ok("POST", "/api/bots", Some(json!({ "name": "Бета", "role": "младший" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let made = crew.ok("POST", "/api/todos/from-text", Some(json!({ "text": "завтра в 10:00 +Бета сделать отчёт" }))).await;
+    let task = &made[0];
+    assert_eq!(task["assignee"], beta.as_str(), "{made}");
+    assert_eq!(task["due_date"], day_offset(1), "{made}");
+    assert_eq!(task["due_time"], "10:00", "{made}");
+    assert!(!task["title"].as_str().unwrap().contains("Бета"), "{made}");
+}

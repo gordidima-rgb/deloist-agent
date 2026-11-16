@@ -339,6 +339,26 @@ pub fn code_draft(text: &str, today: NaiveDate, now: NaiveTime) -> Draft {
     }
 }
 
+/// «+Имя» или «@Имя» с полным именем бота делает его исполнителем, даже если модели не было: слово из названия уходит.
+/// Только живой текст человека; исполнитель, которого уже выбрала модель, остаётся.
+pub fn assign_mentioned(draft: &mut Draft, bots: &[Bot]) {
+    if draft.assignee.is_some() {
+        return;
+    }
+    for bot in bots {
+        let Ok(re) = Regex::new(&format!(r"(?i)(^|\s)[+@]{}($|[\s,.;:!?])", regex::escape(&bot.name))) else { continue };
+        if !re.is_match(&draft.title) {
+            continue;
+        }
+        let rest = re.replace_all(&draft.title, " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        if rest.chars().count() >= 3 {
+            draft.title = rest;
+        }
+        draft.assignee = Some(bot.id.clone());
+        return;
+    }
+}
+
 /// Задача из черновика: та же запись, что у ручной задачи.
 pub fn to_todo(draft: Draft) -> Todo {
     Todo {
@@ -491,8 +511,10 @@ pub async fn from_text_route(State(app): State<Arc<App>>, bytes: Bytes) -> Respo
         Ok(parsed) => parsed,
         Err(message) => return todos::respond(Err(TodoError::Invalid(message))),
     };
+    let bots = app.store.bots();
     let mut made = Vec::with_capacity(parsed.tasks.len());
-    for draft in parsed.tasks {
+    for mut draft in parsed.tasks {
+        assign_mentioned(&mut draft, &bots);
         let mut todo = to_todo(draft);
         if let Some(bucket) = chosen {
             todo.bucket = bucket;
@@ -529,6 +551,21 @@ mod tests {
 
     fn bot(id: &str, name: &str) -> Bot {
         Bot { id: id.into(), name: name.into(), ..Bot::default() }
+    }
+
+    #[test]
+    fn plus_name_makes_the_bot_the_assignee_without_a_model() {
+        let bots = vec![bot("b1", "Бета")];
+        let mut draft = Draft { title: "+Бета сделать отчёт".into(), ..Draft::default() };
+        assign_mentioned(&mut draft, &bots);
+        assert_eq!(draft.assignee.as_deref(), Some("b1"));
+        assert_eq!(draft.title, "сделать отчёт");
+        let mut plain = Draft { title: "позвонить Бета-тестеру".into(), ..Draft::default() };
+        assign_mentioned(&mut plain, &bots);
+        assert_eq!(plain.assignee, None, "без + и @ и внутри слова исполнителем не делает");
+        let mut prefix = Draft { title: "сделать +Бетаигра".into(), ..Draft::default() };
+        assign_mentioned(&mut prefix, &bots);
+        assert_eq!(prefix.assignee, None, "только полное имя");
     }
 
     #[test]
