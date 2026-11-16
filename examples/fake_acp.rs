@@ -61,12 +61,47 @@ impl Io {
     }
 }
 
+fn append_log_line(path: &str, line: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let mut overlapped: windows_sys::Win32::System::IO::OVERLAPPED = unsafe { std::mem::zeroed() };
+            unsafe {
+                windows_sys::Win32::Storage::FileSystem::LockFileEx(
+                    file.as_raw_handle() as _,
+                    0x00000002, // LOCKFILE_EXCLUSIVE_LOCK
+                    0,
+                    u32::MAX,
+                    u32::MAX,
+                    &mut overlapped,
+                );
+            }
+            let _ = writeln!(file, "{line}");
+            let _ = file.flush();
+            unsafe {
+                windows_sys::Win32::Storage::FileSystem::UnlockFileEx(
+                    file.as_raw_handle() as _,
+                    0,
+                    u32::MAX,
+                    u32::MAX,
+                    &mut overlapped,
+                );
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
 fn log(value: &Value) {
     let Ok(path) = std::env::var("FAKE_ACP_LOG") else { return };
     let entry = json!({ "pid": std::process::id(), "method": value["method"], "params": value["params"] });
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{entry}");
-    }
+    append_log_line(&path, &entry.to_string());
 }
 
 /// Первая строка журнала: с какими аргументами и в какой временной папке запущен процесс. Ключа здесь нет и быть не должно.
@@ -78,9 +113,7 @@ fn log_start() {
         "params": { "args": args, "temp": std::env::var("TEMP").unwrap_or_default(), "wsl": std::env::var("WSL_DISTRO_NAME").unwrap_or_default(), "hasKey": std::env::var("GEMINI_API_KEY").is_ok(),
                     "keyLen": std::env::var("GEMINI_API_KEY").map(|k| k.len()).unwrap_or(0) },
     });
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{entry}");
-    }
+    append_log_line(&path, &entry.to_string());
 }
 
 fn write_token(pid: u32) {

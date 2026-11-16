@@ -531,7 +531,14 @@ impl<'a> TurnKey<'a> {
         let token = app.turns.issue_browser_token(bot_id)?;
         let path = turn_key_path(app.store.data_dir(), bot_id);
         std::fs::create_dir_all(path.parent()?).ok()?;
-        if std::fs::write(&path, token).is_err() {
+        let tmp = path.with_extension("key.tmp");
+        if std::fs::write(&tmp, token).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            app.turns.revoke_browser_token(bot_id);
+            return None;
+        }
+        if std::fs::rename(&tmp, &path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
             app.turns.revoke_browser_token(bot_id);
             return None;
         }

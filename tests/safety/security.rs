@@ -1213,10 +1213,39 @@ async fn browser_bridge_works_only_with_the_key_of_the_running_turn() {
     assert_ne!(key, other_key);
 
     // Ключ идёт агенту через окружение (путь к файлу), а не через аргументы запуска.
-    common::wait_until("агент получил сессию", 20, || async { std::fs::read_to_string(&log).is_ok_and(|t| t.lines().any(|l| serde_json::from_str::<Value>(l).is_ok_and(|m| m["method"] == "session/new"))) }).await;
+    // Ждём session/new именно того бота, чей ключ проверяем (по пути к файлу ключа в mcpServers).
+    common::wait_until("агент получил сессию", 20, || async {
+        std::fs::read_to_string(&log).is_ok_and(|t| t.lines().any(|l| {
+            serde_json::from_str::<Value>(l).is_ok_and(|m| {
+                m["method"] == "session/new"
+                    && m["params"]["mcpServers"].as_array().is_some_and(|servers| {
+                        servers.iter().any(|s| {
+                            s["env"].as_array().is_some_and(|env| {
+                                env.iter().any(|e| {
+                                    e["name"] == "DELOIST_BROWSER_TURN_KEY_FILE"
+                                        && e["value"].as_str().is_some_and(|v| v.contains(&bot))
+                                })
+                            })
+                        })
+                    })
+            })
+        }))
+    }).await;
     let logged = std::fs::read_to_string(&log).unwrap();
     assert!(!logged.contains(key.trim()) && !logged.contains(other_key.trim()), "ключ хода попал в журнал агента");
-    let new = logged.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|m| m["method"] == "session/new").unwrap_or_else(|| panic!("{logged}"));
+    let new = logged.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|m| {
+        m["method"] == "session/new"
+            && m["params"]["mcpServers"].as_array().is_some_and(|servers| {
+                servers.iter().any(|s| {
+                    s["env"].as_array().is_some_and(|env| {
+                        env.iter().any(|e| {
+                            e["name"] == "DELOIST_BROWSER_TURN_KEY_FILE"
+                                && e["value"].as_str().is_some_and(|v| v.contains(&bot))
+                        })
+                    })
+                })
+            })
+    }).unwrap_or_else(|| panic!("{logged}"));
     let server = &new["params"]["mcpServers"][0];
     assert!(server["env"].as_array().unwrap().iter().any(|e| e["name"] == "DELOIST_BROWSER_TURN_KEY_FILE"), "{server}");
     assert!(!server["args"].to_string().contains(key.trim()), "ключ хода в argv");
@@ -1246,6 +1275,13 @@ async fn browser_bridge_works_only_with_the_key_of_the_running_turn() {
     crew.ok("POST", &format!("/api/bots/{bot}/stop"), Some(json!({}))).await;
     let file = turn_key_file(&crew, &bot);
     common::wait_until("ключ снят", 20, || async { !file.exists() }).await;
+    // Дождаться, пока бот действительно свободен (TurnKey падает раньше Turns::finish).
+    common::wait_until("бот свободен", 20, || async {
+        let state = crew.ok("GET", "/api/state", None).await;
+        state["bots"].as_array().and_then(|bs| bs.iter().find(|b| b["id"] == bot)).map(|b| b["busy"] == false).unwrap_or(false)
+    }).await;
+    // stop ставит очередь на паузу (Manual): для следующего сообщения нужен resume.
+    crew.ok("POST", &format!("/api/bots/{bot}/queue/resume"), None).await;
     assert_eq!(browser_call(&crew, &bot, Some(key.trim()), "browser_nav").await, 403, "ключ жив после хода");
 
     // Новый ход — новый ключ, старый не оживает.
