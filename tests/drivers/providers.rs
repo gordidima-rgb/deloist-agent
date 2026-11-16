@@ -582,7 +582,8 @@ async fn a_good_update_replaces_the_files_and_leaves_no_leftovers() {
     let agents_dir = crew.data_dir.join("agents");
     assert!(agents_dir.join("codex-acp").join("fake_acp.exe").exists());
     assert!(!agents_dir.join("codex-acp.staging").exists(), "остался staging");
-    assert!(!agents_dir.join("codex-acp.old").exists(), "остался old");
+    // Версия записывается сразу после распаковки, а `.old` убирается после проверки агента: ждём её.
+    common::wait_until("старая папка убрана", 30, || async { !agents_dir.join("codex-acp.old").exists() }).await;
 }
 
 #[tokio::test]
