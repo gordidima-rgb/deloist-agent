@@ -2,7 +2,8 @@ use super::*;
 
 fn temp(name: &str) -> std::path::PathBuf {
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("deloist-{name}-{stamp}"));
+    // Не `%TEMP%`: он лежит в `AppData`, а такие папки команде не отдаются (`grants::protected_folder`).
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("unit-tmp").join(format!("deloist-{name}-{stamp}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

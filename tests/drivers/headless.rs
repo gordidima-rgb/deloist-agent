@@ -107,10 +107,11 @@ async fn a_team_file_goes_out_and_comes_back() {
     assert_eq!(team["format"], "deloist-team");
     assert_eq!(team["bots"].as_array().unwrap().len(), 3);
 
+    // Импорт команды создаёт ботов: с ключа программы (его может прочитать скрипт бота) он закрыт,
+    // решает человек в окне приложения (`guard::bot_room_create`).
     let (code, out, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--json"]);
-    assert_eq!(code, 0, "{out} {err}");
-    let data: Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(data["imported"]["bots"], 3, "{data}");
+    assert_ne!(code, 0, "импорт с ключа программы прошёл: {out} {err}");
+    assert!(format!("{out} {err}").contains("решает человек"), "{out} {err}");
 }
 
 /// Заглушка MCP-клиента: пишет запросы построчно и читает ответы.
