@@ -103,6 +103,7 @@ fn last_summary(all: &[Value]) -> Option<String> {
 fn entry_chars(entry: &Value) -> usize {
     let mut chars = entry["text"].as_str().map_or(0, |t| t.chars().count());
     chars += entry[crate::memory::RECALL_FIELD].as_str().map_or(0, |t| t.chars().count());
+    chars += entry[crate::dates_ru::NOTE_FIELD].as_str().map_or(0, |t| t.chars().count());
     for call in entry["toolCalls"].as_array().into_iter().flatten() {
         chars += call["args"].to_string().chars().count();
         chars += call["result"].as_str().map_or(0, |r| r.chars().count().min(4_000));

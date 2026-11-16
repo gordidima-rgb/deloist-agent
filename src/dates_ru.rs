@@ -727,6 +727,16 @@ pub fn to_json(p: &Parsed) -> Value {
     })
 }
 
+/// Поле сообщения человека с заметкой о сроках. Заметка ложится в ленту вместе с сообщением,
+/// как блок «Из памяти»: следующие ходы шлют её тем же текстом, и кэш начала запроса не теряется.
+pub const NOTE_FIELD: &str = "datesNote";
+
+/// Заметка о сроках на текущий момент (локальное время).
+pub fn note_now(text: &str) -> Option<String> {
+    let now = chrono::Local::now();
+    note(text, now.date_naive(), now.time())
+}
+
 /// Короткая заметка для модели: какие сроки человек назвал словами и какие это точные даты.
 /// `None`, если в тексте нет ни даты, ни времени, ни повтора.
 pub fn note(text: &str, today: NaiveDate, now: NaiveTime) -> Option<String> {

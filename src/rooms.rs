@@ -409,6 +409,9 @@ async fn run(app: Arc<App>, room: Room, room_id: String, text: String, attachmen
     if let Some(block) = crate::memory::recall_block(&app, &format!("room:{room_id}"), &text, &window, &in_prompt).await {
         entry[crate::memory::RECALL_FIELD] = json!(block);
     }
+    if let Some(note) = crate::dates_ru::note_now(&text) {
+        entry[crate::dates_ru::NOTE_FIELD] = json!(note);
+    }
     let user_entry = app.store.append_room_message(&room_id, entry.clone()).await.unwrap_or(entry);
     app.turns.emit(json!({ "type": "room_message", "roomId": room_id, "message": user_entry }));
 
@@ -820,6 +823,9 @@ fn room_messages(app: &App, room: &Room, bot: &Bot, history: &[Value], memory: &
         if entry["role"] == "user" {
             if let Some(block) = entry[crate::memory::RECALL_FIELD].as_str().filter(|b| !b.is_empty()) {
                 messages.push(json!({ "role": "user", "content": block }));
+            }
+            if let Some(note) = entry[crate::dates_ru::NOTE_FIELD].as_str().filter(|b| !b.is_empty()) {
+                messages.push(json!({ "role": "user", "content": note }));
             }
         }
         let files = entry["attachments"].as_array().filter(|a| !a.is_empty() && entry["role"] == "user");

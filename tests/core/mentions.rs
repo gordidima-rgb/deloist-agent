@@ -106,13 +106,14 @@ async fn plus_mention_and_dates_reach_the_model() {
     crew.say(&alpha, "завтра в 10:00 +Бета сделать отчёт").await;
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
     let reqs = REQUESTS.lock().unwrap();
-    let sees = |needle: &str| {
+    let sees = |role: &str, needle: &str| {
         reqs.iter().any(|r| {
-            r["messages"].as_array().cloned().unwrap_or_default().iter().any(|m| m["role"] == "system" && m["content"].as_str().is_some_and(|c| c.contains(needle)))
+            r["messages"].as_array().cloned().unwrap_or_default().iter().any(|m| m["role"] == role && m["content"].as_str().is_some_and(|c| c.contains(needle)))
         })
     };
-    assert!(sees(&format!("Человек упомянул ботов: Бета (id {beta})")), "«+Бета» не стало упоминанием");
-    assert!(sees("В сообщении сроки: «завтра в 10:00» = "), "заметка про сроки не дошла до модели");
+    assert!(sees("system", &format!("Человек упомянул ботов: Бета (id {beta})")), "«+Бета» не стало упоминанием");
+    // Сроки лежат в ленте с сообщением (как «Из памяти»), а не разовой системной заметкой: кэш начала запроса цел.
+    assert!(sees("user", "В сообщении сроки: «завтра в 10:00» = "), "заметка про сроки не дошла до модели");
     let _ = (crew, beta);
 }
 
