@@ -271,3 +271,25 @@ async fn ask_and_result(crew: &Crew, bot: &str, text: &str) -> (String, String) 
     let update = crew.find_event(|e| e["type"] == "tool_update" && e["status"] != "running").expect("инструмент не отвечал");
     (update["status"].as_str().unwrap().to_string(), update["result"].as_str().unwrap_or_default().to_string())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_is_stored_under_the_task_and_bad_files_are_refused() {
+    let crew = Crew::start("todos-files").await;
+    let made = crew.ok("POST", "/api/todos", Some(json!({ "text": "собрать отчёт" }))).await;
+    let id = made["id"].as_str().unwrap().to_string();
+    // «привет» в base64.
+    let (status, with_file) = crew.send("POST", &format!("/api/todos/{id}/files"), Some(json!({ "name": "report.txt", "data": "0L/RgNC40LLQtdGC" }))).await;
+    assert_eq!(status, 201, "{with_file}");
+    let file = &with_file["files"][0];
+    assert_eq!(file["name"], "report.txt");
+    assert_eq!(file["size"], 12);
+    let stored = std::fs::read(crew.data_dir.join("todo-files").join(&id).join(file["path"].as_str().unwrap())).unwrap();
+    assert_eq!(String::from_utf8(stored).unwrap(), "привет");
+    // Имя с путём, пустой файл и чужая задача не принимаются.
+    let (status, _) = crew.send("POST", &format!("/api/todos/{id}/files"), Some(json!({ "name": "../x.txt", "data": "0L/RgNC40LLQtdGC" }))).await;
+    assert_eq!(status, 422);
+    let (status, _) = crew.send("POST", &format!("/api/todos/{id}/files"), Some(json!({ "name": "a.txt", "data": "" }))).await;
+    assert_eq!(status, 422);
+    let (status, _) = crew.send("POST", "/api/todos/nope/files", Some(json!({ "name": "a.txt", "data": "0L/RgNC40LLQtdGC" }))).await;
+    assert_eq!(status, 404);
+}

@@ -61,6 +61,17 @@ pub struct Item {
     pub done: bool,
 }
 
+/// Файл задачи: лежит в `<данные>/todo-files/<id задачи>/`; в задаче — имя, путь внутри этой папки и размер.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TodoFile {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+}
+
+pub const MAX_FILES: usize = 10;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Todo {
@@ -80,6 +91,8 @@ pub struct Todo {
     /// Адрес места и телефон, которые разбор фразы вынес из названия (0.3.5).
     pub address: Option<String>,
     pub phone: Option<String>,
+    /// Приложенные файлы (кнопка «Файл» в поле ввода планировщика).
+    pub files: Vec<TodoFile>,
     pub done: bool,
     pub done_at: Option<i64>,
     pub archived: bool,
@@ -733,6 +746,7 @@ pub fn view(todo: &Todo, now: i64) -> Value {
         "auto_close_after_min": todo.auto_close_after_min,
         "address": todo.address,
         "phone": todo.phone,
+        "files": todo.files,
         "auto_close": { "active": state.active, "countdown": state.countdown },
         "done": todo.done,
         "done_at": todo.done_at,
@@ -821,6 +835,36 @@ fn edit(app: &App, id: &str, bytes: &Bytes) -> Reply {
     Ok((StatusCode::OK, view(&updated, crate::store::now())))
 }
 
+/// Файл к задаче приходит в base64 (сторож пускает только JSON): те же проверки имени и размера, что у вложений чата.
+async fn add_file(app: &App, id: &str, bytes: &Bytes) -> Reply {
+    let body = json_body(bytes)?;
+    let name = crate::attach::clean_name(body.get("name").and_then(Value::as_str).unwrap_or_default()).map_err(TodoError::Invalid)?;
+    let data = body.get("data").and_then(Value::as_str).unwrap_or_default();
+    if data.is_empty() || !data.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'\r' | b'\n')) {
+        return Err(TodoError::Invalid("файл пришёл пустым или не в base64".into()));
+    }
+    let content = crate::browser_tools::base64_decode(data);
+    if content.is_empty() || content.len() > crate::attach::MAX_BYTES {
+        return Err(TodoError::Invalid(format!("файл «{name}» пуст или больше {} МБ", crate::attach::MAX_BYTES / (1024 * 1024))));
+    }
+    // Папка называется по id задачи: сначала убеждаемся, что такая открытая задача есть.
+    let current = app.todos.update(id, |todo| if todo.files.len() >= MAX_FILES { Err(TodoError::Invalid(format!("файлов у задачи до {MAX_FILES}"))) } else { Ok(()) })?;
+    let rel = format!("{}-{name}", crate::store::now());
+    let dir = app.store.data_dir().join("todo-files").join(&current.id);
+    tokio::fs::create_dir_all(&dir).await.map_err(|_| TodoError::Broken)?;
+    tokio::fs::write(dir.join(&rel), &content).await.map_err(|_| TodoError::Broken)?;
+    let updated = app.todos.update(id, |todo| {
+        todo.files.push(TodoFile { name, path: rel, size: content.len() as u64 });
+        Ok(())
+    })?;
+    changed(app);
+    Ok((StatusCode::CREATED, view(&updated, crate::store::now())))
+}
+
+async fn file_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> Response {
+    respond(add_file(&app, &id, &body).await)
+}
+
 async fn patch_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> Response {
     respond(edit(&app, &id, &body))
 }
@@ -889,6 +933,7 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/todos/parse", post(crate::todo_parse::parse_route))
         .route("/api/todos/from-text", post(crate::todo_parse::from_text_route))
         .route("/api/todos/{id}", patch(patch_route).delete(archive_route))
+        .route("/api/todos/{id}/files", post(file_route))
         .route("/api/todos/{id}/done", post(done_route).delete(undone_route))
         .route("/api/todos/{id}/restore", post(restore_route))
 }

@@ -99,6 +99,24 @@ async fn mention_gives_note_with_bot_id() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn plus_mention_and_dates_reach_the_model() {
+    let _serial = SERIAL.lock().await;
+    let (crew, alpha, beta, _gamma) = with_model("plus-dates-note").await;
+    crew.listen().await;
+    crew.say(&alpha, "завтра в 10:00 +Бета сделать отчёт").await;
+    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
+    let reqs = REQUESTS.lock().unwrap();
+    let sees = |needle: &str| {
+        reqs.iter().any(|r| {
+            r["messages"].as_array().cloned().unwrap_or_default().iter().any(|m| m["role"] == "system" && m["content"].as_str().is_some_and(|c| c.contains(needle)))
+        })
+    };
+    assert!(sees(&format!("Человек упомянул ботов: Бета (id {beta})")), "«+Бета» не стало упоминанием");
+    assert!(sees("В сообщении сроки: «завтра в 10:00» = "), "заметка про сроки не дошла до модели");
+    let _ = (crew, beta);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mentioned_delegate_runs_without_card() {
     let _serial = SERIAL.lock().await;
     let (crew, alpha, beta, _gamma) = with_model("mention-delegate-ok").await;

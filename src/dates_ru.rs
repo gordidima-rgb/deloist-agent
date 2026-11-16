@@ -727,6 +727,43 @@ pub fn to_json(p: &Parsed) -> Value {
     })
 }
 
+/// Короткая заметка для модели: какие сроки человек назвал словами и какие это точные даты.
+/// `None`, если в тексте нет ни даты, ни времени, ни повтора.
+pub fn note(text: &str, today: NaiveDate, now: NaiveTime) -> Option<String> {
+    let p = parse(text, today, now);
+    let chars: Vec<char> = text.chars().collect();
+    let words = |kinds: &[SpanKind]| -> String {
+        p.spans
+            .iter()
+            .filter(|s| kinds.contains(&s.kind))
+            .map(|s| chars[s.start.min(chars.len())..s.end.min(chars.len())].iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if p.due_date.is_some() || p.due_time.is_some() {
+        let said = words(&[SpanKind::Date, SpanKind::Time]);
+        let exact = match (p.due_date, p.due_time) {
+            (Some(d), Some(t)) => format!("{} {} ({})", d.format("%Y-%m-%d"), t.format("%H:%M"), weekday_ru(d)),
+            (Some(d), None) => format!("{} ({})", d.format("%Y-%m-%d"), weekday_ru(d)),
+            (None, Some(t)) => format!("время {}", t.format("%H:%M")),
+            (None, None) => unreachable!(),
+        };
+        parts.push(format!("«{said}» = {exact}"));
+    }
+    if let Some(r) = &p.recurrence {
+        parts.push(format!("«{}» = повтор: {}", words(&[SpanKind::Repeat]), label(r, "ru")));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("В сообщении сроки: {}. Сегодня {} ({}).", parts.join("; "), today.format("%Y-%m-%d"), weekday_ru(today)))
+}
+
+fn weekday_ru(d: NaiveDate) -> &'static str {
+    ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"][d.weekday().num_days_from_monday() as usize]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1243,5 +1280,11 @@ mod tests {
         assert_eq!(v["due_time"], "18:00");
         assert_eq!(v["recurrence"], Value::Null);
         assert_eq!(v["spans"][0]["kind"], "date");
+    }
+    #[test]
+    fn note_gives_exact_dates() {
+        let n = note("завтра в 10:00 сделать отчёт", d(2026, 11, 16), tm(9, 0)).unwrap();
+        assert!(n.contains("«завтра в 10:00» = 2026-11-17 10:00 (Вт)"), "{n}");
+        assert!(note("просто текст", d(2026, 11, 16), tm(9, 0)).is_none());
     }
 }

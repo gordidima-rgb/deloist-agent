@@ -2008,9 +2008,11 @@ fn run_turn_body(
                     .into_iter()
                     .filter(|b| b.id != bot_id)
                     .filter(|b| {
-                        let tag = format!("@{}", b.name.to_lowercase());
-                        lowered.match_indices(&tag).any(|(at, _)| {
-                            !lowered[at + tag.len()..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                        ['@', '+'].iter().any(|sign| {
+                            let tag = format!("{sign}{}", b.name.to_lowercase());
+                            lowered.match_indices(&tag).any(|(at, _)| {
+                                !lowered[at + tag.len()..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                            })
                         })
                     })
                     .map(|b| b.id)
@@ -2041,6 +2043,13 @@ fn run_turn_body(
             };
             if let Some(note) = &mention_note {
                 model_messages.push(json!({ "role": "system", "content": note }));
+            }
+            // Сроки из слов человека («завтра в 10») разбирает код: модели приходят точные даты.
+            if opts.depth == 0 && opts.routine.is_none() && !app.turns.is_unattended(&bot_id) {
+                let now = chrono::Local::now();
+                if let Some(note) = crate::dates_ru::note(&user_text, now.date_naive(), now.time()) {
+                    model_messages.push(json!({ "role": "system", "content": note }));
+                }
             }
             // Закрытые задачи участников: строка в ленте модели не видна, итог ей приходит один раз здесь.
             if let Some(note) = crate::team_tasks::closed_note(&app, &bot_id) {

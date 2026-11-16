@@ -689,7 +689,12 @@ pub fn mentioned_bots(members: &[Bot], text: &str) -> Vec<Bot> {
     let lowered = text.to_lowercase();
     let mut result: Vec<Bot> = Vec::new();
     for word in lowered.split_whitespace() {
-        let Some(name) = word.strip_prefix('@') else { continue };
+        // «+Имя» — то же, что «@Имя», но только по полному имени: плюс в тексте встречается чаще.
+        let (name, exact_only) = match (word.strip_prefix('@'), word.strip_prefix('+')) {
+            (Some(name), _) => (name, false),
+            (_, Some(name)) => (name, true),
+            _ => continue,
+        };
         let name: String = name.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
         if name.is_empty() {
             continue;
@@ -697,7 +702,7 @@ pub fn mentioned_bots(members: &[Bot], text: &str) -> Vec<Bot> {
         let bot = members
             .iter()
             .find(|b| b.name.to_lowercase() == name)
-            .or_else(|| members.iter().find(|b| b.name.to_lowercase().starts_with(&name)));
+            .or_else(|| if exact_only { None } else { members.iter().find(|b| b.name.to_lowercase().starts_with(&name)) });
         if let Some(bot) = bot {
             if !result.iter().any(|r| r.id == bot.id) {
                 result.push(bot.clone());
