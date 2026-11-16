@@ -336,6 +336,7 @@ fn run_server(root: &Path) -> Result<(), String> {
         if let Some(config) = cloud {
             // Облако: ссылки со входом в журнал не печатаем, вход только через шлюз.
             guard::set_cloud(true);
+            guard::set_public_origin(config.origin());
             guard = guard.with_cloud(config);
             println!("deloist (облачный режим)  →  {addr}");
         } else {

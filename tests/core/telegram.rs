@@ -24,13 +24,36 @@ const USERNAME: &str = "deloist_test_bot";
 struct FakeTg {
     updates: Arc<Mutex<Vec<Value>>>,
     sent: Arc<Mutex<Vec<Value>>>,
+    /// Все вызовы Bot API по порядку: имена методов.
+    calls: Arc<Mutex<Vec<String>>>,
+    /// Тело последнего `setWebhook`; `None` — вебхука нет.
+    webhook: Arc<Mutex<Option<Value>>>,
+}
+
+impl FakeTg {
+    fn called(&self, method: &str) -> usize {
+        self.calls.lock().unwrap().iter().filter(|m| *m == method).count()
+    }
 }
 
 async fn telegram(State(fake): State<FakeTg>, Path((token, method)): Path<(String, String)>, body: Bytes) -> Response {
     if token != format!("bot{TOKEN}") {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "ok": false, "description": "Unauthorized" }))).into_response();
     }
+    fake.calls.lock().unwrap().push(method.clone());
     match method.as_str() {
+        "setWebhook" => {
+            *fake.webhook.lock().unwrap() = Some(serde_json::from_slice(&body).unwrap_or_else(|_| json!({})));
+            (StatusCode::OK, Json(json!({ "ok": true, "result": true }))).into_response()
+        }
+        "deleteWebhook" => {
+            *fake.webhook.lock().unwrap() = None;
+            (StatusCode::OK, Json(json!({ "ok": true, "result": true }))).into_response()
+        }
+        "getWebhookInfo" => {
+            let url = fake.webhook.lock().unwrap().as_ref().and_then(|w| w["url"].as_str().map(str::to_string)).unwrap_or_default();
+            (StatusCode::OK, Json(json!({ "ok": true, "result": { "url": url, "pending_update_count": 0 } }))).into_response()
+        }
         "getMe" => (
             StatusCode::OK,
             Json(json!({
@@ -72,8 +95,14 @@ async fn fake_telegram() -> (String, FakeTg) {
 }
 
 async fn setup(name: &str) -> (Crew, FakeTg, String, String) {
+    setup_with(name, &[]).await
+}
+
+async fn setup_with(name: &str, extra: &[(&str, &str)]) -> (Crew, FakeTg, String, String) {
     let (base, fake) = fake_telegram().await;
-    let crew = Crew::start_with_env(name, &[("CREW_TEST_TELEGRAM_API", &base)]).await;
+    let mut env = vec![("CREW_TEST_TELEGRAM_API", base.as_str())];
+    env.extend_from_slice(extra);
+    let crew = Crew::start_with_env(name, &env).await;
     let state = crew.ok("GET", "/api/state", None).await;
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     let bot_name = state["bots"][0]["name"].as_str().unwrap().to_string();
@@ -275,4 +304,114 @@ async fn pairing_prefix_and_answer_round_trip_through_the_fake_telegram() {
         !texts.iter().any(|m| m["text"].as_str().unwrap_or_default().contains("чужое сообщение")),
         "сообщение чужого чата попало в бота"
     );
+}
+
+fn update(update_id: i64, chat_id: i64, text: &str) -> Value {
+    json!({
+        "update_id": update_id,
+        "message": {
+            "message_id": update_id, "date": 1,
+            "chat": { "id": chat_id, "type": "private" },
+            "from": { "id": chat_id, "is_bot": false },
+            "text": text,
+        },
+    })
+}
+
+async fn post_hook(crew: &Crew, bot: &str, secret: Option<&str>, body: &Value) -> u16 {
+    let mut req = crew
+        .client
+        .post(format!("{}/hooks/telegram/{bot}", crew.base))
+        .header("host", "u-test.app.example.org")
+        .header("content-type", "application/json")
+        .body(body.to_string());
+    if let Some(secret) = secret {
+        req = req.header("X-Telegram-Bot-Api-Secret-Token", secret);
+    }
+    req.send().await.unwrap().status().as_u16()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cloud_sets_a_webhook_and_never_polls_and_the_secret_gates_delivery() {
+    let (crew, fake, bot, _) = setup_with("tg-cloud", &[("CREW_CLOUD", "1")]).await;
+    crew.listen().await;
+    wait_until("вебхук поставлен", 20, || async { fake.webhook.lock().unwrap().is_some() }).await;
+    let hook = fake.webhook.lock().unwrap().clone().unwrap();
+    assert_eq!(hook["url"], format!("https://u-test.app.example.org/hooks/telegram/{bot}"));
+    assert_eq!(hook["allowed_updates"], json!(["message"]));
+    assert_eq!(hook["drop_pending_updates"], false);
+    let secret = hook["secret_token"].as_str().unwrap().to_string();
+    assert!(secret.len() >= 32 && secret.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'), "{secret}");
+
+    // Секрет вебхука лежит только в секретах: ни в статусе, ни в state.json, ни в ключах-ответах.
+    let status = crew.ok("GET", "/api/telegram", None).await.to_string();
+    assert!(!status.contains(&secret), "секрет вебхука в статусе: {status}");
+    let state_file = std::fs::read_to_string(crew.data_dir.join("state.json")).unwrap_or_default();
+    assert!(!state_file.contains(&secret), "секрет вебхука в state.json");
+    assert!(crate::common::read_secrets(&crew.data_dir).contains(&secret), "секрета нет в secrets.json");
+    for (status, text) in [(403u16, "{}")] {
+        let res = crew.client.post(format!("{}/hooks/telegram/{bot}", crew.base)).header("host", "u-test.app.example.org").header("content-type", "application/json").body(text).send().await.unwrap();
+        assert_eq!(res.status().as_u16(), status);
+        assert!(!res.text().await.unwrap().contains(&secret));
+    }
+
+    // Привязка чата идёт тем же обработчиком, что и в опросе.
+    let pair = crew.ok("POST", "/api/telegram/pair", None).await;
+    let code = pair["code"].as_str().unwrap().to_string();
+
+    // Без секрета и с чужим секретом: 403 и ничего не доходит.
+    let start = update(1, 555, &format!("/start {code}"));
+    assert_eq!(post_hook(&crew, &bot, None, &start).await, 403);
+    assert_eq!(post_hook(&crew, &bot, Some("wrong"), &start).await, 403);
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &start).await, 200, "верный секрет");
+    wait_until("чат привязан", 20, || async { crew.ok("GET", "/api/telegram", None).await["chatPaired"] == true }).await;
+
+    // Верный секрет, но чужой бот в адресе: тоже 403.
+    assert_eq!(post_hook(&crew, "other-bot", Some(&secret), &update(2, 555, "x")).await, 403);
+    // Не Update: 400.
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &json!({ "hello": 1 })).await, 400);
+
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(3, 555, "привет по вебхуку")).await, 200);
+    wait_until("сообщение дошло до бота", 20, || async {
+        let thread = crew.ok("GET", &format!("/api/bots/{bot}/thread?limit=50"), None).await;
+        thread["messages"].as_array().unwrap().iter().any(|m| m["text"] == "[Telegram] привет по вебхуку")
+    })
+    .await;
+    // Повтор той же доставки не создаёт второго сообщения.
+    assert_eq!(post_hook(&crew, &bot, Some(&secret), &update(3, 555, "привет по вебхуку")).await, 200);
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{bot}/thread?limit=50"), None).await;
+    let n = thread["messages"].as_array().unwrap().iter().filter(|m| m["text"] == "[Telegram] привет по вебхуку").count();
+    assert_eq!(n, 1, "повторная доставка создала дубль");
+
+    // Неверные секреты не доходят до бота; перебор ограничен.
+    assert_eq!(post_hook(&crew, &bot, Some("wrong"), &update(4, 555, "чужое")).await, 403);
+    let mut limited = false;
+    for _ in 0..15 {
+        if post_hook(&crew, &bot, Some("wrong"), &update(5, 555, "чужое")).await == 429 {
+            limited = true;
+        }
+    }
+    assert!(limited, "перебор секрета не ограничен");
+    assert_eq!(fake.called("getUpdates"), 0, "в облаке был getUpdates");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pc_mode_removes_a_leftover_webhook_then_polls() {
+    let (base, fake) = fake_telegram().await;
+    *fake.webhook.lock().unwrap() = Some(json!({ "url": "https://old.example/hooks/telegram/x" }));
+    let crew = Crew::start_with_env("tg-pc-webhook", &[("CREW_TEST_TELEGRAM_API", &base)]).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.ok("PUT", "/api/telegram", Some(json!({ "token": TOKEN, "botId": bot }))).await;
+    wait_until("опрос пошёл", 20, || async { fake.called("getUpdates") > 0 }).await;
+    let calls = fake.calls.lock().unwrap().clone();
+    let delete = calls.iter().position(|m| m == "deleteWebhook").expect("вебхук не снят");
+    let poll = calls.iter().position(|m| m == "getUpdates").unwrap();
+    assert!(delete < poll, "getUpdates раньше deleteWebhook: {calls:?}");
+    assert_eq!(fake.called("setWebhook"), 0);
+    assert!(fake.webhook.lock().unwrap().is_none());
+    // На ПК адрес вебхука закрыт.
+    let status = crew.client.post(format!("{}/hooks/telegram/{bot}", crew.base)).header("content-type", "application/json").body("{}").send().await.unwrap().status().as_u16();
+    assert_eq!(status, 404);
 }

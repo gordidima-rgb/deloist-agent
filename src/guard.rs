@@ -52,6 +52,17 @@ pub fn cloud_enabled() -> bool {
     CLOUD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Публичный адрес облака (`CREW_PUBLIC_ORIGIN`, уже проверенный): по нему Telegram шлёт вебхуки.
+static PUBLIC_ORIGIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn public_origin() -> Option<String> {
+    PUBLIC_ORIGIN.get().cloned()
+}
+
+pub fn set_public_origin(origin: &str) {
+    let _ = PUBLIC_ORIGIN.set(origin.trim_end_matches('/').to_string());
+}
+
 pub fn set_cloud(on: bool) {
     CLOUD.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -77,6 +88,10 @@ pub struct CloudConfig {
 }
 
 impl CloudConfig {
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
     /// Облачный режим включён только строкой `CREW_CLOUD=1`. Без неё — `Ok(None)`.
     /// Включён, но хоть одна переменная пуста или неверна — ошибка: молча открываться нельзя.
     pub fn from_env() -> Result<Option<Self>, String> {

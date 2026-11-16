@@ -517,6 +517,30 @@ async fn an_always_on_a_folder_opens_neither_subfolders_nor_appdata() {
 }
 
 #[tokio::test]
+async fn the_telegram_hook_ignores_the_program_key_and_exposes_no_secret() {
+    // Без облака адрес закрыт, с ключом программы вместо секрета Telegram он не открывается ни там, ни там.
+    let crew = Crew::start("tg-hook-key").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let key = runtime["token"].as_str().unwrap().to_string();
+    for header in ["authorization", "x-telegram-bot-api-secret-token", "x-crew-key"] {
+        let value = if header == "authorization" { format!("Bearer {key}") } else { key.clone() };
+        let res = crew
+            .client
+            .post(format!("{}/hooks/telegram/any-bot", crew.base))
+            .header(header, value)
+            .header("content-type", "application/json")
+            .body(r#"{"update_id":1,"message":{"chat":{"id":1},"text":"hi"}}"#)
+            .send()
+            .await
+            .unwrap();
+        let status = res.status().as_u16();
+        let text = res.text().await.unwrap_or_default();
+        assert!(status == 403 || status == 404, "{header}: вебхук принял ключ программы: {status} {text}");
+        assert!(!text.contains(&key), "{header}: ответ вебхука содержит ключ: {text}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_agent_key_cannot_answer_cards_or_touch_rules() {
     let crew = Crew::start("perm-agent").await;
     let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();

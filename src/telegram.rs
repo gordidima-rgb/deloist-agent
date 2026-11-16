@@ -154,6 +154,10 @@ pub struct Telegram {
     warned: Mutex<HashMap<i64, i64>>,
     /// Текущий long poll: `DELETE /api/telegram` отменяет его сразу.
     poll: Mutex<Option<CancellationToken>>,
+    /// Облако: обновления из вебхука идут в один обработчик по очереди, как из long poll.
+    hook_tx: Mutex<Option<tokio::sync::mpsc::Sender<Value>>>,
+    /// Неудачные попытки вебхука по «адрес|бот»: число и начало окна (мс).
+    hook_fails: Mutex<HashMap<String, (u32, i64)>>,
 }
 
 impl Telegram {
@@ -320,6 +324,12 @@ pub(crate) async fn push_text(app: &Arc<App>, text: &str) -> Result<(), String> 
 pub fn start(app: Arc<App>) {
     let replies = app.clone();
     tokio::spawn(async move { reply_loop(replies).await });
+    if crate::cloud::active() {
+        let (tx, rx) = tokio::sync::mpsc::channel(HOOK_QUEUE);
+        *app.telegram.hook_tx.lock().unwrap() = Some(tx);
+        let worker = app.clone();
+        tokio::spawn(async move { hook_worker(worker, rx).await });
+    }
     tokio::spawn(async move { poll_loop(app).await });
 }
 
@@ -334,6 +344,15 @@ async fn poll_loop(app: Arc<App>) {
         }
         let cancel = CancellationToken::new();
         *app.telegram.poll.lock().unwrap() = Some(cancel.clone());
+        if crate::cloud::active() {
+            // Облако: машина просыпается от входящего запроса, а не от long poll, поэтому вебхук.
+            webhook_session(&app, &client, &token, &cancel).await;
+            *app.telegram.poll.lock().unwrap() = None;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+        // ПК: если бот раньше жил в облаке, у Telegram остался вебхук, и getUpdates с ним не работает.
+        drop_webhook(&client, &token).await;
         let mut delay = 1u64;
         loop {
             let settings = app.store.telegram();
@@ -352,15 +371,7 @@ async fn poll_loop(app: Arc<App>) {
                         tokio::time::sleep(Duration::from_millis(300)).await;
                         continue;
                     }
-                    let mut next = settings.offset;
-                    for update in &updates {
-                        handle_update(&app, &client, &token, update).await;
-                        let id = update["update_id"].as_i64().unwrap_or(0);
-                        next = next.max(id + 1);
-                    }
-                    if let Err(e) = app.store.update_telegram(|t| t.offset = next).await {
-                        eprintln!("[telegram] не смог сохранить offset: {e}");
-                    }
+                    process_updates(&app, &client, &token, &updates).await;
                 }
                 Err(e) => {
                     eprintln!("[telegram] getUpdates: {e}");
@@ -371,6 +382,26 @@ async fn poll_loop(app: Arc<App>) {
         }
         *app.telegram.poll.lock().unwrap() = None;
         tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// Общий путь для long poll и вебхука: разобрать обновления и запомнить `offset`.
+/// Уже разобранное (`update_id` меньше offset) пропускается: Telegram может повторить доставку.
+async fn process_updates(app: &Arc<App>, client: &reqwest::Client, token: &str, updates: &[Value]) {
+    let start = app.store.telegram().offset;
+    let mut next = start;
+    for update in updates {
+        let id = update["update_id"].as_i64().unwrap_or(0);
+        if id != 0 && id < start {
+            continue;
+        }
+        handle_update(app, client, token, update).await;
+        next = next.max(id + 1);
+    }
+    if next != start {
+        if let Err(e) = app.store.update_telegram(|t| t.offset = next).await {
+            eprintln!("[telegram] не смог сохранить offset: {e}");
+        }
     }
 }
 
@@ -429,6 +460,145 @@ async fn handle_update(app: &Arc<App>, client: &reqwest::Client, token: &str, up
             };
             send_text(client, token, chat_id, text).await;
         }
+    }
+}
+
+// --- вебхук (облако) -------------------------------------------------------
+// Параметры Bot API проверены 16.11.2026 на https://core.telegram.org/bots/api :
+// setWebhook { url, allowed_updates, drop_pending_updates, secret_token (1-256 символов A-Za-z0-9_-) },
+// deleteWebhook { drop_pending_updates }, getWebhookInfo -> { url, ... };
+// секрет Telegram присылает в заголовке `X-Telegram-Bot-Api-Secret-Token`.
+
+const HOOK_QUEUE: usize = 256;
+const HOOK_BODY_MAX: usize = 1024 * 1024;
+const HOOK_FAILS_MAX: u32 = 10;
+const HOOK_FAILS_WINDOW_MS: i64 = 60 * 1000;
+pub const SECRET_HEADER: &str = "x-telegram-bot-api-secret-token";
+
+/// Адрес, который Telegram вызывает в облаке.
+fn webhook_url(bot_id: &str) -> Option<String> {
+    let origin = crate::guard::public_origin()?;
+    Some(format!("{origin}/hooks/telegram/{bot_id}"))
+}
+
+/// Если у бота стоит вебхук, снять его (без потери накопленных обновлений).
+async fn drop_webhook(client: &reqwest::Client, token: &str) {
+    let set = match call(client, token, "getWebhookInfo", json!({})).await {
+        Ok(info) => !info["url"].as_str().unwrap_or("").is_empty(),
+        Err(_) => true,
+    };
+    if set {
+        if let Err(e) = call(client, token, "deleteWebhook", json!({ "drop_pending_updates": false })).await {
+            eprintln!("[telegram] deleteWebhook: {e}");
+        }
+    }
+}
+
+/// Облако: ставит вебхук и ждёт, пока токен, выключатель или отмена не сменятся; потом снимает вебхук.
+async fn webhook_session(app: &Arc<App>, client: &reqwest::Client, token: &str, cancel: &CancellationToken) {
+    let mut delay = 1u64;
+    let mut registered = false;
+    loop {
+        let settings = app.store.telegram();
+        if cancel.is_cancelled() || app.store.telegram_token() != token || !settings.enabled {
+            break;
+        }
+        if !registered {
+            let result = match (webhook_url(&settings.bot_id), app.store.ensure_telegram_webhook_secret().await) {
+                (Some(url), Ok(secret)) => call(
+                    client,
+                    token,
+                    "setWebhook",
+                    json!({ "url": url, "secret_token": secret, "allowed_updates": ["message"], "drop_pending_updates": false }),
+                )
+                .await
+                .map(|_| ()),
+                (None, _) => Err("нет публичного адреса облака".to_string()),
+                (_, Err(e)) => Err(e.to_string()),
+            };
+            match result {
+                Ok(()) => registered = true,
+                Err(e) => {
+                    eprintln!("[telegram] setWebhook: {e}");
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                    }
+                    delay = next_delay(delay);
+                    continue;
+                }
+            }
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+        }
+    }
+    if registered {
+        if let Err(e) = call(client, token, "deleteWebhook", json!({ "drop_pending_updates": false })).await {
+            eprintln!("[telegram] deleteWebhook: {e}");
+        }
+    }
+}
+
+async fn hook_worker(app: Arc<App>, mut rx: tokio::sync::mpsc::Receiver<Value>) {
+    let client = client();
+    while let Some(update) = rx.recv().await {
+        let token = app.store.telegram_token();
+        if token.is_empty() || !app.store.telegram().enabled {
+            continue;
+        }
+        process_updates(&app, &client, &token, std::slice::from_ref(&update)).await;
+    }
+}
+
+/// Приём `POST /hooks/telegram/<бот>`. Отвечает сразу, обновление разбирается отдельно.
+pub(crate) fn receive(app: &Arc<App>, bot: &str, peer: &str, secret: Option<&str>, body: &[u8]) -> axum::http::StatusCode {
+    use axum::http::StatusCode;
+    if !crate::cloud::active() {
+        return StatusCode::NOT_FOUND;
+    }
+    let at = now();
+    let key = format!("{peer}|{bot}");
+    {
+        let mut fails = app.telegram.hook_fails.lock().unwrap();
+        if fails.len() > 1000 {
+            fails.retain(|_, (_, since)| at - *since < HOOK_FAILS_WINDOW_MS);
+        }
+        if let Some((count, since)) = fails.get(&key) {
+            if at - *since < HOOK_FAILS_WINDOW_MS && *count >= HOOK_FAILS_MAX {
+                return StatusCode::TOO_MANY_REQUESTS;
+            }
+        }
+    }
+    let expected = app.store.telegram_webhook_secret();
+    let settings = app.store.telegram();
+    // Секрет сравнивается за постоянное время, остальные проверки — после него.
+    let secret_ok = !expected.is_empty() && crate::guard::same(secret.unwrap_or(""), &expected);
+    let known = settings.enabled && !settings.bot_id.is_empty() && settings.bot_id == bot && !app.store.telegram_token().is_empty();
+    if !(secret_ok && known) {
+        let mut fails = app.telegram.hook_fails.lock().unwrap();
+        let entry = fails.entry(key).or_insert((0, at));
+        if at - entry.1 >= HOOK_FAILS_WINDOW_MS {
+            *entry = (0, at);
+        }
+        entry.0 += 1;
+        return StatusCode::FORBIDDEN;
+    }
+    if body.len() > HOOK_BODY_MAX {
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    }
+    let Ok(update) = serde_json::from_slice::<Value>(body) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    if update["update_id"].as_i64().is_none() {
+        return StatusCode::BAD_REQUEST;
+    }
+    let tx = app.telegram.hook_tx.lock().unwrap().clone();
+    match tx.map(|tx| tx.try_send(update)) {
+        Some(Ok(())) => StatusCode::OK,
+        // Очередь полна или обработчика нет: Telegram повторит доставку.
+        _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
 

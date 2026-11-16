@@ -723,6 +723,8 @@ struct Secrets {
     provider_keys: std::collections::BTreeMap<String, String>,
     /// Токен своего бота Telegram: только здесь, в state.json и ответах его нет.
     telegram_bot_token: String,
+    /// Секрет вебхука Telegram (`secret_token` у `setWebhook`): только здесь; меняется вместе с токеном бота.
+    telegram_webhook_secret: String,
     /// Токен своего бота Discord: только здесь, в state.json и ответах его нет.
     discord_bot_token: String,
     /// Токен бота Slack (xoxb-…): только здесь, в state.json и ответах его нет.
@@ -1439,8 +1441,35 @@ impl Store {
 
     /// Пустая строка забывает токен.
     pub async fn set_telegram_token(&self, token: &str) -> std::io::Result<()> {
-        self.secrets.lock().unwrap().telegram_bot_token = token.trim().to_string();
+        {
+            let mut secrets = self.secrets.lock().unwrap();
+            secrets.telegram_bot_token = token.trim().to_string();
+            // Новый токен — новый секрет вебхука; пустой токен секрет забывает.
+            secrets.telegram_webhook_secret = if secrets.telegram_bot_token.is_empty() { String::new() } else { crate::guard::random_token() };
+        }
         self.persist_secrets().await
+    }
+
+    /// Секрет вебхука Telegram; пустая строка — ещё не создан.
+    pub fn telegram_webhook_secret(&self) -> String {
+        self.secrets.lock().unwrap().telegram_webhook_secret.clone()
+    }
+
+    /// Секрет вебхука: есть — отдаёт, нет (старые данные) — создаёт и сохраняет.
+    pub async fn ensure_telegram_webhook_secret(&self) -> std::io::Result<String> {
+        let (secret, created) = {
+            let mut secrets = self.secrets.lock().unwrap();
+            if secrets.telegram_webhook_secret.is_empty() {
+                secrets.telegram_webhook_secret = crate::guard::random_token();
+                (secrets.telegram_webhook_secret.clone(), true)
+            } else {
+                (secrets.telegram_webhook_secret.clone(), false)
+            }
+        };
+        if created {
+            self.persist_secrets().await?;
+        }
+        Ok(secret)
     }
 
     pub fn discord(&self) -> DiscordSettings {

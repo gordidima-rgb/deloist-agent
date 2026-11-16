@@ -3231,6 +3231,19 @@ async fn import_hermes(State(app): Shared, body: axum::body::Bytes) -> Response 
     }
 }
 
+/// Вебхук Telegram в облаке: `POST /hooks/telegram/<бот>`, секрет — в заголовке Telegram.
+async fn telegram_hook(
+    State(app): Shared,
+    Path(bot): Path<String>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let secret = headers.get(crate::telegram::SECRET_HEADER).and_then(|v| v.to_str().ok());
+    let status = crate::telegram::receive(&app, &bot, &peer.ip().to_string(), secret, &body);
+    (status, no_store(), Json(json!({ "ok": status.is_success() }))).into_response()
+}
+
 /// Вебхук рутины: `POST /hooks/<id>/<секрет>`, тело — данные для бота.
 async fn hook(State(app): Shared, Path((id, token)): Path<(String, String)>, body: axum::body::Bytes) -> Response {
     let Some(routine) = app.store.routine_by_hook(&id, &token) else {
@@ -3671,6 +3684,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/team/import-request/{id}/deny", post(import_request_deny))
         .route("/api/team/import-request/{handle}/cancel", post(import_request_cancel))
         .route("/api/import/hermes", get(hermes_profiles).post(import_hermes))
+        .route("/hooks/telegram/{bot}", post(telegram_hook))
         .route("/hooks/{id}/{token}", post(hook))
         .merge(crate::screen::routes())
         .merge(crate::voice::routes())
