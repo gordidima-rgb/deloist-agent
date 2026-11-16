@@ -3123,10 +3123,10 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 .kit-sheet .routine .rt-text { min-width: 0; display: flex; align-items: baseline; gap: var(--k-space-2); }
 .kit-sheet .routine .rt-title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-sheet .routine .rt-gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); }
-.kit-sheet .rt-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.kit-sheet .rt-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.kit-sheet .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
-.kit-sheet .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
+:is(.kit-sheet, .made-card) .rt-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+:is(.kit-sheet, .made-card) .rt-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
+:is(.kit-sheet, .made-card) .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
+:is(.kit-sheet, .made-card) .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
 .kit-sheet .rt-last.st-failed .i, .kit-sheet .rt-last.st-error .i, .kit-sheet .rt-last.st-limit .i, .kit-sheet .rt-last.st-needs .i { color: var(--k-attention-text, currentColor); }
 .kit-sheet .routine .rt-actions { margin-left: 0; gap: var(--k-space-2); }
 .kit-sheet .routine .rt-run,
@@ -3915,3 +3915,13 @@ span.tm-main { cursor: inherit; }
 .mcp-login-form { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .mcp-login-form .note { margin: 0; }
 .mcp-login-form button { align-self: flex-start; }
+
+/* Карточка рутины или задачи, которую завёл бот: в ленте чата, те же чипы, что в окне «Задачи и автоматизация». */
+.made-card { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 2px; padding: 12px 14px; border: 1px solid var(--k-line); border-radius: var(--k-radius-lg); background: var(--k-surface); }
+.made-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.made-icon { display: inline-flex; color: var(--k-brand-text); }
+.made-icon .i { width: 16px; height: 16px; }
+.made-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text); font: 600 var(--k-text-sm) / 1.4 var(--k-font-body); }
+.made-open { flex: none; height: 28px; padding: 0 12px; font-size: var(--k-text-xs); }
+.made-card .rt-gist { color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.made-card .rt-chips { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -1022,12 +1022,82 @@ function stepDurNode(ms) {
   return el;
 }
 
+// Рутина или задача, которую завёл бот: под строкой шага показываем карточку, как в окне «Задачи и автоматизация».
+const madeKind = (call) => ({ create_routine: 'routine', add_todo: 'todo' })[plainName(call.name)] || '';
+
+function madeRoutine(args, result) {
+  const id = /\brt_[0-9a-f]+/i.exec(result || '')?.[0] || '';
+  const known = id ? S.routines.find((x) => x.id === id) : null;
+  if (known) return known;
+  return {
+    id,
+    title: String(args.title || ''),
+    prompt: String(args.prompt || ''),
+    botId: String(args.bot_id || S.currentId || ''),
+    at: String(args.at || ''),
+    everyMinutes: Number(args.every_minutes) || 0,
+    days: args.days || [],
+    windowFrom: String(args.window_from || ''),
+    windowTo: String(args.window_to || ''),
+    enabled: args.enabled !== false,
+    quiet: args.quiet !== false,
+    hook: false,
+  };
+}
+
+function madeCard(kind, args, result) {
+  const card = document.createElement('div');
+  card.className = `made-card made-${kind}`;
+  const icon = kind === 'routine'
+    ? svgIcon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')
+    : svgIcon('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m9 12 2 2 4-4"/>');
+  let title;
+  let gist = '';
+  let chips = '';
+  if (kind === 'routine') {
+    const r = madeRoutine(args, result);
+    title = r.title;
+    ({ gist, chips } = routineParts(r));
+  } else {
+    title = /«([^»]+)»/.exec(result || '')?.[1] || String(args.title || args.text || '');
+    const day = /срок (\d{4}-\d{2}-\d{2})/.exec(result || '')?.[1] || String(args.due_date || '');
+    const time = String(args.due_time || '');
+    if (day) {
+      const d = new Date(`${day}T00:00:00`);
+      const label = Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'short' });
+      chips = `<span class="rt-chip" title="${tr('Срок')}">${svgIcon('<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 10h16"/>')}${escapeHtml(label)}${time ? ` ${escapeHtml(time)}` : ''}</span>`;
+    }
+  }
+  card.innerHTML = `
+    <div class="made-head">
+      <span class="made-icon">${icon}</span>
+      <span class="made-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+      <button type="button" class="ghost made-open">${tr('Открыть')}</button>
+    </div>
+    ${gist ? `<div class="rt-gist">${escapeHtml(gist)}</div>` : ''}
+    ${chips ? `<div class="rt-chips">${chips}</div>` : ''}`;
+  $('.made-open', card).addEventListener('click', () => openRoutines(kind === 'routine' ? 'routines' : 'todos'));
+  return card;
+}
+
+// Карточка встаёт в ленту чата, а не прячется в свёрнутый «Ход работы». Один шаг — одна карточка.
+function feedMade(call, result) {
+  const kind = call ? madeKind(call) : '';
+  if (!kind) return;
+  const id = String(call.id || '');
+  if (id && messagesEl().querySelector(`.made-card[data-call-id="${CSS.escape(id)}"]`)) return;
+  const card = madeCard(kind, call.args || {}, result || call.result);
+  card.dataset.callId = id;
+  appendInFeed(card);
+}
+
 function toolNode(call) {
   const d = document.createElement('details');
   d.className = 'tool';
   d.dataset.status = call.status || 'running';
   d.dataset.callId = call.id || '';
   d.dataset.family = toolFamily(call);
+  d._call = call;
   const summary = document.createElement('summary');
   const target = toolTarget(call);
   summary.innerHTML = ICONS.chev + '<span class="t-label" title="' + escapeHtml(clip(call.name, 160)) + '">' + escapeHtml(toolLabel(call)) + '</span>' + (target ? '<span class="t-target" title="' + escapeHtml(target) + '">' + escapeHtml(target) + '</span>' : '') + '<span class="t-status">' + statusLabel(call.status) + '</span>';
@@ -1423,6 +1493,7 @@ function appendThreadMessage(msg) {
     for (const call of own) {
       const learned = skillCall(call);
       if (learned) appendInFeed(skillCard(learned));
+      if (call.status === 'ok') feedMade(call);
     }
     if (own.some((call) => ['error', 'denied', 'timeout'].includes(call.status))) markWorkError(group);
     return;
@@ -2282,6 +2353,7 @@ function updateTool(ev) {
     body.append(res);
     node.open = ev.status !== 'ok';
   }
+  if (ev.status === 'ok') feedMade(node._call, ev.result);
   scrollBottom();
 }
 
@@ -6549,6 +6621,24 @@ const routinesOpen = () => $('#modal-routines').open;
 const isReminder = (r) => r.kind === 'reminder';
 const ordinaryRoutines = () => S.routines.filter((r) => !isReminder(r));
 
+// Название-суть и чипы рутины (бот, расписание, следующий и прошлый запуск): один вид и в списке рутин, и карточкой в чате.
+function routineParts(r) {
+  const bot = botById(r.botId);
+  const next = r.hook ? tr('по вебхуку') : r.enabled ? nextText(r.nextRun) : '';
+  const last = STATUS_LABELS[r.lastStatus];
+  const icon = (body) => svgIcon(body);
+  const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
+  const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
+  const chips = [
+    `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
+    `<span class="rt-chip" title="${tr('Когда')}">${icon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}${escapeHtml(scheduleText(r))}</span>`,
+    next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
+    r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? '<path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/>' : '<path d="m5 12 5 5 9-10"/>')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
+  ].join('');
+  return { gist, chips };
+}
+
 function renderRoutines() {
   const list = $('#routines-list');
   list.innerHTML = '';
@@ -6559,18 +6649,8 @@ function renderRoutines() {
     const bot = botById(r.botId);
     const el = document.createElement('div');
     el.className = `routine${r.enabled ? '' : ' off'}`;
-    const next = r.hook ? tr('по вебхуку') : r.enabled ? nextText(r.nextRun) : '';
-    const last = STATUS_LABELS[r.lastStatus];
     const icon = (body) => svgIcon(body);
-    const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-    const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
-    const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
-    const chips = [
-      `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
-      `<span class="rt-chip" title="${tr('Когда')}">${icon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}${escapeHtml(scheduleText(r))}</span>`,
-      next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
-      r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? '<path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/>' : '<path d="m5 12 5 5 9-10"/>')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
-    ].join('');
+    const { gist, chips } = routineParts(r);
     el.innerHTML = `
       <div class="rt-text">
         <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>

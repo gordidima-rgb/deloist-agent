@@ -1541,6 +1541,7 @@
     'Ошибки: {n}': 'Failures: {n}',
     'Рутины': 'Routines',
     'Задачи и автоматизация': 'Tasks & automation',
+    'Срок': 'Due',
     'Скачать для календаря (.ics)': 'Download for calendar (.ics)',
     'Файл для Google, Outlook или Apple Календаря: рутины появятся в нём повторяющимися событиями. Это снимок на сегодня, сам он не обновляется.': 'A file for Google, Outlook or Apple Calendar: routines show up as repeating events. It is a snapshot of today and does not update itself.',
     'Использование и лимиты': 'Usage and limits',
