@@ -49,7 +49,49 @@ export class CanvasModel {
   }
 
   getGraph() {
-    return toGraph(this.nodes, this.edges, this.strokes);
+    // Уходящие узлы (затухают после чужой правки) в граф не попадают.
+    return toGraph(
+      this.nodes.filter((n) => !n.data?.leaving),
+      this.edges,
+      this.strokes,
+    );
+  }
+
+  /**
+   * Чужая правка (бот или другое окно): заменить граф на месте. Новые узлы появляются с анимацией входа,
+   * изменённые коротко подсвечиваются, удалённые остаются на 380 мс и тают. Возвращает {added, changed, removed}.
+   */
+  applyRemote(graph, { leaveMs = 380, flashMs = 1600 } = {}) {
+    const next = toFlow(graph);
+    const before = new Map(this.nodes.filter((n) => !n.data?.leaving).map((n) => [n.id, n]));
+    const keep = new Set(this.nodes.filter((n) => n.selected).map((n) => n.id));
+    const gone = [...before.values()].filter((n) => !next.nodes.some((m) => m.id === n.id));
+    const stamp = (n) => JSON.stringify([n.position, n.data.fields, n.data.schedule, n.data.locked]);
+    const changed = [];
+    const nodes = next.nodes.map((n) => {
+      const old = before.get(n.id);
+      const out = keep.has(n.id) ? { ...n, selected: true } : n;
+      if (old && stamp(old) !== stamp(n)) {
+        changed.push(n.id);
+        return { ...out, data: { ...out.data, flash: true } };
+      }
+      return out;
+    });
+    const ghosts = gone.map((n) => ({ ...n, selected: false, draggable: false, selectable: false, deletable: false, connectable: false, data: { ...n.data, leaving: true } }));
+    this.nodes = [...nodes, ...ghosts];
+    this.edges = next.edges.filter((e) => !ghosts.some((g) => g.id === e.source || g.id === e.target));
+    this.strokes = graph?.strokes || [];
+    this.#history.reset(this.key());
+    this.#flags();
+    const drop = () => {
+      if (ghosts.length) this.nodes = this.nodes.filter((n) => !n.data?.leaving);
+    };
+    const calm = () => {
+      if (changed.length) this.nodes = this.nodes.map((n) => (n.data?.flash ? { ...n, data: { ...n.data, flash: false } } : n));
+    };
+    setTimeout(drop, leaveMs);
+    setTimeout(calm, flashMs);
+    return { added: next.nodes.filter((n) => !before.has(n.id)).map((n) => n.id), changed, removed: gone.map((n) => n.id) };
   }
 
   key() {

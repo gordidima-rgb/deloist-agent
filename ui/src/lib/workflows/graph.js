@@ -390,3 +390,31 @@ export function starterGraph() {
     strokes: [],
   };
 }
+
+// Виды запуска и места вывода: порядок и значки для узлов «Триггер» и «Вывод».
+export const TRIGGER_KINDS = [
+  { id: 'manual', icon: 'manual' },
+  { id: 'schedule', icon: 'calendar' },
+  { id: 'webhook', icon: 'webhook' },
+  { id: 'telegram', icon: 'telegram' },
+  { id: 'discord', icon: 'discord' },
+  { id: 'slack', icon: 'slack' },
+];
+export const OUTPUT_TARGETS = [
+  { id: 'notify', icon: 'bell' },
+  { id: 'chat', icon: 'chat' },
+  { id: 'telegram', icon: 'telegram' },
+  { id: 'discord', icon: 'discord' },
+  { id: 'slack', icon: 'slack' },
+  { id: 'file', icon: 'file' },
+];
+export const MESSENGERS = ['telegram', 'discord', 'slack'];
+export const isMessenger = (id) => MESSENGERS.includes(id);
+
+/** Подключён ли мессенджер: connections {telegram, discord, slack: bool}. Для остальных видов — всегда да. */
+export function isLinked(id, connections = {}) {
+  return !isMessenger(id) || Boolean(connections[id]);
+}
+
+export const triggerOf = (fields = {}) => fields.trigger || 'manual';
+export const targetOf = (fields = {}) => fields.target || 'notify';

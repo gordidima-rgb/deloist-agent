@@ -3,9 +3,10 @@
   import { tr } from '../../lib/i18n.js';
   import { statusLabel, agoText } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
+  import WfSwitch from './WfSwitch.svelte';
 
   /** items: [{id,title,steps,updated_at,last_run}]; selected: id; handlers приходят от экрана. */
-  let { items = [], selected = '', loading = false, onselect, oncreate, onrename, onduplicate, ondelete, onmenu } = $props();
+  let { items = [], selected = '', loading = false, onselect, oncreate, onrename, onduplicate, ondelete, onenabled, onmenu } = $props();
 
   let editing = $state('');
   let draft = $state('');
@@ -58,7 +59,7 @@
     <ul class="wfl-list">
       {#each items as item, i (item.id)}
         <li style:--i={i}>
-          <div class="wfl-item" class:on={item.id === selected} role="presentation">
+          <div class="wfl-item" class:on={item.id === selected} class:off={item.enabled === false} role="presentation">
             <button type="button" class="wfl-main" aria-current={item.id === selected ? 'true' : undefined} onclick={() => onselect?.(item.id)} ondblclick={() => startEdit(item)}>
               <span class="wfl-ico"><WfIcon name="graph" size={16} /></span>
               <span class="wfl-text">
@@ -91,6 +92,9 @@
                 </small>
               </span>
             </button>
+            <span class="wfl-sw">
+              <WfSwitch checked={item.enabled !== false} label={tr('Включён')} title={item.enabled === false ? tr('Выключен: расписание, вебхук и мессенджеры его не запустят') : tr('Включён: расписание, вебхук и мессенджеры его запускают')} onchange={(v) => onenabled?.(item.id, v)} />
+            </span>
             <span class="wfl-acts">
               <button type="button" title={tr('Переименовать')} aria-label={tr('Переименовать')} onclick={() => startEdit(item)}><WfIcon name="pencil" size={14} /></button>
               <button type="button" title={tr('Дублировать')} aria-label={tr('Дублировать')} onclick={() => onduplicate?.(item.id)}><WfIcon name="dup" size={14} /></button>
@@ -197,6 +201,13 @@
     background: var(--k-surface-2);
     box-shadow: inset 0 0 0 1px var(--k-line-strong);
   }
+  .wfl-sw {
+    flex: none;
+    padding-right: 12px;
+  }
+  .wfl-item.off .wfl-main {
+    opacity: 0.55;
+  }
   .wfl-main {
     display: flex;
     flex: 1;
@@ -289,7 +300,7 @@
   }
   .wfl-acts {
     position: absolute;
-    right: 6px;
+    right: 52px;
     top: 50%;
     display: flex;
     gap: 2px;

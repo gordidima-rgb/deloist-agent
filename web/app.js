@@ -7005,6 +7005,7 @@ function workflowProps() {
     bots: workflowBots(),
     models: workflowModels,
     onconnect: () => DeloistProviders.open(),
+    onsettings: (sub) => openSettingsSub(sub),
     onmenu: () => $('#sidebar').classList.toggle('open'),
   };
 }

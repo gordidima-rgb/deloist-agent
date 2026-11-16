@@ -207,6 +207,58 @@
     }
   }
 
+  export function triggerLabel(id) {
+    switch (id) {
+      case 'schedule':
+        return tr('Расписание');
+      case 'webhook':
+        return tr('Вебхук');
+      case 'telegram':
+        return 'Telegram';
+      case 'discord':
+        return 'Discord';
+      case 'slack':
+        return 'Slack';
+      default:
+        return tr('Вручную');
+    }
+  }
+
+  export function targetLabel(id) {
+    switch (id) {
+      case 'chat':
+        return tr('Чат бота');
+      case 'telegram':
+        return 'Telegram';
+      case 'discord':
+        return 'Discord';
+      case 'slack':
+        return 'Slack';
+      case 'file':
+        return tr('Файл');
+      default:
+        return tr('Уведомление');
+    }
+  }
+
+  // Значок источника запуска в истории и списке.
+  export function sourceIcon(source) {
+    switch (source) {
+      case 'schedule':
+        return 'calendar';
+      case 'webhook':
+        return 'webhook';
+      case 'telegram':
+      case 'discord':
+      case 'slack':
+        return source;
+      case 'node':
+        return 'run_step';
+      default:
+        return 'manual';
+    }
+  }
+
   export function versionKindLabel(kind) {
     switch (kind) {
       case 'run':

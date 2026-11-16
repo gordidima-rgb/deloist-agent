@@ -3,7 +3,7 @@
   // mode 'runs': щелчок по запуску показывает его результаты на узлах; 'versions': щелчок открывает просмотр версии.
   import { tr, trServer } from '../../lib/i18n.js';
   import { toMs, stepSeconds } from '../../lib/workflows/graph.js';
-  import { statusLabel, sourceLabel, versionKindLabel, whenText, seconds } from './Labels.svelte';
+  import { statusLabel, sourceLabel, sourceIcon, versionKindLabel, whenText, seconds } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
 
   /** api(path); workflowId; mode; viewedId — какой запуск сейчас показан; onview(run|null); onpreview(version); onclose(). */
@@ -88,7 +88,7 @@
         <button type="button" class="wf-hp__row" class:on={r.id === viewedId} onclick={() => onview?.(r)}>
           <span class="wf-hp__chip" data-status={r.status}>{statusLabel(r.status)}</span>
           <span class="wf-hp__main">
-            <b>{sourceLabel(r.solo ? 'node' : r.source)}</b>
+            <b class="wf-hp__src"><span class="wf-hp__srcico"><WfIcon name={sourceIcon(r.solo ? 'node' : r.source)} size={13} /></span>{sourceLabel(r.solo ? 'node' : r.source)}</b>
             <small>{whenText(toMs(r.started_at))}</small>
           </span>
           <span class="wf-hp__sec">{r.ended_at ? seconds(runSeconds(r)) : ''}</span>
@@ -229,6 +229,20 @@
   }
   .wf-hp__main b {
     font: 600 13.5px/1.2 var(--k-font-body);
+  }
+  .wf-hp__src {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .wf-hp__srcico {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    background: var(--k-surface-2);
+    color: var(--k-text-2);
   }
   .wf-hp__main small,
   .wf-hp__sec {

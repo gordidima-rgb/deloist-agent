@@ -198,4 +198,60 @@ describe('WorkflowsScreen', () => {
     await drain();
     expect(host.textContent).toContain('Показан прошлый запуск');
   });
+
+  it('toggles enabled from the list and the top bar through PATCH', async () => {
+    const patches = [];
+    const { api } = backend({
+      'PATCH /api/workflows/w1': async (opts) => {
+        patches.push(opts.body);
+        return { workflow: { id: 'w1', title: 'Первый', enabled: opts.body.enabled, revision: 2 } };
+      },
+    });
+    await render(api);
+    const rowSwitch = host.querySelector('.wfl-sw [role="switch"]');
+    expect(rowSwitch.getAttribute('aria-checked')).toBe('true');
+    rowSwitch.click();
+    await drain();
+    expect(patches).toEqual([{ enabled: false }]);
+    expect(host.querySelector('.wfl-item.off')).not.toBeNull();
+    expect(host.querySelector('.wf-en.off')).not.toBeNull();
+    host.querySelector('.wf-en [role="switch"]').click();
+    await drain();
+    expect(patches[1]).toEqual({ enabled: true });
+    expect(host.querySelector('.wfl-item.off')).toBeNull();
+  });
+
+  it('applies a bot edit in place and keeps the canvas mounted', async () => {
+    const { api, state } = backend();
+    await render(api);
+    const nodeEl = host.querySelector('.svelte-flow__node');
+    const g = starterGraph();
+    g.nodes = g.nodes.slice(0, 2);
+    g.edges = [];
+    state.wf = { ...state.wf, revision: 5, graph: { ...g, nodes: g.nodes.map((n, i) => ({ ...n, id: state.wf.graph.nodes[i].id })) } };
+    window.dispatchEvent(new CustomEvent('deloist:event', { detail: { type: 'workflows', workflow_id: 'w1' } }));
+    await drain();
+    // тот же узел остался в DOM (холст не пересобирали), а удалённый затухает и исчезает позже
+    expect(host.contains(nodeEl)).toBe(true);
+    expect(host.querySelector('.wfn.is-leaving')).not.toBeNull();
+  });
+
+  it('does not overwrite unsaved local edits when someone else changes the workflow', async () => {
+    const { api, state } = backend();
+    await render(api);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const area = host.querySelector('.wfn-area');
+      area.value = 'моя правка';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      state.wf = { ...state.wf, revision: 9, graph: { nodes: [], edges: [], strokes: [] } };
+      window.dispatchEvent(new CustomEvent('deloist:event', { detail: { type: 'workflows', workflow_id: 'w1' } }));
+      await vi.advanceTimersByTimeAsync(100);
+    } finally {
+      vi.useRealTimers();
+    }
+    await drain(5);
+    expect(host.querySelectorAll('.svelte-flow__node').length).toBe(3);
+    expect(host.querySelector('.wfn-area').value).toBe('моя правка');
+  });
 });

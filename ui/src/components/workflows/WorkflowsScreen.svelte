@@ -13,7 +13,7 @@
   import WfIcon from './WfIcon.svelte';
 
   /** api(path,{method,body}); bots [{id,name,color,emoji}]; onmenu() открывает боковую панель на узком окне. */
-  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu, uploadAsset, fileUrl } = $props();
+  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu, onsettings, uploadAsset, fileUrl } = $props();
 
   const POLL_MS = 3000;
   const request = (path, opts) => untrack(() => api)(path, opts);
@@ -29,6 +29,7 @@
   let epoch = $state(0);
   let loadError = $state('');
   let listOpen = $state(false);
+  let connections = $state.raw({});
   let handle = null;
 
   function readSelected() {
@@ -60,6 +61,36 @@
     }
   }
 
+  // Подключены ли мессенджеры: триггеры и выводы Telegram, Discord и Slack работают только с привязанным местом.
+  async function loadConnections() {
+    const ask = async (path, key) => {
+      try {
+        const st = await request(path);
+        return Boolean(st?.connected && (st[key] ?? false));
+      } catch {
+        return false;
+      }
+    };
+    const [telegram, discord, slack] = await Promise.all([ask('/api/telegram', 'chatPaired'), ask('/api/discord', 'paired'), ask('/api/slack', 'paired')]);
+    connections = { telegram, discord, slack };
+  }
+
+  async function setEnabled(id, value) {
+    const before = items.find((i) => i.id === id)?.enabled ?? workflow?.enabled ?? true;
+    items = items.map((i) => (i.id === id ? { ...i, enabled: value } : i));
+    if (workflow?.id === id) workflow = { ...workflow, enabled: value };
+    try {
+      const res = await request(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: { enabled: value } });
+      const real = res.workflow?.enabled ?? value;
+      items = items.map((i) => (i.id === id ? { ...i, enabled: real } : i));
+      if (workflow?.id === id) workflow = { ...workflow, enabled: real };
+    } catch (err) {
+      items = items.map((i) => (i.id === id ? { ...i, enabled: before } : i));
+      if (workflow?.id === id) workflow = { ...workflow, enabled: before };
+      fail(err);
+    }
+  }
+
   async function loadRun(id) {
     try {
       const res = await request(`/api/workflows/${encodeURIComponent(id)}/runs?limit=1`);
@@ -81,6 +112,7 @@
       triggers = res.triggers || [];
       epoch += 1;
       loadRun(id);
+      loadConnections();
     } catch (err) {
       if (err?.status === 404) {
         selected = '';
@@ -226,15 +258,36 @@
     loadList();
     if (!workflowId || workflowId !== selected) return;
     await loadRun(workflowId);
-    // Чужая правка графа (бот или другое окно): подтягиваем, если у нас нет несохранённого.
-    if (handle && !handle.pending()) {
-      try {
-        const res = await request(`/api/workflows/${encodeURIComponent(workflowId)}`);
-        if (workflowId !== selected || !handle || handle.pending()) return;
-        triggers = res.triggers || triggers;
-        if (typeof res.workflow?.revision === 'number' && res.workflow.revision > handle.revision()) adopt(res.workflow);
-      } catch {}
-    }
+    if (handle) await pullRemote(workflowId, 0);
+  }
+
+  // Чужая правка графа (бот или другое окно): без своих несохранённых правок холст обновляется на месте и играет
+  // анимацию; с ними правки не трогаем, а человеку показываем карточку, как при конфликте 409.
+  let staleToast = 0;
+  async function pullRemote(workflowId, depth) {
+    try {
+      const res = await request(`/api/workflows/${encodeURIComponent(workflowId)}`);
+      if (workflowId !== selected || !handle) return;
+      triggers = res.triggers || triggers;
+      const fresh = res.workflow;
+      if (workflow && typeof fresh?.enabled === 'boolean' && fresh.enabled !== workflow.enabled) workflow = { ...workflow, enabled: fresh.enabled };
+      if (typeof fresh?.revision !== 'number' || fresh.revision <= handle.revision()) return;
+      // Наше собственное сохранение ещё в пути: его событие пришло раньше ответа. Ждём и смотрим снова.
+      const flying = handle.inflight();
+      if (flying && depth < 2) {
+        await flying.catch(() => {});
+        return pullRemote(workflowId, depth + 1);
+      }
+      if (handle.remote(fresh)) {
+        workflow = { ...workflow, ...fresh, graph: workflow.graph };
+      } else if (staleToast !== fresh.revision) {
+        staleToast = fresh.revision;
+        toast(tr('Процесс изменили в другом месте, пока у вас есть несохранённые правки.'), {
+          action: { label: tr('Загрузить свежую'), onclick: () => adopt(fresh) },
+          duration: 12000,
+        });
+      }
+    } catch {}
   }
 
   function onEvent(e) {
@@ -269,7 +322,7 @@
 
 <div class="wfs" class:list-open={listOpen}>
   <div class="wfs-list">
-    <WorkflowList {items} {selected} loading={listLoading} onselect={open} oncreate={create} onrename={rename} onduplicate={duplicate} ondelete={remove} {onmenu} />
+    <WorkflowList {items} {selected} loading={listLoading} onselect={open} onenabled={setEnabled} oncreate={create} onrename={rename} onduplicate={duplicate} ondelete={remove} {onmenu} />
   </div>
   {#if listOpen}
     <button type="button" class="wfs-scrim" aria-label={tr('Закрыть список')} onclick={() => (listOpen = false)}></button>
@@ -289,6 +342,10 @@
             {onconnect}
             {uploadAsset}
             {fileUrl}
+            enabled={workflow.enabled !== false}
+            onenabled={(v) => setEnabled(workflow.id, v)}
+            {connections}
+            {onsettings}
             api={request}
             {actions}
             onview={(r) => (viewRun = r)}

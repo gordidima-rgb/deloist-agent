@@ -6,6 +6,7 @@
   import { SvelteFlow, Background, MiniMap, Panel, useSvelteFlow, useViewport, getNodesBounds } from '@xyflow/svelte';
   import { tr, trServer } from '../../lib/i18n.js';
   import { toast } from '../../lib/workflows/notify.js';
+  import { fileUrlFor, uploadAssetTo } from '../../lib/workflows/assets.js';
   import { CanvasModel } from '../../lib/workflows/canvasModel.svelte.js';
   import { Saver } from '../../lib/workflows/saver.js';
   import { SHAPE_CHOICES, canConnect, connectionProblem, typeProblem, isRunOpen, kindOf, kindsFor, kindsBetween, latestSteps, stepSeconds, toMs, newId } from '../../lib/workflows/graph.js';
@@ -22,6 +23,7 @@
   import HistoryPopover from './HistoryPopover.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import WfIcon from './WfIcon.svelte';
+  import WfSwitch from './WfSwitch.svelte';
   import ToolArt from './ToolArt.svelte';
 
   /**
@@ -53,6 +55,10 @@
     onconnect,
     uploadAsset,
     fileUrl,
+    enabled = true,
+    onenabled,
+    connections = {},
+    onsettings,
   } = $props();
 
   const flow = useSvelteFlow();
@@ -156,6 +162,19 @@
 
   setContext(WF, {
     model,
+    workflowId: wf0.id,
+    get enabled() {
+      return enabled;
+    },
+    get connections() {
+      return connections;
+    },
+    openSettings: (sub) => onsettings?.(sub),
+    makeWebhook: async (nodeId) => {
+      await saver.flush();
+      const res = await api(`/api/workflows/${encodeURIComponent(wf0.id)}/nodes/${encodeURIComponent(nodeId)}/webhook`, { method: 'POST' });
+      return res?.url || '';
+    },
     get bots() {
       return bots;
     },
@@ -190,7 +209,7 @@
     removeEdge: (id) => model.removeEdge(id),
     shakeId: () => shakeNode,
     assetPreview: (id) => previews[id] || '',
-    fileUrl: (path) => (fileUrl ? fileUrl(path, workflow.id) : /^(data:|https?:|\/)/.test(path) ? path : `/api/workflows/${encodeURIComponent(workflow.id)}/files/${encodeURIComponent(path)}`),
+    fileUrl: (path) => (fileUrl ? fileUrl(path, workflow.id) : fileUrlFor(workflow.id, path)),
     assetFromFile: (id, file) => assetFromFile(id, file),
     clearAsset: (id) => {
       model.setFields(id, { name: '', path: '', mime: '', size: 0, text: '' });
@@ -208,6 +227,15 @@
     pending: () => saver.pending,
     revision: () => saver.revision,
     flush: () => saver.flush(),
+    inflight: () => saver.inFlight,
+    // Чужая правка: подменить граф на месте, если своих несохранённых правок нет. Иначе false.
+    remote: (fresh) => {
+      if (!fresh || saver.pending || saver.dead) return false;
+      model.applyRemote(fresh.graph);
+      saver.revision = fresh.revision;
+      title = fresh.title ?? title;
+      return true;
+    },
   });
 
   // Секунды идущего шага тикают только пока шаг работает.
@@ -243,9 +271,9 @@
         meta.text = await file.text();
       } catch {}
     }
-    if (uploadAsset && !meta.text) {
+    if (!meta.text) {
       try {
-        const res = await uploadAsset(file);
+        const res = await (uploadAsset ? uploadAsset(file, workflow.id) : uploadAssetTo(api, workflow.id, file));
         if (res?.path) meta.path = res.path;
       } catch (err) {
         toast(trServer(err?.message || tr('Файл не загрузился')));
@@ -767,6 +795,12 @@
 
       <Panel position="top-right" class="wf-p-top">
         <div class="wf-bar">
+          {#if !readonly}
+            <span class="wf-en" class:off={!enabled} title={enabled ? tr('Процесс включён: расписание, вебхук и мессенджеры запускают его') : tr('Процесс выключен: расписание, вебхук и мессенджеры его не запустят. Вручную запускать можно.')}>
+              <WfSwitch checked={enabled} label={tr('Включён')} onchange={(v) => onenabled?.(v)} />
+              <span>{enabled ? tr('Включён') : tr('Выключен')}</span>
+            </span>
+          {/if}
           <span class="wf-save" data-state={saveState}>{saveText}</span>
           <button type="button" class="wf-ib" title={tr('Отменить (Ctrl+Z)')} aria-label={tr('Отменить')} disabled={!model.canUndo} onclick={() => model.undo()}>
             <WfIcon name="undo" size={16} />
@@ -1225,6 +1259,18 @@
   .wf-tool--t.on {
     background: color-mix(in oklab, var(--k-text) 9%, transparent);
     color: var(--k-text);
+  }
+  .wf-en {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 6px 0 2px;
+    font: 600 12.5px/1 var(--k-font-body);
+    color: var(--k-text-2);
+    transition: color 200ms var(--k-ease-out, ease);
+  }
+  .wf-en.off {
+    color: var(--k-text-3);
   }
   .wf-lightbox {
     position: absolute;

@@ -6,10 +6,11 @@
   import { tr } from '../../lib/i18n.js';
   import { KINDS, isEnabled, stepSeconds, outTypeOf } from '../../lib/workflows/graph.js';
   import { WF } from './ctx.js';
-  import { kindTitle, kindHint, statusLabel, scheduleText, nextRunText, seconds } from './Labels.svelte';
+  import { kindTitle, kindHint, statusLabel, seconds } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
   import BotPicker from './BotPicker.svelte';
-  import ScheduleEditor from './ScheduleEditor.svelte';
+  import TriggerFields from './TriggerFields.svelte';
+  import OutputFields from './OutputFields.svelte';
   import { buildGroups, labelOf } from '../../lib/modelPicker.js';
 
   let { id, data, selected = false } = $props();
@@ -37,8 +38,9 @@
   const outType = $derived(outTypeOf(kind, fields));
   const portType = $derived(outType === 'image' || outType === 'file' ? outType : 'text');
   const shaking = $derived(ctx.shakeId() === id);
-  const preview = $derived(ctx.assetPreview(id));
-  const imageUrl = $derived(kind === 'image' && step?.status === 'done' && outText ? ctx.fileUrl(outText.trim()) : '');
+  const preview = $derived(ctx.assetPreview(id) || (kind === 'asset' && String(fields.mime || '').startsWith('image/') && fields.path ? ctx.fileUrl(fields.path) : ''));
+  const imagePath = $derived((Array.isArray(step?.files) && step.files[0]) || outText.trim());
+  const imageUrl = $derived(kind === 'image' && step?.status === 'done' && imagePath ? ctx.fileUrl(imagePath) : '');
   const sizeText = $derived.by(() => {
     const n = Number(fields.size) || 0;
     if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
@@ -51,14 +53,12 @@
     if (f) ctx.assetFromFile(id, f);
     e.currentTarget.value = '';
   };
-  const trig = $derived(ctx.triggers.get(id));
   const outText = $derived(typeof step?.output === 'string' ? step.output : step?.output == null ? '' : JSON.stringify(step.output, null, 2));
   const errText = $derived(step?.error ? String(step.error) : '');
   const elapsed = $derived(step ? stepSeconds(step, ctx.now) : 0);
   const hasResult = $derived(Boolean(step) && (status === 'done' || status === 'failed' || status === 'stopped') && Boolean(outText || errText));
 
   let resultOpen = $state(false);
-  let schedOpen = $state(false);
   let copied = $state(false);
 
   const set = (key, value) => ctx.model.setField(id, key, value);
@@ -71,12 +71,6 @@
     } catch {}
   }
 
-  function setTrigger(value) {
-    if (value === fields.trigger) return;
-    ctx.model.setFields(id, { trigger: value });
-    if (value === 'schedule' && !data.schedule) ctx.model.setSchedule(id, { kind: 'daily', time: '09:00' });
-    schedOpen = value === 'schedule';
-  }
 </script>
 
 <div
@@ -86,6 +80,8 @@
   class:is-invalid={invalid}
   class:is-hit={hit}
   class:is-shake={shaking}
+  class:is-leaving={data.leaving}
+  class:is-flash={data.flash}
   data-kind={kind}
   data-status={status}
   style:--tone="var(--k-bot-{meta.tone || 'sky'})"
@@ -124,26 +120,7 @@
 
   <div class="wfn-body">
     {#if kind === 'trigger'}
-      <div class="wfn-seg nodrag" role="radiogroup" aria-label={tr('Как запускать')}>
-        <button type="button" role="radio" aria-checked={fields.trigger !== 'schedule'} class:on={fields.trigger !== 'schedule'} onclick={() => setTrigger('manual')}>{tr('Вручную')}</button>
-        <button type="button" role="radio" aria-checked={fields.trigger === 'schedule'} class:on={fields.trigger === 'schedule'} onclick={() => setTrigger('schedule')}>{tr('По расписанию')}</button>
-      </div>
-      {#if fields.trigger === 'schedule'}
-        <button type="button" class="wfn-sched nodrag" aria-expanded={schedOpen} onclick={() => (schedOpen = !schedOpen)}>
-          <WfIcon name="clock" size={14} />
-          <span>{scheduleText(data.schedule)}</span>
-          <WfIcon name="chevron" size={14} />
-        </button>
-        {#if schedOpen}
-          <ScheduleEditor schedule={data.schedule} onchange={(s) => ctx.model.setSchedule(id, s)} />
-        {/if}
-        <p class="wfn-next">
-          <span>{tr('Следующий запуск')}</span>
-          <b>{nextRunText(trig?.next_run) || tr('после сохранения')}</b>
-        </p>
-      {:else}
-        <p class="wfn-hint">{tr('Запускается кнопкой «Запустить» наверху')}</p>
-      {/if}
+      <TriggerFields {id} {fields} schedule={data.schedule} />
     {:else if kind === 'prompt'}
       <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что сказать следующему шагу')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)}></textarea>
     {:else if kind === 'bot'}
@@ -182,7 +159,7 @@
       {#if fields.name || fields.text || textMode}
         <div class="wfn-file">
           {#if preview}
-            <img class="wfn-file__img" src={preview} alt={fields.name} />
+            <button type="button" class="wfn-file__zoom nodrag" title={tr('Открыть крупно')} aria-label={tr('Открыть крупно')} onclick={() => ctx.zoomImage(preview)}><img class="wfn-file__img" src={preview} alt={fields.name} /></button>
           {:else}
             <span class="wfn-file__ico"><WfIcon name={fields.name ? 'asset' : 'text'} size={20} /></span>
           {/if}
@@ -226,10 +203,7 @@
         </button>
       {/if}
     {:else if kind === 'output'}
-      <div class="wfn-target">
-        <WfIcon name="bell" size={15} />
-        <span>{tr('Уведомление в программе')}</span>
-      </div>
+      <OutputFields {id} {fields} />
     {:else}
       <p class="wfn-hint">{kindHint(kind)}</p>
     {/if}
@@ -316,6 +290,15 @@
   .wfn.is-invalid {
     border-color: var(--k-attention);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--k-attention) 30%, transparent);
+  }
+  .wfn.is-leaving {
+    pointer-events: none;
+    animation: wfn-out 0.38s var(--k-ease-out, ease) both;
+  }
+  .wfn.is-flash {
+    animation:
+      wfn-in 0.5s var(--k-ease-spring, ease) both,
+      wfn-flash 1.5s var(--k-ease-out, ease) both;
   }
   .wfn.is-soon {
     opacity: 0.72;
@@ -420,20 +403,10 @@
     gap: 8px;
     padding: 2px 14px 14px;
   }
-  .wfn-hint,
-  .wfn-next {
+  .wfn-hint {
     margin: 0;
     font: 400 12.5px/1.4 var(--k-font-body);
     color: var(--k-text-3);
-  }
-  .wfn-next {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .wfn-next b {
-    font-weight: 600;
-    color: var(--k-text-2);
   }
   .wfn-seg {
     display: grid;
@@ -462,27 +435,6 @@
     background: var(--k-surface);
     color: var(--k-text);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  }
-  .wfn-sched {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 34px;
-    padding: 0 10px;
-    border: 1px solid var(--k-line);
-    border-radius: 11px;
-    background: transparent;
-    color: var(--k-text);
-    font: 600 12.5px/1 var(--k-font-body);
-    cursor: pointer;
-    transition: background 150ms var(--k-ease-out, ease);
-  }
-  .wfn-sched:hover {
-    background: var(--k-surface-2);
-  }
-  .wfn-sched span {
-    flex: 1;
-    text-align: left;
   }
   .wfn-area,
   .wfn-input {
@@ -727,6 +679,18 @@
     border-radius: 14px;
     background: var(--k-surface-2);
   }
+  .wfn-file__zoom {
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 11px;
+    background: none;
+    cursor: zoom-in;
+    transition: transform 300ms var(--k-ease-spring, ease);
+  }
+  .wfn-file__zoom:hover {
+    transform: scale(1.06);
+  }
   .wfn-file__img,
   .wfn-file__ico {
     flex: none;
@@ -965,6 +929,24 @@
     background: var(--k-attention) !important;
   }
 
+  @keyframes wfn-out {
+    to {
+      opacity: 0;
+      transform: scale(0.88);
+      filter: blur(5px);
+    }
+  }
+  @keyframes wfn-flash {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--k-brand) 60%, transparent);
+    }
+    30% {
+      box-shadow: 0 0 0 7px color-mix(in oklab, var(--k-brand) 35%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
   @keyframes wfn-in {
     from {
       opacity: 0;
@@ -1013,6 +995,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .wfn,
+    .wfn.is-leaving,
+    .wfn.is-flash,
     .wfn[data-status='running'],
     .wfn[data-status='approval'],
     .wfn-st,
