@@ -122,7 +122,7 @@ pub const BUILT_IN: &[BuiltIn] = &[
     },
     BuiltIn {
         id: "openrouter", name: "OpenRouter", about: "Сотни моделей по одному ключу с openrouter.ai. Есть бесплатные модели (суффикс :free)",
-        base_url: "https://openrouter.ai/api/v1", auth: "", key_label: "Ключ API", default_model: "openrouter/auto",
+        base_url: "https://openrouter.ai/api/v1", auth: "", key_label: "Ключ API", default_model: "openrouter/free",
         models: &[], folder: false, local: false,
         free: true, key_url: "https://openrouter.ai/keys",
         console_origins: &["https://openrouter.ai"],
@@ -420,7 +420,8 @@ pub const MODEL_LEVELS: &[(&str, [&str; 3])] = &[
     ("deepseek", ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash"]),
     ("gigachat", ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2"]),
     ("alice", ["aliceai-llm/latest", "aliceai-llm/latest", "aliceai-llm-flash/latest"]),
-    ("openrouter", ["openrouter/auto", "openrouter/auto", "openrouter/auto"]),
+    // Бесплатный старт: без явного выбора человека платные модели не берём (`openrouter/auto` может уйти на платные).
+    ("openrouter", ["openrouter/free", "openrouter/free", "openrouter/free"]),
     // TODO уточнить: у NVIDIA, Groq и Cerebras модель выбирают на экране провайдеров — берём её.
     ("nvidia", ["", "", ""]),
     ("groq", ["", "", ""]),
@@ -1868,7 +1869,7 @@ mod tests {
         assert_eq!(level_model("deepseek", ModelLevel::Fast), Some("deepseek-v4-flash"));
         assert_eq!(level_model("gigachat", ModelLevel::Strong), Some("GigaChat-2-Max"));
         assert_eq!(level_model("alice", ModelLevel::Fast), Some("aliceai-llm-flash/latest"));
-        assert_eq!(level_model("openrouter", ModelLevel::Standard), Some("openrouter/auto"));
+        assert_eq!(level_model("openrouter", ModelLevel::Standard), Some("openrouter/free"));
         assert_eq!(level_model("zai", ModelLevel::Fast), Some("glm-4.7-flash"));
         // Локальный сервер: все три уровня — выбранная модель, пустая строка значит «по умолчанию».
         assert_eq!(level_models("ollama"), Some(["", "", ""]));
