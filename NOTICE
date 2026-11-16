@@ -12,6 +12,7 @@ Third-party components
 Full licence texts and the exact copyright lines are in THIRD_PARTY/.
 
 - Svelte runtime, bundled in web/ui/kit.js. https://github.com/sveltejs/svelte. MIT. Copyright (c) 2016-2025 Svelte Contributors. THIRD_PARTY/svelte.txt
+- Svelte Flow (@xyflow/svelte, @xyflow/system), bundled in web/ui/kit.js. https://github.com/xyflow/xyflow. MIT. Copyright (c) 2019-2025 webkid GmbH. THIRD_PARTY/xyflow-svelte-flow.txt
 - Rust crates from Cargo.lock (about 417, from crates.io). Licences: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, Unlicense, CC0-1.0, 0BSD and, for five unmodified crates (cssparser, cssparser-macros, dtoa-short, option-ext, selectors), MPL-2.0. Names, versions, licences, authors and repositories: THIRD_PARTY/rust-crates.txt
 - OpenWebView2Loader. https://github.com/jchv/OpenWebView2Loader. ISC. Copyright 2020 (the upstream licence names no holder). Logic ported to Rust in src/webview_loader.rs; no C/C++ source is bundled. THIRD_PARTY/jchv-OpenWebView2Loader.txt
 - CopilotKit/OpenBot. https://github.com/CopilotKit/OpenBot. MIT. Copyright (c) 2026 CopilotKit. THIRD_PARTY/CopilotKit-OpenBot.txt

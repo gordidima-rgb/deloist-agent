@@ -5,6 +5,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // Результат лежит в ../web/ui и коммитится (cargo build не требует Node).
 export default defineConfig({
   plugins: [svelte()],
+  // Svelte Flow читает process.env.NODE_ENV; в IIFE для обычного <script> его нет.
+  define: { 'process.env.NODE_ENV': '"production"' },
   build: {
     outDir: '../web/ui',
     emptyOutDir: true,

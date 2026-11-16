@@ -11,6 +11,7 @@
 | svelte | 5.57.3 |
 | vite | 8.3.8 |
 | @sveltejs/vite-plugin-svelte | 7.3.1 |
+| @xyflow/svelte (холст «Рабочие процессы») | 1.7.1 |
 
 Обновляя, ставить с `--save-exact`, пересобирать `web/ui`, менять эту таблицу и версию в `docs/skills/svelte/SKILL.md`.
 
