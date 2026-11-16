@@ -70,6 +70,9 @@ async fn demo_turns_go_through_the_whole_loop() {
     crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "ask" }))).await;
 
     // Делегирование.
+    // Поручать можно только участнику своей команды: собираем команду из бота и Редактора.
+    let editor = bots.iter().find(|b| b["name"] == "Редактор").expect("в демо нет Редактора")["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [bot, editor], "lead": bot, "mode": "lead" }))).await;
     crew.clear_events();
     crew.say(&bot, "делегируй это Редактору").await;
     let delegation = crew.wait_event("делегирование", |e| e["type"] == "delegate_end").await;
