@@ -1,5 +1,5 @@
 <script>
-  // Вкладка «Файлы» в ящике бота: только чтение. Папки открываются, файл показывается текстом.
+  // Вкладка «Файлы» в ящике бота: только чтение. Папки открываются, файл открывает просмотрщик (FileViewer).
   // Данные: GET /api/bots/{id}/files?path=, GET /api/bots/{id}/file?path=.
   import ListItem from '../kit/ListItem.svelte';
   import EmptyState from '../kit/EmptyState.svelte';
@@ -7,13 +7,14 @@
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';
+  import FileViewer from './FileViewer.svelte';
 
-  let { bot, api, initial = '' } = $props();
+  let { bot, api, initial = '', onquote } = $props();
 
   let path = $state('');
   let items = $state([]);
   let loaded = $state(false);
-  let preview = $state(null);
+  let viewing = $state(null);
 
   const crumbs = $derived(path ? path.split('/') : []);
 
@@ -28,14 +29,9 @@
     }
   }
 
-  async function open(item) {
+  function open(item) {
     if (item.dir) return load(item.path);
-    try {
-      const { text } = await api(`/api/bots/${encodeURIComponent(bot.id)}/file?path=${encodeURIComponent(item.path)}`);
-      preview = { name: item.name, text };
-    } catch (err) {
-      toast(err.message);
-    }
+    viewing = { name: item.name, path: item.path };
   }
 
   const up = () => load(path.split('/').slice(0, -1).join('/'));
@@ -47,7 +43,7 @@
     if (!rel) return load('');
     const parts = rel.split('/');
     await load(parts.slice(0, -1).join('/'));
-    await open({ name: parts[parts.length - 1], path: rel, dir: false });
+    open({ name: parts[parts.length - 1], path: rel, dir: false });
   }
 
   start();
@@ -81,6 +77,9 @@
   </svg>
 {/snippet}
 
+{#if viewing}
+  <FileViewer {bot} {api} {onquote} file={viewing} onclose={() => (viewing = null)} />
+{:else}
 <div class="df">
   <div class="df-bar">
     <Button size="sm" variant="ghost" disabled={!path} onclick={up}>{tr('↑ вверх')}</Button>
@@ -104,14 +103,8 @@
       {/each}
     </ul>
   {/if}
-
-  {#if preview}
-    <div class="df-preview">
-      <p class="df-name">{preview.name}</p>
-      <pre>{preview.text}</pre>
-    </div>
-  {/if}
 </div>
+{/if}
 
 <style>
   .df { display: flex; flex-direction: column; gap: var(--k-space-3); min-width: 0; }
@@ -143,23 +136,4 @@
   .df-icon--image, .df-icon--presentation { color: var(--k-ai); }
   .df-icon--audio, .df-icon--spreadsheet { color: var(--k-brand-text); }
   .df-icon--video, .df-icon--pdf { color: var(--k-attention-text); }
-  .df-preview {
-    display: flex;
-    flex-direction: column;
-    gap: var(--k-space-2);
-    padding: var(--k-space-3);
-    border-radius: var(--k-radius-md);
-    background: var(--k-surface-2);
-    min-width: 0;
-  }
-  .df-name { margin: 0; color: var(--k-text-2); font: 600 var(--k-text-xs) / 1.3 var(--k-font-body); }
-  .df-preview pre {
-    margin: 0;
-    max-height: 360px;
-    overflow: auto;
-    color: var(--k-text);
-    font: 400 var(--k-text-xs) / 1.5 var(--k-font-mono);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
 </style>

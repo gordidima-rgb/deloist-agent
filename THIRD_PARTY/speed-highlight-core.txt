@@ -1,0 +1,8 @@
+Third-party material: speed-highlight/core
+Repository: https://github.com/speed-highlight/core
+Package taken: @speed-highlight/core 2.1.0 (npm)
+License: CC0-1.0 (public domain dedication)
+
+Used for syntax highlighting in the file viewer (no code copied; imported as a dependency):
+  - ui/src/lib/highlight.js  imports tokenize and 24 language modules, bundled into web/ui/kit.js.
+Token classes (shj-syn-*) are styled in ui/src/components/drawer/FileViewer.svelte with the kit's own colours.

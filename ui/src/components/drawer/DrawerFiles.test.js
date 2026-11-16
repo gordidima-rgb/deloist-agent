@@ -87,7 +87,7 @@ describe('DrawerFiles', () => {
     rowByName('a.txt').click();
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/api/bots/b1/file?path=a.txt');
-      expect(host.querySelector('.df-preview pre').textContent).toBe('hello');
+      expect(host.querySelector('.fv-code .fv-text').textContent).toBe('hello');
     });
   });
 

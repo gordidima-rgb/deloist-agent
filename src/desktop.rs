@@ -84,6 +84,71 @@ pub fn show_error(message: &str) {
     eprintln!("{message}");
 }
 
+/// Адрес `vscode://file/<путь>[:строка]` для файла: каждый байт вне `A-Za-z0-9-._~/:` кодируется как `%XX`,
+/// обратные слэши Windows становятся прямыми, `\?\` убирается. Чистая функция: запуск ниже.
+pub(crate) fn vscode_url(path: &std::path::Path, line: Option<u32>) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = text.strip_prefix("//?/").unwrap_or(&text);
+    let mut url = String::from("vscode://file/");
+    for byte in text.trim_start_matches('/').bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
+            url.push(byte as char);
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    if let Some(line) = line.filter(|n| *n > 0) {
+        url.push_str(&format!(":{line}"));
+    }
+    url
+}
+
+/// Открывает файл в VS Code через обработчик ссылок `vscode:` в системе. Если VS Code не установлен, Windows
+/// покажет своё окно выбора, а не запустит что-то само. В облаке и без окна рабочего стола не работает.
+#[cfg(windows)]
+pub(crate) fn open_in_vscode(path: &std::path::Path, line: Option<u32>) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut core::ffi::c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> *mut core::ffi::c_void;
+    }
+    if crate::cloud::active() {
+        return Err("в облаке редактор не открыть".into());
+    }
+    let url = vscode_url(path, line);
+    let wide = |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
+    let (verb, target) = (wide("open"), wide(&url));
+    // ShellExecuteW возвращает значение больше 32 при успехе.
+    let code = unsafe { ShellExecuteW(core::ptr::null_mut(), verb.as_ptr(), target.as_ptr(), core::ptr::null(), core::ptr::null(), 1) };
+    if (code as usize) > 32 {
+        Ok(())
+    } else {
+        Err("не удалось запустить VS Code: он установлен?".into())
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn open_in_vscode(path: &std::path::Path, line: Option<u32>) -> Result<(), String> {
+    if crate::cloud::active() {
+        return Err("в облаке редактор не открыть".into());
+    }
+    std::process::Command::new("xdg-open")
+        .arg(vscode_url(path, line))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "не удалось запустить VS Code: он установлен?".to_string())
+}
+
 /// Ссылка из ответа бота открывается в обычном браузере, а не внутри приложения с его сессией.
 #[cfg(windows)]
 pub(crate) fn open_in_browser(url: &str) {
@@ -338,7 +403,18 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_title_colors;
+    use super::{parse_title_colors, vscode_url};
+
+    #[test]
+    fn vscode_url_is_a_plain_encoded_file_link() {
+        let url = vscode_url(std::path::Path::new(r"\\?\C:\Users\Public\Deloist data\ботs\a b&c.md"), Some(12));
+        assert_eq!(url, "vscode://file/C:/Users/Public/Deloist%20data/%D0%B1%D0%BE%D1%82s/a%20b%26c.md:12");
+        assert_eq!(vscode_url(std::path::Path::new("/home/u/x.rs"), None), "vscode://file/home/u/x.rs");
+        assert_eq!(vscode_url(std::path::Path::new("/home/u/x.rs"), Some(0)), "vscode://file/home/u/x.rs");
+        // Ничего, что оболочка или обработчик ссылки счёл бы разделителем.
+        let hostile = vscode_url(std::path::Path::new("/a/\"; calc & b?x#y%.md"), None);
+        assert!(!hostile.contains(['"', ';', ' ', '&', '?', '#']), "{hostile}");
+    }
 
     #[test]
     fn title_colors_are_parsed_as_colorref() {

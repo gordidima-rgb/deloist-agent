@@ -4820,6 +4820,19 @@ async function stopCurrent() {
   }
 }
 
+// Выделенное в просмотрщике файла с комментарием: кладём в поле ввода, не затирая черновик и не отправляя —
+// человек может набрать несколько замечаний подряд и отправить их одним сообщением.
+function quoteToChat({ text }) {
+  const input = $('#input');
+  if (!input || input.disabled) return toast(tr('Сначала открой чат с ботом'));
+  const base = input.value.replace(/\s+$/, '');
+  input.value = base ? `${base}\n\n${text}\n` : `${text}\n`;
+  autosize();
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  toast(tr('Добавил в сообщение'));
+}
+
 function autosize() {
   const el = $('#input');
   // Подсветка сроков следит за текстом поля; код меняет его без события input.
@@ -5023,7 +5036,7 @@ function renderDrawer() {
   if (S.tab === 'files') {
     const initial = S.openFile || '';
     S.openFile = '';
-    tabView = window.DeloistUI.mountDrawerFiles(body, { bot, api, initial });
+    tabView = window.DeloistUI.mountDrawerFiles(body, { bot, api, initial, onquote: quoteToChat });
   }
 }
 

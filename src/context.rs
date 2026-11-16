@@ -225,6 +225,10 @@ pub fn known_tokens(model: &str) -> Option<usize> {
         // Старые имена API DeepSeek. На странице моделей их уже нет; берём последнее опубликованное значение.
         "deepseek-chat" | "deepseek-reasoner" => return Some(128_000),
         "gpt-6.1-terra" => return Some(1_050_000),
+        // xAI, docs.x.ai/developers/models (16.11.2026): `maxPromptLength` 500 000 у 4.5/4.6/4.7, 256 000 у grok-build-0.1.
+        // У `grok-4.7-build-fast` (Grok Build) на странице записи нет — окно не выдумываем.
+        "grok-4.5" | "grok-4.6" | "grok-4.7" => return Some(500_000),
+        "grok-build-0.1" => return Some(256_000),
         _ => {}
     }
     if id.starts_with("gigachat-2") {
@@ -411,6 +415,10 @@ mod tests {
         assert_eq!(known_tokens("aliceai-llm-flash/latest"), Some(65_536));
         assert_eq!(known_tokens("aliceai-llm/latest"), Some(131_072));
         assert_eq!(known_tokens("gpt://b1g123/yandexgpt/latest"), Some(32_768));
+        assert_eq!(known_tokens("grok-4.7"), Some(500_000));
+        assert_eq!(known_tokens("grok-4.5"), Some(500_000));
+        assert_eq!(known_tokens("grok-build-0.1"), Some(256_000));
+        assert_eq!(known_tokens("grok-4.7-build-fast"), None);
         assert_eq!(known_tokens("claude-opus-5-5"), Some(1_000_000));
         assert_eq!(known_tokens("claude-sonnet-5-5"), Some(1_000_000));
         assert_eq!(known_tokens("claude-haiku-4-5"), Some(200_000));

@@ -17,6 +17,7 @@
     "vitest": "5.1.0"
   },
   "dependencies": {
-    "@xyflow/svelte": "1.7.1"
+    "@xyflow/svelte": "1.7.1",
+    "@speed-highlight/core": "2.1.0"
   }
 }

@@ -922,6 +922,28 @@ async fn the_agent_key_cannot_branch_a_thread() {
 }
 
 #[tokio::test]
+async fn the_agent_key_cannot_open_the_code_editor() {
+    let crew = Crew::start("vscode-agent").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    let token = agent_token(&crew);
+    let response = crew
+        .client
+        .post(format!("{}/api/bots/{bot}/file/open-in-vscode", crew.base))
+        .bearer_auth(&token)
+        .json(&json!({ "path": "a.txt" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 403, "ключ программы запустил редактор");
+    // Человеку: путь вне воркспейса и несуществующий файл отклоняются без запуска чего-либо.
+    for path in ["../outside.txt", "missing.txt", "..\\..\\x"] {
+        let (status, _) = crew.send("POST", &format!("/api/bots/{bot}/file/open-in-vscode"), Some(json!({ "path": path }))).await;
+        assert_eq!(status, 400, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn browser_sign_in_rejects_unknown_site() {
     let crew = Crew::start("signin-site").await;
     let state = crew.ok("GET", "/api/state", None).await;

@@ -510,7 +510,7 @@ pub(crate) fn cloud_closed(norm: &str) -> bool {
     if let Some(rest) = norm.strip_prefix("/api/bots/") {
         let tail = rest.split_once('/').map(|(_, t)| t).unwrap_or("");
         // Экран и питомцы: окна рабочего стола.
-        if tail == "screen" || tail.starts_with("screen/") || tail == "pet-place" {
+        if tail == "screen" || tail.starts_with("screen/") || tail == "pet-place" || tail == "file/open-in-vscode" {
             return true;
         }
     }
@@ -556,7 +556,11 @@ fn human_only(path: &str) -> bool {
         // Вход человека в Google в браузере бота и отметка состояния — только окно.
         // Ветка треда создаёт бота с персоной и перепиской: это тоже решает человек.
         || (path.starts_with("/api/bots/")
-            && (path.ends_with("/browser/sign-in") || path.ends_with("/sign-in-state") || path.ends_with("/branch")))
+            && (path.ends_with("/browser/sign-in")
+                || path.ends_with("/sign-in-state")
+                || path.ends_with("/branch")
+                // Запуск редактора кода на компьютере человека: только по его кнопке в просмотрщике файлов.
+                || path.ends_with("/file/open-in-vscode")))
         // Правила бота в мессенджерах (что можно писать, вступать, удалять): задаёт только человек в окне.
         || (path.starts_with("/api/bots/") && (path.ends_with("/messengers") || path.contains("/messengers/")))
         // Перенос ботов из Hermes создаёт ботов и пишет их персоны и память: решает человек.
@@ -1142,7 +1146,7 @@ mod tests {
             "/api/vault", "/api/vault/logins", "/api/selfdev/clone", "/api/browser/obscura/install", "/api/browser/moli/install",
             "/api/providers/x/install", "/api/providers/scan", "/api/providers/x/check", "/api/providers/x/connect", "/api/updates/app",
             "/api/updates/tools/x", "/api/voice/prepare", "/api/voice/local/x/download", "/api/user-chrome/connect", "/api/selection/current",
-            "/api/hotkeys", "/api/dock/new-bot", "/api/shortcut", "/api/bots/x/screen", "/api/bots/x/screen/input", "/api/bots/x/pet-place",
+            "/api/hotkeys", "/api/dock/new-bot", "/api/shortcut", "/api/bots/x/screen", "/api/bots/x/screen/input", "/api/bots/x/pet-place", "/api/bots/x/file/open-in-vscode",
             "/api/import/hermes", "/api/know-me/read", "/api/voice/settings",
         ] {
             assert!(cloud_closed(&normalize_path(path)), "{path} открыт в облаке");

@@ -1758,6 +1758,31 @@ async fn file(State(app): Shared, Path(id): Path<String>, Query(q): Query<PathQu
     }
 }
 
+#[derive(Deserialize)]
+struct OpenInEditor {
+    path: String,
+    line: Option<u32>,
+}
+
+/// Кнопка «Открыть в VS Code» в просмотрщике файла. Путь только из воркспейса бота, редактор запускает ОС
+/// по ссылке `vscode://file/…`: ни команды, ни оболочки, ни аргументов от пользователя. Скрипту бота закрыто (`guard::human_only`).
+async fn file_open_in_vscode(State(app): Shared, Path(id): Path<String>, Json(body): Json<OpenInEditor>) -> Response {
+    if let Err(r) = need_bot(&app, &id) {
+        return r;
+    }
+    let abs = match app.store.safe_path(&id, &body.path) {
+        Ok(p) => p,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e),
+    };
+    if !abs.is_file() {
+        return fail(StatusCode::BAD_REQUEST, "файла нет");
+    }
+    match crate::desktop::open_in_vscode(&abs, body.line) {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
 /// Файл как есть: текстовый ответ выше портит картинки и обрезает большие файлы.
 async fn file_raw(State(app): Shared, Path(id): Path<String>, Query(q): Query<PathQuery>) -> Response {
     if let Err(r) = need_bot(&app, &id) {
@@ -3550,6 +3575,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/bots/{id}/files", get(files))
         .route("/api/bots/{id}/file", get(file))
         .route("/api/bots/{id}/file/raw", get(file_raw))
+        .route("/api/bots/{id}/file/open-in-vscode", post(file_open_in_vscode))
         .route("/api/bots/{id}/browser", post(show_browser))
         .route("/api/bots/{id}/browser/sign-in", post(browser_sign_in))
         .route("/api/bots/{id}/browser-tool", post(browser_tool))

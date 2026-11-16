@@ -1106,6 +1106,11 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
 .drawer[hidden] { display: none; }
 
 body.drawer-open #chat { margin-right: min(430px, 40vw); }
+/* Просмотрщик файлов: «Шире» растягивает панель. На узком окне она и так на весь экран. */
+@media (min-width: 821px) {
+  body.drawer-wide .drawer { width: min(860px, 70vw); }
+  body.drawer-wide.drawer-open #chat { margin-right: min(860px, 70vw); }
+}
 
 .drawer-head {
   display: flex;
