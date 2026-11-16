@@ -1657,6 +1657,79 @@ async function compactCurrent() {
   }
 }
 
+// После смены модели: сколько истории новая модель прочитает с первого же хода (кэша у неё нет).
+// Больше 30% её окна — предлагаем сжать; больше порога сжатия — программа сожмёт сама перед ходом
+// (compact::bot_thread), говорим только об этом. Агенты ACP начинают новую сессию со сводкой сами.
+const SWITCH_OFFER_SHARE = 0.3;
+
+function modelSwitchAdvice(ctx, acp) {
+  if (acp || !ctx) return { kind: 'none' };
+  const tokens = Number(ctx.tokens || 0);
+  if (Number(ctx.percent || 0) >= 100) return { kind: 'auto', tokens };
+  const window = Number(ctx.window || 0);
+  if (ctx.windowKnown && window > 0 && tokens / window >= SWITCH_OFFER_SHARE) return { kind: 'offer', tokens, share: Math.round((tokens / window) * 100) };
+  return { kind: 'none' };
+}
+
+function toastAction(message, label, onClick, ms = 12000) {
+  const el = $('#toast');
+  el.textContent = message;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'ghost';
+  button.textContent = label;
+  button.addEventListener('click', () => {
+    el.hidden = true;
+    onClick();
+  });
+  el.append(' ', button);
+  el.hidden = false;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+// Сжать историю личного чата бота. Пока бот работает, сжатие ждёт конца хода (turn_end).
+const compactAfterTurn = new Set();
+
+async function compactBot(id) {
+  if (S.busy.has(id)) {
+    compactAfterTurn.add(id);
+    toast(tr('Сожму историю, как только бот закончит ход.'));
+    return;
+  }
+  try {
+    const { dropped } = await api(`/api/bots/${id}/compact`, { method: 'POST' });
+    toast(tr('История сжата: {n} сообщений в сводке', { n: dropped }));
+    if (!inRoom() && S.currentId === id) await reloadThread();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function afterModelSwitch(id) {
+  const busy = S.busy.has(id);
+  const later = busy ? tr('Бот сейчас работает. Новая модель включится со следующего сообщения в чате.') + ' ' : '';
+  let advice = { kind: 'none' };
+  try {
+    const stats = await api(`/api/bots/${id}/stats`);
+    S.sessionStats.set(id, stats);
+    if (S.currentId === id) renderSessionStats();
+    const bot = botById(id) || {};
+    const driver = bot.driver || S.settings.driver || '';
+    advice = modelSwitchAdvice(stats.context, driver === 'acp' || driver.startsWith('acp:'));
+  } catch {
+    // Без цифр — только про то, когда включится модель.
+  }
+  if (advice.kind === 'offer') {
+    toastAction(later + tr('Новая модель прочитает историю ≈ {n} ток ({p}% её окна).', { n: fmtCount(advice.tokens), p: advice.share }),
+      tr('Сжать историю'), () => compactBot(id));
+  } else if (advice.kind === 'auto') {
+    toast(later + tr('История больше окна новой модели: перед следующим ответом она сожмётся в сводку.'), 7000);
+  } else if (busy) {
+    toast(later.trim(), 5000);
+  }
+}
+
 // Навык, который бот сохранил в этом вызове: имя и создан он или исправлен.
 function skillCall(call) {
   if (call.name !== 'save_skill' || call.status !== 'ok') return null;
@@ -2999,8 +3072,10 @@ async function openHeadModelPopover() {
       await refreshState();
       paintHeadModel(botById(bot.id));
       if (headModelPopover?.handle === handle && S.currentId === bot.id) handle.update(props());
+      return true;
     } catch (err) {
       toast(err.message);
+      return false;
     }
   };
   const handle = DeloistUI.mountChatModelPopover(host, {
@@ -3010,13 +3085,13 @@ async function openHeadModelPopover() {
     anchor: chip,
     onselect: async (next) => {
       // Конкретная модель главнее уровня: уровень возвращаем в «Авто», как в профиле.
-      await save(next.model ? { driver: next.driver, model: next.model, modelLevel: '' } : { driver: next.driver, model: next.model });
-      // Идущий ход доработает на прежней модели: новая включится со следующего сообщения.
-      if (S.busy.has(bot.id)) toast(tr('Бот сейчас работает. Новая модель включится со следующего сообщения в чате.'), 5000);
+      if (await save(next.model ? { driver: next.driver, model: next.model, modelLevel: '' } : { driver: next.driver, model: next.model })) {
+        afterModelSwitch(bot.id);
+      }
     },
     oneffort: async (effort) => {
-      await save({ effort });
-      if (S.busy.has(bot.id)) toast(tr('Бот сейчас работает. Новое усилие включится со следующего сообщения в чате.'), 5000);
+      // Идущий ход доработает с прежним усилием: новое включится со следующего сообщения.
+      if (await save({ effort }) && S.busy.has(bot.id)) toast(tr('Бот сейчас работает. Новое усилие включится со следующего сообщения в чате.'), 5000);
     },
     onoption: (id, valueId) => {
       const next = { ...(botById(bot.id)?.agentOptions || {}) };
@@ -3372,6 +3447,7 @@ function handleEvent(ev) {
 
     case 'turn_end':
       S.busy.delete(ev.botId);
+      if (compactAfterTurn.delete(ev.botId)) compactBot(ev.botId);
       S.unread.delete(ev.botId);
       S.onSpare.delete(ev.botId);
       turnCard.forget('bot:' + ev.botId);
