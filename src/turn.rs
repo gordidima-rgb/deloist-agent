@@ -2560,6 +2560,11 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         return ("error".into(), format!("Ошибка инструмента: {}", crate::cloud::NO_CONSOLE));
     }
 
+    // Рабочие процессы: без человека, из шага процесса и из делегирования правки отказывают до карточки.
+    if let Some(why) = crate::workflow_tools::refuse(app, bot, &call.name, &call.args) {
+        return ("denied".into(), why);
+    }
+
     if tools::needs_approval_for(app, bot, &call.name, &call.args) {
         // Текст карточки собирает программа (`describe`); слова бота (`purpose`) идут отдельной строкой.
         // Браузерные инструменты спрашивают сами, своими словами: к ним описание не липнем.

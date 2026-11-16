@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -27,6 +27,8 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/workflows/{id}/duplicate", post(duplicate))
         .route("/api/workflows/{id}/run", post(start))
         .route("/api/workflows/{id}/runs", get(runs))
+        .route("/api/workflows/{id}/nodes/{node_id}/webhook", post(rotate_hook))
+        .route("/hooks/workflows/{id}/{node_id}/{secret}", post(incoming_hook))
         .route("/api/workflows/{id}/nodes/{node_id}/run", post(start_solo))
         .route("/api/workflows/{id}/versions", get(versions))
         .route("/api/workflows/{id}/versions/{v}", get(version))
@@ -176,11 +178,25 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
         Ok(b) => b,
         Err(r) => return r,
     };
-    let Some(title) = title_of(&body) else { return fail(StatusCode::BAD_REQUEST, "нужно название") };
+    let title = title_of(&body);
+    let enabled = body.get("enabled").and_then(Value::as_bool);
+    if title.is_none() && enabled.is_none() {
+        return fail(StatusCode::BAD_REQUEST, "нужно название или enabled");
+    }
     let view = {
         let mut guard = app.workflows.lock();
         let Some(stored) = guard.get_mut(&id) else { return not_found() };
-        stored.wf.title = title;
+        if let Some(title) = title {
+            stored.wf.title = title;
+        }
+        if let Some(enabled) = enabled {
+            // После паузы сроки считаются заново: пропущенное за время выключения не запускается разом.
+            if enabled && !stored.wf.enabled {
+                stored.slots.clear();
+                wf::refresh_slots(stored, now());
+            }
+            stored.wf.enabled = enabled;
+        }
         stored.wf.updated_at = now();
         let view = stored.wf.clone();
         guard.save_wf(&id);
@@ -339,4 +355,72 @@ async fn restore(State(app): Shared, Path((id, v)): Path<(String, u64)>) -> Resp
     };
     changed(&app, &id);
     reply(StatusCode::OK, json!({ "workflow": view }))
+}
+
+/// Новый секрет вебхука узла. Секрет виден только в этом ответе; на диске остаётся отпечаток.
+async fn rotate_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id)): Path<(String, String)>) -> Response {
+    let secret = crate::guard::random_token();
+    {
+        let mut guard = app.workflows.lock();
+        let Some(stored) = guard.get_mut(&id) else { return not_found() };
+        if !stored.wf.graph.node(&node_id).is_some_and(|n| n.kind == "trigger" && n.text("trigger") == "webhook") {
+            return fail(StatusCode::BAD_REQUEST, "это не запуск вебхуком");
+        }
+        stored.hooks.insert(node_id.clone(), wf::hook_digest(&secret));
+        guard.save_wf(&id);
+    }
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("127.0.0.1");
+    changed(&app, &id);
+    reply(StatusCode::OK, json!({ "url": format!("http://{host}/hooks/workflows/{id}/{node_id}/{secret}") }))
+}
+
+const HOOK_BODY_CHARS: usize = 64_000;
+const HOOK_DELIVERIES: usize = 200;
+
+/// Входящий вебхук процесса. Неверный адрес, неверный секрет и выключенный процесс отвечают одинаково.
+async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id, secret)): Path<(String, String, String)>, body: Bytes) -> Response {
+    if body.len() > HOOK_BODY_CHARS * 4 || String::from_utf8_lossy(&body).chars().count() > HOOK_BODY_CHARS {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "тело больше 64 000 знаков");
+    }
+    let delivery = ["x-delivery-id", "x-github-delivery", "idempotency-key"]
+        .iter()
+        .find_map(|name| headers.get(*name).and_then(|v| v.to_str().ok()))
+        .map(|v| v.trim().chars().take(200).collect::<String>())
+        .filter(|v| !v.is_empty());
+    {
+        let mut guard = app.workflows.lock();
+        let found = guard.get(&id).is_some_and(|s| {
+            let digest = wf::hook_digest(&secret);
+            s.wf.enabled
+                && s.wf.graph.node(&node_id).is_some_and(|n| n.kind == "trigger" && n.text("trigger") == "webhook")
+                && s.hooks.get(&node_id).is_some_and(|stored| crate::guard::same(stored, &digest))
+        });
+        if !found {
+            return fail(StatusCode::NOT_FOUND, "нет такого вебхука");
+        }
+        if let Some(key) = &delivery {
+            if guard.deliveries.get(&id).is_some_and(|list| list.iter().any(|k| k == &format!("{node_id}:{key}"))) {
+                return reply(StatusCode::OK, json!({ "ok": true, "duplicate": true }));
+            }
+        }
+        if guard.has_open_run(&id) {
+            return reply(StatusCode::ACCEPTED, json!({ "skipped": "busy" }));
+        }
+    }
+    let data = crate::workflow_run::frame_external(&String::from_utf8_lossy(&body));
+    match run::start_run_with(&app, &id, "webhook", None, None, Some(node_id.clone()), false, Some(data)) {
+        Ok(started) => {
+            if let Some(key) = delivery {
+                let mut guard = app.workflows.lock();
+                let list = guard.deliveries.entry(id).or_default();
+                list.push_back(format!("{node_id}:{key}"));
+                while list.len() > HOOK_DELIVERIES {
+                    list.pop_front();
+                }
+            }
+            reply(StatusCode::ACCEPTED, json!({ "ok": true, "run_id": started.id }))
+        }
+        Err(e) if e.status == 409 => reply(StatusCode::ACCEPTED, json!({ "skipped": "busy" })),
+        Err(_) => fail(StatusCode::NOT_FOUND, "нет такого вебхука"),
+    }
 }

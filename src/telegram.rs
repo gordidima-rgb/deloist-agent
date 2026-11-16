@@ -403,7 +403,8 @@ async fn handle_update(app: &Arc<App>, client: &reqwest::Client, token: &str, up
             };
             send_text(client, token, chat_id, &text).await;
         }
-        Incoming::Text { chat_id: _, text } => {
+        Incoming::Text { chat_id, text } => {
+            crate::workflow_run::on_message(app, "telegram", &chat_id.to_string(), &text);
             deliver(app, "telegram", PREFIX, &bot_id, &text).await;
         }
         Incoming::Stop { .. } => {

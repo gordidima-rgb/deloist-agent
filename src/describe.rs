@@ -479,6 +479,17 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
             d.risk = "high";
             d.text = ph!(format!("{me} хочет {ru} «{n}»"), format!("{me} wants to {en} “{n}”"));
         }
+        "edit_workflow" | "run_workflow" | "delete_workflow" => {
+            let summary = crate::workflow_tools::summary(app, name, args);
+            d.class = match name {
+                "edit_workflow" => "change",
+                "run_workflow" => "run",
+                _ => "delete",
+            };
+            d.risk = "high";
+            d.text = ph!(format!("{me}: {summary}"), format!("{me}: {summary}"));
+            d.details = summary;
+        }
         "generate_image" => {
             d.class = "spend";
             d.risk = "medium";

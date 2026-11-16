@@ -13,6 +13,7 @@ const MAX_BOTS: usize = 50;
 const MAX_SKILLS: usize = 100;
 const MAX_ROOMS: usize = 30;
 const MAX_ROUTINES: usize = 100;
+const MAX_WORKFLOWS: usize = 50;
 /// Текст из чужого файла идёт в каждый запрос к модели: длинный обошёлся бы дорого.
 const MAX_TEXT: usize = 20_000;
 
@@ -70,12 +71,36 @@ pub fn export(app: &App) -> Value {
             "members": r.bot_ids.iter().map(|id| name_of(id)).filter(|n| !n.is_empty()).collect::<Vec<_>>(),
             "lead": name_of(&r.lead),
         })).collect::<Vec<_>>(),
+        "workflows": export_workflows(app, &name_of),
         "routines": routines.iter().map(|r| json!({
             "bot": name_of(&r.bot_id), "title": r.title, "prompt": r.prompt,
             "everyMinutes": r.every_minutes, "at": r.at, "days": r.days,
             "windowFrom": r.window_from, "windowTo": r.window_to, "quiet": r.quiet,
         })).collect::<Vec<_>>(),
     })
+}
+
+/// Процессы без секретов, запусков и мест доставки: боты записаны именами, а не номерами.
+fn export_workflows(app: &App, name_of: &dyn Fn(&str) -> String) -> Vec<Value> {
+    let guard = app.workflows.lock();
+    guard
+        .items
+        .iter()
+        .map(|stored| {
+            let mut graph = stored.wf.graph.clone();
+            for node in &mut graph.nodes {
+                if let Some(id) = node.fields.remove("bot_id") {
+                    let name = name_of(id.as_str().unwrap_or_default());
+                    if !name.is_empty() {
+                        node.fields.insert("bot_name".into(), json!(name));
+                    }
+                }
+                // Чат или канал человека — не часть команды.
+                node.fields.remove("place_id");
+            }
+            json!({ "title": stored.wf.title, "graph": graph })
+        })
+        .collect()
 }
 
 /// Импорт: боты и навыки создаются заново, рутины приходят выключенными.
@@ -181,8 +206,41 @@ pub async fn import(app: &Arc<App>, team: &Value) -> Result<Value, String> {
         made_routines += 1;
     }
 
+    // Процессы приезжают выключенными и без вебхуков: адрес с секретом включает только сам человек.
+    let mut made_workflows = 0;
+    for item in team.get("workflows").and_then(Value::as_array).unwrap_or(&empty).iter().take(MAX_WORKFLOWS) {
+        let title = item.get("title").and_then(Value::as_str).unwrap_or_default().trim();
+        let Some(mut graph) = item.get("graph").and_then(|g| serde_json::from_value::<crate::workflows::Graph>(g.clone()).ok()) else { continue };
+        if title.is_empty() {
+            continue;
+        }
+        for node in &mut graph.nodes {
+            node.fields.remove("place_id");
+            node.fields.remove("bot_id");
+            if let Some(name) = node.fields.remove("bot_name") {
+                if let Some(id) = name.as_str().and_then(|n| bot_ids.get(n)) {
+                    node.fields.insert("bot_id".into(), json!(id));
+                }
+            }
+        }
+        if crate::workflows::validate_graph(&graph).is_err() {
+            continue;
+        }
+        let mut stored = crate::workflows::new_workflow(&title.chars().take(200).collect::<String>(), graph);
+        stored.wf.enabled = false;
+        let id = stored.wf.id.clone();
+        {
+            let mut guard = app.workflows.lock();
+            guard.items.push(stored);
+            guard.runs.insert(id.clone(), Vec::new());
+            guard.save_wf(&id);
+        }
+        app.turns.emit(json!({ "type": "workflows", "workflow_id": id }));
+        made_workflows += 1;
+    }
+
     Ok(json!({
-        "bots": made_bots, "skills": made_skills, "rooms": made_rooms, "routines": made_routines,
+        "bots": made_bots, "skills": made_skills, "rooms": made_rooms, "routines": made_routines, "workflows": made_workflows,
     }))
 }
 

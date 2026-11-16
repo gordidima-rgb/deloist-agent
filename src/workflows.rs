@@ -122,11 +122,18 @@ pub struct LastRun {
     pub at: i64,
 }
 
+fn yes() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Workflow {
     pub id: String,
     pub title: String,
+    /// Выключенный процесс не запускается ни по расписанию, ни вебхуком, ни сообщением; вручную работает всегда.
+    #[serde(default = "yes")]
+    pub enabled: bool,
     pub revision: u64,
     pub graph: Graph,
     pub created_at: i64,
@@ -187,6 +194,9 @@ pub struct Run {
     /// Запуск одного узла («выполнить шаг»): ниже по графу ничего не идёт.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
+    /// Данные извне для запускающего узла (тело вебхука, сообщение) уже в рамке «это данные».
+    #[serde(skip)]
+    pub trigger_data: Option<String>,
     /// Почему запуск упал целиком («слишком много кругов»).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -492,6 +502,14 @@ pub struct Stored {
     #[serde(flatten)]
     pub wf: Workflow,
     pub slots: HashMap<String, Slot>,
+    /// Вебхуки: SHA-256 секрета по узлу. Сам секрет нигде не хранится и показывается один раз.
+    pub hooks: HashMap<String, String>,
+}
+
+/// Отпечаток секрета вебхука.
+pub fn hook_digest(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    crate::store::hex(&Sha256::digest(secret.as_bytes()))
 }
 
 fn schedule_nodes(graph: &Graph) -> impl Iterator<Item = (&Node, &Schedule)> {
@@ -557,6 +575,12 @@ pub struct Inner {
     pub runs: HashMap<String, Vec<Run>>,
     /// Токены остановки идущих шагов (по id шага).
     pub tokens: HashMap<String, CancellationToken>,
+    /// Последние номера доставок вебхука (до 200 на процесс).
+    pub deliveries: HashMap<String, std::collections::VecDeque<String>>,
+    /// Тексты, которые наши выводы отправили в мессенджеры: ответом они запуска не вызывают.
+    pub sent: std::collections::VecDeque<(i64, String)>,
+    /// Бот, который сейчас идёт шагом процесса → процесс.
+    pub bot_steps: HashMap<String, String>,
 }
 
 pub struct Workflows {
@@ -653,6 +677,21 @@ impl Inner {
         self.runs.values().flat_map(|v| v.iter()).find(|r| r.steps.iter().any(|s| s.id == step_id)).map(|r| r.id.clone())
     }
 
+    /// Тексты своих выводов помним десять минут.
+    pub fn note_sent(&mut self, text: &str) {
+        let at = now();
+        self.sent.retain(|(when, _)| at - *when < 10 * 60_000);
+        self.sent.push_back((at, text.trim().to_string()));
+        while self.sent.len() > 200 {
+            self.sent.pop_front();
+        }
+    }
+
+    pub fn was_sent(&self, text: &str) -> bool {
+        let at = now();
+        self.sent.iter().any(|(when, sent)| at - *when < 10 * 60_000 && sent == text.trim())
+    }
+
     pub fn has_open_run(&self, wf_id: &str) -> bool {
         self.runs.get(wf_id).is_some_and(|v| v.iter().any(Run::is_open))
     }
@@ -683,7 +722,7 @@ impl Workflows {
             }
         }
         items.sort_by_key(|s| s.wf.created_at);
-        Self { inner: Mutex::new(Inner { dir, versions, items, runs, tokens: HashMap::new() }) }
+        Self { inner: Mutex::new(Inner { dir, versions, items, runs, tokens: HashMap::new(), deliveries: HashMap::new(), sent: Default::default(), bot_steps: HashMap::new() }) }
     }
 
     pub fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -693,7 +732,7 @@ impl Workflows {
 
 pub fn new_workflow(title: &str, graph: Graph) -> Stored {
     let at = now();
-    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), revision: 1, graph, created_at: at, updated_at: at, last_run: None }, slots: HashMap::new() }
+    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, revision: 1, graph, created_at: at, updated_at: at, last_run: None }, slots: HashMap::new(), hooks: HashMap::new() }
 }
 
 /// Строка списка: без графа.

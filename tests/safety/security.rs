@@ -1571,6 +1571,7 @@ async fn the_program_key_cannot_touch_workflows() {
         ("POST", format!("/api/workflows/{id}/run")),
         ("GET", format!("/api/workflows/{id}/runs")),
         ("POST", format!("/api/workflows/{id}/nodes/n1/run")),
+        ("POST", format!("/api/workflows/{id}/nodes/t/webhook")),
         ("GET", format!("/api/workflows/{id}/versions")),
         ("GET", format!("/api/workflows/{id}/versions/1")),
         ("POST", format!("/api/workflows/{id}/versions/1/restore")),

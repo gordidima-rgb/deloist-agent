@@ -178,6 +178,19 @@ async fn post_message(client: &reqwest::Client, token: &str, channel_id: &str, c
     Ok(())
 }
 
+/// Текст в привязанное место, без хода бота. Не подключено — понятная причина; других получателей нет.
+pub(crate) async fn push_text(app: &Arc<App>, text: &str) -> Result<(), String> {
+    let token = app.store.slack_bot_token();
+    let place = app.store.settings().slack.channel_id;
+    if token.trim().is_empty() || place.trim().is_empty() {
+        return Err("Slack не подключён".into());
+    }
+    for part in crate::telegram::split_text(text, MAX_MESSAGE_CHARS) {
+        post_message(&client(), &token, &place, &part).await.map_err(|_| "Slack не принял сообщение".to_string())?;
+    }
+    Ok(())
+}
+
 /// Отправка с делением на части по 3500 символов и одним повтором после 429.
 async fn send_text(client: &reqwest::Client, token: &str, channel_id: &str, text: &str) {
     for part in crate::telegram::split_text(text, MAX_MESSAGE_CHARS) {
@@ -521,7 +534,8 @@ async fn handle_event(app: &Arc<App>, client: &reqwest::Client, bot_token: &str,
             };
             send_text(client, bot_token, &channel_id, &text).await;
         }
-        Incoming::Text { text, .. } => {
+        Incoming::Text { text, channel_id, .. } => {
+            crate::workflow_run::on_message(app, "slack", &channel_id, &text);
             crate::telegram::deliver(app, "slack", PREFIX, &bot_id, &text).await;
         }
         Incoming::Stop { .. } => {

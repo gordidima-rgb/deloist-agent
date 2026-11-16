@@ -116,6 +116,19 @@ async fn post_message(client: &reqwest::Client, token: &str, channel_id: &str, c
     Ok(())
 }
 
+/// Текст в привязанное место, без хода бота. Не подключено — понятная причина; других получателей нет.
+pub(crate) async fn push_text(app: &Arc<App>, text: &str) -> Result<(), String> {
+    let token = app.store.discord_token();
+    let place = app.store.settings().discord.channel_id;
+    if token.trim().is_empty() || place.trim().is_empty() {
+        return Err("Discord не подключён".into());
+    }
+    for part in crate::telegram::split_text(text, MAX_MESSAGE_CHARS) {
+        post_message(&client(), &token, &place, &part).await.map_err(|_| "Discord не принял сообщение".to_string())?;
+    }
+    Ok(())
+}
+
 /// Отправка с делением на части по 2000 символов и одним повтором после 429.
 async fn send_text(client: &reqwest::Client, token: &str, channel_id: &str, text: &str) {
     for part in crate::telegram::split_text(text, MAX_MESSAGE_CHARS) {
@@ -488,7 +501,8 @@ async fn handle_message(app: &Arc<App>, client: &reqwest::Client, token: &str, m
             };
             send_text(client, token, &channel_id, &text).await;
         }
-        Incoming::Text { text, .. } => {
+        Incoming::Text { text, channel_id, .. } => {
+            crate::workflow_run::on_message(app, "discord", &channel_id, &text);
             crate::telegram::deliver(app, "discord", PREFIX, &bot_id, &text).await;
         }
         Incoming::Stop { .. } => {

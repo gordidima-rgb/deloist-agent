@@ -59,6 +59,7 @@ pub fn tool_defs() -> Value {
         list.extend(crate::browser_tools::tool_defs());
         list.extend(crate::team_tasks::defs());
         list.extend(crate::routine_tools::defs());
+        list.extend(crate::workflow_tools::defs());
         list.extend(crate::goal_tools::defs());
         list.extend(crate::scripts::defs());
         list.extend(crate::habits::bot_tool_defs());
@@ -311,11 +312,11 @@ fn base_tool_defs() -> Value {
 /// Инструменты, на которые нельзя отвечать «разрешить на этот разговор» или «всегда»: каждый вызов — отдельное решение.
 /// Ход самопроверки и ход без человека спрашивают инструменты рутин и целей каждый раз (`grants::scope_for`).
 pub fn never_remember(tool: &str) -> bool {
-    tool == "delete_routine"
+    tool == "delete_routine" || crate::workflow_tools::is_mutating(tool)
 }
 
 pub fn is_high_risk(name: &str) -> bool {
-    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_routine" | "update_routine" | "delete_routine")
+    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_routine" | "update_routine" | "delete_routine" | "edit_workflow" | "run_workflow" | "delete_workflow")
 }
 
 /// Инструменты, которые только читают: их не спрашиваем даже в строгом режиме.
@@ -323,7 +324,7 @@ pub fn is_read_only(name: &str) -> bool {
     // `ask_user` и так обращается к человеку. `remember` меняет память бота, это уже запись.
     // `save_script` и `run_script` сами ничего не делают: сохранять можно только под согласие человека, а каждый шаг
     // скрипта идёт через обычную проверку и карточки (`turn::execute_call_in`).
-    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "recall" | "read_skill" | "workspace_graph" | "list_routines" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "search_catalog" | "save_script" | "run_script")
+    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "recall" | "read_skill" | "workspace_graph" | "list_routines" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "search_catalog" | "save_script" | "run_script")
 }
 
 /// Какой из двух режимов осторожнее. Передача задачи не должна снижать осторожность:
@@ -460,6 +461,10 @@ pub fn needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> boo
     }
     if crate::routine_tools::is_routine_tool(name) {
         return crate::routine_tools::needs_approval(app, bot, name, args);
+    }
+    // Рабочие процессы: чтение свободно, правка, запуск и удаление спрашивают всегда, в любом режиме.
+    if crate::workflow_tools::is_tool(name) {
+        return crate::workflow_tools::is_mutating(name);
     }
     if crate::goal_tools::is_goal_tool(name) {
         return crate::goal_tools::needs_approval(app, bot, name, args);
@@ -851,6 +856,12 @@ pub fn label(name: &str) -> &str {
         "create_bot" => "создание бота",
         "update_bot" => "настройка бота",
         "list_routines" => "просмотр рутин",
+        "list_workflows" => "просмотр процессов",
+        "read_workflow" => "чтение процесса",
+        "read_workflow_runs" => "запуски процесса",
+        "edit_workflow" => "правка процесса",
+        "run_workflow" => "запуск процесса",
+        "delete_workflow" => "удаление процесса",
         "list_habits" => "просмотр привычек",
         "save_script" => "сохранение скрипта",
         "run_script" => "запуск скрипта",
@@ -1417,6 +1428,8 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
         team if crate::team_tasks::is_tool(team) => crate::team_tasks::exec(app, bot, team, args, depth).await,
 
         routine if crate::routine_tools::is_routine_tool(routine) => crate::routine_tools::exec(app, bot, routine, args).await,
+
+        flow if crate::workflow_tools::is_tool(flow) => crate::workflow_tools::exec(app, bot, flow, args).await,
 
         browser if browser.starts_with("browser_") => crate::browser_tools::exec(app, bot, browser, args).await,
 
