@@ -32,6 +32,8 @@ fn cli(data: &Path, args: &[&str]) -> (i32, String, String) {
     )
 }
 
+const TIMEOUT_CODE: i32 = 4;
+
 fn bot_id(state: &Value, name: &str) -> String {
     state["bots"]
         .as_array()
@@ -100,6 +102,8 @@ async fn run_gives_a_task_to_a_bot_and_exports_what_it_made() {
 #[tokio::test]
 async fn a_team_file_goes_out_and_comes_back() {
     let crew = Crew::start("cli-team").await;
+    // Окно человека слушает события: без него командная строка сразу скажет, что подтвердить некому.
+    crew.listen().await;
     let file = crew.data_dir.join("team.json");
     let (code, out, err) = cli(&crew.data_dir, &["team", "export", "--out", file.to_str().unwrap()]);
     assert_eq!(code, 0, "{out} {err}");
@@ -107,11 +111,109 @@ async fn a_team_file_goes_out_and_comes_back() {
     assert_eq!(team["format"], "deloist-team");
     assert_eq!(team["bots"].as_array().unwrap().len(), 3);
 
-    // Импорт команды создаёт ботов: с ключа программы (его может прочитать скрипт бота) он закрыт,
-    // решает человек в окне приложения (`guard::bot_room_create`).
-    let (code, out, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--json"]);
-    assert_ne!(code, 0, "импорт с ключа программы прошёл: {out} {err}");
-    assert!(format!("{out} {err}").contains("решает человек"), "{out} {err}");
+    // Ключ программы сам команду не добавляет: командная строка подаёт заявку и ждёт человека.
+    let before = crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len();
+    let child = Command::new(BIN)
+        .args(["team", "apply", file.to_str().unwrap(), "--json", "--wait", "60"])
+        .env("CREW_DATA_DIR", &crew.data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("запуск deloist");
+    let waiter = tokio::task::spawn_blocking(move || child.wait_with_output().expect("ожидание deloist"));
+
+    // Человек в окне: карточка появилась, ничего не создано, нажимает «Добавить».
+    let mut request = Value::Null;
+    for _ in 0..100 {
+        request = crew.ok("GET", "/api/team/import-requests", None).await["requests"][0].clone();
+        if request.is_object() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let id = request["id"].as_str().expect("заявка не появилась в окне").to_string();
+    assert_eq!(request["preview"]["bots"].as_array().unwrap().len(), 3, "{request}");
+    let card_code = request["code"].as_str().expect("в карточке нет кода").to_string();
+    assert_eq!(card_code.len(), 5, "{request}");
+    assert_eq!(crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len(), before, "до «Добавить» бот уже создан");
+    crew.ok("POST", &format!("/api/team/import-request/{id}/approve"), None).await;
+
+    let out = waiter.await.unwrap();
+    let (code, stdout, stderr) = (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string());
+    assert_eq!(code, 0, "{stdout} {stderr}");
+    assert!(stderr.contains("Жду подтверждения"), "{stderr}");
+    assert!(stderr.contains(&format!("код {card_code}")), "код в терминале не совпал с карточкой {card_code}: {stderr}");
+    let data: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!((data["status"].as_str(), data["imported"]["bots"].as_i64()), (Some("approved"), Some(3)), "{data}");
+    assert_eq!(crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len(), before + 3);
+
+    // Отказ человека: код 1, ничего не добавлено.
+    let child = Command::new(BIN)
+        .args(["team", "apply", file.to_str().unwrap(), "--wait", "60"])
+        .env("CREW_DATA_DIR", &crew.data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("запуск deloist");
+    let waiter = tokio::task::spawn_blocking(move || child.wait_with_output().expect("ожидание deloist"));
+    let mut id = String::new();
+    for _ in 0..100 {
+        if let Some(found) = crew.ok("GET", "/api/team/import-requests", None).await["requests"][0]["id"].as_str() {
+            id = found.to_string();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(!id.is_empty(), "вторая заявка не появилась");
+    crew.send("POST", &format!("/api/team/import-request/{id}/deny"), None).await;
+    let out = waiter.await.unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("отклонил"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len(), before + 3);
+
+    // Отклонённый файл час не принимается: повтор сразу получает отказ, а не карточку.
+    let (code, _, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--wait", "5"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("час"), "{err}");
+
+    // Другой файл: не дождались — код 4, заявка снята и принять её уже нельзя.
+    let mut other = team.clone();
+    other["bots"][0]["name"] = json!("Другой файл");
+    let file = crew.data_dir.join("team-other.json");
+    std::fs::write(&file, other.to_string()).unwrap();
+    let (code, _, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--wait", "1"]);
+    assert_eq!(code, TIMEOUT_CODE, "{err}");
+    assert!(crew.ok("GET", "/api/team/import-requests", None).await["requests"].as_array().unwrap().is_empty(), "заявка осталась висеть");
+
+    // --no-wait: номер заявки и код 0, бот не создан.
+    let (code, out, _) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--no-wait", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let data: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(data["status"], "pending", "{data}");
+    assert_eq!(crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len(), before + 3);
+}
+
+/// Без открытого окна подтвердить некому: ждать бессмысленно, заявка снимается.
+#[tokio::test]
+async fn team_apply_without_an_open_window_says_so_and_does_not_wait() {
+    let crew = Crew::start("cli-team-nowindow").await;
+    let file = crew.data_dir.join("team.json");
+    let (code, out, err) = cli(&crew.data_dir, &["team", "export", "--out", file.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out} {err}");
+    let started = std::time::Instant::now();
+    let (code, _, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--wait", "60"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("Окно Deloist не открыто: подтвердить некому. Открой окно или веб-интерфейс."), "{err}");
+    assert!(started.elapsed().as_secs() < 20, "ждала без окна");
+    assert!(crew.ok("GET", "/api/team/import-requests", None).await["requests"].as_array().unwrap().is_empty(), "заявка осталась висеть");
+
+    // С --no-wait только предупреждение: заявка ждёт, пока окно не откроется.
+    let (code, out, err) = cli(&crew.data_dir, &["team", "apply", file.to_str().unwrap(), "--no-wait"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("Окно Deloist не открыто") && out.contains("код "), "{out} {err}");
+    assert_eq!(crew.ok("GET", "/api/team/import-requests", None).await["requests"].as_array().unwrap().len(), 1);
 }
 
 /// Заглушка MCP-клиента: пишет запросы построчно и читает ответы.

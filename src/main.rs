@@ -118,6 +118,7 @@ mod aumid;
 mod team;
 mod tg_channels;
 mod team_changes;
+mod team_import_requests;
 mod team_proposal;
 mod team_tasks;
 mod tools;
@@ -184,6 +185,8 @@ pub struct App {
     pub vault: password_vault::Vault,
     /// Задачи, которые боты команды дали друг другу без ожидания.
     pub tasks: team_tasks::Tasks,
+    /// Заявки командной строки на добавление команды из файла: ждут человека в окне.
+    pub import_requests: team_import_requests::ImportRequests,
 }
 
 /// Папка приложения: при разработке корень репозитория, иначе папка рядом с exe.
@@ -253,7 +256,7 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     let data = store.data_dir().to_path_buf();
     let turns = turn::Turns::open(store.data_dir());
     let queues = queue::Queues::open(store.data_dir().to_path_buf(), turns.sender()).await;
-    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data) });
+    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default() });
     // До первого хода: отметки задач у новой версии начинаются с этой минуты.
     extract::init(&app).await;
     scheduler::start(app.clone());

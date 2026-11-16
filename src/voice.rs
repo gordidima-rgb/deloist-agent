@@ -156,8 +156,9 @@ pub const VOICE_STATES: [&str; 5] = ["recording", "transcribing", "sending", "do
 pub const LEVEL_EVERY: Duration = Duration::from_millis(50);
 
 /// События только для окон человека: программа с ключом их не получает.
+/// Заявки командной строки на добавление команды (`team_import_*`): номер и состав карточки видит только окно.
 pub fn window_only(event: &Value) -> bool {
-    event.get("type").and_then(Value::as_str) == Some("voice_state")
+    matches!(event.get("type").and_then(Value::as_str), Some("voice_state" | "team_import_request" | "team_import_closed"))
 }
 
 /// Пропустить ли ещё одно событие: смена шага — всегда, уровень того же шага — не чаще `LEVEL_EVERY`.
@@ -313,6 +314,7 @@ mod tests {
         assert!(should_emit(last, ms(1), "recording", "b"), "другой бот");
         assert!(window_only(&json!({ "type": "voice_state", "state": "recording" })));
         assert!(!window_only(&json!({ "type": "voice_hotkey" })));
+        assert!(window_only(&json!({ "type": "team_import_request" })) && window_only(&json!({ "type": "team_import_closed" })));
     }
 
     #[test]

@@ -3150,6 +3150,16 @@ function handleEvent(ev) {
       if (mine) teamProposalCard(ev);
       break;
 
+    case 'team_import_request':
+      teamImportCard(ev.request);
+      break;
+
+    case 'team_import_closed': {
+      // Заявку закрыли в другом окне, отозвала командная строка или вышел срок.
+      S.importCards?.get(ev.id)?.importFinish?.();
+      break;
+    }
+
     case 'optimizer_offer':
       if (mine) optimizerOfferCard(ev);
       break;
@@ -3594,8 +3604,132 @@ function onPermissionEvent(ev) {
   if (ev.type === 'activity_logged' && ev.botId === S.currentId && !$('#drawer').hidden && S.tab === 'profile') loadActivity(ev.botId);
 }
 
+// Заявка командной строки (`deloist team apply`) на добавление команды из файла. Карточка общая для всего окна:
+// она не привязана к чату бота. Ничего не создаётся, пока человек не нажмёт «Добавить»; закрытие окна клавишей Esc
+// считается отказом. Ключ программы такую карточку принять не может: адреса принятия закрыты для него в guard.rs.
+function teamImportCard(request) {
+  if (!request?.id || S.importCards?.has(request.id)) return;
+  S.importCards ||= new Map();
+  const preview = request.preview || {};
+  const list = (items) => (Array.isArray(items) ? items : []);
+  const MAX_SHOWN = 12;
+  const section = (title, rows) => {
+    if (!rows.length) return '';
+    const shown = rows.slice(0, MAX_SHOWN).map((row) => `<li>${row}</li>`).join('');
+    const more = rows.length > MAX_SHOWN ? `<li class="note">${tr('и ещё {n}', { n: rows.length - MAX_SHOWN })}</li>` : '';
+    return `<div class="note"><b>${title}</b></div><ul class="team-list">${shown}${more}</ul>`;
+  };
+  // Начало текста: человек видит, какие указания получит бот, а не только имена.
+  const sample = (text, chars) => (text ? `<div class="note team-excerpt">${escapeHtml(text)}${chars ? ` · ${tr('{n} знаков', { n: Number(chars) || 0 })}` : ''}</div>` : '');
+  const bots = list(preview.bots).map((b) => `<b>${escapeHtml(b.name)}</b>${b.role ? ` — ${escapeHtml(b.role)}` : ''}${sample(b.excerpt, b.chars)}`);
+  const skills = list(preview.skills).map((k) => `<b>${escapeHtml(k.name)}</b>${sample(k.excerpt, k.chars)}`);
+  const rooms = list(preview.rooms).map((r) => `<b>${escapeHtml(r.name)}</b> · ${tr('участников: {n}', { n: Number(r.members) || 0 })}`);
+  const routines = list(preview.routines).map((r) => `<b>${escapeHtml(r.title || '…')}</b> — ${escapeHtml(r.bot)}${sample(r.excerpt, r.chars)}`);
+  const warnings = preview.warnings || {};
+  const warn = [
+    warnings.longText ? tr('Есть очень длинные персоны или навыки: прочитайте их целиком, прежде чем добавлять.') : '',
+    warnings.manyBots ? tr('В файле больше пяти ботов.') : '',
+  ].filter(Boolean).map((line) => `<p class="note team-access team-warn">⚠ ${line}</p>`).join('');
+  const dlg = document.createElement('dialog');
+  dlg.className = 'modal kit-dialog kit-form team-import-card';
+  dlg.innerHTML = `<form method="dialog" class="modal-inner">
+    <h3 tabindex="-1">${tr('Добавить команду из файла')}</h3>
+    <p class="note">${tr('Командная строка (deloist team apply) просит добавить в Deloist команду из файла. Пока вы не нажмёте «Добавить», ничего не создаётся.')}</p>
+    <p class="team-code">${tr('Код сверки')}: <b data-code>${escapeHtml(request.code || '')}</b> <span class="note">${tr('Он должен совпасть с кодом в вашем терминале. Не совпал или вы ничего не запускали — отклоните.')}</span></p>
+    ${section(tr('Боты: {n}', { n: bots.length }), bots)}
+    ${section(tr('Навыки: {n}', { n: skills.length }), skills)}
+    ${section(tr('Команды: {n}', { n: rooms.length }), rooms)}
+    ${section(tr('Рутины: {n}', { n: routines.length }), routines)}
+    <p class="note">${tr('Всего текста указаний: {chars} знаков; навыков: {skills}.', { chars: Number(preview.totalChars) || 0, skills: skills.length })}</p>
+    ${warn}
+    <p class="note team-defaults">${tr('Новые боты начнут в режиме «спрашивать», без сайтов в браузере и без папок. Рутины придут выключенными.')}</p>
+    <p class="note team-access team-warn">⚠ ${tr('Персоны и навыки из файла станут указаниями для ботов. Если вы не запускали эту команду, нажмите «Отклонить».')}</p>
+    <p class="note" data-pending></p>
+    <div class="modal-actions">
+      <button type="button" class="ghost" data-reject-all>${tr('Отклонить все и не принимать заявки 1 час')}</button>
+      <button type="button" class="ghost" data-decline>${tr('Отклонить')}</button>
+      <button type="button" class="primary" data-accept>${tr('Добавить')}</button>
+    </div>
+  </form>`;
+  document.body.appendChild(dlg);
+  S.importCards.set(request.id, dlg);
+  const paintPending = () => {
+    const n = S.importCards.size;
+    S.importCards.forEach((card) => {
+      const line = card.querySelector('[data-pending]');
+      if (line) line.textContent = tr('Ждут ответа заявок: {n}', { n });
+    });
+  };
+  paintPending();
+  let timer = null;
+  const finish = () => {
+    clearTimeout(timer);
+    S.importCards.delete(request.id);
+    if (dlg.open) dlg.close();
+    dlg.remove();
+    paintPending();
+  };
+  dlg.importFinish = finish;
+  const resolve = async (action) => {
+    $$('button', dlg).forEach((btn) => { btn.disabled = true; });
+    try {
+      const done = await api(`/api/team/import-request/${encodeURIComponent(request.id)}/${action}`, { method: 'POST' });
+      finish();
+      if (action === 'approve') {
+        await refreshState();
+        renderSkills();
+        renderRoutines();
+        const imported = done.imported || {};
+        toast(tr('Добавлено. Ботов: {bots}, навыков: {skills}, команд: {rooms}, рутин: {routines} (выключены).', { bots: imported.bots || 0, skills: imported.skills || 0, rooms: imported.rooms || 0, routines: imported.routines || 0 }), 6000);
+      }
+    } catch (err) {
+      if (err.status === 404 || err.status === 409 || err.status === 410) {
+        finish();
+        if (err.status !== 404) toast(trServer(err.message), 6000);
+        return;
+      }
+      toast(tr('Не смог добавить: {error}', { error: trServer(err.message) }), 7000);
+      $$('button', dlg).forEach((btn) => { btn.disabled = false; });
+    }
+  };
+  dlg.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    resolve('deny');
+  });
+  $('[data-accept]', dlg).addEventListener('click', () => resolve('approve'));
+  $('[data-decline]', dlg).addEventListener('click', () => resolve('deny'));
+  $('[data-reject-all]', dlg).addEventListener('click', async () => {
+    $$('button', dlg).forEach((btn) => { btn.disabled = true; });
+    try {
+      await api('/api/team/import-requests/reject-all', { method: 'POST' });
+      [...S.importCards.values()].forEach((card) => card.importFinish?.());
+      toast(tr('Заявки отклонены, новые не принимаются час.'), 5000);
+    } catch (err) {
+      toast(trServer(err.message), 6000);
+      $$('button', dlg).forEach((btn) => { btn.disabled = false; });
+    }
+  });
+  // Просроченную заявку принять нельзя: карточка гаснет сама.
+  timer = setTimeout(finish, Math.max(1, Number(request.expiresInSeconds) || 600) * 1000);
+  dlg.showModal();
+  $('[data-decline]', dlg)?.focus({ preventScroll: true });
+  dlg.scrollTop = 0;
+  dlg.querySelector('.modal-inner')?.scrollTo?.(0, 0);
+}
+
+// Заявки, поданные, пока окно было закрыто или связь прерывалась.
+async function showImportRequests() {
+  try {
+    const { requests } = await api('/api/team/import-requests');
+    for (const request of Array.isArray(requests) ? requests : []) teamImportCard(request);
+  } catch {
+    // не критично: заявка подаётся ещё раз командой
+  }
+}
+
 function connectEvents() {
   const es = new EventSource('/api/events');
+  es.onopen = () => showImportRequests();
   es.onmessage = (e) => {
     try {
       handleEvent(JSON.parse(e.data));

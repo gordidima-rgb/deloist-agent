@@ -561,6 +561,10 @@ fn human_only(path: &str) -> bool {
         || (path.starts_with("/api/rooms/") && path.ends_with("/reassign"))
         // Согласие на специалиста запускает ход и передаёт работу: решает человек.
         || (path.starts_with("/api/bots/") && path.contains("/offers/"))
+        // Заявка командной строки на добавление команды из файла: ключ программы её подаёт, читает статус
+        // по номеру и отзывает (`cancel`), а принять, отклонить и увидеть список ждущих может только окно.
+        || path.starts_with("/api/team/import-requests")
+        || (path.starts_with("/api/team/import-request/") && (path.trim_end_matches('/').ends_with("/approve") || path.trim_end_matches('/').ends_with("/deny")))
         // Бот-оптимизатор читает журналы и спрашивает человека: ответ, выключатель и список
         // его решений видит и меняет только окно. Ключ программы из `runtime.json` сюда не ходит.
         || path.starts_with("/api/optimizer")

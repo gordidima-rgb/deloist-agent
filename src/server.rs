@@ -617,20 +617,22 @@ async fn state(State(app): Shared) -> Response {
 async fn events(State(app): Shared, window: Option<axum::Extension<crate::guard::WindowSession>>) -> Response {
     // Часть событий (уровень микрофона) только для окон человека, не для программ с ключом.
     let window = window.is_some();
+    // Пока окно слушает события, `deloist team apply` знает, что карточку кто-то увидит.
+    let listening = window.then(|| app.import_requests.window_connected());
     let rx = app.turns.subscribe();
     let hello = format!(
         "retry: 3000\n\ndata: {}\n\n",
         json!({ "type": "hello", "at": crate::store::now() })
     );
     let hello = futures_util::stream::once(async move { hello });
-    let live = futures_util::stream::unfold(rx, move |mut rx| async move {
+    let live = futures_util::stream::unfold((rx, listening), move |(mut rx, listening)| async move {
         loop {
             match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
                 Ok(Ok(event)) if !window && crate::voice::window_only(&event) => continue,
-                Ok(Ok(event)) => return Some((format!("data: {event}\n\n"), rx)),
+                Ok(Ok(event)) => return Some((format!("data: {event}\n\n"), (rx, listening))),
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => return None,
-                Err(_) => return Some((": ping\n\n".to_string(), rx)),
+                Err(_) => return Some((": ping\n\n".to_string(), (rx, listening))),
             }
         }
     });
@@ -3012,6 +3014,128 @@ async fn import_team(State(app): Shared, body: axum::body::Bytes) -> Response {
     }
 }
 
+// --- Заявка командной строки на добавление команды (`deloist team apply`) ---------------------
+// Ключ программы заявку подаёт, читает её статус по номеру и отзывает; принять или отклонить может
+// только окно (см. guard::human_only). Файл команды лежит в памяти и ничего не создаёт до «Добавить».
+
+fn import_closed(app: &Arc<App>, id: &str, status: &str) {
+    app.turns.emit(json!({ "type": "team_import_closed", "id": id, "status": status }));
+}
+
+async fn import_request_create(State(app): Shared, body: axum::body::Bytes) -> Response {
+    use crate::team_import_requests::Refusal;
+    if body.len() > crate::team::MAX_REQUEST_BYTES + 1024 {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "файл команды больше 1 МБ");
+    }
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let team = body.get("team").cloned().unwrap_or(body);
+    let preview = match crate::team::validate(&app, &team) {
+        Ok(preview) => preview,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e),
+    };
+    match app.import_requests.create(team, preview) {
+        Ok(created) => {
+            if let Some(event) = app.import_requests.event_for(&created.id) {
+                app.turns.emit(json!({ "type": "team_import_request", "request": event }));
+            }
+            // Ручка и код уходят только подавшему: публичный номер остаётся окну.
+            let mut answer = app.import_requests.status(&created.handle).unwrap_or_else(|| json!({ "status": "pending" }));
+            answer["handle"] = json!(created.handle);
+            answer["code"] = json!(created.code);
+            answer["windows"] = json!(app.import_requests.windows());
+            self::created(answer)
+        }
+        Err(Refusal::Duplicate) => fail(StatusCode::CONFLICT, "этот файл уже ждёт подтверждения в окне Deloist"),
+        Err(Refusal::Blocked) => fail(StatusCode::TOO_MANY_REQUESTS, "этот файл недавно отклонили в окне Deloist: повторить можно через час"),
+        Err(Refusal::Paused) => fail(StatusCode::TOO_MANY_REQUESTS, "человек отказался принимать заявки на час"),
+        Err(Refusal::TooMany) => fail(StatusCode::TOO_MANY_REQUESTS, "уже ждут ответа три заявки: ответьте на них в окне Deloist"),
+        Err(Refusal::RateLimited) => fail(StatusCode::TOO_MANY_REQUESTS, "слишком много заявок за последние минуты: подождите"),
+    }
+}
+
+/// Статус читается по ручке из ответа на подачу; публичный номер из карточки статуса не даёт.
+async fn import_request_status(State(app): Shared, Path(handle): Path<String>) -> Response {
+    match app.import_requests.status(&handle) {
+        Some(status) => ok(status),
+        None => fail(StatusCode::NOT_FOUND, "такой заявки нет или она уже забыта"),
+    }
+}
+
+/// Список ждущих заявок для окна (закрыт для ключа программы).
+async fn import_requests_pending(State(app): Shared) -> Response {
+    ok(json!({ "requests": app.import_requests.pending() }))
+}
+
+async fn import_request_approve(State(app): Shared, Path(id): Path<String>) -> Response {
+    use crate::team_import_requests::Take;
+    let team = match app.import_requests.take_for_apply(&id) {
+        Take::Taken(team) => team,
+        Take::Missing => return fail(StatusCode::NOT_FOUND, "заявки нет: её уже обработали или она забыта"),
+        Take::Expired => {
+            import_closed(&app, &id, "expired");
+            return fail(StatusCode::GONE, "срок заявки вышел: запустите команду ещё раз");
+        }
+        Take::NotPending => return fail(StatusCode::CONFLICT, "заявка уже обработана"),
+    };
+    // Импорт идёт в своей задаче: если окно оборвёт запрос, он всё равно дойдёт до `finish`.
+    let job = {
+        let (app, id) = (app.clone(), id.clone());
+        tokio::spawn(async move {
+            let result = crate::team::import(&app, &team).await;
+            app.import_requests.finish(&id, result.clone());
+            import_closed(&app, &id, if result.is_ok() { "approved" } else { "failed" });
+            if result.is_ok() {
+                app.turns.emit(json!({ "type": "state_changed" }));
+            }
+            result
+        })
+    };
+    let result = match job.await {
+        Ok(result) => result,
+        Err(e) => {
+            app.import_requests.finish(&id, Err(format!("задача импорта прервалась: {e}")));
+            import_closed(&app, &id, "failed");
+            Err("импорт прервался".to_string())
+        }
+    };
+    match result {
+        Ok(summary) => ok(json!({ "imported": summary })),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+async fn import_request_deny(State(app): Shared, Path(id): Path<String>) -> Response {
+    if app.import_requests.deny(&id) {
+        import_closed(&app, &id, "denied");
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        fail(StatusCode::NOT_FOUND, "заявка уже неактивна")
+    }
+}
+
+/// «Отклонить все и не принимать заявки час»: решает человек в окне.
+async fn import_requests_reject_all(State(app): Shared) -> Response {
+    let ids = app.import_requests.reject_all();
+    for id in &ids {
+        import_closed(&app, id, "denied");
+    }
+    ok(json!({ "rejected": ids.len() }))
+}
+
+/// Командная строка отзывает свою заявку по ручке (например, не дождалась): карточка в окне гаснет.
+async fn import_request_cancel(State(app): Shared, Path(handle): Path<String>) -> Response {
+    match app.import_requests.cancel(&handle) {
+        Some(id) => {
+            import_closed(&app, &id, "cancelled");
+            StatusCode::NO_CONTENT.into_response()
+        }
+        None => fail(StatusCode::NOT_FOUND, "заявка уже неактивна"),
+    }
+}
+
 // --- Перенос из Hermes Agent (только из окна: см. guard::human_only) ---------------------
 
 async fn hermes_profiles() -> Response {
@@ -3479,6 +3603,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/connectors/{id}/check", post(connector_check))
         .route("/api/team/export", get(export_team))
         .route("/api/team/import", post(import_team))
+        .route("/api/team/import-request", post(import_request_create))
+        .route("/api/team/import-requests", get(import_requests_pending))
+        .route("/api/team/import-requests/reject-all", post(import_requests_reject_all))
+        .route("/api/team/import-request/{handle}", get(import_request_status))
+        .route("/api/team/import-request/{id}/approve", post(import_request_approve))
+        .route("/api/team/import-request/{id}/deny", post(import_request_deny))
+        .route("/api/team/import-request/{handle}/cancel", post(import_request_cancel))
         .route("/api/import/hermes", get(hermes_profiles).post(import_hermes))
         .route("/hooks/{id}/{token}", post(hook))
         .merge(crate::screen::routes())

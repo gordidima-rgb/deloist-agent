@@ -3821,3 +3821,12 @@ span.tm-main { cursor: inherit; }
 @media (min-width: 821px) {
   body.side-collapsed .side-menu-trigger span, body.side-collapsed .side-menu-trigger .side-menu-chevron { display: none; }
 }
+
+/* Карточка «Добавить команду из файла» (заявка командной строки): длинный список прокручивается, кнопки всегда видны. */
+.team-import-card { max-height: min(88vh, 720px); }
+.team-import-card .team-list { margin: 2px 0 6px; padding-left: 18px; }
+.team-import-card .modal-actions { position: sticky; bottom: 0; background: var(--k-surface); padding-top: var(--k-space-2); }
+.team-import-card .modal-actions { flex-wrap: wrap; justify-content: flex-end; }
+.team-import-card .team-code { margin: 4px 0; }
+.team-import-card .team-code b { font: 800 var(--k-text-xl) / 1 var(--k-font-display); letter-spacing: 0.18em; padding: 0 6px; }
+.team-import-card .team-excerpt { margin: 2px 0 4px; font-style: italic; overflow-wrap: anywhere; }
