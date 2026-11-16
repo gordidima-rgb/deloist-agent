@@ -145,7 +145,9 @@ async fn a_pending_approval_survives_a_restart() {
     crew.keep_data();
     drop(crew);
 
-    let crew = Crew::start_at(data, &[]).await;
+    let sink = data.with_extension("txt");
+    let sink_text = sink.to_string_lossy().to_string();
+    let crew = Crew::start_at(data, &[("CREW_TEST_REMINDER_SINK", &sink_text)]).await;
     let run = run_status(&crew, &run_id, &id).await;
     assert_eq!(run["status"], "approval", "согласие ждёт дальше: {run}");
     crew.ok("POST", &format!("/api/workflow-steps/{step_id}/decide"), Some(json!({ "approved": true }))).await;

@@ -1554,6 +1554,45 @@ async fn the_program_key_cannot_touch_the_optimizer() {
 }
 
 #[tokio::test]
+async fn the_program_key_cannot_touch_workflows() {
+    let crew = Crew::start("workflows-agent").await;
+    let made = crew.ok("POST", "/api/workflows", Some(json!({ "title": "Мой" }))).await;
+    let id = made["workflow"]["id"].as_str().unwrap().to_string();
+    let token = agent_token(&crew);
+    let body = json!({ "title": "Чужой", "base_revision": 1, "graph": { "nodes": [], "edges": [] }, "approved": true, "request_id": "x" }).to_string();
+    let calls = [
+        ("GET", "/api/workflows".to_string()),
+        ("POST", "/api/workflows".to_string()),
+        ("GET", format!("/api/workflows/{id}")),
+        ("PUT", format!("/api/workflows/{id}/graph")),
+        ("PATCH", format!("/api/workflows/{id}")),
+        ("DELETE", format!("/api/workflows/{id}")),
+        ("POST", format!("/api/workflows/{id}/duplicate")),
+        ("POST", format!("/api/workflows/{id}/run")),
+        ("GET", format!("/api/workflows/{id}/runs")),
+        ("POST", "/api/workflow-runs/run_x/stop".to_string()),
+        ("POST", "/api/workflow-steps/st_x/stop".to_string()),
+        ("POST", "/api/workflow-steps/st_x/retry".to_string()),
+        ("POST", "/api/workflow-steps/st_x/decide".to_string()),
+    ];
+    for (method, path) in calls {
+        let response = reqwest::Client::new()
+            .request(method.parse().unwrap(), format!("{}{path}", crew.base))
+            .bearer_auth(&token)
+            .header("content-type", "application/json")
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "ключ программы дошёл до процессов: {method} {path}");
+    }
+    // Ничего не изменилось: процесс на месте, его название прежнее, чужого нет.
+    let list = crew.ok("GET", "/api/workflows", None).await;
+    assert_eq!(list["workflows"].as_array().unwrap().len(), 1);
+    assert_eq!(list["workflows"][0]["title"], "Мой");
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_reassign_a_room() {
     let crew = Crew::start("security-reassign").await;
     let state = crew.ok("GET", "/api/state", None).await;
