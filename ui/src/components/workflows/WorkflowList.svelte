@@ -251,15 +251,18 @@
   .wfl-text small {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
+    white-space: nowrap;
     gap: 6px;
     font: 400 12px/1.3 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfl-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 1px 8px;
     white-space: nowrap;
     border-radius: 999px;
@@ -268,6 +271,7 @@
     font: 600 11px/1.5 var(--k-font-body);
   }
   .wfl-chip i {
+    margin-left: 5px;
     font-style: normal;
     font-weight: 400;
     opacity: 0.7;

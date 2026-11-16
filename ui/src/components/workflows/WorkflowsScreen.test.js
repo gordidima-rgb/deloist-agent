@@ -41,12 +41,13 @@ function backend(over = {}) {
     if (over[`${method} ${path}`]) return over[`${method} ${path}`](opts);
     if (path === '/api/workflows' && method === 'GET') return { workflows: state.list };
     if (path === '/api/workflows' && method === 'POST') {
-      const w = { id: 'w2', title: opts.body.title, revision: 1, graph: opts.body.graph };
-      state.list = [...state.list, { id: 'w2', title: w.title, steps: 3, last_run: null }];
+      const nid = state.list.length === 1 ? 'w2' : `w${state.list.length + 1}`;
+      const w = { id: nid, title: opts.body.title, revision: 1, graph: opts.body.graph };
+      state.list = [...state.list, { id: nid, title: w.title, steps: 3, last_run: null }];
       return { workflow: w };
     }
     if (path === '/api/workflows/w1' && method === 'GET') return { workflow: state.wf, triggers: [] };
-    if (path === '/api/workflows/w2' && method === 'GET') return { workflow: { id: 'w2', title: 'Новый процесс', revision: 1, graph: starterGraph() }, triggers: [] };
+    if (/^\/api\/workflows\/w[2-9]$/.test(path) && method === 'GET') return { workflow: { id: 'w2', title: 'Новый процесс', revision: 1, graph: starterGraph() }, triggers: [] };
     if (path === '/api/workflows/w1' && method === 'DELETE') {
       state.list = [];
       return { ok: true };
@@ -98,6 +99,11 @@ describe('WorkflowsScreen', () => {
     await drain();
     expect(state.calls).toContain('POST /api/workflows');
     expect(state.calls).toContain('GET /api/workflows/w2');
+    // «Новый процесс» уже есть в списке: следующее имя получает номер
+    host.querySelector('.wfl-new').click();
+    await drain();
+    const posts = api.mock.calls.filter((c) => c[0] === '/api/workflows' && c[1]?.method === 'POST');
+    expect(posts.map((c) => c[1].body.title)).toEqual(['Новый процесс', 'Новый процесс 2']);
   });
 
   it('deletes only after a second click on the trash button', async () => {
@@ -134,9 +140,50 @@ describe('WorkflowsScreen', () => {
     }
     await drain();
     expect(puts).toBe(1);
-    // после конфликта холст собран заново из свежей версии: она пустая
+    // правка не потеряна: холст прежний, показан выбор, автосохранение стоит
+    expect(host.querySelector('.wfs-conflict')).not.toBeNull();
+    expect(host.querySelector('.wfn-area').value).toBe('новое поручение');
+    expect(state.calls.filter((c) => c.startsWith('PUT'))).toHaveLength(1);
+    // «Загрузить свежую»: холст собирается заново из свежей версии (она пустая)
+    [...host.querySelectorAll('.wfs-cf-btn')].find((b) => b.textContent.includes('свежую')).click();
+    await drain();
+    expect(host.querySelector('.wfs-conflict')).toBeNull();
     expect(host.querySelectorAll('.svelte-flow__node').length).toBe(0);
     expect(state.calls.filter((c) => c.startsWith('PUT'))).toHaveLength(1);
+  });
+
+  it('keeps my edits after a 409 and re-saves with the fresh revision', async () => {
+    const conflict = { id: 'w1', title: 'Первый', revision: 7, graph: { nodes: [], edges: [], strokes: [] } };
+    const bases = [];
+    const { api, state } = backend({
+      'PUT /api/workflows/w1/graph': async (opts) => {
+        bases.push(opts.body.base_revision);
+        if (bases.length === 1) throw Object.assign(new Error('conflict'), { status: 409, data: { conflict: true, workflow: conflict } });
+        return { revision: 8 };
+      },
+    });
+    await render(api);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const area = host.querySelector('.wfn-area');
+      area.value = 'мои правки';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(2500);
+      // ещё правка, пока выбор не сделан: автосохранение стоит
+      area.value = 'мои правки ещё';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(3000);
+    } finally {
+      vi.useRealTimers();
+    }
+    await drain();
+    expect(bases).toEqual([2]);
+    [...host.querySelectorAll('.wfs-cf-btn')].find((b) => b.textContent.includes('Оставить')).click();
+    await drain();
+    expect(bases).toEqual([2, 7]);
+    expect(host.querySelector('.wfs-conflict')).toBeNull();
+    expect(host.querySelector('.wfn-area').value).toBe('мои правки ещё');
+    expect(state.calls.filter((c) => c.startsWith('PUT'))).toHaveLength(2);
   });
 
   it('refreshes the run on a workflows event for the open process', async () => {
@@ -258,8 +305,8 @@ describe('WorkflowsScreen', () => {
     await drain(5);
     expect(host.querySelectorAll('.svelte-flow__node').length).toBe(3);
     expect(host.querySelector('.wfn-area').value).toBe('моя правка');
-    expect(toast).toHaveBeenCalledTimes(1);
-    expect(toast.mock.calls[0][1].action.label).toBe('Загрузить свежую');
+    const btns = [...host.querySelectorAll('.wfs-cf-btn')].map((b) => b.textContent.trim());
+    expect(btns).toEqual(['Оставить мои правки', 'Загрузить свежую']);
     delete window.DeloistUI;
   });
 });

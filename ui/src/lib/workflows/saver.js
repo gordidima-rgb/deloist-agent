@@ -1,5 +1,5 @@
 // Сохранение графа: одна отложенная запись, не больше одной в полёте, ревизия из ответа.
-// Ответ 409 — кто-то сохранил раньше: отдаём свежий процесс наружу и больше не пишем эту версию.
+// Ответ 409 — кто-то сохранил раньше: отдаём свежий процесс наружу и держим запись, пока человек не выберет.
 export class Saver {
   /**
    * api(path, {method, body}); id; revision — текущая; getGraph() — что писать;
@@ -16,11 +16,28 @@ export class Saver {
     this.inFlight = null;
     this.again = false;
     this.dead = false;
+    this.held = false;
+  }
+
+  hold() {
+    this.held = true;
+    clearTimeout(this.timer);
+    this.timer = 0;
+    this.on.state?.('dirty');
+  }
+
+  // Человек выбрал «Оставить мои правки»: пишем наш граф поверх свежей ревизии.
+  release(revision) {
+    if (this.dead) return;
+    if (typeof revision === 'number') this.revision = revision;
+    this.held = false;
+    return this.flush();
   }
 
   schedule() {
     if (this.dead) return;
     this.on.state?.('dirty');
+    if (this.held) return;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = 0;
@@ -29,11 +46,11 @@ export class Saver {
   }
 
   get pending() {
-    return Boolean(this.timer) || Boolean(this.inFlight) || this.again;
+    return Boolean(this.timer) || Boolean(this.inFlight) || this.again || this.held;
   }
 
   async flush() {
-    if (this.dead) return;
+    if (this.dead || this.held) return;
     clearTimeout(this.timer);
     this.timer = 0;
     if (this.inFlight) {
@@ -64,9 +81,9 @@ export class Saver {
       this.on.state?.(this.timer || this.again ? 'dirty' : 'idle');
     } catch (err) {
       if (err?.status === 409) {
-        this.dead = true;
+        this.held = true;
         this.on.conflict?.(err.data?.workflow ?? null);
-        this.on.state?.('idle');
+        this.on.state?.('dirty');
       } else {
         this.on.error?.(err);
         this.on.state?.('error');

@@ -460,7 +460,10 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
                 }
                 Spawn::Output { run_id, step_id, workflow_id, title, target, node, input, external } => {
                     let result = crate::workflow_io::deliver(&app, &workflow_id, &title, &target, &node, &input, external).await;
-                    complete(&app, &run_id, &step_id, result.map(|out| (out, None, Vec::new())));
+                    complete(&app, &run_id, &step_id, result.map(|out| {
+                        let files = if target == "file" { vec![out.clone()] } else { Vec::new() };
+                        (out, None, files)
+                    }));
                 }
                 Spawn::Notice { workflow_id, run_id, step_id, title, question } => {
                     app.turns.emit(json!({ "type": "workflow_approval", "workflow_id": workflow_id, "run_id": run_id, "step_id": step_id, "title": title, "question": question }));

@@ -111,7 +111,6 @@
     on: {
       state: (s) => (saveState = s),
       conflict: (fresh) => {
-        toast(tr('Процесс изменили в другом месте. Загрузили свежую версию.'));
         onconflict?.(fresh);
       },
       error: (err) => {
@@ -226,6 +225,8 @@
     pending: () => saver.pending || model.typing,
     revision: () => saver.revision,
     flush: () => saver.flush(),
+    hold: () => saver.hold(),
+    keepMine: (revision) => saver.release(revision),
     inflight: () => saver.inFlight,
     // Чужая правка: подменить граф на месте, если своих несохранённых правок нет. Иначе false.
     remote: (fresh) => {

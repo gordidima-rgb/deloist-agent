@@ -100,6 +100,7 @@
 
   async function open(id) {
     selected = id;
+    conflict = null;
     remember(id);
     listOpen = false;
     run = null;
@@ -125,14 +126,25 @@
   // Свежая копия после конфликта 409 или правки в другом месте: холст собирается заново.
   function adopt(fresh) {
     if (!fresh) return open(selected);
+    conflict = null;
     workflow = fresh;
     epoch += 1;
     loadList();
   }
 
+  // «Новый процесс», «Новый процесс 2», …: первое имя, которого ещё нет в списке.
+  function freshTitle() {
+    const base = tr('Новый процесс');
+    const used = new Set(items.map((i) => i.title));
+    if (!used.has(base)) return base;
+    let n = 2;
+    while (used.has(`${base} ${n}`)) n += 1;
+    return `${base} ${n}`;
+  }
+
   async function create() {
     try {
-      const res = await request('/api/workflows', { method: 'POST', body: { title: tr('Новый процесс'), graph: starterGraph() } });
+      const res = await request('/api/workflows', { method: 'POST', body: { title: freshTitle(), graph: starterGraph() } });
       await loadList();
       await open(res.workflow.id);
     } catch (err) {
@@ -264,6 +276,31 @@
   // Чужая правка графа (бот или другое окно): без своих несохранённых правок холст обновляется на месте и играет
   // анимацию; с ними правки не трогаем, а человеку показываем карточку, как при конфликте 409.
   let staleToast = 0;
+  let conflict = $state.raw(null);
+
+  // Свои правки не теряем молча: автосохранение стоит, пока человек не выберет.
+  function askConflict(fresh) {
+    handle?.hold();
+    conflict = { fresh: fresh ?? null };
+  }
+
+  async function keepMine() {
+    const c = conflict;
+    conflict = null;
+    let revision = c?.fresh?.revision;
+    if (typeof revision !== 'number' && workflow) {
+      try {
+        revision = (await request(`/api/workflows/${encodeURIComponent(workflow.id)}`)).workflow?.revision;
+      } catch {}
+    }
+    handle?.keepMine(revision);
+  }
+
+  function loadFresh() {
+    const c = conflict;
+    conflict = null;
+    adopt(c?.fresh);
+  }
   async function pullRemote(workflowId, depth) {
     try {
       const res = await request(`/api/workflows/${encodeURIComponent(workflowId)}`);
@@ -282,10 +319,7 @@
         workflow = { ...workflow, ...fresh, graph: workflow.graph };
       } else if (staleToast !== fresh.revision) {
         staleToast = fresh.revision;
-        toast(tr('Процесс изменили в другом месте, пока у вас есть несохранённые правки.'), {
-          action: { label: tr('Загрузить свежую'), onclick: () => adopt(fresh) },
-          duration: 12000,
-        });
+        askConflict(fresh);
       }
     } catch {}
   }
@@ -354,12 +388,19 @@
             onrun={startRun}
             onstop={stopRun}
             onrename={(t) => rename(workflow.id, t)}
-            onconflict={adopt}
+            onconflict={askConflict}
             onlist={() => (listOpen = !listOpen)}
             onready={(h) => (handle = h)}
           />
         </SvelteFlowProvider>
       {/key}
+      {#if conflict}
+        <div class="wfs-conflict" role="alertdialog" aria-label={tr('Процесс изменили в другом месте')}>
+          <span>{tr('Процесс изменили в другом месте, а у вас есть несохранённые правки. Автосохранение на паузе.')}</span>
+          <button type="button" class="wfs-cf-btn" onclick={keepMine}>{tr('Оставить мои правки')}</button>
+          <button type="button" class="wfs-cf-btn" onclick={loadFresh}>{tr('Загрузить свежую')}</button>
+        </div>
+      {/if}
       {#if previewV}
         <div class="wfs-preview">
           {#key previewV.v}
@@ -413,6 +454,40 @@
   }
   .wfs-scrim {
     display: none;
+  }
+  .wfs-conflict {
+    position: absolute;
+    left: 50%;
+    top: 12px;
+    z-index: 40;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    max-width: min(560px, calc(100% - 24px));
+    padding: 10px 12px;
+    translate: -50% 0;
+    border-radius: 14px;
+    background: var(--k-surface);
+    color: var(--k-text);
+    box-shadow: var(--k-shadow-pop, 0 8px 28px rgb(0 0 0 / 0.25)), inset 0 0 0 1px var(--k-line-strong);
+    font: 500 13px/1.35 var(--k-font-body);
+  }
+  .wfs-conflict span {
+    flex: 1 1 240px;
+  }
+  .wfs-cf-btn {
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--k-surface-3);
+    color: var(--k-text);
+    font: 600 12.5px/1.2 var(--k-font-body);
+    cursor: pointer;
+  }
+  .wfs-cf-btn:first-of-type {
+    background: var(--k-accent, var(--k-surface-3));
+    color: var(--k-accent-ink, var(--k-text));
   }
   .wfs-preview {
     position: absolute;

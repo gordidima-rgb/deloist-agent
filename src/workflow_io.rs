@@ -249,8 +249,10 @@ pub async fn deliver(app: &Arc<App>, workflow_id: &str, title: &str, target: &st
         }
         "file" => {
             let (data_dir, wf, rel, text) = (app.store.data_dir().to_path_buf(), workflow_id.to_string(), node.text("path"), input.to_string());
-            let path = tokio::task::spawn_blocking(move || write_file(&data_dir, &wf, &rel, &text)).await.map_err(|e| e.to_string())??;
-            Ok(path.to_string_lossy().into_owned())
+            let parts = safe_relative(&rel)?;
+            tokio::task::spawn_blocking(move || write_file(&data_dir, &wf, &rel, &text)).await.map_err(|e| e.to_string())??;
+            // Человеку показываем путь внутри папки процесса, а не полный путь на диске.
+            Ok(parts.join("/"))
         }
         other => Err(format!("неизвестный вывод «{other}»")),
     }
