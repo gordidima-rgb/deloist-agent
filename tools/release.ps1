@@ -16,6 +16,9 @@ Set-Location $root
 
 if (-not (Test-Path $Key)) { throw "Нет ключа выпуска: $Key" }
 if (git status --porcelain) { throw 'В дереве есть незакоммиченные правки: выпуск должен совпадать с коммитом.' }
+# Специалисты каталога: оба языка, разделы инструкций, проверочные задачи, нет секретов и личных путей.
+node tools/check_agents.mjs
+if ($LASTEXITCODE -ne 0) { throw 'Проверка специалистов каталога не прошла (tools/check_agents.mjs).' }
 
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
 $tag = "v$version"
