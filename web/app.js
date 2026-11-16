@@ -6561,15 +6561,21 @@ function renderRoutines() {
     el.className = `routine${r.enabled ? '' : ' off'}`;
     const next = r.hook ? tr('по вебхуку') : r.enabled ? nextText(r.nextRun) : '';
     const last = STATUS_LABELS[r.lastStatus];
+    const icon = (body) => svgIcon(body);
+    const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
+    const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
+    const chips = [
+      next || r.hook ? `<span class="rt-chip" title="${escapeHtml(`${nextTitle}
+${bot?.name || tr('бот удалён')}, ${scheduleText(r)}`)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
+      r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? '<path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/>' : '<path d="m5 12 5 5 9-10"/>')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
+    ].join('');
     el.innerHTML = `
-      <div>
-        <div class="rt-title">${escapeHtml(r.title)}${r.hook ? ` <span class="rt-quiet on">${tr('вебхук')}</span>` : ''}</div>
-        <div class="rt-meta">${escapeHtml(bot?.name || tr('бот удалён'))}, ${escapeHtml(scheduleText(r))}<button type="button" class="rt-quiet${r.quiet ? ' on' : ''}" title="${tr('Писать в чат, только если есть что сказать')}">${r.quiet ? tr('только важное') : tr('писать всё')}</button></div>
-        ${next ? `<div class="rt-next">${r.hook ? tr('Адрес: {url}', { url: `<code>${escapeHtml(hookUrl(r))}</code>` }) : tr('Следующий запуск: {time}', { time: escapeHtml(next) })}</div>` : ''}
-        ${r.lastRun ? `<div class="rt-meta">${tr('Последний запуск {time}', { time: escapeHtml(whenText(r.lastRun)) })}${last ? `: <span class="${statusClass(r.lastStatus)}">${escapeHtml(last)}</span>` : ''}</div>` : ''}
-      </div>
+      <div class="rt-title" title="${escapeHtml(`${r.title}
+${bot?.name || tr('бот удалён')}, ${scheduleText(r)}`)}">${escapeHtml(r.title)}</div>
+      <div class="rt-chips">${chips}</div>
       <div class="rt-actions">
-        <button type="button" class="ghost rt-run">${tr('Запустить')}</button>
+        <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' : '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>')}</button>
+        <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('<path d="M7 5v14l12-7z"/>')}</button>
         <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
         <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
       </div>`;
@@ -6593,7 +6599,7 @@ function renderRoutines() {
         e.target.checked = r.enabled;
       }
     });
-    $('.rt-actions .icon-btn', el).addEventListener('click', async () => {
+    $('.rt-actions button:last-of-type', el).addEventListener('click', async () => {
       try {
         await api(`/api/routines/${r.id}`, { method: 'DELETE' });
         S.routines = S.routines.filter((x) => x.id !== r.id);

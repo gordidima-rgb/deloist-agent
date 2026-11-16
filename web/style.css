@@ -3099,7 +3099,7 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
   position: fixed;
   inset: 0 0 0 auto;
   margin: 0;
-  width: min(640px, 100vw);
+  width: min(720px, 100vw);
   height: 100dvh;
   max-height: none;
   padding: 0;
@@ -3118,8 +3118,20 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 .kit-sheet .sheet-foot { margin: 0; padding: var(--k-space-3) var(--k-space-6); border-top: 1px solid var(--k-line); justify-content: flex-start; }
 .kit-sheet .routines-list,
 .kit-sheet .journal-list { max-height: none; overflow: visible; }
-.kit-sheet .routine { flex-wrap: wrap; row-gap: var(--k-space-2); }
-.kit-sheet .routine .rt-actions { margin-left: auto; }
+/* Рутина — одна строка: название, чипы (бот, расписание, следующий и прошлый запуск с временем), действия. */
+.kit-sheet .routine { flex-wrap: nowrap; align-items: center; gap: var(--k-space-3); }
+.kit-sheet .routine .rt-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-sheet .rt-chips { flex: none; display: flex; align-items: center; gap: 6px; }
+.kit-sheet .rt-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.kit-sheet .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
+.kit-sheet .rt-chip.rt-bot { background: transparent; padding-left: 0; color: var(--k-text-3); font-weight: 400; }
+.kit-sheet .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
+.kit-sheet .rt-last.st-failed .i, .kit-sheet .rt-last.st-error .i, .kit-sheet .rt-last.st-limit .i, .kit-sheet .rt-last.st-needs .i { color: var(--k-attention-text, currentColor); }
+.kit-sheet .routine .rt-actions { margin-left: 0; flex: none; gap: var(--k-space-2); }
+.kit-sheet .routine .rt-run,
+.kit-sheet .routine .rt-quiet { width: 28px; height: 28px; padding: 0; background: transparent; }
+.kit-sheet .routine .rt-quiet:not(.on) { color: var(--k-text-3); }
+.kit-sheet .routine .rt-quiet.on { color: var(--k-brand-text); }
 /* Журнал: каждый запуск — своя мягкая карточка, текст спокойнее заголовка. */
 .kit-dialog.kit-sheet .journal-list:has(.jr) { padding: 0; border: 0; gap: var(--k-space-2); }
 .kit-sheet .jr { padding: var(--k-space-3) var(--k-space-4); border: 0; border-radius: var(--k-radius-lg); background: var(--k-surface-2); gap: 6px; }
