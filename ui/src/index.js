@@ -35,6 +35,7 @@ import DrawerMemory from './components/drawer/DrawerMemory.svelte';
 import DrawerGoals from './components/drawer/DrawerGoals.svelte';
 import DrawerFiles from './components/drawer/DrawerFiles.svelte';
 import BotList from './components/sidebar/BotList.svelte';
+import NeedsBoard from './components/sidebar/NeedsBoard.svelte';
 import UsageScreen from './components/usage/UsageScreen.svelte';
 import RemindersTab from './components/routines/RemindersTab.svelte';
 import TodosTab from './components/routines/TodosTab.svelte';
@@ -139,6 +140,8 @@ window.DeloistUI = {
   mountDrawerFiles: (target, props) => mountComponent(DrawerFiles, target, props),
   // Список слева: закреплённые, старшие, специалисты в запасе, группы.
   mountBotList: (target, props) => mountComponent(BotList, target, props),
+  // Доска под «Нужен ты»: что ждёт тебя, что в работе, что ждёт в очереди и что не прочитано.
+  mountNeedsBoard: (target, props) => mountComponent(NeedsBoard, target, props),
   // Окно «Использование и лимиты»: расход токенов, лимиты ботов, модели и подписки.
   mountUsageScreen: (target, props) => mountComponent(UsageScreen, target, props),
   // Окно «Рутины»: вкладки «Напоминания», «Задачи» и «Привычки».

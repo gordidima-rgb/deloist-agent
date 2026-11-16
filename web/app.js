@@ -615,6 +615,7 @@ function queuedCount(id) {
 }
 
 function renderSidebar() {
+  renderNeeds();
   const current = botById(S.currentId);
   if (current && !inRoom()) paintBadges($('#head-avatar'), current);
   paintGuests();
@@ -3200,7 +3201,7 @@ function handleEvent(ev) {
 
     case 'queue_updated': {
       const items = Array.isArray(ev.items) ? ev.items : [];
-      S.queues.set(ev.botId, { paused: Boolean(ev.paused), pauseReason: ev.pauseReason, items });
+      S.queues.set(ev.botId, { paused: Boolean(ev.paused), pauseReason: ev.pauseReason, hold: S.queues.get(ev.botId)?.hold, items });
       const bot = botById(ev.botId);
       if (bot) bot.queued = items.length;
       if (mine) renderQueue();
@@ -3285,6 +3286,8 @@ function handleEvent(ev) {
 
 // Всё, что ждёт человека, по всем ботам и группам: карточки, передачи браузера, вопросы.
 let needsItems = [];
+let boardWorking = [];
+let boardWaiting = [];
 let needsTimer = null;
 
 function refreshNeedsSoon() {
@@ -3294,8 +3297,10 @@ function refreshNeedsSoon() {
 
 async function refreshNeeds() {
   try {
-    const { items } = await api('/api/needs');
-    needsItems = items || [];
+    const data = await api('/api/needs');
+    needsItems = data.items || [];
+    boardWorking = data.working || [];
+    boardWaiting = data.waiting || [];
   } catch {
     return;
   }
@@ -3312,26 +3317,82 @@ function needKind(item) {
   return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение') }[item.kind] || '';
 }
 
+// Почему сообщение ждёт в очереди. Код приходит с сервера (`holdReason`), слова подбираем здесь.
+function holdText(code) {
+  return {
+    paused_manual: tr('на паузе: остановлено вручную'),
+    paused_restart: tr('на паузе после перезапуска'),
+    limit: tr('ждёт: лимит токенов на месяц'),
+    card: tr('ждёт твоего ответа на карточку'),
+    busy: tr('ждёт конца хода'),
+  }[code] || '';
+}
+
+// Причина для очереди открытого бота: пауза и лимит знает сервер, карточку и занятость видно по событиям.
+function queueHold(id) {
+  const data = S.queues.get(id);
+  if (data?.paused) return data.pauseReason === 'manual' ? 'paused_manual' : 'paused_restart';
+  if (data?.hold === 'limit') return 'limit';
+  if (S.waiting.get(id)?.size) return 'card';
+  return S.busy.has(id) ? 'busy' : '';
+}
+
+function boardSections() {
+  const where = (item) => (item.roomName ? `${item.botName || ''} · ${item.roomName}` : item.botName || '');
+  const needs = needsItems.map((item) => ({
+    id: item.id, ref: item, where: where(item), meta: needKind(item), title: needTitle(item).slice(0, 140),
+  }));
+  const working = boardWorking.map((item) => ({
+    id: `${item.kind}:${item.id || item.botId}`, ref: item, where: where(item),
+    meta: window.DeloistUI.durationText(Date.now() - item.since) || tr('только что'),
+    title: item.kind === 'task' ? tr('задача от {name}: {text}', { name: item.fromName || '', text: item.text || '' }) : '',
+  }));
+  const waiting = boardWaiting.map((item) => ({
+    id: `${item.kind}:${item.id || item.botId}`, ref: item, where: where(item),
+    meta: item.kind === 'queue' ? tr('В очереди: {count}', { count: item.count }) : tr('задача от {name}', { name: item.fromName || '' }),
+    title: item.text || '',
+    tag: holdText(item.reason),
+  }));
+  const unread = [
+    ...S.bots.filter((b) => S.unread.has(b.id)).map((b) => ({ id: `bot:${b.id}`, ref: { botId: b.id }, where: b.name })),
+    ...S.rooms.filter((r) => S.roomsUnread.has(r.id)).map((r) => ({ id: `room:${r.id}`, ref: { roomId: r.id }, where: r.name })),
+  ];
+  return [
+    { key: 'needs', title: tr('Нужен ты'), items: needs },
+    { key: 'working', title: tr('В работе'), items: working },
+    { key: 'waiting', title: tr('Ждёт'), items: waiting },
+    { key: 'unread', title: tr('Непрочитанные'), items: unread },
+  ];
+}
+
+async function pickBoard(key, entry) {
+  const item = entry.ref;
+  if (key === 'needs') return openNeed(item);
+  $('#needs-list').hidden = true;
+  renderNeeds();
+  if (item.roomId && roomById(item.roomId)) await selectRoom(item.roomId);
+  else if (item.botId && botById(item.botId)) await selectBot(item.botId);
+}
+
+let needsBoardView = null;
+
 function renderNeeds() {
   const btn = $('#btn-needs');
   const list = $('#needs-list');
-  if (!btn || !list) return;
+  if (!btn || !list || !window.DeloistUI?.mountNeedsBoard) return;
   const count = needsItems.length;
-  btn.hidden = count === 0;
-  $('#needs-count').textContent = String(count);
-  if (!count) list.hidden = true;
+  const sections = boardSections();
+  const any = sections.some((s) => s.items.length);
+  // Кнопка живёт, пока на доске что-то есть; значок считает только «Нужен ты».
+  btn.hidden = !any;
+  const badge = $('#needs-count');
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+  if (!any) list.hidden = true;
   btn.setAttribute('aria-expanded', String(!list.hidden));
-  list.innerHTML = '';
-  for (const item of needsItems) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'need-item';
-    const where = item.roomName ? `${item.botName || ''} · ${item.roomName}` : item.botName || '';
-    row.innerHTML = `<span class="need-where">${escapeHtml(where)} · ${escapeHtml(needKind(item))}</span>
-      <span class="need-title">${escapeHtml(needTitle(item).slice(0, 140))}</span>`;
-    row.addEventListener('click', () => openNeed(item));
-    list.append(row);
-  }
+  if (list.hidden) return;
+  if (needsBoardView) needsBoardView.update({ sections });
+  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard });
 }
 
 // Переход к карточке: открыть разговор, дорисовать карточку, если её нет на странице, и показать её.
@@ -3596,7 +3657,8 @@ async function loadActivity(botId) {
 }
 
 function onPermissionEvent(ev) {
-  if (['approval', 'approval_closed', 'question', 'question_closed', 'turn_end'].includes(ev.type)) refreshNeedsSoon();
+  if (['approval', 'approval_closed', 'question', 'question_closed', 'turn_start', 'turn_end', 'queue_updated', 'task_update'].includes(ev.type)) refreshNeedsSoon();
+  if (ev.type === 'turn_start' || ev.type === 'turn_end') renderQueue();
   if (ev.type === 'permissions_changed') {
     refreshGrantsLine();
     if ($('#modal-settings')?.open) loadRules();
@@ -3983,6 +4045,7 @@ function renderQueue(force = false) {
     id: S.currentId,
     paused: Boolean(data?.paused),
     pauseReason: data?.pauseReason,
+    hold: S.currentId ? queueHold(S.currentId) : '',
     edit: S.queueEdit?.id || null,
     items: items.map((item) => [item.id, item.text]),
   });
@@ -3991,12 +4054,9 @@ function renderQueue(force = false) {
 
   box.hidden = !items.length;
   $('#queue-count').textContent = tr('В очереди: {count}', { count: items.length });
-  $('#queue-note').hidden = !data?.paused;
-  $('#queue-note').textContent = data?.pauseReason === 'manual'
-    ? tr('Остановлено вручную')
-    : data?.pauseReason === 'restart'
-      ? tr('Приостановлено после перезапуска')
-      : tr('на паузе');
+  const hold = S.currentId ? queueHold(S.currentId) : '';
+  $('#queue-note').hidden = !hold;
+  $('#queue-note').textContent = holdText(hold);
   $('#queue-resume').hidden = !data?.paused;
 
   const list = $('#queue-list');
@@ -4016,7 +4076,7 @@ async function loadQueue(id) {
   try {
     const data = await api(`/api/bots/${id}/queue`);
     const items = Array.isArray(data.items) ? data.items : [];
-    S.queues.set(id, { paused: Boolean(data.paused), pauseReason: data.pauseReason, items });
+    S.queues.set(id, { paused: Boolean(data.paused), pauseReason: data.pauseReason, hold: data.holdReason, items });
     const bot = botById(id);
     if (bot) bot.queued = items.length;
     if (id === S.currentId) renderQueue();
