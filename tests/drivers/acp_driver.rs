@@ -532,3 +532,65 @@ async fn a_full_window_keeps_the_session_when_nobody_can_write_a_summary() {
     assert_eq!(s.count("session/new"), 1, "сессию заменили без сводки");
     assert_eq!(session_of(&first), session_of(&second), "агент потерял разговор");
 }
+
+/// Сообщение в группу и ответ бота в её треде.
+async fn room_turn(s: &Setup, room: &str, text: &str) -> String {
+    s.crew.clear_events();
+    s.crew.ok("POST", &format!("/api/rooms/{room}/messages"), Some(json!({ "text": text }))).await;
+    s.crew.wait_event("конец хода группы", |e| e["type"] == "room_turn_end" && e["roomId"] == room).await;
+    let thread = s.crew.ok("GET", &format!("/api/rooms/{room}/thread?limit=10"), None).await;
+    let answer = thread["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "assistant").cloned();
+    answer.and_then(|a| a["text"].as_str().map(str::to_string)).unwrap_or_default()
+}
+
+async fn new_room(s: &Setup, name: &str, instructions: &str) -> String {
+    let room = s
+        .crew
+        .ok("POST", "/api/rooms", Some(json!({ "name": name, "instructions": instructions, "botIds": [s.bot], "lead": s.bot, "mode": "lead" })))
+        .await;
+    room["room"]["id"].as_str().unwrap().to_string()
+}
+
+/// Весь текст prompt-блоков, который агент получил в этой сессии.
+fn prompts_of(s: &Setup, session: &str) -> Vec<String> {
+    s.methods()
+        .iter()
+        .filter(|m| m["method"] == "session/prompt" && m["params"]["sessionId"] == session)
+        .map(|m| m["params"]["prompt"].as_array().unwrap().iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"))
+        .collect()
+}
+
+#[tokio::test]
+async fn each_team_and_the_personal_chat_get_their_own_agent_session() {
+    let s = Setup::new("acp-thread-sessions", json!({}), "ask").await;
+    let alpha = new_room(&s, "Альфа", "МЕТКА-АЛЬФА-ПРАВИЛО").await;
+    let beta = new_room(&s, "Бета", "МЕТКА-БЕТА-ПРАВИЛО").await;
+
+    let (_, personal) = s.turn("личное: секрет-личный").await;
+    let a1 = room_turn(&s, &alpha, "в альфе: секрет-альфа").await;
+    let b1 = room_turn(&s, &beta, "в бете: секрет-бета").await;
+    let a2 = room_turn(&s, &alpha, "альфа ещё раз").await;
+    let (_, personal2) = s.turn("личное ещё раз").await;
+
+    let (sp, sa, sb) = (session_of(&personal), session_of(&a1), session_of(&b1));
+    assert!(!sp.is_empty() && !sa.is_empty() && !sb.is_empty(), "{personal} / {a1} / {b1}");
+    assert_ne!(sp, sa, "личный чат и команда делят сессию");
+    assert_ne!(sp, sb, "личный чат и команда делят сессию");
+    assert_ne!(sa, sb, "две команды делят сессию");
+    assert_eq!(sa, session_of(&a2), "вторая реплика в той же команде не продолжила её сессию");
+    assert_eq!(sp, session_of(&personal2), "личный чат потерял свою сессию");
+    // Один процесс агента на бота, три сессии.
+    assert_eq!(pid_of(&personal), pid_of(&b1));
+    assert_eq!(s.count("initialize"), 1);
+    assert_eq!(s.count("session/new"), 3);
+
+    // Каждая сессия получила свой текст и ничего чужого.
+    let own = |session: &str| prompts_of(&s, session).join("\n");
+    let (tp, ta, tb) = (own(&sp), own(&sa), own(&sb));
+    assert!(ta.contains("МЕТКА-АЛЬФА-ПРАВИЛО") && !ta.contains("МЕТКА-БЕТА-ПРАВИЛО"), "система альфы: {ta}");
+    assert!(tb.contains("МЕТКА-БЕТА-ПРАВИЛО") && !tb.contains("МЕТКА-АЛЬФА-ПРАВИЛО"), "система беты: {tb}");
+    assert!(!tp.contains("МЕТКА-") && !tp.contains("секрет-альфа") && !tp.contains("секрет-бета"), "личная сессия: {tp}");
+    assert!(ta.contains("секрет-альфа") && !ta.contains("секрет-бета") && !ta.contains("секрет-личный"), "разговор альфы: {ta}");
+    assert!(tb.contains("секрет-бета") && !tb.contains("секрет-альфа") && !tb.contains("секрет-личный"), "разговор беты: {tb}");
+    assert!(tp.contains("секрет-личный"), "разговор личного чата: {tp}");
+}

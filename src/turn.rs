@@ -1852,12 +1852,15 @@ async fn drive_once(
             hidden.extend(extras.hidden.iter().cloned());
             env.extend(extras.env.iter().cloned());
             let agent_options = agent_options_of(bot);
+            // Ход группы идёт в её сессии агента, личный чат и служебные запросы — в личной.
+            let conv = app.turns.conv_of(&bot.id).filter(|c| c.starts_with("room:"));
             acp::run(
                 acp::Request {
                     app,
                     bot,
                     messages,
                     workspace: &workspace,
+                    thread: conv.as_deref().unwrap_or(acp::PERSONAL_THREAD),
                     spec: acp::Spec { command: &choice.cli_command, env: &env, hidden_env: &hidden, mode: &settings.acp_mode, model: &choice.model, effort: &choice.effort, options: &agent_options, temp_root: extras.temp_root.as_deref(), auth: &extras.auth },
                 },
                 cancel,

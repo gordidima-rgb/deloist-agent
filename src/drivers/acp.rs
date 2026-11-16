@@ -27,6 +27,9 @@ use crate::store::Bot;
 use crate::App;
 
 pub const PROTOCOL_VERSION: i64 = 1;
+/// Ключ разговора для личного чата бота; команда — `room:<id>`.
+pub const PERSONAL_THREAD: &str = "bot";
+
 /// Режимы агентов, в которых правки и команды идут через `session/request_permission`.
 /// Codex: `read-only`; Claude Code, Gemini и большинство остальных: `default`.
 const ASKING_MODES: [&str; 2] = ["read-only", "default"];
@@ -159,8 +162,8 @@ struct Agent {
     stderr: Arc<Mutex<VecDeque<String>>>,
     /// Ответ на `initialize`: что агент умеет и как в него входить.
     init: Mutex<Value>,
-    /// Сессия бота. Замок заодно не даёт двум ходам одного бота идти в один процесс.
-    session: AsyncMutex<Option<String>>,
+    /// Сессии бота по разговорам (`bot` — личный чат, `room:<id>` — команда): у каждого своя. Замок заодно не даёт двум ходам одного бота идти в один процесс.
+    sessions: AsyncMutex<HashMap<String, String>>,
     /// Своя временная папка процесса: убирается, когда процесс закрылся.
     temp: Option<PathBuf>,
 }
@@ -270,9 +273,9 @@ fn pool() -> &'static Mutex<HashMap<String, Arc<Agent>>> {
     POOL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Последняя сессия бота: после перезапуска агента её можно продолжить через `session/load`.
-fn known_sessions() -> &'static Mutex<HashMap<String, (String, String)>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+/// Последняя сессия бота в каждом разговоре, ключ `(бот, разговор)`: после перезапуска агента её можно продолжить через `session/load`.
+fn known_sessions() -> &'static Mutex<HashMap<(String, String), (String, String)>> {
+    static SESSIONS: OnceLock<Mutex<HashMap<(String, String), (String, String)>>> = OnceLock::new();
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -375,7 +378,7 @@ async fn spawn(spec: &Spec<'_>, signature: String, workspace: &Path) -> Result<A
         alive: AtomicBool::new(true),
         stderr: Arc::new(Mutex::new(VecDeque::new())),
         init: Mutex::new(Value::Null),
-        session: AsyncMutex::new(None),
+        sessions: AsyncMutex::new(HashMap::new()),
         temp,
     });
 
@@ -504,6 +507,8 @@ pub struct Request<'a> {
     /// Сообщения в виде для модели: системное, история, последнее сообщение человека.
     pub messages: &'a [Value],
     pub workspace: &'a Path,
+    /// Разговор, которому принадлежит ход: `bot` — личный чат, `room:<id>` — команда. У бота в каждом своя сессия агента.
+    pub thread: &'a str,
     pub spec: Spec<'a>,
 }
 
@@ -547,32 +552,33 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
     // Живёт до конца функции; без хода (его нет у вызова вне очереди) ключа нет и мост закрыт.
     let _turn_key = TurnKey::issue(req.app, &bot_id);
     let agent = agent_for(&bot_id, &req.spec, req.workspace).await?;
-    let mut session = agent.session.lock().await;
+    let mut sessions = agent.sessions.lock().await;
+    let key = (bot_id.clone(), req.thread.to_string());
 
     let (tx, mut inbox) = mpsc::unbounded_channel::<Value>();
     let mut carry: Option<String> = None;
     // Сводку пишет модель команды по API, как у доктора памяти. Нет такой модели — новая сессия
     // началась бы с чистого листа: тогда оставляем агенту прежнюю, он сожмётся сам, как раньше.
-    let writer = reported_usage(&bot_id)
+    let writer = reported_usage_in(&bot_id, req.thread)
         .is_some_and(|(used, size)| needs_fresh_session(used, size))
         .then(|| crate::service::house_bot(req.app))
         .flatten();
     if let Some(writer) = writer {
         // Окно агента почти полно: прежнюю сессию не продолжаем, начинаем новую и уносим в неё сводку.
-        *session = None;
-        known_sessions().lock().unwrap().remove(&bot_id);
-        forget_usage(&bot_id);
-        carry = fresh_session_summary(req.app, req.bot, &writer).await;
+        sessions.remove(req.thread);
+        known_sessions().lock().unwrap().remove(&key);
+        forget_usage(&bot_id, req.thread);
+        carry = fresh_session_summary(req.app, req.bot, &writer, req.thread).await;
     }
-    let fresh = if session.is_none() {
+    let fresh = if !sessions.contains_key(req.thread) {
         let (id, fresh) = open_session(&agent, &req, cancel).await?;
-        *session = Some(id);
+        sessions.insert(req.thread.to_string(), id);
         fresh
     } else {
         false
     };
-    let session_id = session.clone().unwrap_or_default();
-    known_sessions().lock().unwrap().insert(bot_id.clone(), (agent.signature.clone(), session_id.clone()));
+    let session_id = sessions.get(req.thread).cloned().unwrap_or_default();
+    known_sessions().lock().unwrap().insert(key, (agent.signature.clone(), session_id.clone()));
 
     let prompt = prompt_blocks(&agent, req.messages, fresh, carry.as_deref());
     *agent.inbox.lock().unwrap() = Some(tx);
@@ -585,7 +591,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         }
     };
 
-    let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, bot_id: bot_id.clone() };
+    let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, bot_id: bot_id.clone(), thread: req.thread.to_string() };
     let mut deadline: Option<tokio::time::Instant> = None;
     let outcome = loop {
         if turn.cancelled && deadline.is_none() {
@@ -637,7 +643,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         Err(_) if turn.cancelled => Err("остановлено".into()),
         Err(CallError::Rpc(error)) => {
             if needs_auth(&error) {
-                *session = None;
+                sessions.remove(req.thread);
             }
             Err(format!("агент вернул ошибку: {}", rpc_message(&error)))
         }
@@ -652,6 +658,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
 }
 
 struct TurnState {
+    thread: String,
     bot_id: String,
     /// Файлы, на правку которых человек уже дал разрешение в этом ходе.
     allowed_paths: HashSet<PathBuf>,
@@ -675,15 +682,24 @@ const ACP_OWN_SCRIPT_WITHOUT_CARD: bool = false;
 
 /// Сводка разговора для новой сессии агента. Сжимаем тред той же кнопкой, что «Сжать историю»,
 /// и берём сводку так же, как её берёт системный промпт. Сводки нет — сессия всё равно новая.
-async fn fresh_session_summary(app: &Arc<App>, bot: &Bot, writer: &Bot) -> Option<String> {
+async fn fresh_session_summary(app: &Arc<App>, bot: &Bot, writer: &Bot, thread: &str) -> Option<String> {
     // Сжал — `compact()` сам сказал чату `compacted`, как и кнопка. Сжимать было нечего —
     // событие посылаем здесь: сессия всё равно новая.
     // `Box::pin` разрывает цикл асинхронных вызовов: сжатие может позвать модель, а её ход — снова агента.
-    let compacted = Box::pin(crate::compact::bot_thread_by(app, bot, writer, true)).await;
+    // Сводка — того разговора, которому принадлежит сессия: команды и личного чата не смешиваем.
+    let room = thread.strip_prefix("room:").and_then(|id| app.store.room(id));
+    let (compacted, summary_of) = match &room {
+        Some(room) => (Box::pin(crate::compact::room_thread(app, room, true)).await, crate::store::Thread::Room(&room.id)),
+        None => (Box::pin(crate::compact::bot_thread_by(app, bot, writer, true)).await, crate::store::Thread::Bot(&bot.id)),
+    };
     if compacted.is_none() {
-        app.turns.emit(json!({ "type": "compacted", "botId": &bot.id, "dropped": 0, "summarized": false }));
+        let event = match &room {
+            Some(room) => json!({ "type": "compacted", "roomId": &room.id, "dropped": 0, "summarized": false }),
+            None => json!({ "type": "compacted", "botId": &bot.id, "dropped": 0, "summarized": false }),
+        };
+        app.turns.emit(event);
     }
-    let summary = app.store.thread_summary(crate::store::Thread::Bot(&bot.id)).await;
+    let summary = app.store.thread_summary(summary_of).await;
     match summary {
         Some(text) if !text.trim().is_empty() => Some(text),
         _ => {
@@ -715,7 +731,7 @@ async fn open_session(agent: &Agent, req: &Request<'_>, cancel: &CancellationTok
             { "name": TURN_KEY_ENV, "value": turn_key_path(req.app.store.data_dir(), &req.bot.id).to_string_lossy() },
         ] }]);
 
-    let previous = known_sessions().lock().unwrap().get(&req.bot.id).cloned();
+    let previous = known_sessions().lock().unwrap().get(&(req.bot.id.clone(), req.thread.to_string())).cloned();
     if let Some((signature, id)) = previous {
         if signature == agent.signature && init["agentCapabilities"]["loadSession"] == true {
             // Агент повторит историю уведомлениями: хода нет, поэтому они никуда не попадут.
@@ -1409,15 +1425,20 @@ async fn handle_message(
     }
 }
 
-/// Последний `usage_update` агента по ботам: `(занято токенов, окно в токенах)`.
-fn usage_store() -> &'static Mutex<HashMap<String, (u64, u64)>> {
-    static STORE: OnceLock<Mutex<HashMap<String, (u64, u64)>>> = OnceLock::new();
+/// Последний `usage_update` агента по сессиям, ключ `(бот, разговор)`: `(занято токенов, окно в токенах)`.
+fn usage_store() -> &'static Mutex<HashMap<(String, String), (u64, u64)>> {
+    static STORE: OnceLock<Mutex<HashMap<(String, String), (u64, u64)>>> = OnceLock::new();
     STORE.get_or_init(Default::default)
 }
 
-/// Заполненность контекста, как её назвал сам агент (`usage_update`): `(used, size)`.
+/// Заполненность контекста сессии бота в этом разговоре, как её назвал сам агент (`usage_update`): `(used, size)`.
+fn reported_usage_in(bot_id: &str, thread: &str) -> Option<(u64, u64)> {
+    usage_store().lock().unwrap().get(&(bot_id.to_string(), thread.to_string())).copied()
+}
+
+/// Заполненность окна в личном чате бота: её показывает его карточка. Сессии команд считаются отдельно.
 pub fn reported_usage(bot_id: &str) -> Option<(u64, u64)> {
-    usage_store().lock().unwrap().get(bot_id).copied()
+    reported_usage_in(bot_id, PERSONAL_THREAD)
 }
 
 /// `used` и `size` из уведомления `usage_update`. Окно без размера или с нулём не годится.
@@ -1433,8 +1454,8 @@ fn needs_fresh_session(used: u64, size: u64) -> bool {
 }
 
 /// Забыть заполненность окна: после новой сессии агент сообщит её заново, и порог не сработает дважды.
-fn forget_usage(bot_id: &str) {
-    usage_store().lock().unwrap().remove(bot_id);
+fn forget_usage(bot_id: &str, thread: &str) {
+    usage_store().lock().unwrap().remove(&(bot_id.to_string(), thread.to_string()));
 }
 
 fn handle_update(message: &Value, turn: &mut TurnState, sink: Sink<'_>) {
@@ -1445,7 +1466,7 @@ fn handle_update(message: &Value, turn: &mut TurnState, sink: Sink<'_>) {
     match update["sessionUpdate"].as_str().unwrap_or_default() {
         "usage_update" => {
             if let Some(usage) = usage_of(update) {
-                usage_store().lock().unwrap().insert(turn.bot_id.clone(), usage);
+                usage_store().lock().unwrap().insert((turn.bot_id.clone(), turn.thread.clone()), usage);
             }
         }
         "agent_message_chunk" => {
@@ -1915,7 +1936,7 @@ mod tests {
 
     #[test]
     fn duplicate_tool_call_invalidates_identity_even_when_cache_is_full() {
-        let mut turn = TurnState { bot_id: "test".into(), allowed_paths: HashSet::new(), approval_policy: None,
+        let mut turn = TurnState { thread: "bot".into(), bot_id: "test".into(), allowed_paths: HashSet::new(), approval_policy: None,
             known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false };
         for i in 0..256 {
             turn.known_calls.insert(i.to_string(), KnownCall { identity: Some((bridge_name().to_string(), "browser_page".into())), safe: true });
@@ -2007,6 +2028,18 @@ mod tests {
         assert_eq!(usage_of(&json!({ "size": 100 })), None);
     }
 
+    #[test]
+    fn window_usage_is_tracked_per_conversation() {
+        usage_store().lock().unwrap().insert(("ub".into(), "bot".into()), (10, 100));
+        usage_store().lock().unwrap().insert(("ub".into(), "room:r1".into()), (90, 100));
+        assert_eq!(reported_usage("ub"), Some((10, 100)), "личное окно — по личной сессии");
+        assert!(!needs_fresh_session(10, 100));
+        assert_eq!(reported_usage_in("ub", "room:r1"), Some((90, 100)));
+        forget_usage("ub", "room:r1");
+        assert_eq!(reported_usage_in("ub", "room:r1"), None);
+        assert_eq!(reported_usage("ub"), Some((10, 100)), "забыть команду — не трогать личную сессию");
+        forget_usage("ub", "bot");
+    }
     #[test]
     fn a_full_window_needs_a_fresh_session() {
         assert!(!needs_fresh_session(84, 100), "84% — ещё можно продолжать");
