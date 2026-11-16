@@ -27,6 +27,17 @@ describe('toolLook', () => {
     expect(S.toolLook({ name: 'Fetch', kind: 'fetch' })).toEqual({ act: 'search' });
   });
 
+  it('ищет сервис: запрос называет сервис — на шаре его значок', () => {
+    const app = (slug) => ({ act: 'app', icon: `icons/apps/${slug}.svg` });
+    expect(S.toolLook({ name: 'web_search', args: { query: 'OpenBot nightly-labs github' } })).toEqual(app('github'));
+    expect(S.toolLook({ name: 'google_web_search', kind: 'search', args: { query: 'youtube channel stats' } })).toEqual(app('youtube'));
+    expect(S.toolLook({ name: 'Searching the web for: notion api limits', kind: 'search' })).toEqual(app('notion'));
+    expect(S.toolLook({ name: 'web_search', args: { query: 'twitter api pricing' } })).toEqual(app('x'));
+    expect(S.toolLook({ name: 'web_search', args: { query: 'как варить борщ' } })).toEqual({ act: 'search' });
+    expect(S.toolLook({ name: 'web_search', args: { query: 'python tutorial' } })).toEqual({ act: 'search' });
+    expect(S.toolLook({ name: 'browser_page', args: { query: 'github' } })).toEqual({ act: 'search' });
+  });
+
   it('собирает: команды сборки и компиляции', () => {
     for (const command of ['cargo build --release', 'npm run build', 'cmake --build .', 'dotnet build', 'tsc -p .', 'make all', 'gradlew assemble']) {
       expect(S.toolLook({ name: 'run_command', args: { command } }), command).toEqual({ act: 'build' });

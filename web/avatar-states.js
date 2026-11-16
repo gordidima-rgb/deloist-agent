@@ -68,6 +68,23 @@
     return '';
   }
 
+  // Названия, которыми люди зовут сервис, а значок лежит под другим именем.
+  const ALIASES = { twitter: 'x' };
+  /** Сервис из текста запроса поиска: любые строки аргументов и заголовок вызова. '' — не назван. */
+  function serviceIn(tool, name) {
+    if (!names) return '';
+    const args = tool?.args && typeof tool.args === 'object' ? tool.args : {};
+    const text = [name, tool?.title, ...Object.values(args).filter((value) => typeof value === 'string')].join(' ').slice(0, 400);
+    for (const word of tokens(text)) {
+      const alias = ALIASES[word];
+      if (alias && apps && alias in apps) return alias;
+      if (word.length < 3) continue;
+      const slug = names.get(word);
+      if (slug) return slug;
+    }
+    return '';
+  }
+
   const extOf = (value) => {
     const match = /\.([a-z0-9]{2,8})(?:["'\s)]|$)/i.exec(String(value || ''));
     return match ? match[1].toLowerCase() : '';
@@ -105,7 +122,14 @@
     if (DRAW_TOOLS.has(name) || /(^|_)image($|_)/.test(name) || kind === 'generate') return { act: 'draw' };
     const icon = siteIcon(args.url);
     if (icon && (browserTool(name) || kind === 'fetch')) return { act: 'app', icon };
-    if (browserTool(name) || SEARCH_TOOLS.has(name) || kind === 'search' || kind === 'fetch') return { act: 'search' };
+    if (browserTool(name) || SEARCH_TOOLS.has(name) || kind === 'search' || kind === 'fetch') {
+      // Поиск без адреса: если запрос называет сервис («OpenBot nightly-labs github»), на шаре его значок, а не общая лупа.
+      if (!browserTool(name)) {
+        const slug = serviceIn(tool, name);
+        if (slug) return { act: 'app', icon: `icons/apps/${slug}.svg` };
+      }
+      return { act: 'search' };
+    }
     const file = FILE_ACT[extOf(path)] || FILE_ACT[extOf(command)];
     if (file) return { act: file };
     // Приложение называет сам вызов: имя инструмента (telegram_posts, mcp__godot__…), заголовок агента, первое слово команды.
