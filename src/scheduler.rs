@@ -90,6 +90,7 @@ async fn tick(app: &Arc<App>) {
     crate::todos::tick(app);
     crate::habits::remind_tick(app).await;
     crate::goals::tick(app).await;
+    crate::workflow_run::tick(app);
     app.browsers.close_idle(BROWSER_IDLE_MS, |bot| app.turns.is_busy(bot)).await;
 
     let routines = app.store.routines();
@@ -141,6 +142,8 @@ async fn tick(app: &Arc<App>) {
 
 pub fn start(app: Arc<App>) {
     tokio::spawn(async move {
+        // Запуски процессов, прерванные перезапуском, продолжают проход.
+        crate::workflow_run::resume(&app);
         let mut timer = tokio::time::interval(tick_period());
         timer.tick().await;
         loop {

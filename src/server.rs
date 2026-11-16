@@ -3644,6 +3644,7 @@ pub fn router(app: Arc<App>) -> Router {
         .merge(crate::user_chrome::routes())
         .merge(crate::habits::routes())
         .merge(crate::todos::routes())
+        .merge(crate::workflow_api::routes())
         .fallback(web)
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
         .with_state(app)

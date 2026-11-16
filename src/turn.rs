@@ -2771,6 +2771,49 @@ pub fn delegate_to_bot_with(
     })
 }
 
+/// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём и с теми же согласиями.
+/// Ждёт, пока бот освободится (до минуты). Возвращает последний ответ бота; `stop` останавливает ход.
+pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, text: &str, unattended: bool, stop: CancellationToken) -> Result<String, String> {
+    let Some(bot) = app.store.bot(bot_id) else {
+        return Err("бот не найден".into());
+    };
+    let mut waited = 0;
+    let cancel = loop {
+        if stop.is_cancelled() {
+            return Err("остановлено".into());
+        }
+        if let Some(cancel) = app.turns.begin(bot_id) {
+            break cancel;
+        }
+        if waited >= 60 {
+            return Err(format!("бот «{}» {BUSY_SUFFIX}", bot.name));
+        }
+        waited += 1;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    };
+    if unattended {
+        app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
+    }
+    let opts = TurnOptions { source: Some("delegation:Рабочий процесс".into()), depth: 1, unattended, ..TurnOptions::default() };
+    let watcher = {
+        let (app, bot_id, stop) = (app.clone(), bot_id.to_string(), stop.clone());
+        tokio::spawn(async move {
+            stop.cancelled().await;
+            app.turns.stop_turn(&bot_id);
+        })
+    };
+    let (answer, _tokens) = run_turn_body(app.clone(), bot, text.to_string(), Vec::new(), opts, cancel).await;
+    watcher.abort();
+    if stop.is_cancelled() {
+        return Err("остановлено".into());
+    }
+    drain_queue(app, bot_id).await;
+    if answer.trim().is_empty() {
+        return Err("бот не дал ответа".into());
+    }
+    Ok(answer)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

@@ -570,6 +570,9 @@ fn human_only(path: &str) -> bool {
         // Бот-оптимизатор читает журналы и спрашивает человека: ответ, выключатель и список
         // его решений видит и меняет только окно. Ключ программы из `runtime.json` сюда не ходит.
         || path.starts_with("/api/optimizer")
+        // Рабочие процессы: создают, запускают и решают согласия только из окна. Шаг-бот ходит внутри программы.
+        || path.starts_with("/api/workflows")
+        || path.starts_with("/api/workflow-")
         || (path.starts_with("/api/bots/") && path.ends_with("/optimizer"))
         // Пустить бота в свой Chrome решает только человек.
         || path.starts_with("/api/user-chrome")
