@@ -887,3 +887,60 @@ async fn moved_order_survives_a_restart() {
     assert_eq!(queue_texts(&queue), ["c", "a", "b"], "порядок после перезапуска потерян: {queue}");
 }
 
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_message_says_why_and_the_board_lists_it() {
+    let (crew, fake, bot) = setup("queue-reason", &[]).await;
+    *fake.script.lock().unwrap() = vec![
+        Step::Tool("run_command", json!({ "command": "echo один > C:\\Windows\\deloist-probe.txt" })),
+        Step::Say("первый".into()),
+    ];
+
+    crew.clear_events();
+    crew.say(&bot, "старт").await;
+    let approval = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    let id = approval["id"].as_str().unwrap().to_string();
+    crew.say(&bot, "потом это").await;
+    let queue = wait_queue(&crew, &bot, 1).await;
+    assert_eq!(queue["holdReason"], "card", "карточка без ответа держит очередь: {queue}");
+
+    let board = crew.ok("GET", "/api/needs", None).await;
+    assert_eq!(board["count"], 1, "значок считает только «Нужен ты»: {board}");
+    let working = board["working"].as_array().unwrap();
+    assert_eq!(working.len(), 1, "{board}");
+    assert_eq!(working[0]["botId"], bot.as_str());
+    assert!(working[0]["since"].as_i64().unwrap() > 0);
+    let waiting = board["waiting"].as_array().unwrap();
+    assert_eq!(waiting.len(), 1, "{board}");
+    assert_eq!(waiting[0]["kind"], "queue");
+    assert_eq!(waiting[0]["count"], 1);
+    assert_eq!(waiting[0]["reason"], "card");
+    assert_eq!(waiting[0]["text"], "потом это");
+
+    crew.ok("POST", &format!("/api/approvals/{id}"), Some(json!({ "allow": true }))).await;
+    wait_thread_text(&crew, &bot, "первый").await;
+    wait_queue(&crew, &bot, 0).await;
+    let board = crew.ok("GET", "/api/needs", None).await;
+    assert!(board["waiting"].as_array().unwrap().is_empty(), "{board}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_queue_reports_the_manual_pause_on_the_board() {
+    let (crew, fake, bot) = setup("queue-reason-pause", &[]).await;
+    *fake.script.lock().unwrap() = vec![
+        Step::Tool("run_command", json!({ "command": "echo один > C:\\Windows\\deloist-probe.txt" })),
+        Step::Say("после паузы".into()),
+    ];
+    crew.clear_events();
+    crew.say(&bot, "старт").await;
+    crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.say(&bot, "в очереди").await;
+    wait_queue(&crew, &bot, 1).await;
+    crew.ok("POST", &format!("/api/bots/{bot}/stop"), None).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let paused = wait_paused(&crew, &bot).await;
+    assert_eq!(paused["holdReason"], "paused_manual", "{paused}");
+    let board = crew.ok("GET", "/api/needs", None).await;
+    assert_eq!(board["waiting"][0]["reason"], "paused_manual", "{board}");
+    assert!(board["working"].as_array().unwrap().is_empty(), "{board}");
+}

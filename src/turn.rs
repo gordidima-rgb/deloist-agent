@@ -159,6 +159,8 @@ struct Busy {
     cancel: CancellationToken,
     /// Ключ моста ACP к браузеру этого хода: живёт, пока идёт ход (см. [`Turns::issue_browser_token`]).
     browser_token: Option<String>,
+    /// Когда ход начался (мс): для доски «В работе».
+    since: i64,
 }
 
 /// Снимает пол осторожности и след передачи, когда ход кончился или его отбросили (отмена, паника).
@@ -449,6 +451,10 @@ impl Turns {
         self.busy.lock().unwrap().contains_key(bot_id)
     }
 
+    pub fn busy_since(&self, bot_id: &str) -> Option<i64> {
+        self.busy.lock().unwrap().get(bot_id).map(|b| b.since)
+    }
+
     pub fn busy_bots(&self) -> Vec<String> {
         self.busy.lock().unwrap().keys().cloned().collect()
     }
@@ -569,7 +575,7 @@ impl Turns {
             return None;
         }
         let cancel = CancellationToken::new();
-        busy.insert(bot_id.to_string(), Busy { cancel: cancel.clone(), browser_token: None });
+        busy.insert(bot_id.to_string(), Busy { cancel: cancel.clone(), browser_token: None, since: now() });
         Some(cancel)
     }
 

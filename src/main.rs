@@ -115,6 +115,7 @@ mod slack;
 mod telegram;
 mod reminders;
 mod aumid;
+mod board;
 mod team;
 mod tg_channels;
 mod team_changes;

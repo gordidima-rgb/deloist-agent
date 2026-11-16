@@ -1361,7 +1361,8 @@ async fn get_queue(State(app): Shared, Path(id): Path<String>) -> Response {
         return r;
     }
     let queue = app.queues.get(&id);
-    ok(json!({ "paused": queue.paused, "pauseReason": queue.pause_reason, "items": queue.items }))
+    let hold = app.store.bot(&id).and_then(|bot| crate::board::hold_reason(&app, &bot));
+    ok(json!({ "paused": queue.paused, "pauseReason": queue.pause_reason, "holdReason": hold, "items": queue.items }))
 }
 
 async fn resume_queue(State(app): Shared, Path(id): Path<String>) -> Response {
@@ -1868,7 +1869,8 @@ async fn needs(State(app): Shared) -> Response {
             item
         })
         .collect();
-    ok(json!({ "items": items, "count": items.len() }))
+    let (working, waiting) = crate::board::build(&app);
+    ok(json!({ "items": items, "count": items.len(), "working": working, "waiting": waiting }))
 }
 
 /// Правила «всегда здесь» (и старые разрешения сайтов у ботов) и разрешения разговоров.
