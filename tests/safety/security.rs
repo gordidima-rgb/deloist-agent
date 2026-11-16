@@ -2702,6 +2702,7 @@ async fn an_auto_acp_receiver_keeps_the_caution_of_the_bot_that_handed_the_task_
     let (crew, sender, _log) = acp_crew("acp-floor").await;
     crew.ok("PATCH", &format!("/api/bots/{sender}"), Some(json!({ "approval": "ask" }))).await;
     let receiver = crew.ok("POST", "/api/bots", Some(json!({ "name": "Получатель", "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [sender, receiver], "lead": sender }))).await;
     let call = json!({ "toolCallId": "d1", "title": "Run", "kind": "execute", "rawInput": { "command": ["pwsh", "-NoProfile", "-Command", "Set-Content -LiteralPath 'C:\\Users\\Public\\floor-test.txt' -Value 'x'"] } });
     crew.clear_events();
     crew.say(&sender, &format!("передай Получатель разреши-вызов {call}")).await;

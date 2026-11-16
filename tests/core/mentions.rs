@@ -133,6 +133,7 @@ async fn mentioned_delegate_runs_without_card() {
 async fn unmentioned_handoff_runs_but_the_receiver_keeps_the_senders_strict_policy() {
     let _serial = SERIAL.lock().await;
     let (crew, alpha, _beta, gamma) = with_model_case("mention-delegate-policy", true).await;
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [alpha, gamma], "lead": alpha }))).await;
     crew.listen().await;
     crew.say(&alpha, "сделай").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
@@ -141,4 +142,20 @@ async fn unmentioned_handoff_runs_but_the_receiver_keeps_the_senders_strict_poli
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
     assert!(!crew.data_dir.join("workspaces").join(&gamma).join("receiver.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unmentioned_bot_outside_the_team_gets_no_task() {
+    let _serial = SERIAL.lock().await;
+    let (crew, alpha, _beta, gamma) = with_model("mention-outside").await;
+    crew.listen().await;
+    crew.say(&alpha, "сделай").await;
+    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{alpha}/thread?limit=50"), None).await;
+    let results: Vec<String> = thread["messages"].as_array().unwrap().iter()
+        .flat_map(|m| m["toolCalls"].as_array().cloned().unwrap_or_default())
+        .map(|c| c["result"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(results.iter().any(|r| r.contains("не в твоей команде")), "{results:?}");
+    assert_eq!(crew.count_events(|e| e["type"] == "turn_start" && e["botId"] == gamma.as_str()), 0, "Гамма не запускалась");
 }

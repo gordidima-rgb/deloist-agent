@@ -836,6 +836,7 @@ async fn handing_a_task_to_another_bot_shows_no_card_and_the_receiver_keeps_its_
         ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string());
     }
     let (scout, editor) = (ids[0].clone(), ids[1].clone());
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [scout, editor], "lead": scout }))).await;
     // Отправитель решает сам, получатель — строгий: свои рискованные шаги получатель всё равно спрашивает.
     set_mode(&crew, &scout, "auto").await;
     set_mode(&crew, &editor, "strict").await;
@@ -872,6 +873,7 @@ async fn a_chain_of_handoffs_stops_after_two_hops() {
     for name in ["Один", "Два", "Три", "Четыре"] {
         ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string());
     }
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Цепочка", "botIds": [ids[0], ids[1], ids[2], ids[3]], "lead": ids[0] }))).await;
     *fake.script.lock().unwrap() = vec![
         tool("delegate", json!({ "bot": "Два", "task": "дальше" })),
         tool("delegate", json!({ "bot": "Три", "task": "дальше" })),
@@ -936,6 +938,7 @@ async fn nested_delegation_keeps_original_floor_and_folder_intersection() {
     let dir = outside("nested-folders");
     let folder = dir.join("a");
     make_team(&crew, &[&ids[1], &ids[2]], &folder).await;
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Верх", "botIds": [ids[0], ids[1]], "lead": ids[0] }))).await;
     *fake.script.lock().unwrap() = vec![
         tool("delegate", json!({"bot":"Middle","task":"delegate"})),
         tool("delegate", json!({"bot":"Last","task":"write"})),
@@ -1029,6 +1032,8 @@ async fn a_team_folder_is_not_open_to_a_task_from_a_bot_outside_that_team() {
     let dir = outside("handoff-team");
     let folder = dir.join("a");
     make_team(&crew, &[receiver.as_str(), member.as_str()], &folder).await;
+    // Вне команды поручают только ведущие ведущим: Чужак ведёт свою команду, Свой-тест — эту.
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Чужая", "botIds": [stranger], "lead": stranger }))).await;
 
     // Отправитель вне команды: получатель в своей команде пишет, но по чужой передаче папка команды не его.
     *fake.script.lock().unwrap() = vec![tool("delegate", json!({ "bot": "Свой-тест", "task": "запиши" })), write(&folder.join("x.txt")), say("не дали"), say("передал")];

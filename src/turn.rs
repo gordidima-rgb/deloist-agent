@@ -2646,14 +2646,15 @@ pub fn delegate_to(
         if depth >= 2 {
             return Err("слишком глубокая цепочка делегирования".into());
         }
-        let wanted = target_name.to_lowercase();
-        let bots = app.store.bots();
-        let target = bots
-            .iter()
-            .find(|b| b.name.to_lowercase() == wanted)
-            .or_else(|| bots.iter().find(|b| b.name.to_lowercase().starts_with(&wanted)))
-            .cloned()
-            .ok_or_else(|| format!("в команде нет бота «{target_name}»"))?;
+        // Вне команды поручают только ведущие ведущим; упомянутые человеком и приглашённые специалисты — можно.
+        let allowed = crate::team_tasks::delegate_targets(&app, &from);
+        let target = crate::team_tasks::pick_by_name(&allowed, &target_name).ok_or_else(|| {
+            if app.store.bots().iter().any(|b| b.name.to_lowercase() == target_name.trim().to_lowercase()) {
+                format!("«{target_name}» {}", crate::team_tasks::OUTSIDE_TEAM)
+            } else {
+                format!("нет бота «{target_name}»")
+            }
+        })?;
         delegate_to_bot(app, from, target, task, depth).await
     })
 }

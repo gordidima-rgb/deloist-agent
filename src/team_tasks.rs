@@ -1,7 +1,7 @@
 //! Работа команды без ожидания: `assign_task` отдаёт задачу участнику и сразу возвращает номер, `task_status` и
 //! `team_status` показывают, кто чем занят, `share_file` кладёт файл из своей папки в папку участника.
 //!
-//! Правила: только участникам своей команды (ведущий — всем, участник — ведущему); не больше трёх незакрытых задач
+//! Правила: любому участнику своей команды, вне команды — только ведущий ведущему; не больше трёх незакрытых задач
 //! на участника от одного бота; повтор того же текста, пока задача идёт, возвращает тот же номер. Ход участника
 //! запускает тот же `delegate_to_bot`, что и у `delegate`, с теми же правилами согласий. Задачи лежат в
 //! `team_tasks.json`: после перезапуска то, что шло, помечено «прервано». Конец задачи — короткая строка в ленте
@@ -211,44 +211,70 @@ fn rooms_of(app: &App, bot_id: &str) -> Vec<Room> {
     app.store.rooms().into_iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).collect()
 }
 
-/// Те, кому `from` вправе давать задачи и файлы: ведущий — участникам своих команд, участник — их ведущему.
+/// Те, кому `from` вправе давать задачи и файлы (владелец, 16.11.2026): внутри команды — любому
+/// участнику, вне команды общаются только ведущие (оркестраторы) — ведущий с ведущими других команд.
 pub fn teammates(app: &App, from: &Bot) -> Vec<Bot> {
     let mut ids: Vec<String> = Vec::new();
-    for room in rooms_of(app, &from.id) {
-        let lead = lead_of(app, &room);
-        let reachable: Vec<String> = if lead.as_deref() == Some(from.id.as_str()) {
-            room.bot_ids.iter().filter(|id| **id != from.id).cloned().collect()
-        } else {
-            lead.into_iter().collect()
-        };
-        for id in reachable {
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
+    let mut push = |id: &String| {
+        if *id != from.id && !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    };
+    let rooms: Vec<Room> = app.store.rooms().into_iter().filter(|r| !r.archived).collect();
+    let mut leads_somewhere = false;
+    for room in rooms.iter().filter(|r| r.bot_ids.iter().any(|b| *b == from.id)) {
+        leads_somewhere |= lead_of(app, room).as_deref() == Some(from.id.as_str());
+        room.bot_ids.iter().for_each(&mut push);
+    }
+    if leads_somewhere {
+        for lead in rooms.iter().filter_map(|room| lead_of(app, room)) {
+            push(&lead);
         }
     }
     ids.iter().filter_map(|id| app.store.bot(id)).collect()
 }
+
+/// Кому `delegate` может поручить: команда по правилу `teammates`, плюс боты, которых человек
+/// упомянул в этом ходе («@Бета» — его согласие), и специалисты, уже приглашённые карточкой (гости треда).
+pub fn delegate_targets(app: &App, from: &Bot) -> Vec<Bot> {
+    let mut bots = teammates(app, from);
+    let mut extra: Vec<String> = app.turns.mentioned_for(&from.id);
+    extra.extend(
+        crate::store::bot_guests(from).iter().filter_map(|g| g.get("botId").and_then(Value::as_str)).map(str::to_string),
+    );
+    for id in extra {
+        if id != from.id && !bots.iter().any(|b| b.id == id) {
+            if let Some(bot) = app.store.bot(&id) {
+                bots.push(bot);
+            }
+        }
+    }
+    bots
+}
+
+/// Бот по имени среди разрешённых: точное имя, иначе единственное совпадение по началу.
+pub fn pick_by_name(bots: &[Bot], name: &str) -> Option<Bot> {
+    let wanted = name.trim().to_lowercase();
+    if wanted.is_empty() {
+        return None;
+    }
+    let exact: Vec<&Bot> = bots.iter().filter(|b| b.name.to_lowercase() == wanted).collect();
+    if !exact.is_empty() {
+        return (exact.len() == 1).then(|| exact[0].clone());
+    }
+    let prefix: Vec<&Bot> = bots.iter().filter(|b| b.name.to_lowercase().starts_with(&wanted)).collect();
+    (prefix.len() == 1).then(|| prefix[0].clone())
+}
+
+/// Отказ с подсказкой, если адресат вне разрешённых.
+pub const OUTSIDE_TEAM: &str = "не в твоей команде: задачи можно передавать участникам своей команды, а вне команды общаются только ведущие команд. Нужен другой бот — предложи человеку собрать команду через propose_team или специалиста через offer_specialist.";
 
 fn find_teammate(app: &App, from: &Bot, name: &str) -> Result<Bot, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("не указан бот".into());
     }
-    let mates = teammates(app, from);
-    let wanted = name.to_lowercase();
-    let exact: Vec<&Bot> = mates.iter().filter(|b| b.name.to_lowercase() == wanted).collect();
-    let found = if exact.len() == 1 {
-        Some(exact[0])
-    } else if exact.is_empty() {
-        let prefix: Vec<&Bot> = mates.iter().filter(|b| b.name.to_lowercase().starts_with(&wanted)).collect();
-        (prefix.len() == 1).then(|| prefix[0])
-    } else {
-        None
-    };
-    found.cloned().ok_or_else(|| {
-        format!("«{name}» не в твоей команде: задачи и файлы можно передавать только участникам своей команды (ведущий — всем, участник — ведущему). Нужен другой бот — предложи человеку собрать команду через propose_team.")
-    })
+    pick_by_name(&teammates(app, from), name).ok_or_else(|| format!("«{name}» {OUTSIDE_TEAM}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +294,7 @@ pub fn defs() -> Vec<Value> {
             "assign_task",
             "Дать задачу участнику своей команды БЕЗ ожидания: вернётся taskId, а участник работает параллельно. Так можно пустить нескольких участников сразу. Когда задача закончится, в твоей ленте появится строка; свой ход она не запускает — результат смотри через task_status. Не больше 3 незакрытых задач на участника; тот же текст тому же боту, пока задача идёт, вернёт тот же taskId. Участник не видит ни твою переписку, ни прошлые ходы: задача — самодостаточный бриф.",
             json!({
-                "bot": { "type": "string", "description": "Имя участника твоей команды (ведущий — любому, участник — ведущему)." },
+                "bot": { "type": "string", "description": "Имя участника твоей команды; ведущий может дать задачу и ведущему другой команды." },
                 "text": { "type": "string", "description": "Самодостаточный бриф: цель, входные данные, ограничения, что вернуть. До 6000 знаков." },
                 "files": { "type": "array", "items": { "type": "string" }, "description": "Файлы из твоей папки, которые нужны участнику (до 5, по 20 МБ). Копии лягут в его папку attachments/." },
             }),

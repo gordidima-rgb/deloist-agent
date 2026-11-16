@@ -586,6 +586,7 @@ async fn a_queued_chat_after_a_night_delegation_is_not_treated_as_unattended() {
     let state = crew.ok("GET", "/api/state", None).await;
     let target = state["bots"][1]["id"].as_str().unwrap().to_string();
     let target_name = state["bots"][1]["name"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [bot, target], "lead": bot }))).await;
     let gate = Arc::new(tokio::sync::Notify::new());
     *fake.script.lock().unwrap() = vec![
         Step::Tool("delegate", json!({ "bot": target_name, "task": "сделай часть" })),

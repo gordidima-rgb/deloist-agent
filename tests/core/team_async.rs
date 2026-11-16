@@ -206,20 +206,30 @@ async fn two_tasks_run_in_parallel_and_finish_without_waking_the_lead() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn only_teammates_get_tasks_and_a_member_may_only_report_to_the_lead() {
+async fn inside_a_team_anyone_and_outside_only_lead_to_lead() {
     let t = team("async-teammates", 100).await;
-    let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Дельта", "text": "чужому" }))]).await;
+    let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Дельта", "text": "чужому" })), ("assign_task", json!({ "bot": "Альфа", "text": "себе" }))]).await;
     assert!(out[0].contains("не в твоей команде") && out[0].contains("propose_team"), "{}", out[0]);
+    assert!(out[1].contains("не в твоей команде"), "самому себе нельзя: {}", out[1]);
     assert!(t.tasks_file().is_empty(), "задача чужому не создана");
-    // Участник не даёт задач участнику, но может дать ведущему.
-    let out = t.run(&t.beta, &[("assign_task", json!({ "bot": "Гамма", "text": "соседу" })), ("share_file", json!({ "bot": "Гамма", "path": "x.txt" }))]).await;
-    assert!(out[0].contains("не в твоей команде"), "{}", out[0]);
+
+    // Вторая команда: Дельта ведёт, Эпсилон — участник.
+    let eps = t.crew.ok("POST", "/api/bots", Some(json!({ "name": "Эпсилон", "role": "вёрстка", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    t.crew.ok("POST", "/api/rooms", Some(json!({ "name": "Соседи", "botIds": [t.outsider, eps], "lead": t.outsider }))).await;
+    // Ведущий — ведущему другой команды можно; ведущий — участнику чужой команды нельзя.
+    let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Дельта", "text": "коллеге" })), ("assign_task", json!({ "bot": "Эпсилон", "text": "через голову" }))]).await;
+    assert!(task_id(&out[0]).starts_with("task_"), "ведущий ведущему: {}", out[0]);
     assert!(out[1].contains("не в твоей команде"), "{}", out[1]);
-    let out = t.run(&t.beta, &[("assign_task", json!({ "bot": "Альфа", "text": "ведущему" }))]).await;
-    assert!(task_id(&out[0]).starts_with("task_"), "{}", out[0]);
-    // Самому себе нельзя.
-    let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Альфа", "text": "себе" }))]).await;
+    // Участник не обращается к ведущему чужой команды, и чужой участник — к нашему ведущему.
+    let out = t.run(&t.beta, &[("assign_task", json!({ "bot": "Дельта", "text": "мимо своего" }))]).await;
     assert!(out[0].contains("не в твоей команде"), "{}", out[0]);
+    let out = t.run(&eps, &[("assign_task", json!({ "bot": "Альфа", "text": "мимо своего" }))]).await;
+    assert!(out[0].contains("не в твоей команде"), "{}", out[0]);
+
+    // Внутри команды участник даёт задачу и соседу, и ведущему (владелец, 16.11.2026).
+    let out = t.run(&t.beta, &[("assign_task", json!({ "bot": "Гамма", "text": "соседу" })), ("assign_task", json!({ "bot": "Альфа", "text": "ведущему" }))]).await;
+    assert!(task_id(&out[0]).starts_with("task_"), "{}", out[0]);
+    assert!(task_id(&out[1]).starts_with("task_"), "{}", out[1]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -88,6 +88,7 @@ async fn with_model(name: &str) -> (Crew, String, String, Arc<Mutex<Vec<Value>>>
     crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "model": "m", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "test-key" }))).await;
     let alpha = crew.ok("POST", "/api/bots", Some(json!({ "name": "Альфа", "role": "старший", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
     let beta = crew.ok("POST", "/api/bots", Some(json!({ "name": "Бета", "role": "младший", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [alpha, beta], "lead": alpha }))).await;
     (crew, alpha, beta, requests)
 }
 

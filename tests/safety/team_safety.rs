@@ -213,6 +213,7 @@ async fn handing_a_task_to_an_auto_bot_does_not_skip_the_question() {
     let crew = with_model("delegate-safe").await;
     let senior = bot_named(&crew, "Старший", "ask").await;
     let junior = bot_named(&crew, "Младший", "auto").await;
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [senior, junior], "lead": senior }))).await;
     crew.listen().await;
     crew.say(&senior, "сделай").await;
     let card = crew.wait_event("вопрос про команду", |e| e["type"] == "approval").await;
@@ -228,7 +229,8 @@ async fn handing_a_task_to_an_auto_bot_does_not_skip_the_question() {
 async fn between_auto_bots_nothing_is_asked() {
     let crew = with_model("delegate-auto").await;
     let senior = bot_named(&crew, "Старший", "auto").await;
-    bot_named(&crew, "Младший", "auto").await;
+    let junior = bot_named(&crew, "Младший", "auto").await;
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [senior, junior], "lead": senior }))).await;
     crew.listen().await;
     crew.say(&senior, "сделай").await;
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == senior.as_str()).await;

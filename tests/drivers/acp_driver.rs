@@ -466,7 +466,15 @@ async fn the_agent_hands_a_task_to_another_bot_through_its_team_tools() {
     let thread = s.crew.ok("GET", &format!("/api/bots/{other}/thread?limit=10"), None).await;
     assert!(thread.to_string().contains("задача от агента"), "второй бот не получил задачу: {thread}");
 
-    // Без упоминания карточки тоже нет: передача сообщения другому боту ничего не разрешает, получатель работает по своим правилам.
+    // Без упоминания и вне команды поручить нельзя: вне команды общаются только ведущие (владелец, 16.11.2026).
+    s.crew.clear_events();
+    s.crew.say(&s.bot, "передай Второй ещё").await;
+    s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
+    let answer = s.last_answer().await;
+    assert!(answer.contains("не в твоей команде"), "{answer}");
+
+    // В одной команде — можно, и без карточки: передача ничего не разрешает, получатель работает по своим правилам.
+    s.crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [s.bot, other], "lead": s.bot }))).await;
     s.crew.clear_events();
     s.crew.say(&s.bot, "передай Второй ещё").await;
     s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
