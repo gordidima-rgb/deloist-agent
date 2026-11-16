@@ -4674,6 +4674,13 @@ async function postWithFiles(url, uploadUrl, text, files, input, extra = {}) {
 
 // Карточка хода появляется в момент отправки и не ждёт сервера. Не ушло или встало в очередь —
 // карточка, которую завела эта отправка, не должна остаться крутиться.
+// Подсветка сроков и чипы под полем ввода чата (ChatDates.svelte); поле остаётся тем же <textarea>.
+function mountChatDates(input) {
+  const chipsHost = $('#in-chips');
+  if (!window.DeloistUI?.mountChatDates || !chipsHost) return;
+  window.DeloistUI.mountChatDates($('#in-field'), { input, chipsHost });
+}
+
 async function sendWithCard(key, url, uploadUrl, text, files, input, opts) {
   const had = turnCard.has(key);
   if (!had) {
@@ -4743,6 +4750,8 @@ async function stopCurrent() {
 
 function autosize() {
   const el = $('#input');
+  // Подсветка сроков следит за текстом поля; код меняет его без события input.
+  el.dispatchEvent(new Event('cd-sync'));
   el.style.height = 'auto';
   // scrollHeight без рамки, а высота задаётся с рамкой: без поправки появляется полоса прокрутки.
   el.style.height = `${Math.min(200, el.scrollHeight + el.offsetHeight - el.clientHeight)}px`;
@@ -7437,7 +7446,10 @@ function bindUi() {
     setSendState();
     listenToInput(Boolean(input.value.trim()));
   });
+  mountChatDates(input);
   input.addEventListener('keydown', (e) => {
+    // Список «@/+Имя» уже забрал Enter (MentionPopover): сообщение не уходит.
+    if (e.defaultPrevented) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();

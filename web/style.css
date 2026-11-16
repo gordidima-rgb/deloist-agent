@@ -1997,6 +1997,11 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 #chat { position: relative; background: var(--k-canvas); }
 .composer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .composer-main textarea { flex: none; width: 100%; }
+/* Подсветка сроков (ChatDates.svelte) лежит позади поля, чипы — под ним. */
+.in-field { position: relative; }
+.in-field textarea { position: relative; z-index: 1; display: block; }
+.in-chips { display: flex; flex-wrap: wrap; }
+.in-chips:empty { display: none; }
 .attach {
   width: 44px;
   height: 44px;

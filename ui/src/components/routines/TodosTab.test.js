@@ -207,4 +207,43 @@ describe('TodosTab', () => {
     await drain();
     expect(api).toHaveBeenCalledWith('/api/todos/carry-over', { method: 'POST' });
   });
+  it('sends subtasks and the date picker value with the new task, and offers bots on "+"', async () => {
+    const created = [{ id: 'n1', title: 'Отчёт' }];
+    const api = apiFor((path, opts) => {
+      if (path === '/api/state') return Promise.resolve({ bots: [{ id: 'b1', name: 'Бета', role: 'младший' }] });
+      if (path === '/api/todos/from-text') return Promise.resolve(created);
+    });
+    await render(TodosTab, { api });
+    const field = host.querySelector('textarea.cmp-input');
+    field.value = 'отчёт +Б';
+    field.setSelectionRange(8, 8);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await drain();
+    expect(document.querySelector('.mn-pop .mn-name')?.textContent).toBe('Бета');
+    // Enter выбирает бота и не отправляет задачу.
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await drain();
+    expect(field.value).toBe('отчёт +Бета ');
+    expect(api).not.toHaveBeenCalledWith('/api/todos/from-text', expect.anything());
+    // Подзадача: строка появляется, текст уходит в чек-лист новой задачи.
+    [...host.querySelectorAll('.td-tools button')].find((b) => b.textContent.trim() === 'Подзадача').click();
+    await drain();
+    const sub = host.querySelector('.td-sub-input');
+    sub.value = 'собрать цифры';
+    sub.dispatchEvent(new Event('input', { bubbles: true }));
+    await drain();
+    [...host.querySelectorAll('.td-form-bar button')].find((b) => b.textContent.trim() === 'Добавить').click();
+    await drain();
+    expect(api).toHaveBeenCalledWith('/api/todos/from-text', { method: 'POST', body: { text: 'отчёт +Бета', bucket: 'active' } });
+    expect(api).toHaveBeenCalledWith('/api/todos/n1', { method: 'PATCH', body: { items: [{ text: 'собрать цифры', done: false }] } });
+  });
+
+  it('the date input puts the picked day into the field', async () => {
+    await render(TodosTab, { api: apiFor() });
+    const date = host.querySelector('input[type="date"]');
+    date.value = '2026-11-20';
+    date.dispatchEvent(new Event('change', { bubbles: true }));
+    await drain();
+    expect(host.querySelector('textarea.cmp-input').value).toBe('20.11.2026');
+  });
 });

@@ -11,6 +11,7 @@ import StepPill from './components/StepPill.svelte';
 import MicButton from './components/MicButton.svelte';
 import Menu from './components/Menu.svelte';
 import MentionPopover from './components/MentionPopover.svelte';
+import ChatDates from './components/chat/ChatDates.svelte';
 import KnowMe from './components/KnowMe.svelte';
 import VoiceChat from './components/VoiceChat.svelte';
 import ApprovalCard from './components/chat/ApprovalCard.svelte';
@@ -99,6 +100,7 @@ window.DeloistUI = {
   mountMicButton: (target, props) => mountComponent(MicButton, target, props),
   // Меню кита по списку пунктов: «…» в шапке мини-чата дока.
   mountMenu: (target, props) => mountComponent(Menu, target, props),
+  mountChatDates: (target, props) => mountComponent(ChatDates, target, props),
   mountMentionPopover: (target, props) => mountComponent(MentionPopover, target, props),
   mountWhatsNew: (target, props) => mountComponent(WhatsNew, target, props),
   mountKnowMe: (target, props) => mountComponent(KnowMe, target, props),

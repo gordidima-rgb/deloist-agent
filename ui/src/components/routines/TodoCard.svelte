@@ -169,6 +169,17 @@
     </form>
   </div>
 
+  {#if todo.files?.length}
+    <div class="tc-col">
+      <span class="tc-label">{tr('Файлы')}</span>
+      <ul class="tc-items">
+        {#each todo.files as file (file.path)}
+          <li class="tc-item"><span class="tc-hint">{file.name}</span></li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+
   <div class="tc-col">
     <span class="tc-label">{tr('Повтор')}</span>
     <TodoRecurrence rule={todo.recurrence} dueDate={todo.due_date} onchange={setRecurrence} />

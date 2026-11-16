@@ -2,16 +2,19 @@
   // Поле ввода фразы с подсветкой даты, времени и повтора на лету и чипами под полем.
   // Разбор делает код на сервере (GET /api/dates/parse), модель не зовётся.
   // Свойства общие: value, onsubmit(parsed), placeholder. Список задач возьмёт тот же компонент.
+  // bots: если список дан, «+Имя» и «@Имя» открывают выбор исполнителя (MentionPopover, как в чате).
   import { untrack } from 'svelte';
   import { tr } from '../../lib/i18n.js';
   import { api as defaultApi } from '../../lib/api.js';
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
+  import MentionPopover from '../MentionPopover.svelte';
 
   let {
     value = $bindable(''),
     placeholder = '',
     api = defaultApi,
     maxlength = 500,
+    bots = [],
     disabled = false,
     id = '',
     describedby = '',
@@ -23,6 +26,7 @@
   let parsed = $state(null);
   let parsedText = $state('');
   let focused = $state(false);
+  let field = $state(null);
 
   let timer = null;
   let seq = 0;
@@ -112,6 +116,7 @@
   }
 
   function onkeydown(event) {
+    if (event.defaultPrevented) return; // список «+Имя» уже забрал Enter
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
     event.preventDefault();
     submit();
@@ -120,6 +125,27 @@
   function remove(kind) {
     if (!fresh || parsedText !== value) return;
     value = removeKind(value, fresh.spans, kind);
+  }
+
+  // Дата из календаря: слова прежней даты уходят, новая дописывается как ДД.ММ.ГГГГ и подсвечивается сама.
+  export function setDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ''));
+    if (!m) return;
+    const base = fresh && parsedText === value && hasKind(fresh.spans, 'date') ? removeKind(value, fresh.spans, 'date') : value.trim();
+    value = `${base} ${m[3]}.${m[2]}.${m[1]}`.trim().slice(0, maxlength);
+    field?.focus();
+  }
+
+  // Дописать текст (голос) через пробел.
+  export function append(text) {
+    const add = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (!add) return;
+    value = `${value.trim()} ${add}`.trim().slice(0, maxlength);
+    field?.focus();
+  }
+
+  export function focus() {
+    field?.focus();
   }
 
   function chipLabel(chip) {
@@ -139,6 +165,7 @@
       {maxlength}
       aria-describedby={describedby || undefined}
       spellcheck="true"
+      bind:this={field}
       {value}
       {oninput}
       {onkeydown}
@@ -146,6 +173,7 @@
       onblur={() => (focused = false)}
     ></textarea>
   </div>
+  {#if bots.length && field}<MentionPopover {bots} input={field} />{/if}
   <div class="cmp-chips" aria-live="polite">
     {#each chips as chip (chip.kind)}
       <span class="cmp-chip cmp-chip--{chip.kind}" data-kind={chip.kind}>

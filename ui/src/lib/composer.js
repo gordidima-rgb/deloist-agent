@@ -29,10 +29,13 @@ export function hasKind(spans, kind) {
 }
 
 // Текст без кусков одного вида: так «убрать чип» стирает слова из поля, и следующий разбор чипа уже не находит.
-export function removeKind(text, spans, kind) {
+// keepLines: многострочное поле (чат) сохраняет переносы строк, склеиваются только пробелы.
+export function removeKind(text, spans, kind, { keepLines = false } = {}) {
   const parts = splitByMarks(text, spans);
   const kept = parts.filter((p) => p.kind !== kind).map((p) => p.text);
-  return kept.join('').replace(/\s{2,}/g, ' ').trim();
+  const joined = kept.join('');
+  if (keepLines) return joined.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/gm, '').trim();
+  return joined.replace(/\s{2,}/g, ' ').trim();
 }
 
 // «пн, 5 марта» для даты ГГГГ-ММ-ДД. Часовой пояс не нужен: дата собирается из частей.

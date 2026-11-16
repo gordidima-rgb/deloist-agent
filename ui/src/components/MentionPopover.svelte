@@ -1,7 +1,7 @@
 <script>
   import { tick } from 'svelte';
   import { tr } from '../lib/i18n.js';
-  import { detectMentionTrigger } from '../lib/mention.js';
+  import { detectMentionTrigger, TRIGGER_RE } from '../lib/mention.js';
 
   let { bots = [], input = null } = $props();
 
@@ -33,10 +33,10 @@
     if (!bot || !input) return;
     const caret = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, caret);
-    const m = before.match(/(^|\s)(@)([\p{L}\p{N}_]*)$/u);
+    const m = before.match(TRIGGER_RE);
     if (!m) { open = false; return; }
     const triggerStart = m.index + m[1].length;
-    const inserted = '@' + (bot.name || '') + ' ';
+    const inserted = m[2] + (bot.name || '') + ' ';
     const newValue = input.value.slice(0, triggerStart) + inserted + input.value.slice(caret);
     input.value = newValue;
     const newCaret = triggerStart + inserted.length;
@@ -80,10 +80,11 @@
       }
     };
     input.addEventListener('input', onInput);
-    input.addEventListener('keydown', onKeydown);
+    // Захват: список забирает Enter/Tab раньше, чем поле отправит сообщение (там проверяют defaultPrevented).
+    input.addEventListener('keydown', onKeydown, true);
     return () => {
       input.removeEventListener('input', onInput);
-      input.removeEventListener('keydown', onKeydown);
+      input.removeEventListener('keydown', onKeydown, true);
     };
   });
 </script>

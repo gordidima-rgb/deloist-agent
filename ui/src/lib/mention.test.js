@@ -17,6 +17,17 @@ describe('detectMentionTrigger', () => {
 		});
 	});
 
+	describe('+ trigger', () => {
+		it('triggers on bare + and after whitespace', () => {
+			expect(detectMentionTrigger('+')).toEqual({ trigger: '+', query: '' });
+			expect(detectMentionTrigger('завтра в 10 +Бе')).toEqual({ trigger: '+', query: 'Бе' });
+		});
+		it('does not trigger mid-word or after the query ended', () => {
+			expect(detectMentionTrigger('2+2')).toBeNull();
+			expect(detectMentionTrigger('+Бета сделать')).toBeNull();
+		});
+	});
+
 	it('returns null for empty text', () => {
 		expect(detectMentionTrigger('')).toBeNull();
 	});

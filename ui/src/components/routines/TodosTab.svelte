@@ -48,6 +48,16 @@
   let carrying = $state(false);
   const pending = new Set();
 
+  // Поле ввода: исполнитель по «+Имя», календарь, подзадачи, файлы и голос.
+  let bots = $state([]);
+  let subtasks = $state([]); // тексты подзадач, которые уйдут в чек-лист новой задачи
+  let files = $state([]); // File, которые уйдут к новой задаче
+  let dateInput = $state();
+  let fileInput = $state();
+  let micButton = $state();
+  const MAX_FILE = 10 * 1024 * 1024; // как у вложений чата (attach::MAX_BYTES)
+  const MAX_FILES = 10;
+
   const board = $derived(groupBoard(todos, { filter, query, today }));
   const counts = $derived(filterCounts(todos, today));
   const candidates = $derived(carryOverCandidates(todos, today));
@@ -100,6 +110,7 @@
 
   $effect(() => {
     load();
+    loadBots();
     const onEvent = (e) => {
       if (e.detail?.type !== 'todos_changed') return;
       load();
@@ -118,13 +129,88 @@
     return api('/api/todos/from-text', { method: 'POST', body: { text: parsed.text, bucket: newBucket } });
   }
 
+  // Боты для «+Имя»: исполнителем бывает только бот (людей-исполнителей в данных нет).
+  async function loadBots() {
+    try {
+      const state = await api('/api/state');
+      if (Array.isArray(state?.bots)) bots = state.bots.filter((b) => b && b.name && !b.archived);
+    } catch {
+      bots = [];
+    }
+  }
+
+  function toBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Подзадачи и файлы относятся к созданной задаче; если фраза распалась на несколько, они уходят к первой.
+  async function attachExtras(created) {
+    const first = Array.isArray(created) ? created[0] : null;
+    if (!first?.id) return;
+    const items = subtasks.map((t) => t.trim()).filter(Boolean).map((text) => ({ text, done: false }));
+    try {
+      if (items.length) await api(`/api/todos/${encodeURIComponent(first.id)}`, { method: 'PATCH', body: { items } });
+      for (const file of files) {
+        await api(`/api/todos/${encodeURIComponent(first.id)}/files`, { method: 'POST', body: { name: file.name, data: await toBase64(file) } });
+      }
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  function pickDate() {
+    if (!dateInput) return;
+    try {
+      dateInput.showPicker();
+    } catch {
+      dateInput.focus();
+      dateInput.click();
+    }
+  }
+
+  function addFiles(list) {
+    const next = [...files];
+    for (const file of list) {
+      if (next.length >= MAX_FILES) {
+        error = tr('К задаче можно приложить до {n} файлов', { n: MAX_FILES });
+        break;
+      }
+      if (file.size > MAX_FILE) {
+        error = tr('Файл «{name}» больше {mb} МБ', { name: file.name, mb: MAX_FILE / (1024 * 1024) });
+        continue;
+      }
+      next.push(file);
+    }
+    files = next;
+  }
+
+  // Голос: тот же микрофон, что в чате (voice.js); распознанное дописывается в поле. Без voice.js кнопки нет.
+  const voiceReady = typeof window !== 'undefined' && Boolean(window.DeloistVoice?.voiceButton);
+  $effect(() => {
+    if (!voiceReady || !micButton) return;
+    const mic = window.DeloistVoice.voiceButton({
+      button: micButton,
+      onText: (spoken) => composer?.append(spoken),
+      onError: (message) => (error = message),
+    });
+    return () => mic?.cancel?.();
+  });
+
   async function add(parsed) {
     if (busy) return;
     busy = true;
     try {
-      await create(parsed);
+      const created = await create(parsed);
       text = '';
       error = '';
+      await attachExtras(created);
+      subtasks = [];
+      files = [];
       await load();
     } catch (err) {
       fail(err);
@@ -336,11 +422,43 @@
   {#if error}<p class="td-error" role="alert">{error}</p>{/if}
 
   <div class="td-form">
-    <Composer bind:this={composer} bind:value={text} {api} placeholder={tr('Позвонить маме завтра в 10:00')} onsubmit={add} />
+    <Composer bind:this={composer} bind:value={text} {api} {bots} placeholder={tr('Позвонить маме завтра в 10:00. «+Имя» назначит бота')} onsubmit={add} />
+    {#if subtasks.length}
+      <ul class="td-sub" aria-label={tr('Подзадачи новой задачи')}>
+        {#each subtasks as _, i (i)}
+          <li class="td-sub-row">
+            <input class="td-sub-input" type="text" maxlength="200" bind:value={subtasks[i]} placeholder={tr('Подзадача')} aria-label={tr('Подзадача {n}', { n: i + 1 })} />
+            <button type="button" class="td-x" aria-label={tr('Убрать подзадачу {n}', { n: i + 1 })} title={tr('Убрать')} onclick={() => (subtasks = subtasks.filter((_, at) => at !== i))}>×</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if files.length}
+      <ul class="td-files" aria-label={tr('Файлы новой задачи')}>
+        {#each files as file, i (i)}
+          <li class="td-file">
+            <span class="td-file-name">{file.name}</span>
+            <button type="button" class="td-x" aria-label={tr('Убрать: {what}', { what: file.name })} title={tr('Убрать')} onclick={() => (files = files.filter((_, at) => at !== i))}>×</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     <div class="td-form-bar">
-      <Button size="sm" variant="ghost" onclick={() => (newBucket = nextBucket(newBucket))} aria-label={tr('Раздел новой задачи: {name}', { name: bucketName(newBucket) })}>
-        {tr('Раздел: {name}', { name: bucketName(newBucket) })}
-      </Button>
+      <div class="td-tools">
+        <Button size="sm" variant="ghost" onclick={pickDate} aria-label={tr('Выбрать дату')}>{tr('Дата')}</Button>
+        <input bind:this={dateInput} class="td-hidden-input" type="date" tabindex="-1" aria-hidden="true" onchange={(e) => { composer?.setDate(e.currentTarget.value); e.currentTarget.value = ''; }} />
+        <Button size="sm" variant="ghost" onclick={() => (newBucket = nextBucket(newBucket))} aria-label={tr('Раздел новой задачи: {name}', { name: bucketName(newBucket) })}>
+          {tr('Раздел: {name}', { name: bucketName(newBucket) })}
+        </Button>
+        <Button size="sm" variant="ghost" onclick={() => (subtasks = [...subtasks, ''])} aria-label={tr('Добавить подзадачу')}>{tr('Подзадача')}</Button>
+        <Button size="sm" variant="ghost" onclick={() => fileInput?.click()} aria-label={tr('Приложить файл')}>{tr('Файл')}</Button>
+        <input bind:this={fileInput} class="td-hidden-input" type="file" multiple tabindex="-1" aria-hidden="true" onchange={(e) => { addFiles([...e.currentTarget.files]); e.currentTarget.value = ''; }} />
+        {#if voiceReady}
+          <button type="button" bind:this={micButton} class="td-mic" aria-label={tr('Сказать голосом')} title={tr('Сказать голосом')}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" /></svg>
+          </button>
+        {/if}
+      </div>
       <Button variant="primary" size="sm" loading={busy} disabled={!text.trim()} onclick={() => composer?.submit()}>{tr('Добавить')}</Button>
     </div>
   </div>
@@ -461,6 +579,118 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--k-space-2, 8px);
+  }
+  .td-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--k-space-1, 4px);
+    min-width: 0;
+  }
+  .td-hidden-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .td-mic {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--k-radius-pill, 999px);
+    background: transparent;
+    color: var(--k-text-2, #5c5f66);
+    cursor: pointer;
+  }
+  .td-mic:hover {
+    background: color-mix(in srgb, var(--k-text, #262931) 10%, transparent);
+    color: var(--k-text, #262931);
+  }
+  .td-mic:focus-visible {
+    outline: none;
+    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
+  }
+  .td-mic:global([data-state='listening']) {
+    background: var(--k-attention, #ff4f3a);
+    color: #fff;
+  }
+  .td-mic:global([data-state='working']),
+  .td-mic:global([data-state='downloading']),
+  .td-mic:global([data-state='loading']) {
+    opacity: 0.6;
+  }
+  .td-sub,
+  .td-files {
+    display: flex;
+    flex-direction: column;
+    gap: var(--k-space-1, 4px);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .td-files {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .td-sub-row,
+  .td-file {
+    display: flex;
+    align-items: center;
+    gap: var(--k-space-1, 4px);
+  }
+  .td-sub-row {
+    padding-left: var(--k-space-3, 12px);
+  }
+  .td-file {
+    padding: 3px 4px 3px 10px;
+    border-radius: var(--k-radius-pill, 999px);
+    background: var(--k-surface, #fff);
+    border: 1px solid var(--k-line, #e0ded9);
+    font: 600 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
+    color: var(--k-text, #262931);
+  }
+  .td-file-name {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .td-sub-input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--k-line-strong, #cfcdc7);
+    border-radius: var(--k-radius-sm, 12px);
+    background: var(--k-surface, #fff);
+    color: var(--k-text, #262931);
+    font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
+  }
+  .td-sub-input:focus {
+    outline: none;
+    border-color: var(--k-brand, #025bff);
+    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
+  }
+  .td-x {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--k-radius-pill, 999px);
+    background: transparent;
+    color: var(--k-text-2, #5c5f66);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .td-x:hover {
+    background: color-mix(in srgb, var(--k-text, #262931) 12%, transparent);
+    color: var(--k-text, #262931);
   }
   .td-bar {
     display: flex;
