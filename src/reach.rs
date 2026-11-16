@@ -343,6 +343,12 @@ pub fn command_needs_approval_in(command: &str, places: &Places) -> bool {
     analyze(command, &places.ctx(), false, 0)
 }
 
+/// То же для текста, который агент сам исполняет в PowerShell (без `powershell -Command`).
+/// Разбор PowerShell строгий: `$`, `(`, `{`, `%` и обратная кавычка сразу дают «спросить».
+pub fn ps_command_needs_approval_in(script: &str, places: &Places) -> bool {
+    analyze(script, &places.ctx(), true, 0)
+}
+
 /// Чем опасна запись по этому пути, если он в папке запущенной программы (и не в своей папке).
 pub fn install_reason(real: &Path, places: &Places) -> Option<&'static str> {
     let install = canonical_or_same(places.install?);

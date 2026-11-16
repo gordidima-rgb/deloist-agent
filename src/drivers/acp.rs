@@ -1688,7 +1688,16 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
         other => other.as_str().unwrap_or_default().to_string(),
     };
     let shell_command = call["rawInput"]["shell_command"].as_str().unwrap_or_default();
+    // Antigravity (Gemini) присылает команду только названием: `rawInput` пустой. Проверяем название как команду.
+    let title_command = (kind == "execute"
+        && call["rawInput"]["command"].is_null()
+        && call["rawInput"]["shell_command"].is_null()
+        && paths.is_empty()
+        && crate::describe::acp_mcp_tool(call).is_none())
+    .then(|| call["title"].as_str().unwrap_or_default())
+    .unwrap_or_default();
     let touch = crate::keys::command_touch(&command).or_else(|| crate::keys::command_touch(shell_command))
+        .or_else(|| crate::keys::command_touch(title_command))
         .or_else(|| paths.iter().find_map(|p| crate::keys::path_touch(&p.to_string_lossy())));
     // Push, выпуск и зеркало агент тоже не делает без человека, в каком бы режиме ни был бот.
     // Metacharacters in an argv element are data, not shell separators. Keep checking
@@ -1696,7 +1705,8 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
     let release_text = if call["rawInput"]["command"].is_array() {
         command.replace(['&', '|', ';', '\n', '\r'], " ")
     } else { command.clone() };
-    let releases = crate::reach::release_command(&release_text).is_some() || crate::reach::release_command(shell_command).is_some();
+    let releases = crate::reach::release_command(&release_text).is_some() || crate::reach::release_command(shell_command).is_some()
+        || crate::reach::release_command(title_command).is_some();
     // Режим бота берём свежим: человек мог включить «Свободу действий» посреди хода.
     let fresh = req.app.store.bot(&req.bot.id);
     let mut floored = fresh.as_ref().unwrap_or(req.bot).clone();
@@ -1728,6 +1738,12 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
             || crate::tools::needs_approval_for(req.app, bot, "write_file", &json!({"path":p.to_string_lossy()})));
     let conflicting_known = known.is_some() && safe_known.is_none();
     let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
+    // Команда только названием (Antigravity), которая по строгому разбору лишь читает: карточка не нужна, как у своего `run_command`.
+    if ask && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
+        && crate::tools::acp_title_command_is_read_only(req.app, bot, title_command)
+    {
+        ask = false;
+    }
     // Правка своего файла командой PowerShell: если строгий разбор доказал, что она только пишет в своих папках, карточка не нужна.
     // Выключено слиянием с main (91e808d): его тесты требуют карточку и для массива аргументов, пока владелец не решит иначе.
     if ACP_OWN_SCRIPT_WITHOUT_CARD && ask && !releases && touch.is_none() && !conflicting_known && kind == "execute" && bot.approval == "ask" && call["rawInput"]["shell_command"].is_null() {

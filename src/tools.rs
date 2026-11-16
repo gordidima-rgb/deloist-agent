@@ -633,6 +633,34 @@ pub(crate) fn key_file_target(store: &crate::store::Store, bot_id: &str, raw: &s
     }
 }
 
+/// Команда, которую ACP-агент прислал только названием (Antigravity/Gemini исполняет его в PowerShell сам),
+/// в режиме «спрашивать» идёт без карточки, если строгий разбор доказал, что она только читает:
+/// те же правила, что у своего `run_command` (`reach::analyze`), плюс запрет переводов строк.
+/// Секреты, ключи, выпуск и всё, что меняет файлы или не разобрано, — карточка, как раньше.
+pub(crate) fn acp_title_command_is_read_only(app: &App, bot: &Bot, title: &str) -> bool {
+    // `>` пишет даже у читающей команды; для ACP правка своих файлов идёт с карточкой (см. `ACP_OWN_SCRIPT_WITHOUT_CARD`).
+    if bot.approval != "ask" || title.trim().is_empty() || title.contains(['\n', '\r', '\0', '>']) {
+        return false;
+    }
+    let store = &app.store;
+    let workspace = store.workspace(&bot.id);
+    if crate::reach::release_command(title).is_some()
+        || crate::keys::command_touch(title).is_some()
+        || crate::reach::command_secret(title, &workspace, store.data_dir()).is_some()
+    {
+        return false;
+    }
+    let projects = homes(app, &bot.id);
+    let places = crate::reach::Places { workspace: &workspace, projects: &projects, data_dir: store.data_dir(), install: None };
+    let lower = title.trim_start().to_lowercase();
+    let wrapped = ["powershell ", "pwsh ", "powershell.exe ", "pwsh.exe "].iter().any(|p| lower.starts_with(p));
+    if wrapped {
+        !crate::reach::command_needs_approval_in(title, &places)
+    } else {
+        !crate::reach::ps_command_needs_approval_in(title, &places)
+    }
+}
+
 /// Папки, где бот хозяин: checkout режима разработки и общие папки команды (только в её разговоре).
 pub(crate) fn homes(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
     let mut out = crate::rooms::projects_for_turn(app, bot_id);

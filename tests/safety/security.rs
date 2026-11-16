@@ -2812,6 +2812,42 @@ async fn acp_shell_requests_are_described_and_an_own_file_edit_requires_a_card()
     let _ = std::fs::remove_dir_all(&away);
 }
 
+/// Antigravity (Gemini) присылает команду только названием, с пустым `rawInput`, и исполняет её в PowerShell.
+/// Чтение в своей папке идёт без карточки (как свой `run_command`), всё остальное спрашивается.
+#[tokio::test]
+async fn acp_title_only_read_commands_go_without_a_card() {
+    let (crew, bot, _log) = acp_crew("acp-title").await;
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "ask" }))).await;
+    let ws = crew.data_dir.join("workspaces").join(&bot);
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(ws.join("x-analiz.md"), "git\n").unwrap();
+    let call = |title: String| json!({ "toolCallId": "t1", "title": title, "kind": "execute" });
+    for title in [
+        "Get-ChildItem -Force".to_string(),
+        format!("Get-ChildItem -Force \"{}\"", ws.display()),
+        format!("Select-String -Path \"{}\" -Pattern \"git\"", ws.join("x-analiz.md").display()),
+    ] {
+        let (card, _) = acp_asks(&crew, &bot, call(title.clone())).await;
+        assert!(card.is_none(), "чтение спросило карточку: {title}: {card:?}");
+    }
+    for title in [
+        "Set-Content notes.md x".to_string(),
+        "Get-ChildItem; Remove-Item notes.md".to_string(),
+        "Get-ChildItem $(Remove-Item notes.md)".to_string(),
+        "Get-Content `calc`".to_string(),
+        "Get-Content x-analiz.md\nRemove-Item x-analiz.md".to_string(),
+        "Get-Content .env".to_string(),
+        "Get-ChildItem > out.txt".to_string(),
+    ] {
+        let (card, _) = acp_asks(&crew, &bot, call(title.clone())).await;
+        assert!(card.is_some(), "без карточки прошло: {title}");
+    }
+    // Выпуск названием спрашивается и в «Свободе действий».
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "auto" }))).await;
+    let (card, _) = acp_asks(&crew, &bot, call("git push origin main".into())).await;
+    assert_eq!(card.expect("git push названием спрашивается")["human"]["class"], "release");
+}
+
 // --- раунд 2: строковая форма ACP, пол осторожности передачи, права бота через PATCH -------------------------
 
 #[tokio::test]

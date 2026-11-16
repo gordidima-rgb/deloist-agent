@@ -909,6 +909,10 @@ pub fn acp(app: &App, bot: &Bot, call: &Value, paths: &[PathBuf]) -> Described {
         Value::String(s) => vec![s.clone()],
         _ => Vec::new(),
     };
+    // Antigravity (Gemini) присылает команду только названием и исполняет её в PowerShell.
+    let title_only = command.is_empty() && kind == "execute" && paths.is_empty() && raw["shell_command"].is_null()
+        && acp_mcp_tool(call).is_none() && call["title"].as_str().is_some_and(|t| !t.trim().is_empty() && !t.contains("://"));
+    let command = if title_only { vec![call["title"].as_str().unwrap_or_default().to_string()] } else { command };
     if !command.is_empty() {
         details.push_str(&format!("команда: {}\n", command.join(" ")));
     }
@@ -944,7 +948,8 @@ pub fn acp(app: &App, bot: &Bot, call: &Value, paths: &[PathBuf]) -> Described {
     }
     match kind {
         "execute" if !command.is_empty() => {
-            let script = shellplan::script_from_argv(&command).or_else(|| if command.len() == 1 { shellplan::script_from_cmdline(&command[0]) } else { None });
+            let script = shellplan::script_from_argv(&command).or_else(|| if command.len() == 1 { shellplan::script_from_cmdline(&command[0]) } else { None })
+                .or_else(|| title_only.then(|| command[0].clone()));
             if let Some(label) = crate::reach::release_command(&command.join(" ")) {
                 d.class = "release";
                 d.text = ph!(format!("{me}: агент хочет отправить изменения наружу: {label}"), format!("{me}: the agent wants to send changes out: {label}"));
