@@ -62,6 +62,7 @@ fn build_prompt(bot: &Bot, messages: &[Value], memory: &str, workspace: &Path, p
         lines.push(format!("# Твоя память\n{memory}"));
     }
     lines.push(format!("# Рабочая папка\n{}", workspace.display()));
+    lines.push(format!("# Оформление\n{}", crate::turn::LINKS_RULE.trim_start_matches("— ").trim_end_matches(';')));
     if let Some(project) = project {
         lines.push(project.to_string());
     }

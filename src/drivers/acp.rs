@@ -1836,9 +1836,23 @@ fn inside_workspace(req: &Request<'_>, raw: &str) -> Result<PathBuf, String> {
     req.app.store.safe_path(&req.bot.id, &rel.to_string_lossy()).map_err(|_| outside())
 }
 
+/// Путь для чтения. Внутри папки бота — как для записи; снаружи — по правилу родного `read_file`
+/// (читать можно везде, кроме секретов): движки хранят свою память и заметки вне папки бота, а отказ
+/// стоит бота хода и токенов, ничего не защищая. Секреты отсекает `read_target` ниже, запись сюда не распространяется.
+fn readable_path(req: &Request<'_>, raw: &str) -> Result<PathBuf, String> {
+    match inside_workspace(req, raw) {
+        Err(e) if e.starts_with("путь вне папки бота") => {
+            let given = Path::new(raw);
+            let candidate = if given.is_absolute() { given.to_path_buf() } else { req.workspace.join(given) };
+            std::fs::canonicalize(&candidate).map_err(|_| e)
+        }
+        other => other,
+    }
+}
+
 async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, cancel: &CancellationToken, sink: Sink<'_>) -> Result<String, String> {
     let raw = params["path"].as_str().unwrap_or_default();
-    let path = inside_workspace(req, raw)?;
+    let path = readable_path(req, raw)?;
     // Resolve aliases before choosing the shared secret policy, and reject protected paths
     // before offering any approval. Its contents are not read until the decision arrives.
     let real = crate::reach::real_path(&path).ok_or("не удалось проверить путь")?;
@@ -1858,7 +1872,7 @@ async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, canc
             sink(DriverEvent::Activity(json!({ "id": "acp-secret-read-denied", "name": "Разрешение", "kind": "permission", "status": "denied" })));
             return Err("человек не разрешил чтение файла с ключами".into());
         }
-        let current = inside_workspace(req, raw)?;
+        let current = readable_path(req, raw)?;
         let current = crate::reach::real_path(&current).ok_or("не удалось повторно проверить путь")?;
         let current = crate::tools::key_file_target(&req.app.store, &req.bot.id, &current.to_string_lossy())?;
         if current != checked { return Err("путь к файлу изменился во время подтверждения".into()); }

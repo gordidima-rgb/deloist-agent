@@ -371,11 +371,21 @@ async fn files_inside_the_workspace_work_and_outside_are_refused() {
     let (_, answer) = s.turn(&format!("прочитай {}", absolute.display())).await;
     assert!(answer.contains("прочитано: заметка"), "абсолютный путь внутри воркспейса: {answer}");
 
+    // Служебные файлы программы закрыты для чтения по тому же правилу, что у родного read_file.
     for path in [secret.display().to_string(), "../../secret.txt".to_string(), "..\\..\\secret.txt".to_string()] {
         let (_, answer) = s.turn(&format!("прочитай {path}")).await;
-        assert!(answer.contains("ошибка: путь вне папки бота"), "{path}: {answer}");
+        assert!(answer.contains("ошибка:") && answer.contains("сюда боту нельзя"), "{path}: {answer}");
         assert!(!answer.contains("тайна"), "{path}: {answer}");
     }
+
+    // Чтение вне папки бота (память движка, заметки) — разрешено, как у родных инструментов.
+    let elsewhere = common::temp_data_dir("acp-read-elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let outside_note = elsewhere.join("memory.md");
+    std::fs::write(&outside_note, "память движка").unwrap();
+    let (_, answer) = s.turn(&format!("прочитай {}", outside_note.display())).await;
+    assert!(answer.contains("прочитано: память движка"), "чтение вне папки бота: {answer}");
+    let _ = std::fs::remove_dir_all(&elsewhere);
 
     let (_, answer) = s.turn("запиши sub/out.txt").await;
     assert!(answer.contains("записано"), "{answer}");
