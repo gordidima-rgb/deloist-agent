@@ -13,7 +13,7 @@
   import WfIcon from './WfIcon.svelte';
 
   /** api(path,{method,body}); bots [{id,name,color,emoji}]; onmenu() открывает боковую панель на узком окне. */
-  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu } = $props();
+  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu, uploadAsset, fileUrl } = $props();
 
   const POLL_MS = 3000;
   const request = (path, opts) => untrack(() => api)(path, opts);
@@ -287,6 +287,8 @@
             viewing={Boolean(viewRun)}
             {models}
             {onconnect}
+            {uploadAsset}
+            {fileUrl}
             api={request}
             {actions}
             onview={(r) => (viewRun = r)}

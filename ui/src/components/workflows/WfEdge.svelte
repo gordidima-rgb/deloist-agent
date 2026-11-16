@@ -3,7 +3,7 @@
   import { getContext } from 'svelte';
   import { BaseEdge, EdgeLabel, getBezierPath } from '@xyflow/svelte';
   import { tr } from '../../lib/i18n.js';
-  import { edgeFlow } from '../../lib/workflows/graph.js';
+  import { edgeFlow, outTypeOf } from '../../lib/workflows/graph.js';
   import { WF } from './ctx.js';
   import WfIcon from './WfIcon.svelte';
 
@@ -14,9 +14,14 @@
   const path = $derived(geometry[0]);
   const flow = $derived(edgeFlow({ source, target, branch: data?.branch }, ctx.steps));
   const branch = $derived(data?.branch);
+  const type = $derived.by(() => {
+    const n = ctx.model.nodes.find((x) => x.id === source);
+    const t = n ? outTypeOf(n.data.kind, n.data.fields) : 'text';
+    return t === 'image' || t === 'file' ? t : 'text';
+  });
 </script>
 
-<BaseEdge {id} {path} class={['wfe', `wfe--${flow}`, selected && 'wfe--sel']} interactionWidth={22} />
+<BaseEdge {id} {path} class={['wfe', `wfe--${flow}`, `wfe--t-${type}`, selected && 'wfe--sel']} interactionWidth={22} />
 {#if flow === 'live'}
   <path d={path} pathLength="100" class="wfe-comet" fill="none" />
 {/if}
@@ -38,6 +43,12 @@
     transition:
       stroke 220ms var(--k-ease-out, ease),
       stroke-width 150ms var(--k-ease-out, ease);
+  }
+  :global(.svelte-flow__edge-path.wfe--t-image) {
+    stroke: color-mix(in oklab, var(--k-bot-rose) 70%, var(--k-line-strong));
+  }
+  :global(.svelte-flow__edge-path.wfe--t-file) {
+    stroke: color-mix(in oklab, var(--k-bot-tangerine) 75%, var(--k-line-strong));
   }
   :global(.svelte-flow__edge-path.wfe--pending) {
     stroke: color-mix(in oklab, var(--k-brand) 55%, var(--k-line-strong));

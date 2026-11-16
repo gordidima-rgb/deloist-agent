@@ -14,6 +14,7 @@ import {
   toFlow,
   toGraph,
   connectionProblem,
+  typeProblem,
   kindsBetween,
 } from './graph.js';
 import { MAX_STROKES, limitPoints } from './strokes.js';
@@ -196,6 +197,8 @@ export class CanvasModel {
     if (!src || !dst) return { problem: 'unknown' };
     const why = connectionProblem(kindOf(src), kindOf(dst));
     if (why) return { problem: why };
+    const mismatch = typeProblem(kindOf(src), src.data.fields, kindOf(dst));
+    if (mismatch) return { problem: mismatch };
     if (!canConnect(this.nodes, this.edges, conn)) return { problem: conn.source === conn.target ? 'self' : 'duplicate' };
     if (this.edges.length >= MAX_EDGES) return { problem: 'limit' };
     const branch = conn.sourceHandle && conn.sourceHandle !== 'out' ? conn.sourceHandle : undefined;

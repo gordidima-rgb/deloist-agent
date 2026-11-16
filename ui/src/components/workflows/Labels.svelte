@@ -11,7 +11,7 @@
       case 'bot':
         return tr('Бот');
       case 'llm':
-        return tr('Модель');
+        return 'LLM';
       case 'condition':
         return tr('Условие');
       case 'approval':
@@ -22,6 +22,10 @@
         return tr('Заметка');
       case 'text':
         return tr('Текст');
+      case 'asset':
+        return tr('Ресурс');
+      case 'image':
+        return tr('Изображение');
       default:
         return kind;
     }
@@ -43,6 +47,10 @@
         return tr('Ждёт вашего решения');
       case 'output':
         return tr('Отправляет результат наружу');
+      case 'asset':
+        return tr('Файл, картинка или готовый текст');
+      case 'image':
+        return tr('Рисует картинку по описанию');
       default:
         return '';
     }
@@ -87,6 +95,8 @@
         return tr('Шаг нельзя соединить с самим собой');
       case 'duplicate':
         return tr('Эти шаги уже соединены');
+      case 'type':
+        return tr('Тип данных не подходит: у выхода и входа разные порты');
       case 'limit':
         return tr('Слишком много связей в процессе');
       default:

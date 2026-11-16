@@ -8,7 +8,7 @@
   import { toast } from '../../lib/workflows/notify.js';
   import { CanvasModel } from '../../lib/workflows/canvasModel.svelte.js';
   import { Saver } from '../../lib/workflows/saver.js';
-  import { canConnect, connectionProblem, isRunOpen, kindOf, kindsFor, kindsBetween, latestSteps, stepSeconds, toMs, newId } from '../../lib/workflows/graph.js';
+  import { SHAPE_CHOICES, canConnect, connectionProblem, typeProblem, isRunOpen, kindOf, kindsFor, kindsBetween, latestSteps, stepSeconds, toMs, newId } from '../../lib/workflows/graph.js';
   import { WF } from './ctx.js';
   import { connectionText, statusLabel, seconds } from './Labels.svelte';
   import WfNode from './WfNode.svelte';
@@ -22,6 +22,7 @@
   import HistoryPopover from './HistoryPopover.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import WfIcon from './WfIcon.svelte';
+  import ToolArt from './ToolArt.svelte';
 
   /**
    * workflow {id,title,revision,graph}; triggers [{node_id,type,next_run}]; bots [{id,name,color,emoji}];
@@ -50,6 +51,8 @@
     onview,
     onpreview,
     onconnect,
+    uploadAsset,
+    fileUrl,
   } = $props();
 
   const flow = useSvelteFlow();
@@ -63,8 +66,12 @@
   let brush = $state('pen');
   let brushColor = $state('ink');
   let brushSize = $state(3);
-  let shapeKind = $state('rect');
+  let shapeId = $state('rect');
   let shapeFill = $state('sky');
+  let noteColor = $state('lemon');
+  let shakeNode = $state('');
+  let previews = $state.raw({});
+  let lightbox = $state('');
   let menu = $state(null);
   let ctxMenu = $state(null);
   let panel = $state(null); // 'runs' | 'versions' | null
@@ -181,6 +188,17 @@
     retry: (step) => actions.retry?.(step),
     stopStep: (step) => actions.stop?.(step),
     removeEdge: (id) => model.removeEdge(id),
+    shakeId: () => shakeNode,
+    assetPreview: (id) => previews[id] || '',
+    fileUrl: (path) => (fileUrl ? fileUrl(path, workflow.id) : /^(data:|https?:|\/)/.test(path) ? path : `/api/workflows/${encodeURIComponent(workflow.id)}/files/${encodeURIComponent(path)}`),
+    assetFromFile: (id, file) => assetFromFile(id, file),
+    clearAsset: (id) => {
+      model.setFields(id, { name: '', path: '', mime: '', size: 0, text: '' });
+      const { [id]: gone, ...rest } = previews;
+      if (gone) URL.revokeObjectURL(gone);
+      previews = rest;
+    },
+    zoomImage: (url) => (lightbox = url),
   });
 
   const nodeTypes = { wfnode: WfNode, wfnote: WfNote, wfshape: WfShape };
@@ -209,6 +227,60 @@
       localStorage.setItem('wf-minimap', minimap ? '1' : '0');
     } catch {}
   });
+
+  // ---- ресурсы: файлы на холсте ----
+
+  const TEXTLIKE = /^(text\/|application\/(json|xml|x-yaml|yaml|csv))/;
+
+  async function assetFromFile(id, file) {
+    const meta = { name: file.name, mime: file.type || '', size: file.size };
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      previews = { ...previews, [id]: url };
+    }
+    if ((TEXTLIKE.test(file.type) || /\.(txt|md|csv|json|log)$/i.test(file.name)) && file.size <= 20000) {
+      try {
+        meta.text = await file.text();
+      } catch {}
+    }
+    if (uploadAsset && !meta.text) {
+      try {
+        const res = await uploadAsset(file);
+        if (res?.path) meta.path = res.path;
+      } catch (err) {
+        toast(trServer(err?.message || tr('Файл не загрузился')));
+      }
+    }
+    model.setFields(id, meta);
+  }
+
+  function onDragOver(e) {
+    if (readonly || !e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDrop(e) {
+    if (readonly || !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    const pos = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    let i = 0;
+    for (const f of e.dataTransfer.files) {
+      const node = model.addNode('asset', pos.x - 150 + i * 30, pos.y - 40 + i * 30, {}, { commit: false });
+      if (node) assetFromFile(node.id, f);
+      i += 1;
+    }
+    model.commit();
+  }
+
+  // Отказ в соединении: узел-приёмник вздрагивает.
+  function shake(id) {
+    if (!id) return;
+    shakeNode = id;
+    setTimeout(() => {
+      if (shakeNode === id) shakeNode = '';
+    }, 460);
+  }
 
   // ---- вид ----
 
@@ -312,7 +384,7 @@
     const ev = 'changedTouches' in event ? event.changedTouches[0] : event;
     const r = box.getBoundingClientRect();
     const side = state.fromHandle?.type === 'target' ? 'target' : 'source';
-    const allowed = kindsFor(kindOf(state.fromNode), side);
+    const allowed = kindsFor(kindOf(state.fromNode), side, state.fromNode.data?.fields);
     if (!allowed.length) return;
     ctxMenu = null;
     menu = {
@@ -331,11 +403,12 @@
     panel = null;
     const pos = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
     if (tool === 'note' || tool === 'text') {
-      model.addNode(tool, pos.x - (tool === 'note' ? 100 : 20), pos.y - 20);
+      model.addNode(tool, pos.x - (tool === 'note' ? 100 : 20), pos.y - 20, tool === 'note' ? { fields: { text: '', color: noteColor }, w: 220, h: 160 } : {});
       tool = 'select';
     } else if (tool === 'shape') {
-      const round = shapeKind === 'circle';
-      model.addNode('shape', pos.x - 80, pos.y - 60, { fields: { shape: shapeKind, fill: shapeFill, text: '' }, w: round ? 130 : 170, h: round ? 130 : 120 });
+      const ch = SHAPE_CHOICES.find((c) => c.id === shapeId) || SHAPE_CHOICES[0];
+      const round = ch.shape === 'circle';
+      model.addNode('shape', pos.x - 80, pos.y - 60, { fields: { shape: ch.shape, fill: shapeFill, text: '', ...(ch.flip ? { flip: true } : {}) }, w: round ? 130 : 170, h: round ? 130 : 120 });
       tool = 'select';
     }
   }
@@ -348,6 +421,7 @@
     const res = model.connect(conn);
     if (res.edge) return res.edge;
     toast(connectionText(res.problem));
+    shake(conn.target);
     return null;
   }
 
@@ -357,7 +431,9 @@
       const from = state.fromHandle?.type === 'target' ? state.toNode : state.fromNode;
       const to = state.fromHandle?.type === 'target' ? state.fromNode : state.toNode;
       const why = connectionProblem(kindOf(from), kindOf(to));
-      toast(connectionText(why || (from.id === to.id ? 'self' : 'duplicate')));
+      const mismatch = !why && typeProblem(kindOf(from), from.data?.fields, kindOf(to));
+      toast(connectionText(why || mismatch || (from.id === to.id ? 'self' : 'duplicate')));
+      shake(to.id);
     }
   }
 
@@ -606,7 +682,7 @@
 
 <svelte:window onkeydown={onKey} onpointermove={(e) => (lastPointer = { x: e.clientX, y: e.clientY })} />
 
-<div class="wf-canvas" class:is-ro={readonly} class:is-hud-off={!hud} data-tool={tool} bind:this={box}>
+<div class="wf-canvas" class:is-ro={readonly} class:is-hud-off={!hud} data-tool={tool} bind:this={box} role="presentation" ondragover={onDragOver} ondrop={onDrop}>
   <SvelteFlow
     bind:nodes={model.nodes}
     bind:edges={model.edges}
@@ -652,7 +728,7 @@
       onerase={(ids) => model.removeStrokes(ids)}
     />
     {#if minimap}
-      <MiniMap position="bottom-right" pannable zoomable nodeColor="var(--k-line-strong)" maskColor="color-mix(in oklab, var(--k-canvas) 70%, transparent)" bgColor="var(--k-surface)" nodeBorderRadius={6} />
+      <MiniMap position="bottom-right" style="margin-bottom: 72px;" pannable zoomable nodeColor="var(--k-line-strong)" maskColor="color-mix(in oklab, var(--k-canvas) 70%, transparent)" bgColor="var(--k-surface)" nodeBorderRadius={6} />
     {/if}
 
     {#if readonly}
@@ -718,7 +794,7 @@
         </div>
       </Panel>
 
-      <Panel position="bottom-left" class="wf-p-zoom">
+      <Panel position="bottom-right" class="wf-p-zoom">
         <div class="wf-bar wf-bar--zoom">
           <button type="button" class="wf-ib" title={tr('Отдалить')} aria-label={tr('Отдалить')} onclick={() => flow.zoomOut({ duration: 200 })}><WfIcon name="minus" size={15} /></button>
           <button type="button" class="wf-zoomval" title={tr('Масштаб 100%')} onclick={() => flow.setZoom(1, { duration: 200 })}>{zoomPct}%</button>
@@ -729,19 +805,21 @@
       </Panel>
 
       <Panel position="bottom-center" class="wf-p-tools">
-        {#if tool === 'draw' || tool === 'shape'}
+        {#if tool === 'draw' || tool === 'shape' || tool === 'note'}
           <ToolOptions
             mode={tool}
             {brush}
             color={brushColor}
             size={brushSize}
-            shape={shapeKind}
+            {shapeId}
             fill={shapeFill}
+            {noteColor}
             onbrush={(b) => (brush = b)}
             oncolor={(c) => (brushColor = c)}
             onsize={(n) => (brushSize = n)}
-            onshape={(s) => (shapeKind = s)}
+            onshape={(id) => (shapeId = id)}
             onfill={(f) => (shapeFill = f)}
+            onnote={(c) => (noteColor = c)}
           />
         {/if}
         {#if searchOpen}
@@ -766,14 +844,14 @@
           </div>
         {/if}
         <div class="wf-tools nodrag nopan" role="toolbar" aria-label={tr('Инструменты холста')}>
-          <button type="button" class="wf-tool" class:on={tool === 'select'} aria-pressed={tool === 'select'} title={toolTitle(tr('Выбор'), 'V')} aria-label={tr('Выбор')} onclick={() => (tool = 'select')}><WfIcon name="select" size={17} /></button>
-          <button type="button" class="wf-tool" class:on={tool === 'hand'} aria-pressed={tool === 'hand'} title={toolTitle(tr('Рука'), 'H')} aria-label={tr('Рука')} onclick={() => (tool = 'hand')}><WfIcon name="hand" size={17} /></button>
-          <button type="button" class="wf-tool" class:on={tool === 'draw'} aria-pressed={tool === 'draw'} title={toolTitle(tr('Рисование'), 'P')} aria-label={tr('Рисование')} onclick={() => (tool = tool === 'draw' ? 'select' : 'draw')}><WfIcon name="pencil" size={17} /></button>
+          <button type="button" class="wf-tool" class:on={tool === 'select'} aria-pressed={tool === 'select'} title={toolTitle(tr('Выбор'), 'V')} aria-label={tr('Выбор')} onclick={() => (tool = 'select')}><WfIcon name="select" size={18} /></button>
+          <button type="button" class="wf-tool" class:on={tool === 'hand'} aria-pressed={tool === 'hand'} title={toolTitle(tr('Рука'), 'H')} aria-label={tr('Рука')} onclick={() => (tool = 'hand')}><WfIcon name="hand" size={18} /></button>
           <span class="wf-sep"></span>
-          <button type="button" class="wf-tool" class:on={tool === 'note'} aria-pressed={tool === 'note'} title={toolTitle(tr('Заметка'), 'N')} aria-label={tr('Заметка')} onclick={() => (tool = tool === 'note' ? 'select' : 'note')}><WfIcon name="note" size={17} /></button>
-          <button type="button" class="wf-tool" class:on={tool === 'shape'} aria-pressed={tool === 'shape'} title={toolTitle(tr('Фигуры'), 'R')} aria-label={tr('Фигуры')} onclick={() => (tool = tool === 'shape' ? 'select' : 'shape')}><WfIcon name="shape" size={17} /></button>
-          <button type="button" class="wf-tool" class:on={tool === 'text'} aria-pressed={tool === 'text'} title={toolTitle(tr('Текст'), 'T')} aria-label={tr('Текст')} onclick={() => (tool = tool === 'text' ? 'select' : 'text')}><WfIcon name="text" size={17} /></button>
-          <button type="button" class="wf-tool" class:on={searchOpen} aria-pressed={searchOpen} title={toolTitle(tr('Поиск'), 'Ctrl+F')} aria-label={tr('Поиск')} onclick={() => (searchOpen ? closeSearch() : openSearch())}><WfIcon name="search" size={17} /></button>
+          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'draw'} aria-pressed={tool === 'draw'} title={toolTitle(tr('Рисование'), 'P')} aria-label={tr('Рисование')} onclick={() => (tool = tool === 'draw' ? 'select' : 'draw')}><ToolArt name="pencil" /></button>
+          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'note'} aria-pressed={tool === 'note'} title={toolTitle(tr('Заметка'), 'N')} aria-label={tr('Заметка')} onclick={() => (tool = tool === 'note' ? 'select' : 'note')}><ToolArt name="note" /></button>
+          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'shape'} aria-pressed={tool === 'shape'} title={toolTitle(tr('Фигуры'), 'R')} aria-label={tr('Фигуры')} onclick={() => (tool = tool === 'shape' ? 'select' : 'shape')}><ToolArt name="shapes" /></button>
+          <button type="button" class="wf-tool wf-tool--t" class:on={tool === 'text'} aria-pressed={tool === 'text'} title={toolTitle(tr('Текст'), 'T')} aria-label={tr('Текст')} onclick={() => (tool = tool === 'text' ? 'select' : 'text')}><span class="wf-tool__t">T</span></button>
+          <button type="button" class="wf-tool" class:on={searchOpen} aria-pressed={searchOpen} title={toolTitle(tr('Поиск'), 'Ctrl+F')} aria-label={tr('Поиск')} onclick={() => (searchOpen ? closeSearch() : openSearch())}><WfIcon name="search" size={18} /></button>
           <span class="wf-sep"></span>
           <button type="button" class="wf-add" aria-haspopup="menu" aria-expanded={Boolean(menu && !menu.pos && !menu.edgeId)} onclick={() => (menu && !menu.pos ? (menu = null) : openAddMenu())}>
             <WfIcon name="plus" size={15} />
@@ -835,6 +913,11 @@
       onclose={() => (modelPick = null)}
     />
   {/if}
+  {#if lightbox}
+    <div class="wf-lightbox" role="presentation" onclick={() => (lightbox = '')} onkeydown={(e) => e.key === 'Escape' && (lightbox = '')}>
+      <img src={lightbox} alt="" />
+    </div>
+  {/if}
   {#if viewing && run && !readonly}
     <div class="wf-viewing">
       <WfIcon name="history" size={15} />
@@ -846,6 +929,7 @@
 
 <style>
   .wf-canvas {
+    container-type: inline-size;
     position: relative;
     width: 100%;
     height: 100%;
@@ -1124,6 +1208,40 @@
     margin: 0 4px;
     background: var(--k-line);
   }
+  .wf-tool--art {
+    width: 46px;
+    height: 44px;
+  }
+  .wf-tool--art.on {
+    background: color-mix(in oklab, var(--k-text) 9%, transparent);
+  }
+  .wf-tool--t .wf-tool__t {
+    font: 800 20px/1 var(--k-font-display);
+    transition: transform 320ms var(--k-ease-spring, ease);
+  }
+  .wf-tool--t:hover .wf-tool__t {
+    transform: translateY(-2px) scale(1.1);
+  }
+  .wf-tool--t.on {
+    background: color-mix(in oklab, var(--k-text) 9%, transparent);
+    color: var(--k-text);
+  }
+  .wf-lightbox {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    background: var(--k-backdrop);
+    cursor: zoom-out;
+    animation: wf-pop 0.3s var(--k-ease-out, ease) both;
+  }
+  .wf-lightbox img {
+    max-width: 86%;
+    max-height: 86%;
+    border-radius: 18px;
+    box-shadow: var(--k-shadow-3);
+  }
   .wf-add {
     white-space: nowrap;
     display: inline-flex;
@@ -1133,16 +1251,16 @@
     padding: 0 15px 0 12px;
     border: 0;
     border-radius: 13px;
-    background: var(--k-brand);
-    color: var(--k-on-brand, #fff);
-    font: 700 13px/1 var(--k-font-body);
+    background: var(--k-text);
+    color: var(--k-canvas);
+    font: 700 13.5px/1 var(--k-font-body);
     cursor: pointer;
     transition:
       background 150ms var(--k-ease-out, ease),
       transform 300ms var(--k-ease-spring, ease);
   }
   .wf-add:hover {
-    background: var(--k-brand-hover);
+    background: color-mix(in oklab, var(--k-text) 86%, var(--k-canvas));
   }
   .wf-add:active {
     transform: scale(0.95);
@@ -1293,6 +1411,14 @@
     transform: scale(0.94);
   }
 
+  @container (max-width: 1040px) {
+    .wf-canvas :global(.wf-p-zoom) {
+      margin-bottom: 80px;
+    }
+    .wf-canvas :global(.svelte-flow__minimap) {
+      margin-bottom: 128px !important;
+    }
+  }
   @media (max-width: 820px) {
     .wf-ib--list {
       display: grid;

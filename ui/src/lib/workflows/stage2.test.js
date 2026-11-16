@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CanvasModel } from './canvasModel.svelte.js';
-import { edgeFlow, isEnabled, kindsBetween, kindsFor, makeNode, starterGraph, toFlow, toGraph, validateGraph } from './graph.js';
+import { SHAPE_CHOICES, canConnect, edgeFlow, isEnabled, kindsBetween, kindsFor, makeNode, outTypeOf, starterGraph, toFlow, toGraph, typeProblem, validateGraph } from './graph.js';
 import { hitsStroke, limitPoints, pathOf, thin, MAX_POINTS } from './strokes.js';
 
 describe('stage 2 kinds', () => {
@@ -168,5 +168,67 @@ describe('CanvasModel stage 2', () => {
     expect(g.nodes[0].locked).toBe(true);
     const flow = toFlow(g);
     expect(flow.nodes[0].draggable).toBe(false);
+  });
+});
+
+describe('port types', () => {
+  const mk = (kind, fields = {}) => toFlow({ nodes: [{ id: kind + JSON.stringify(fields).length, kind, x: 0, y: 0, fields }], edges: [] }).nodes[0];
+
+  it('knows what each node puts out', () => {
+    expect(outTypeOf('trigger')).toBe('text');
+    expect(outTypeOf('image')).toBe('image');
+    expect(outTypeOf('asset', { name: 'a.jpg', mime: 'image/jpeg', path: 'p' })).toBe('image');
+    expect(outTypeOf('asset', { name: 'a.pdf', mime: 'application/pdf', path: 'p' })).toBe('file');
+    expect(outTypeOf('asset', { text: 'hello' })).toBe('text');
+    expect(outTypeOf('approval')).toBe('any');
+    expect(outTypeOf('output')).toBeNull();
+  });
+
+  it('accepts matching types and refuses the rest', () => {
+    expect(typeProblem('asset', { name: 'a.pdf', path: 'p', mime: 'application/pdf' }, 'llm')).toBeNull();
+    expect(typeProblem('image', {}, 'llm')).toBeNull();
+    expect(typeProblem('image', {}, 'condition')).toBe('type');
+    expect(typeProblem('asset', { name: 'a.pdf', path: 'p', mime: 'application/pdf' }, 'condition')).toBe('type');
+    expect(typeProblem('image', {}, 'output')).toBeNull();
+    expect(typeProblem('image', {}, 'approval')).toBeNull();
+  });
+
+  it('canConnect uses the types of the real nodes', () => {
+    const a = mk('asset', { name: 'a.pdf', mime: 'application/pdf', path: 'p' });
+    const c = mk('condition');
+    const l = mk('llm');
+    expect(canConnect([a, c], [], { source: a.id, target: c.id, sourceHandle: 'out' })).toBe(false);
+    expect(canConnect([a, l], [], { source: a.id, target: l.id, sourceHandle: 'out' })).toBe(true);
+  });
+
+  it('the model reports a type mismatch as its own problem', () => {
+    const m = new CanvasModel({});
+    m.load({
+      nodes: [
+        { id: 'i', kind: 'image', x: 0, y: 0, fields: {} },
+        { id: 'c', kind: 'condition', x: 400, y: 0, fields: {} },
+      ],
+      edges: [],
+      strokes: [],
+    });
+    expect(m.connect({ source: 'i', target: 'c', sourceHandle: 'out' }).problem).toBe('type');
+  });
+
+  it('offers only fitting kinds after dragging from an image output', () => {
+    const k = kindsFor('image', 'source', {});
+    expect(k).toEqual(expect.arrayContaining(['llm', 'image', 'bot', 'approval', 'output']));
+    expect(k).not.toContain('condition');
+  });
+
+  it('inverted triangle is a flipped triangle for the backend', () => {
+    const d = SHAPE_CHOICES.find((c) => c.id === 'triangle_down');
+    expect(d.shape).toBe('triangle');
+    expect(d.flip).toBe(true);
+    expect(SHAPE_CHOICES.map((c) => c.id)).toHaveLength(7);
+  });
+
+  it('asset and image get default fields', () => {
+    expect(makeNode('asset', 0, 0).fields).toEqual({ name: '', path: '', mime: '', size: 0 });
+    expect(makeNode('image', 0, 0).fields.size).toBe('1024x1024');
   });
 });

@@ -8,13 +8,14 @@
   let { id, data, selected = false } = $props();
 
   const ctx = getContext(WF);
-  const shape = $derived(data.fields?.shape || 'rect');
+  const shape = $derived(data.fields?.shape === 'triangle' && data.fields?.flip ? 'triangle_down' : data.fields?.shape || 'rect');
   const fill = $derived(data.fields?.fill || 'sky');
   const hit = $derived(ctx.hits.has(id));
 
   const POLY = {
     diamond: '50,2 98,50 50,98 2,50',
     triangle: '50,4 97,96 3,96',
+    triangle_down: '3,4 97,4 50,96',
     star: '50,3 62,36 97,38 70,59 80,94 50,73 20,94 30,59 3,38 38,36',
   };
 </script>

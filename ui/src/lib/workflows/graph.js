@@ -3,23 +3,75 @@
 
 // Ключи вида узла. inputs/outputs — сколько портов (0 или 1), stage — этап, на котором узел оживает.
 export const KINDS = {
-  trigger: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'sky' },
-  prompt: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'lemon' },
-  bot: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'violet' },
-  llm: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'mint' },
-  condition: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'tangerine', branches: ['yes', 'no'] },
-  approval: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'coral' },
-  output: { inputs: 1, outputs: 0, stage: 1, group: 'flow', tone: 'rose' },
+  trigger: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'tangerine' },
+  prompt: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'sky' },
+  asset: { inputs: 0, outputs: 1, stage: 1, group: 'inputs', tone: 'tangerine' },
+  bot: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'mint' },
+  llm: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'violet' },
+  image: { inputs: 1, outputs: 1, stage: 1, group: 'steps', tone: 'rose' },
+  condition: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'violet', branches: ['yes', 'no'] },
+  approval: { inputs: 1, outputs: 1, stage: 1, group: 'flow', tone: 'tangerine' },
+  output: { inputs: 1, outputs: 0, stage: 1, group: 'flow', tone: 'sky' },
   note: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
   text: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
   shape: { inputs: 0, outputs: 0, stage: 1, group: 'annot', annotation: true },
 };
 
+// Типы данных на портах: text (серый), image (розовый), file (оранжевый). 'any' на входе принимает всё.
+export const PORT_TYPES = ['text', 'image', 'file'];
+const IN_TYPES = {
+  bot: ['text', 'file', 'image'],
+  llm: ['text', 'file', 'image'],
+  image: ['text', 'image', 'file'],
+  condition: ['text'],
+  approval: 'any',
+  output: 'any',
+};
+
+// Что выдаёт узел. Ресурс: картинка или текст по типу файла, иначе файл. Одобрение и условие не меняют тип: 'any'.
+export function outTypeOf(kind, fields = {}) {
+  switch (kind) {
+    case 'asset': {
+      const mime = String(fields.mime || '');
+      if (mime.startsWith('image/')) return 'image';
+      if (!mime && !fields.path && fields.text) return 'text';
+      return fields.path || fields.name ? 'file' : 'text';
+    }
+    case 'image':
+      return 'image';
+    case 'approval':
+      return 'any';
+    default:
+      return KINDS[kind]?.outputs ? 'text' : null;
+  }
+}
+
+export const inTypesOf = (kind) => IN_TYPES[kind] ?? (KINDS[kind]?.inputs ? ['text'] : []);
+
+// Тип данных не подходит к входу (null — подходит).
+export function typeProblem(sourceKind, sourceFields, targetKind) {
+  const out = outTypeOf(sourceKind, sourceFields);
+  const ins = inTypesOf(targetKind);
+  if (!out || out === 'any' || ins === 'any') return null;
+  return ins.includes(out) ? null : 'type';
+}
+
 export const SHAPES = ['rect', 'circle', 'diamond', 'triangle', 'oval', 'star'];
+// Кнопки выбора фигуры: перевёрнутый треугольник хранится как треугольник с флагом flip (бэкенд знает шесть фигур).
+export const SHAPE_CHOICES = [
+  { id: 'rect', shape: 'rect' },
+  { id: 'circle', shape: 'circle' },
+  { id: 'diamond', shape: 'diamond' },
+  { id: 'triangle', shape: 'triangle' },
+  { id: 'triangle_down', shape: 'triangle', flip: true },
+  { id: 'oval', shape: 'oval' },
+  { id: 'star', shape: 'star' },
+];
+export const NOTE_COLORS = ['lemon', 'tangerine', 'mint', 'sky', 'violet', 'rose', 'ice'];
 export const BRUSH_COLORS = ['ink', 'sky', 'mint', 'lemon', 'tangerine', 'rose', 'violet'];
 export const BRUSHES = { pen: { width: 3 }, marker: { width: 14 } };
 
-export const ANNOTATION_COLORS = ['lemon', 'mint', 'sky', 'rose', 'violet', 'tangerine'];
+export const ANNOTATION_COLORS = ['lemon', 'mint', 'sky', 'rose', 'violet', 'tangerine', 'ice'];
 export const MAX_NODES = 200;
 export const MAX_EDGES = 400;
 export const MAX_FIELD = 20000;
@@ -52,6 +104,10 @@ export function defaultFields(kind) {
       return { target: 'notify' };
     case 'llm':
       return { provider: '', model: '', prompt: '', system: '' };
+    case 'asset':
+      return { name: '', path: '', mime: '', size: 0 };
+    case 'image':
+      return { prompt: '', provider: '', model: '', size: '1024x1024' };
     case 'condition':
       return { rule: '', provider: '', model: '' };
     case 'note':
@@ -95,6 +151,7 @@ export function canConnect(nodes, edges, conn) {
   const dst = nodes.find((n) => n.id === conn.target);
   if (!src || !dst) return false;
   if (connectionProblem(kindOf(src), kindOf(dst))) return false;
+  if (typeProblem(kindOf(src), src.data?.fields, kindOf(dst))) return false;
   const branch = conn.sourceHandle && conn.sourceHandle !== 'out' ? conn.sourceHandle : undefined;
   if (kindOf(src) === 'condition' && !branch) return false;
   return !edges.some((e) => e.source === conn.source && e.target === conn.target && (e.data?.branch || undefined) === branch);
@@ -104,16 +161,17 @@ export const kindOf = (node) => node?.data?.kind ?? node?.kind;
 
 // Какие виды можно создать, если линию потянули от узла `fromKind`
 // (side = 'source': тянули с выхода, новый узел получит вход; 'target': наоборот).
-export function kindsFor(fromKind, side) {
+export function kindsFor(fromKind, side, fromFields = {}) {
   return Object.keys(KINDS).filter((k) => {
     if (!isEnabled(k) || isAnnotation(k)) return false;
-    return side === 'source' ? !connectionProblem(fromKind, k) : !connectionProblem(k, fromKind);
+    if (side === 'source') return !connectionProblem(fromKind, k) && !typeProblem(fromKind, fromFields, k);
+    return !connectionProblem(k, fromKind) && !typeProblem(k, {}, fromKind);
   });
 }
 
 // Что можно вставить в ребро между двумя видами: нужен и вход, и выход.
 export function kindsBetween(sourceKind, targetKind) {
-  return Object.keys(KINDS).filter((k) => isEnabled(k) && !isAnnotation(k) && !connectionProblem(sourceKind, k) && !connectionProblem(k, targetKind));
+  return Object.keys(KINDS).filter((k) => isEnabled(k) && !isAnnotation(k) && !connectionProblem(sourceKind, k) && !connectionProblem(k, targetKind) && !typeProblem(sourceKind, {}, k) && !typeProblem(k, {}, targetKind));
 }
 
 // ---- перевод графа <-> узлы и рёбра Svelte Flow ----

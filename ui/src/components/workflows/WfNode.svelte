@@ -4,7 +4,7 @@
   import { getContext } from 'svelte';
   import { Handle, Position } from '@xyflow/svelte';
   import { tr } from '../../lib/i18n.js';
-  import { KINDS, isEnabled, stepSeconds } from '../../lib/workflows/graph.js';
+  import { KINDS, isEnabled, stepSeconds, outTypeOf } from '../../lib/workflows/graph.js';
   import { WF } from './ctx.js';
   import { kindTitle, kindHint, statusLabel, scheduleText, nextRunText, seconds } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
@@ -32,6 +32,25 @@
     return labelOf(buildGroups({ providers: m.providers || [], plan: m.plan || null, settings: m.settings || {}, value }), value).text;
   });
   let systemOpen = $state(false);
+  let textMode = $state(false);
+  let fileInput = $state();
+  const outType = $derived(outTypeOf(kind, fields));
+  const portType = $derived(outType === 'image' || outType === 'file' ? outType : 'text');
+  const shaking = $derived(ctx.shakeId() === id);
+  const preview = $derived(ctx.assetPreview(id));
+  const imageUrl = $derived(kind === 'image' && step?.status === 'done' && outText ? ctx.fileUrl(outText.trim()) : '');
+  const sizeText = $derived.by(() => {
+    const n = Number(fields.size) || 0;
+    if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+    return n ? `${n} B` : '';
+  });
+  const IMAGE_SIZES = ['1024x1024', '1536x1024', '1024x1536'];
+  const pickedFile = (e) => {
+    const f = e.currentTarget.files?.[0];
+    if (f) ctx.assetFromFile(id, f);
+    e.currentTarget.value = '';
+  };
   const trig = $derived(ctx.triggers.get(id));
   const outText = $derived(typeof step?.output === 'string' ? step.output : step?.output == null ? '' : JSON.stringify(step.output, null, 2));
   const errText = $derived(step?.error ? String(step.error) : '');
@@ -66,6 +85,7 @@
   class:is-soon={!enabled}
   class:is-invalid={invalid}
   class:is-hit={hit}
+  class:is-shake={shaking}
   data-kind={kind}
   data-status={status}
   style:--tone="var(--k-bot-{meta.tone || 'sky'})"
@@ -158,6 +178,53 @@
         <span>{modelText}</span>
         <WfIcon name="chevron" size={14} />
       </button>
+    {:else if kind === 'asset'}
+      {#if fields.name || fields.text || textMode}
+        <div class="wfn-file">
+          {#if preview}
+            <img class="wfn-file__img" src={preview} alt={fields.name} />
+          {:else}
+            <span class="wfn-file__ico"><WfIcon name={fields.name ? 'asset' : 'text'} size={20} /></span>
+          {/if}
+          <span class="wfn-file__meta">
+            <b>{fields.name || tr('Текст')}</b>
+            <small>{[fields.mime, sizeText].filter(Boolean).join(' · ') || tr('Готовый текст')}</small>
+          </span>
+          <button type="button" class="wfn-icon nodrag" title={tr('Убрать')} aria-label={tr('Убрать')} onclick={() => { textMode = false; ctx.clearAsset(id); }}><WfIcon name="x" size={14} /></button>
+        </div>
+        {#if !fields.name || fields.text}
+          <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Вставьте текст')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)}></textarea>
+        {:else if !fields.path}
+          <p class="wfn-hint">{tr('Файл пока только на этом экране: на сервер он попадёт вместе с запуском.')}</p>
+        {/if}
+      {:else}
+        <div class="wfn-drop nodrag" role="presentation">
+          <span class="wfn-drop__ico"><WfIcon name="asset" size={22} /></span>
+          <b>{tr('Перетащите файл сюда')}</b>
+          <span class="wfn-drop__acts">
+            <button type="button" class="wfn-btn wfn-btn--ok" onclick={() => fileInput?.click()}>{tr('Выбрать файл')}</button>
+            <button type="button" class="wfn-btn wfn-btn--no" onclick={() => (textMode = true)}>{tr('Вставить текст')}</button>
+          </span>
+        </div>
+      {/if}
+      <input bind:this={fileInput} class="wfn-hidden" type="file" onchange={pickedFile} tabindex="-1" aria-hidden="true" />
+    {:else if kind === 'image'}
+      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
+        <WfIcon name="image" size={14} />
+        <span>{modelText}</span>
+        <WfIcon name="chevron" size={14} />
+      </button>
+      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что нарисовать')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)}></textarea>
+      <div class="wfn-seg wfn-seg--3 nodrag" role="radiogroup" aria-label={tr('Размер картинки')}>
+        {#each IMAGE_SIZES as sz (sz)}
+          <button type="button" role="radio" aria-checked={(fields.size || '1024x1024') === sz} class:on={(fields.size || '1024x1024') === sz} onclick={() => set('size', sz)}>{sz.replace('x', '×')}</button>
+        {/each}
+      </div>
+      {#if imageUrl}
+        <button type="button" class="wfn-thumb nodrag" title={tr('Открыть крупно')} onclick={() => ctx.zoomImage(imageUrl)}>
+          <img src={imageUrl} alt={fields.prompt || tr('Изображение')} />
+        </button>
+      {/if}
     {:else if kind === 'output'}
       <div class="wfn-target">
         <WfIcon name="bell" size={15} />
@@ -202,13 +269,13 @@
             </button>
           {/if}
         </div>
-        <pre class="wfn-res-text">{errText || outText}</pre>
+        {#if !(kind === 'image' && imageUrl)}<pre class="wfn-res-text">{errText || outText}</pre>{/if}
       </div>
     {/if}
   </div>
 
   {#if meta.outputs && kind !== 'condition'}
-    <Handle type="source" position={Position.Right} id="out" class="wfn-port" />
+    <Handle type="source" position={Position.Right} id="out" class="wfn-port wfn-port--t-{portType}" />
   {/if}
   {#if kind === 'condition'}
     <Handle type="source" position={Position.Right} id="yes" style="top: 34%" class="wfn-port wfn-port--yes" />
@@ -602,6 +669,141 @@
   .wfn-pager button:disabled {
     opacity: 0.3;
     cursor: default;
+  }
+  .wfn-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .wfn-seg--3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .wfn-seg--3 button {
+    font-size: 11.5px;
+  }
+  .wfn-drop {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    padding: 14px 10px 12px;
+    border: 1.5px dashed var(--k-line-strong);
+    border-radius: 14px;
+    color: var(--k-text-2);
+    font: 600 13px/1.2 var(--k-font-body);
+    text-align: center;
+    transition:
+      border-color 150ms var(--k-ease-out, ease),
+      background 150ms var(--k-ease-out, ease);
+  }
+  .wfn-drop:hover {
+    border-color: var(--k-bot-tangerine);
+    background: color-mix(in oklab, var(--k-bot-tangerine) 8%, transparent);
+  }
+  .wfn-drop__ico {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+    background: color-mix(in oklab, var(--k-bot-tangerine) 24%, var(--k-surface));
+    color: color-mix(in oklab, var(--k-bot-tangerine) 78%, var(--k-text));
+  }
+  .wfn-drop__acts {
+    display: flex;
+    gap: 6px;
+  }
+  .wfn-drop__acts .wfn-btn {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12.5px;
+  }
+  .wfn-file {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 8px 8px 8px;
+    border-radius: 14px;
+    background: var(--k-surface-2);
+  }
+  .wfn-file__img,
+  .wfn-file__ico {
+    flex: none;
+    width: 46px;
+    height: 46px;
+    border-radius: 11px;
+    object-fit: cover;
+  }
+  .wfn-file__ico {
+    display: grid;
+    place-items: center;
+    background: color-mix(in oklab, var(--k-bot-tangerine) 24%, var(--k-surface));
+    color: color-mix(in oklab, var(--k-bot-tangerine) 78%, var(--k-text));
+  }
+  .wfn-file__meta {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 3px;
+  }
+  .wfn-file__meta b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 13px/1.2 var(--k-font-body);
+  }
+  .wfn-file__meta small {
+    font: 400 11.5px/1.2 var(--k-font-body);
+    color: var(--k-text-3);
+  }
+  .wfn-thumb {
+    display: block;
+    padding: 0;
+    border: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--k-surface-2);
+    cursor: zoom-in;
+    animation: wfn-fold 0.4s var(--k-ease-out, ease) both;
+    transition: transform 320ms var(--k-ease-spring, ease);
+  }
+  .wfn-thumb:hover {
+    transform: scale(1.02);
+  }
+  .wfn-thumb img {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+  }
+  .wfn.is-shake {
+    animation: wfn-shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  }
+  :global(.wfn-port--t-image) {
+    background: var(--k-bot-rose) !important;
+  }
+  :global(.wfn-port--t-file) {
+    background: var(--k-bot-tangerine) !important;
+  }
+  @keyframes wfn-shake {
+    10%,
+    90% {
+      transform: translateX(-2px);
+    }
+    20%,
+    80% {
+      transform: translateX(4px);
+    }
+    30%,
+    50%,
+    70% {
+      transform: translateX(-7px);
+    }
+    40%,
+    60% {
+      transform: translateX(7px);
+    }
   }
   .wfn-decide {
     display: grid;
