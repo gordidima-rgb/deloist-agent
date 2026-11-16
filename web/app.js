@@ -6562,23 +6562,27 @@ function renderRoutines() {
     const next = r.hook ? tr('по вебхуку') : r.enabled ? nextText(r.nextRun) : '';
     const last = STATUS_LABELS[r.lastStatus];
     const icon = (body) => svgIcon(body);
+    const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
     const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
     const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
     const chips = [
-      next || r.hook ? `<span class="rt-chip" title="${escapeHtml(`${nextTitle}
-${bot?.name || tr('бот удалён')}, ${scheduleText(r)}`)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
+      `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
+      `<span class="rt-chip" title="${tr('Когда')}">${icon('<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>')}${escapeHtml(scheduleText(r))}</span>`,
+      next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
       r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? '<path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/>' : '<path d="m5 12 5 5 9-10"/>')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
     ].join('');
     el.innerHTML = `
-      <div class="rt-title" title="${escapeHtml(`${r.title}
-${bot?.name || tr('бот удалён')}, ${scheduleText(r)}`)}">${escapeHtml(r.title)}</div>
-      <div class="rt-chips">${chips}</div>
+      <div class="rt-text">
+        <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
+        ${gist ? `<div class="rt-gist" title="${escapeHtml(gist)}">${escapeHtml(gist)}</div>` : ''}
+      </div>
       <div class="rt-actions">
         <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' : '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>')}</button>
         <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('<path d="M7 5v14l12-7z"/>')}</button>
         <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
         <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
-      </div>`;
+      </div>
+      <div class="rt-chips">${chips}</div>`;
     $('.rt-run', el).addEventListener('click', () => runRoutine(r.id));
     $('.rt-quiet', el).addEventListener('click', async () => {
       try {
@@ -6814,6 +6818,16 @@ function mountRoutineTabs() {
     ],
     onchange: setRoutineTab,
   });
+  const tabIcons = {
+    routines: '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
+    journal: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+    todos: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m9 12 2 2 4-4"/>',
+    reminders: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+    habits: '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/>',
+  };
+  for (const tab of host.querySelectorAll('.k-tab[data-id]')) {
+    if (tabIcons[tab.dataset.id]) tab.insertAdjacentHTML('afterbegin', svgIcon(tabIcons[tab.dataset.id]));
+  }
 }
 
 // Клик по кнопке отдаёт сюда событие, поэтому вкладка принимается только строкой.

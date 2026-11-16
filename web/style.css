@@ -3118,20 +3118,31 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 .kit-sheet .sheet-foot { margin: 0; padding: var(--k-space-3) var(--k-space-6); border-top: 1px solid var(--k-line); justify-content: flex-start; }
 .kit-sheet .routines-list,
 .kit-sheet .journal-list { max-height: none; overflow: visible; }
-/* Рутина — одна строка: название, чипы (бот, расписание, следующий и прошлый запуск с временем), действия. */
-.kit-sheet .routine { flex-wrap: nowrap; align-items: center; gap: var(--k-space-3); }
-.kit-sheet .routine .rt-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kit-sheet .rt-chips { flex: none; display: flex; align-items: center; gap: 6px; }
-.kit-sheet .rt-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+/* Рутина: первая строка — название, о чём она и действия; вторая — чипы (бот, расписание, следующий и прошлый запуск). */
+.kit-sheet .routine { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--k-space-2) var(--k-space-3); }
+.kit-sheet .routine .rt-text { min-width: 0; display: flex; align-items: baseline; gap: var(--k-space-2); }
+.kit-sheet .routine .rt-title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-sheet .routine .rt-gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); }
+.kit-sheet .rt-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kit-sheet .rt-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .kit-sheet .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
-.kit-sheet .rt-chip.rt-bot { background: transparent; padding-left: 0; color: var(--k-text-3); font-weight: 400; }
 .kit-sheet .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
 .kit-sheet .rt-last.st-failed .i, .kit-sheet .rt-last.st-error .i, .kit-sheet .rt-last.st-limit .i, .kit-sheet .rt-last.st-needs .i { color: var(--k-attention-text, currentColor); }
-.kit-sheet .routine .rt-actions { margin-left: 0; flex: none; gap: var(--k-space-2); }
+.kit-sheet .routine .rt-actions { margin-left: 0; gap: var(--k-space-2); }
 .kit-sheet .routine .rt-run,
 .kit-sheet .routine .rt-quiet { width: 28px; height: 28px; padding: 0; background: transparent; }
 .kit-sheet .routine .rt-quiet:not(.on) { color: var(--k-text-3); }
 .kit-sheet .routine .rt-quiet.on { color: var(--k-brand-text); }
+/* Значки разделов в капсуле вкладок. */
+.kit-sheet .k-tab { display: inline-flex; align-items: center; gap: 6px; }
+.kit-sheet .k-tab .i { width: 15px; height: 15px; flex: none; }
+/* «Новая рутина» — небольшая кнопка, форма раскрывается под ней. */
+.kit-sheet details.group { border: 0; padding: 0; }
+.kit-sheet details.group > summary { display: inline-flex; align-items: center; gap: 6px; width: auto; height: 32px; padding: 0 14px 0 10px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); font: 600 var(--k-text-sm) / 1 var(--k-font-body); }
+.kit-sheet details.group > summary:hover { background: var(--k-surface-3); }
+.kit-sheet details.group[open] > .group-body { padding: var(--k-space-4); border: 1px solid var(--k-line); border-radius: var(--k-radius-lg); }
+.kit-sheet .sheet-foot { flex-direction: column; align-items: flex-start; gap: var(--k-space-2); }
+.kit-sheet .sheet-foot .note { margin: 0; max-width: 56ch; }
 /* Журнал: каждый запуск — своя мягкая карточка, текст спокойнее заголовка. */
 .kit-dialog.kit-sheet .journal-list:has(.jr) { padding: 0; border: 0; gap: var(--k-space-2); }
 .kit-sheet .jr { padding: var(--k-space-3) var(--k-space-4); border: 0; border-radius: var(--k-radius-lg); background: var(--k-surface-2); gap: 6px; }
@@ -3143,7 +3154,8 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 .kit-sheet button:not(.k-tab) { transition: transform 150ms cubic-bezier(.34, 1.36, .64, 1), background var(--k-dur-fast, 150ms) ease-out; }
 .kit-sheet button:not(.k-tab):active { transform: scale(.96); }
 @media (prefers-reduced-motion: reduce) { .kit-sheet button:not(.k-tab):active { transform: none; } }
-.kit-sheet details.group { border: 1px solid var(--k-line); border-radius: var(--k-radius-lg); padding: var(--k-space-3) var(--k-space-4); }/* Вкладки окна «Рутины»: капсула кита над содержимым. */
+
+/* Вкладки окна «Рутины»: капсула кита над содержимым. */
 .rt-tabs { margin: 2px 0 14px; }
 .rt-tabs:empty { display: none; }
 .kit-form .modal-inner { gap: var(--k-space-4); }
