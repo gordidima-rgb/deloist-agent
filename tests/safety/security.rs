@@ -1317,6 +1317,9 @@ async fn the_agent_key_cannot_change_settings_or_providers() {
         call(reqwest::Method::PATCH, "/api/providers/openrouter", Some(json!({ "baseUrl": "https://evil.example/v1" }))).await.unwrap(),
         call(reqwest::Method::POST, "/api/providers/opencode/install", None).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/providers/openrouter", None).await.unwrap(),
+        // «Начать бесплатно» открывает браузер и кладёт ключ в хранилище: только окно.
+        call(reqwest::Method::POST, "/api/providers/openrouter/connect", None).await.unwrap(),
+        call(reqwest::Method::POST, "/api/providers/openrouter/cancel", None).await.unwrap(),
         // Gemini: установка, вход, аккаунты, выход, ключ API и проверка обновлений — только человек в окне.
         call(reqwest::Method::POST, "/api/providers/antigravity/install", None).await.unwrap(),
         call(reqwest::Method::POST, "/api/providers/antigravity/connect", None).await.unwrap(),

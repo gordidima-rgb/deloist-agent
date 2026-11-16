@@ -276,6 +276,9 @@ async fn provider_check(State(app): Shared, Path(id): Path<String>) -> Response 
 }
 
 async fn provider_connect(State(app): Shared, Path(id): Path<String>) -> Response {
+    if id == "openrouter" {
+        return provider_result(app.providers.start_openrouter_login(&app).await);
+    }
     let providers = app.providers.clone();
     provider_result(providers.check(&app, &id, true).await)
 }
@@ -355,7 +358,11 @@ async fn provider_key_remove(State(app): Shared, Path(id): Path<String>) -> Resp
 }
 
 async fn provider_cancel(State(app): Shared, Path(id): Path<String>) -> Response {
-    ok(json!({ "cancelled": app.providers.cancel(&id) }))
+    let login = id == "openrouter" && app.providers.cancel_login();
+    if login {
+        app.providers.emit(&app, &id).await;
+    }
+    ok(json!({ "cancelled": app.providers.cancel(&id) || login }))
 }
 
 async fn get_account(State(app): Shared) -> Response {

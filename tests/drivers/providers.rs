@@ -634,3 +634,97 @@ async fn a_system_node_means_no_download() {
     assert!(command.starts_with(&system_node) || command.starts_with(&format!("\"{system_node}\"")), "{command}");
 }
 
+
+/// Заглушка OpenRouter: `POST /api/v1/auth/keys` отдаёт ключ только на верные код и проверочную строку.
+async fn fake_openrouter(seen: Arc<Mutex<Vec<Value>>>) -> String {
+    async fn keys(State(seen): State<Arc<Mutex<Vec<Value>>>>, axum::Json(body): axum::Json<Value>) -> axum::Json<Value> {
+        seen.lock().unwrap().push(body.clone());
+        if body["code"] == "good-code" {
+            axum::Json(json!({ "key": OPENROUTER_TEST_KEY }))
+        } else {
+            axum::Json(json!({ "error": "bad" }))
+        }
+    }
+    let app = Router::new().route("/api/v1/auth/keys", post(keys)).with_state(seen);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+const OPENROUTER_TEST_KEY: &str = "sk-or-v1-test-key-0123456789";
+
+fn query_of(url: &str) -> std::collections::HashMap<String, String> {
+    reqwest::Url::parse(url).unwrap().query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()
+}
+
+#[tokio::test]
+async fn start_free_signs_in_to_openrouter_and_keeps_the_key_out_of_sight() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fake = fake_openrouter(seen.clone()).await;
+    let crew = Crew::start_with_env("prov-openrouter-login", &[("CREW_TEST_OPENROUTER_URL", &fake)]).await;
+    crew.listen().await;
+    let started = crew.ok("POST", "/api/providers/openrouter/connect", None).await;
+    assert_eq!(started["started"], true);
+    let auth = query_of(started["authUrl"].as_str().unwrap());
+    let callback = auth["callback_url"].clone();
+    assert_eq!(auth["code_challenge_method"], "S256");
+    assert!(callback.starts_with("http://localhost:"), "{callback}");
+    // Ждём входа: в списке видно «входим», ключа нет.
+    let list = crew.ok("GET", "/api/providers", None).await;
+    let view = list["providers"].as_array().unwrap().iter().find(|p| p["id"] == "openrouter").cloned().unwrap();
+    assert_eq!(view["signingIn"], true, "{view}");
+    assert_ne!(view["status"], "connected");
+
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let local = callback.replace("localhost", "127.0.0.1");
+    // Чужой ответ с неверным state отклонён, обмен не начат.
+    let wrong = client.get(format!("{local}?code=good-code&state=not-the-state")).send().await.unwrap();
+    assert_eq!(wrong.status().as_u16(), 400);
+    assert!(seen.lock().unwrap().is_empty(), "обмен начался по чужому ответу");
+    // Верный ответ: ключ получен и сохранён.
+    let right = client.get(format!("{local}?code=good-code&state={}", auth["state"])).send().await.unwrap();
+    assert_eq!(right.status().as_u16(), 200);
+    let event = crew.wait_event("OpenRouter подключён", |e| e["type"] == "provider" && e["provider"]["id"] == "openrouter" && e["provider"]["status"] == "connected").await;
+    assert_eq!(event["provider"]["signingIn"], false);
+    assert_eq!(event["provider"]["model"], "openrouter/free", "{event}");
+    // Проверочная строка подходит к challenge из ссылки.
+    let body = seen.lock().unwrap()[0].clone();
+    let verifier = body["code_verifier"].as_str().unwrap();
+    let digest = Sha256::digest(verifier.as_bytes());
+    let expected = digest.iter().fold(Vec::new(), |mut acc, b| { acc.push(*b); acc });
+    use base64::Engine;
+    assert_eq!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(expected), auth["code_challenge"]);
+    assert_eq!(body["code_challenge_method"], "S256");
+    // Ключа нет ни в ответах, ни в событиях; на диске он только в зашифрованном хранилище.
+    let list = crew.ok("GET", "/api/providers", None).await;
+    assert!(!list.to_string().contains(OPENROUTER_TEST_KEY), "ключ в списке провайдеров");
+    let events = serde_json::to_string(&*crew.events.lock().unwrap()).unwrap();
+    assert!(!events.contains(OPENROUTER_TEST_KEY), "ключ в событиях");
+    assert!(common::read_secrets(&crew.data_dir).contains(OPENROUTER_TEST_KEY), "ключ не сохранён");
+    // Порт закрыт: повторный возврат уходить некуда.
+    assert!(client.get(format!("{local}?code=good-code&state={}", auth["state"])).send().await.is_err());
+}
+
+#[tokio::test]
+async fn start_free_shows_an_error_and_can_be_cancelled() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fake = fake_openrouter(seen.clone()).await;
+    let crew = Crew::start_with_env("prov-openrouter-bad", &[("CREW_TEST_OPENROUTER_URL", &fake)]).await;
+    crew.listen().await;
+    let started = crew.ok("POST", "/api/providers/openrouter/connect", None).await;
+    let auth = query_of(started["authUrl"].as_str().unwrap());
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let local = auth["callback_url"].replace("localhost", "127.0.0.1");
+    client.get(format!("{local}?code=bad-code&state={}", auth["state"])).send().await.unwrap();
+    let event = crew.wait_event("ошибка входа", |e| e["type"] == "provider" && e["provider"]["id"] == "openrouter" && e["provider"]["status"] == "error").await;
+    assert!(event["provider"]["error"].as_str().unwrap().contains("ключ"), "{event}");
+    assert!(common::read_secrets(&crew.data_dir).is_empty() || !common::read_secrets(&crew.data_dir).contains(OPENROUTER_TEST_KEY));
+    // Второй заход и отмена.
+    crew.ok("POST", "/api/providers/openrouter/connect", None).await;
+    let cancelled = crew.ok("POST", "/api/providers/openrouter/cancel", None).await;
+    assert_eq!(cancelled["cancelled"], true);
+    let list = crew.ok("GET", "/api/providers", None).await;
+    let view = list["providers"].as_array().unwrap().iter().find(|p| p["id"] == "openrouter").cloned().unwrap();
+    assert_eq!(view["signingIn"], false);
+}

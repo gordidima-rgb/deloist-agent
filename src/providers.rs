@@ -321,6 +321,8 @@ pub struct Providers {
     /// Последний релиз Antigravity CLI с GitHub и время неудачной попытки его получить.
     release: Mutex<Option<(Instant, Value)>>,
     release_failed: Mutex<Option<Instant>>,
+    /// Идущий вход в OpenRouter через браузер («Начать бесплатно»).
+    pub(crate) login: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 fn saved_path(app: &App) -> PathBuf {
@@ -518,11 +520,11 @@ impl Providers {
         saved.clone().unwrap_or_default()
     }
 
-    fn entry(&self, app: &App, id: &str) -> Value {
+    pub(crate) fn entry(&self, app: &App, id: &str) -> Value {
         self.load(app).get(id).cloned().unwrap_or_else(|| json!({}))
     }
 
-    fn update_entry(&self, app: &App, id: &str, change: impl FnOnce(&mut Map<String, Value>)) {
+    pub(crate) fn update_entry(&self, app: &App, id: &str, change: impl FnOnce(&mut Map<String, Value>)) {
         self.load(app);
         let snapshot = {
             let mut saved = self.saved.lock().unwrap();
@@ -765,6 +767,7 @@ impl Providers {
         json!({
             "id": id,
             "kind": "key",
+            "signingIn": id == "openrouter" && self.login_active(),
             "name": name,
             "description": built.map(|b| b.about).or(entry["about"].as_str()),
             "featured": built.is_some_and(|b| !b.local),
@@ -1114,7 +1117,7 @@ impl Providers {
         Ok(self.view(app, &agent, featured))
     }
 
-    async fn emit(&self, app: &Arc<App>, id: &str) {
+    pub(crate) async fn emit(&self, app: &Arc<App>, id: &str) {
         if let Ok(view) = self.get(app, id).await {
             app.turns.emit(json!({ "type": "provider", "provider": view }));
         }

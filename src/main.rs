@@ -79,6 +79,7 @@ mod dock;
 mod attach;
 mod process;
 mod providers;
+mod openrouter_login;
 mod queue;
 mod reach;
 mod routine_tools;

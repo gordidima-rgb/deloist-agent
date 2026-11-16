@@ -204,6 +204,15 @@ window.DeloistProviders = (() => {
     return line(tr('Не подключено'), tr('Впиши ключ ниже и нажми «Сохранить».'));
   }
 
+  /// «Начать бесплатно»: вход в OpenRouter в браузере вместо ручного ключа. Ключ приходит сразу в хранилище программы.
+  function freeStart(p) {
+    if (p.signingIn) {
+      return `<div class="prov-free"><p class="prov-line-sub">${tr('Жду входа в браузере…')}</p>${button('free-cancel', tr('Отмена'))}</div>`;
+    }
+    return `<div class="prov-free"><button type="button" class="primary" data-act="free-start">${tr('Начать бесплатно')}</button>`
+      + `<p class="prov-line-sub">${tr('Откроется браузер: войдите в OpenRouter, ключ придёт сам. Бесплатные модели ограничены: до 20 запросов в минуту и 50 в день, пока нет пополнений; условия обработки запросов у каждой модели свои, секретное не отправляйте.')}</p></div>`;
+  }
+
   function addressCard(p) {
     const fields = [];
     if (p.custom || (p.local && p.found === false)) {
@@ -221,10 +230,11 @@ window.DeloistProviders = (() => {
       const link = `<a href="${esc(p.keyUrl)}" target="_blank" rel="noopener">${tr('Где взять ключ')}</a>`;
       fields.unshift(`<div class="prov-key-guide"><p class="prov-line-sub">${link}</p><ol class="prov-guide"><li>${tr('Войдите на сайт {name} и авторизуйтесь.', { name: esc(p.name) })}</li><li>${tr('Создайте ключ API.')}</li><li>${tr('Вставьте его сюда и нажмите «Сохранить».')}</li></ol></div>`);
     }
+    const free = p.id === 'openrouter' && p.status !== 'connected' ? freeStart(p) : '';
     const where = p.local
       ? tr('Модели работают на этом компьютере, без интернета и без оплаты.')
       : tr('Адрес API: {url}. Провайдер списывает деньги за каждый запрос со своего счёта.', { url: `<code>${esc(p.baseUrl)}</code>` });
-    return section(tr('Подключение'), addressStatus(p))
+    return section(tr('Подключение'), addressStatus(p) + free)
       + section(p.needsKey ? tr('Ключ и модель') : tr('Модель'),
         `${fields.join('')}<p class="prov-line-sub">${where}</p>
          <div class="modal-actions">${p.custom ? button('remove', tr('Удалить')) : (p.hasKey ? button('forget', tr('Забыть ключ')) : '')}<button type="button" class="primary" data-act="key-save">${tr('Сохранить')}</button></div>`);
@@ -370,6 +380,14 @@ window.DeloistProviders = (() => {
           onChanged();
           break;
         }
+        case 'free-start':
+          await api(`/api/providers/${id}/connect`, { method: 'POST' });
+          replace(await api(`/api/providers/${id}`));
+          break;
+        case 'free-cancel':
+          await api(`/api/providers/${id}/cancel`, { method: 'POST' });
+          replace(await api(`/api/providers/${id}`));
+          break;
         case 'key-save': {
           const body = { model: el('prov-key-model').value.trim(), verify: true };
           const key = el('prov-key')?.value.trim();

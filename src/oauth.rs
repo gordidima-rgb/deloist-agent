@@ -180,7 +180,7 @@ pub fn challenge(verifier: &str) -> String {
     base64url(&Sha256::digest(verifier.as_bytes()))
 }
 
-fn new_verifier() -> String {
+pub(crate) fn new_verifier() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -209,7 +209,7 @@ impl Flows {
     }
 }
 
-fn http() -> reqwest::Client {
+pub(crate) fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -546,7 +546,7 @@ struct Flow {
     typed_secret: Option<String>,
 }
 
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -629,7 +629,7 @@ async fn listen(app: Arc<App>, listener: TcpListener, flow: Flow) {
     app.connectors.oauth.active.lock().unwrap().remove(&flow.id);
 }
 
-async fn respond(socket: &mut tokio::net::TcpStream, status: u16, text: &str) {
+pub(crate) async fn respond(socket: &mut tokio::net::TcpStream, status: u16, text: &str) {
     let reason = match status {
         200 => "OK",
         404 => "Not Found",

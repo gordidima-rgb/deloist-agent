@@ -503,7 +503,7 @@ pub(crate) fn cloud_closed(norm: &str) -> bool {
     if let Some(rest) = norm.strip_prefix("/api/providers/") {
         // Установка агентов, проверка и вход через их программу, ссылка входа, выход и ключ Gemini.
         let tail = rest.split_once('/').map(|(_, t)| t).unwrap_or("");
-        if matches!(tail, "install" | "check" | "connect" | "signin-link" | "logout") || tail.starts_with("accounts") {
+        if matches!(tail, "install" | "check" | "connect" | "cancel" | "signin-link" | "logout") || tail.starts_with("accounts") {
             return true;
         }
     }
