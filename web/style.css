@@ -383,8 +383,10 @@ a.ghost { text-decoration: none; }
 
 /* ------------------------------------------------------------------ чат */
 
-#chat, #team, #catalog { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-#chat[hidden], #team[hidden], #catalog[hidden] { display: none; }
+#chat, #team, #catalog, #workflows { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#chat[hidden], #team[hidden], #catalog[hidden], #workflows[hidden] { display: none; }
+#workflows { background: var(--k-canvas, var(--color-bg-surface)); }
+.workflows-body { flex: 1; min-height: 0; }
 /* Catalog: the Svelte page brings its own header; this bar only carries the menu on narrow windows. */
 #catalog { background: var(--k-canvas, var(--color-bg-surface)); }
 #catalog .catalog-head { display: none; }
@@ -3190,7 +3192,7 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 
 /* ---- рамка и остров ---- */
 html, body { background: var(--color-bg-canvas); }
-#chat, #team, #catalog, .drawer {
+#chat, #team, #catalog, #workflows, .drawer {
   --k-canvas: var(--island);
   background: var(--island);
   border: 1px solid var(--color-border-default);
@@ -3198,10 +3200,10 @@ html, body { background: var(--color-bg-canvas); }
   box-shadow: var(--arc-island-shadow);
   overflow: hidden;
 }
-#chat, #team, #catalog { margin: 8px; }
+#chat, #team, #catalog, #workflows { margin: 8px; }
 .drawer { top: 8px; right: 8px; bottom: 8px; border-radius: 18px; }
 @media (min-width: 821px) {
-  #chat, #team, #catalog { margin-left: 0; }
+  #chat, #team, #catalog, #workflows { margin-left: 0; }
   body.drawer-open #chat { margin-right: calc(min(430px, 40vw) + 16px); }
   .drawer { box-shadow: var(--arc-island-shadow); }
 }
@@ -3440,18 +3442,18 @@ body.split-on .split-pane:not([hidden]) {
   min-height: 0;
 }
 body.split-on #sidebar { grid-column: 1; grid-row: 1; }
-body.split-on #chat, body.split-on #team, body.split-on #catalog { grid-column: -2 / -1; grid-row: 1; }
+body.split-on #chat, body.split-on #team, body.split-on #catalog, body.split-on #workflows { grid-column: -2 / -1; grid-row: 1; }
 
 body { --split-pad: 16px; }
 @media (max-width: 820px) { body { --split-pad: 24px; } }
 
 body.split-row { --split-size: clamp(320px, calc((100% - var(--split-pad)) * var(--split-ratio, 0.5)), calc(100% - var(--split-pad) - 320px)); }
 body.split-row .split-pane { justify-self: end; width: var(--split-size); margin: 8px 8px 8px 0; }
-body.split-row #chat, body.split-row #team, body.split-row #catalog { margin-right: calc(var(--split-size) + 16px); }
+body.split-row #chat, body.split-row #team, body.split-row #catalog, body.split-row #workflows { margin-right: calc(var(--split-size) + 16px); }
 
 body.split-col { --split-size: clamp(240px, calc((100vh - 24px) * var(--split-ratio, 0.5)), calc(100vh - 24px - 240px)); }
 body.split-col .split-pane { align-self: end; height: var(--split-size); margin: 0 8px 8px 0; }
-body.split-col #chat, body.split-col #team, body.split-col #catalog { margin-bottom: calc(var(--split-size) + 16px); }
+body.split-col #chat, body.split-col #team, body.split-col #catalog, body.split-col #workflows { margin-bottom: calc(var(--split-size) + 16px); }
 @media (max-width: 820px) { body.split-col .split-pane { margin-left: 8px; } }
 
 /* Боковая панель профиля занимает правый край окна: второй чат на это время прячется. */
@@ -3527,7 +3529,7 @@ body.split-dragging .split-zone { display: flex; }
 /* ---- страница во фрейме: только чат, без рамки окна ---- */
 html.pane-mode, .pane-mode body { background: var(--island); }
 .pane-mode #app { grid-template-columns: minmax(0, 1fr); }
-.pane-mode #sidebar, .pane-mode #team, .pane-mode #catalog,
+.pane-mode #sidebar, .pane-mode #team, .pane-mode #catalog, .pane-mode #workflows,
 .pane-mode #btn-menu, .pane-mode #btn-split { display: none !important; }
 .pane-mode #btn-pane-close { display: inline-flex; }
 .pane-mode #chat { margin: 0 !important; border: 0; border-radius: 0; box-shadow: none; transition: none; }

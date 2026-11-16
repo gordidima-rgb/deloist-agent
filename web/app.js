@@ -3276,6 +3276,7 @@ function handleEvent(ev) {
         if (routinesOpen()) renderRoutines();
         scheduleTeam();
         refreshCatalog();
+        refreshWorkflowBots();
         if (!$('#drawer').hidden && S.tab === 'goals') renderDrawer();
       });
       break;
@@ -6862,6 +6863,7 @@ function dropTeamAvatars() {
 
 function leaveTeam() {
   leaveCatalog();
+  leaveWorkflows();
   if (!teamOpen()) return;
   dropTeamAvatars();
   $('#team').hidden = true;
@@ -6891,6 +6893,7 @@ function clearChatView() {
 function showTeam() {
   clearChatView();
   hideCatalog();
+  hideWorkflows();
   $('#team').hidden = false;
   renderSidebar();
   renderTeam();
@@ -6924,6 +6927,7 @@ function markCatalogNav() {
 function showCatalog(page = S.catalogPage || 'skills') {
   if (!catalogOpen()) {
     clearChatView();
+    hideWorkflows();
     if (teamOpen()) {
       dropTeamAvatars();
       $('#team').hidden = true;
@@ -6950,6 +6954,60 @@ function leaveCatalog() {
   if (!catalogOpen()) return;
   hideCatalog();
   $('#chat').hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Рабочие процессы: список и холст на Svelte Flow (ui/src/components/workflows)
+// ---------------------------------------------------------------------------
+
+const workflowsOpen = () => !$('#workflows').hidden;
+
+function workflowBots() {
+  return S.bots.map((b) => ({ id: b.id, name: b.name, color: b.color, emoji: b.emoji || '' }));
+}
+
+function markWorkflowsNav() {
+  $('#btn-workflows').classList.toggle('on', workflowsOpen());
+}
+
+function showWorkflows() {
+  if (!workflowsOpen()) {
+    clearChatView();
+    hideCatalog();
+    if (teamOpen()) {
+      dropTeamAvatars();
+      $('#team').hidden = true;
+    }
+    $('#workflows').hidden = false;
+  }
+  if (!window.DeloistUI?.mountWorkflows) {
+    $('#workflows-root').textContent = tr('Рабочие процессы не загрузились: перезапусти приложение.');
+  } else if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
+  else {
+    S.workflowsUi = window.DeloistUI.mountWorkflows($('#workflows-root'), {
+      bots: workflowBots(),
+      onmenu: () => $('#sidebar').classList.toggle('open'),
+    });
+  }
+  renderSidebar();
+  markWorkflowsNav();
+}
+
+// Экран остаётся смонтированным, но спрятанным: холст не перестраивается при возврате.
+function hideWorkflows() {
+  if (!workflowsOpen()) return;
+  $('#workflows').hidden = true;
+  markWorkflowsNav();
+}
+
+function leaveWorkflows() {
+  if (!workflowsOpen()) return;
+  hideWorkflows();
+  $('#chat').hidden = false;
+}
+
+function refreshWorkflowBots() {
+  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
 }
 
 // Состояние поменялось: открытый каталог перечитывает, что стоит у человека.
@@ -7293,6 +7351,7 @@ function bindUi() {
   $('#btn-catalog').addEventListener('click', () => showCatalog());
   $$('#catalog-nav [data-catalog]').forEach((b) => b.addEventListener('click', () => showCatalog(b.dataset.catalog)));
   $('#btn-catalog-menu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+  $('#btn-workflows').addEventListener('click', showWorkflows);
   $$('#theme-switch [data-value]').forEach((btn) => btn.addEventListener('click', () => chooseTheme(btn.dataset.value)));
   $$('.theme-toggle').forEach((btn) => btn.addEventListener('click', toggleTheme));
   initSidebarCollapse();
@@ -7934,7 +7993,7 @@ const Split = (() => {
   // ---- перетаскивание из списка слева ----
 
   const mainRect = () => {
-    const el = [$('#chat'), $('#team'), $('#catalog')].find((n) => n && !n.hidden);
+    const el = [$('#chat'), $('#team'), $('#catalog'), $('#workflows')].find((n) => n && !n.hidden);
     return el ? el.getBoundingClientRect() : null;
   };
 

@@ -38,6 +38,10 @@
             <button type="button" class="side-nav side-sub" data-catalog="apps">Приложения</button>
           </div>
           <button type="button" class="ghost side-link" id="btn-catalog" title="Каталог" aria-expanded="false" aria-controls="catalog-nav"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/></svg>Каталог</button>
+          <button class="ghost side-link" id="btn-workflows" title="Рабочие процессы">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h4v4H6zM14 16h4v4h-4zM14 4h4v4h-4z"/><path d="M10 6h4M8 8v5a3 3 0 0 0 3 3h3"/></svg>
+            Рабочие процессы
+          </button>
           <button class="ghost side-link" id="btn-routines" title="Рутины">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
             Рутины
@@ -94,6 +98,10 @@
           <div class="head-text"><div class="head-name">Каталог</div></div>
         </header>
         <div class="catalog-body" id="catalog-root"></div>
+      </main>
+
+      <main id="workflows" hidden>
+        <div class="workflows-body" id="workflows-root"></div>
       </main>
 
       <main id="chat" hidden>
