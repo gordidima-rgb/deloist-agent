@@ -1495,10 +1495,23 @@ body.drawer-open #chat { margin-right: min(430px, 40vw); }
 
 /* ------------------------------------------------------------------ скролл */
 
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); background-clip: padding-box; }
-::-webkit-scrollbar-track { background: transparent; }
+/* Как в Arc: тонкая «пилюля» внутри поля, а не полоса по краю. Прозрачная рамка отодвигает её от края,
+   отступ дорожки сверху и снизу держит её внутри скруглённых углов окна или карточки. Видна ярче при наведении. */
+::-webkit-scrollbar { width: 14px; height: 14px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; margin: 18px 0; }
+::-webkit-scrollbar-track:horizontal { margin: 0 18px; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 38%, transparent);
+  border: 5px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  min-height: 36px;
+}
+:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent); }
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--color-text-muted) 80%, transparent); border-width: 4px; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
 
 /* ------------------------------------------------------------------ группы, навыки, MCP */
 
