@@ -4,7 +4,8 @@
 //! Правила: любому участнику своей команды, вне команды — только ведущий ведущему; не больше трёх незакрытых задач
 //! на участника от одного бота; повтор того же текста, пока задача идёт, возвращает тот же номер. Ход участника
 //! запускает тот же `delegate_to_bot`, что и у `delegate`, с теми же правилами согласий. Задачи лежат в
-//! `team_tasks.json`: после перезапуска то, что шло, помечено «прервано». Конец задачи — короткая строка в ленте
+//! `team_tasks.json`: после перезапуска то, что шло или ждало, ставится в очередь и идёт заново (не больше
+//! `MAX_ATTEMPTS` запусков и не старше `RESUME_WINDOW`), иначе помечено «прервано». Конец задачи — короткая строка в ленте
 //! ведущего; его собственный ход она не запускает. Новых адресов API нет: инструменты идут только через ход бота.
 
 use std::path::{Component, Path, PathBuf};
@@ -48,6 +49,10 @@ const KEEP_TOTAL: usize = 300;
 /// Сколько задача ждёт, пока занятый получатель освободится.
 const QUEUE_WAIT: Duration = Duration::from_secs(30 * 60);
 const RESULT_FILES: usize = 8;
+/// Сколько раз задача может начаться: после перезапуска идущая запускается ещё раз, но не по кругу, если сама роняет программу.
+const MAX_ATTEMPTS: u32 = 2;
+/// Старше этого после перезапуска задачу заново не берём: человек уже не ждёт и мог дать другую.
+const RESUME_WINDOW_MS: i64 = 6 * 3600 * 1000;
 const NO_REPLY: &str = crate::turn::NO_REPLY;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -79,6 +84,8 @@ pub struct Task {
     pub room: String,
     /// Ведущему уже сказали об итоге в его следующем ходу (системная заметка).
     pub noted: bool,
+    /// Сколько раз ход получателя по этой задаче уже начинался (после перезапуска растёт).
+    pub attempts: u32,
 }
 
 impl Task {
@@ -93,16 +100,27 @@ pub struct Tasks {
 }
 
 impl Tasks {
-    /// Читает сохранённое. Всё, что шло или ждало, при запуске прервано: процесс, который её вёл, умер.
+    /// Читает сохранённое. Процесс, который вёл задачи, умер: ждавшая остаётся в очереди, шедшая встаёт в очередь ещё раз
+    /// (пока есть попытки и она свежая), остальные помечены прерванными. Запускает их `resume`.
     pub fn open(dir: &Path) -> Self {
         let path = dir.join("team_tasks.json");
         let mut items: Vec<Task> = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let at = now();
         let mut changed = false;
         for task in items.iter_mut().filter(|t| t.is_open()) {
-            task.state = "interrupted".into();
-            task.finished = at;
             changed = true;
+            let fresh = at - task.created < RESUME_WINDOW_MS;
+            let was_running = task.state == "running";
+            if was_running {
+                task.attempts += 1;
+            }
+            if fresh && task.attempts < MAX_ATTEMPTS {
+                task.state = "queued".into();
+                task.started = 0;
+            } else {
+                task.state = "interrupted".into();
+                task.finished = at;
+            }
         }
         let before = items.len();
         items.retain(|t| at - t.created < KEEP_OLD_MS);
@@ -170,6 +188,11 @@ impl Tasks {
         }
         found.sort_by_key(|t| t.finished);
         found
+    }
+
+    /// Номера задач, которые ждут запуска.
+    fn queued_ids(&self) -> Vec<String> {
+        self.items.lock().unwrap().iter().filter(|t| t.state == "queued").map(|t| t.id.clone()).collect()
     }
 
     pub fn all(&self) -> Vec<Task> {
@@ -421,9 +444,21 @@ fn remove_copies(app: &App, target: &Bot, copied: &[String]) {
     }
 }
 
+/// После запуска программы: ведёт заново задачи, которые перезапуск оставил в очереди. Зовётся один раз из `main`.
+pub fn resume(app: &Arc<App>) {
+    for id in app.tasks.queued_ids() {
+        tokio::spawn(run(app.clone(), id));
+    }
+}
+
 /// Бриф получателю: задача, переданные файлы и кто их дал.
 fn brief(task: &Task) -> String {
     let mut text = task.text.clone();
+    if task.attempts > 0 {
+        text.push_str("
+
+Прошлый запуск этой задачи оборвал перезапуск программы. Часть работы могла быть сделана: посмотри свою папку и продолжай с того места, а не начинай с нуля.");
+    }
     if !task.files.is_empty() {
         text.push_str(&format!("\n\nФайлы от «{}» лежат в твоей папке: {}.", task.from_name, task.files.join(", ")));
     }
@@ -874,7 +909,7 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_turns_running_tasks_into_interrupted_ones() {
+    fn a_restart_requeues_open_tasks_once_and_then_interrupts_them() {
         let dir = temp("restart");
         let tasks = Tasks::open(&dir);
         tasks.begin(task("a", "lead", "pic", "ждёт")).unwrap();
@@ -884,11 +919,42 @@ mod tests {
         tasks.update("c", |t| t.state = "done".into());
         drop(tasks);
         let after = Tasks::open(&dir);
-        assert_eq!(after.get("a").unwrap().state, "interrupted");
-        assert_eq!(after.get("b").unwrap().state, "interrupted");
-        assert!(after.get("b").unwrap().finished > 0);
+        assert_eq!(after.get("a").unwrap().state, "queued", "ждавшая остаётся в очереди");
+        assert_eq!(after.get("a").unwrap().attempts, 0);
+        assert_eq!(after.get("b").unwrap().state, "queued", "шедшая встаёт в очередь заново");
+        assert_eq!(after.get("b").unwrap().attempts, 1);
         assert_eq!(after.get("c").unwrap().state, "done");
-        assert!(!after.get("a").unwrap().is_open());
+        let mut ids = after.queued_ids();
+        ids.sort();
+        assert_eq!(ids, vec!["a", "b"]);
+        // Второй обрыв той же задачи: попытки кончились.
+        after.update("b", |t| t.state = "running".into());
+        drop(after);
+        let again = Tasks::open(&dir);
+        assert_eq!(again.get("b").unwrap().state, "interrupted");
+        assert!(again.get("b").unwrap().finished > 0);
+        assert!(!again.get("b").unwrap().is_open());
+        assert_eq!(again.get("a").unwrap().state, "queued");
+    }
+
+    #[test]
+    fn a_stale_task_is_not_resumed_after_a_restart() {
+        let dir = temp("restart-stale");
+        let tasks = Tasks::open(&dir);
+        let mut old = task("old", "lead", "pic", "давняя");
+        old.created = now() - RESUME_WINDOW_MS - 1_000;
+        tasks.begin(old).unwrap();
+        drop(tasks);
+        let after = Tasks::open(&dir);
+        assert_eq!(after.get("old").unwrap().state, "interrupted");
+    }
+
+    #[test]
+    fn a_resumed_brief_says_the_first_run_was_cut_off() {
+        let mut t = task("r", "lead", "pic", "сделай");
+        assert!(!brief(&t).contains("оборвал перезапуск"));
+        t.attempts = 1;
+        assert!(brief(&t).contains("оборвал перезапуск"));
     }
 
     #[test]

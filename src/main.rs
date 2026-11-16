@@ -276,6 +276,7 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     discord::start(app.clone());
     slack::start(app.clone());
     password_vault::start(app.clone());
+    team_tasks::resume(&app);
     Ok(app)
 }
 
