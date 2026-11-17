@@ -645,7 +645,12 @@ pub fn describe_script_or_text(app: &App, bot: &Bot, whole: &str, script: Option
         class = if class == "unknown" { "change" } else { class };
     }
     if !scan.runs.is_empty() || !scan2.runs.is_empty() {
-        let tools: Vec<String> = scan.runs.iter().chain(scan2.runs.iter()).cloned().collect();
+        let mut tools: Vec<String> = Vec::new();
+        for tool in scan.runs.iter().chain(scan2.runs.iter()) {
+            if !tools.contains(tool) {
+                tools.push(tool.clone());
+            }
+        }
         parts_ru.push(format!("запускает другие программы ({})", tools.join(", ")));
         parts_en.push(format!("starts other programs ({})", tools.join(", ")));
     }

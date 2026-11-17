@@ -975,6 +975,21 @@ fn looks_like_path(s: &str) -> bool {
         && !s.starts_with("http")
 }
 
+/// Оператор вызова PowerShell `& 'prog.exe'`: одиночный `&` в начале выражения (после начала строки, `;`, `|`,
+/// `(`, `{` или `=`). Цепочки `cmd1 && cmd2` и фон `cmd &` в bash — не он: 17.11.2026 `cd … && tail …`
+/// показывалось как «запускает другие программы (&, &)».
+fn call_operator(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    chars.iter().enumerate().any(|(i, &c)| {
+        if c != '&' || chars.get(i + 1) == Some(&'&') || (i > 0 && chars[i - 1] == '&') {
+            return false;
+        }
+        let next_ok = chars.get(i + 1).is_some_and(|n| n.is_whitespace() || matches!(n, '\'' | '"' | '$' | '('));
+        let before = chars[..i].iter().rev().find(|p| !matches!(p, ' ' | '\t'));
+        next_ok && before.is_none_or(|p| matches!(p, '\n' | ';' | '|' | '(' | '{' | '='))
+    })
+}
+
 pub fn scan(text: &str) -> Scan {
     let mut out = Scan::default();
     let lower = text.to_lowercase();
@@ -1019,10 +1034,13 @@ pub fn scan(text: &str) -> Scan {
             out.installs.push(label.to_string());
         }
     }
-    for verb in ["start-process", "saps ", "start ", "invoke-item", "& ", "[diagnostics.process]", "system.diagnostics.process", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "schtasks", "new-service"] {
+    for verb in ["start-process", "saps ", "start ", "invoke-item", "[diagnostics.process]", "system.diagnostics.process", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "schtasks", "new-service"] {
         if has(verb) {
             out.runs.push(verb.trim().to_string());
         }
+    }
+    if call_operator(text) {
+        out.runs.push("&".into());
     }
     // Программы, через которые скачивают, правят систему или запускают чужое: отдельные слова, а не куски других слов.
     let words: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-' || c == '.')).filter(|w| !w.is_empty()).collect();
@@ -1037,6 +1055,18 @@ pub fn scan(text: &str) -> Scan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_powershell_call_operator_counts_as_starting_a_program() {
+        // Bash: цепочка && и heredoc с данными — не запуск чужой программы.
+        let bash = "cd C:/Users/Public/Deloist/data/workspaces/bot_1 && tail -c1 x-metrics.csv | xxd | head -1; cat >> x-metrics.csv <<'EOF'\n1,2\nEOF";
+        assert!(!scan(bash).runs.iter().any(|r| r == "&"), "{:?}", scan(bash).runs);
+        assert!(!scan("sleep 5 &").runs.iter().any(|r| r == "&"));
+        // PowerShell: & в начале выражения запускает программу по пути из строки.
+        for ps in ["& 'C:\\tools\\x.exe' -a", "$r = & \"$env:TEMP\\y.exe\"", "cd C:\\p; & $exe", "Get-Item a | & { $_ }"] {
+            assert!(scan(ps).runs.iter().any(|r| r == "&"), "не найден вызов: {ps}");
+        }
+    }
 
     const EDITOR: &str = "$p = 'ai-agents-market-map.md'\n$c = [System.IO.File]::ReadAllText($p)\n$c = $c.Replace('старая фраза', 'новая фраза').Replace('a', 'b')\n$add = @'\n## Новое\n- ссылка 1\n'@\n$c = $c + \"`n\" + $add\n[System.IO.File]::WriteAllText($p, $c, (New-Object System.Text.UTF8Encoding $false))";
 

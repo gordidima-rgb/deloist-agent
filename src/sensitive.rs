@@ -140,9 +140,29 @@ fn digit_runs(text: &str, allowed: &str) -> Vec<(Range<usize>, Vec<u32>)> {
     out
 }
 
+/// Начало номера и длина, как у настоящих карт (Visa, Mastercard, Мир, Amex, UnionPay, JCB, Maestro, Diners,
+/// Discover). Одной проверки Луна мало: её проходит каждое десятое число, и ID твитов (19 цифр, «21…»)
+/// маскировались как карты — в карточках, памяти и сводках шагов (17.11.2026).
+fn issuer_fits(digits: &[u32]) -> bool {
+    let n = digits.len();
+    let head = |k: usize| digits.iter().take(k).fold(0u32, |acc, d| acc * 10 + d);
+    match digits.first() {
+        Some(4) => matches!(n, 13 | 16 | 19),
+        Some(5) if (51..=55).contains(&head(2)) => n == 16,
+        Some(2) if (2221..=2720).contains(&head(4)) => n == 16,
+        Some(2) if (2200..=2204).contains(&head(4)) => (16..=19).contains(&n),
+        Some(3) if matches!(head(2), 34 | 37) => n == 15,
+        Some(3) if (3528..=3589).contains(&head(4)) => (16..=19).contains(&n),
+        Some(3) if (300..=305).contains(&head(3)) || matches!(head(2), 36 | 38 | 39) => (14..=19).contains(&n),
+        Some(6) => (16..=19).contains(&n),
+        Some(5) if matches!(head(2), 50 | 56..=58) => (12..=19).contains(&n),
+        _ => false,
+    }
+}
+
 fn cards(text: &str, out: &mut Vec<Span>) {
     for (range, digits) in digit_runs(text, " -") {
-        if (13..=19).contains(&digits.len()) && luhn(&digits) {
+        if (13..=19).contains(&digits.len()) && issuer_fits(&digits) && luhn(&digits) {
             out.push(Span { range, kind: Kind::Card });
         }
     }
@@ -283,6 +303,33 @@ pub fn mask(text: &str, contacts: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Дописать к цифрам контрольную по Луну: получится число, которое проверку Луна проходит.
+    fn with_check(body: &str) -> String {
+        (0..10).map(|d| format!("{body}{d}")).find(|s| luhn(&s.chars().map(|c| c.to_digit(10).unwrap()).collect::<Vec<_>>())).unwrap()
+    }
+
+    #[test]
+    fn card_numbers_need_a_real_issuer_and_length_not_only_luhn() {
+        // Настоящие по виду карты маскируются.
+        for card in ["4276 3800 1234 5679", "5500-0000-0000-0004", "378282246310005", &with_check("222100000000000"), &with_check("220012345678901"), &with_check("620000000000000")] {
+            assert_eq!(cards_in(card), 1, "карта не найдена: {card}");
+        }
+        // ID твитов и прочие длинные числа с верной контрольной цифрой — не карты.
+        let tweet = with_check("212262510561666672");
+        assert_eq!(tweet.len(), 19);
+        for text in [tweet.as_str(), &with_check("100000000000000"), &with_check("51000000000000000"), &with_check("90000000000000")] {
+            assert_eq!(cards_in(text), 0, "принято за карту: {text}");
+        }
+        let line = format!("{tweet},2026-11-17 11:46,45.0,72,1,1,0");
+        assert_eq!(mask(&line, false), line, "строка метрик X испорчена маской");
+    }
+
+    fn cards_in(text: &str) -> usize {
+        let mut spans = Vec::new();
+        cards(text, &mut spans);
+        spans.len()
+    }
 
     #[test]
     fn secrets_are_recognised_and_plain_talk_is_not() {
