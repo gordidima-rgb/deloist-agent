@@ -205,7 +205,7 @@ describe('WorkflowsScreen', () => {
     await render(api);
     host.querySelector('[aria-label="Версии"]').click();
     await drain();
-    host.querySelector('.wf-hp__row').click();
+    host.querySelector('.wf-hp__row .k-lrow__t').click();
     await drain();
     expect(state.calls).toContain('GET /api/workflows/w1/versions/3');
     expect(host.querySelector('.wfs-preview')).not.toBeNull();
@@ -225,7 +225,7 @@ describe('WorkflowsScreen', () => {
     await render(api);
     host.querySelector('[aria-label="Версии"]').click();
     await drain();
-    host.querySelector('.wf-hp__row').click();
+    host.querySelector('.wf-hp__row .k-lrow__t').click();
     await drain();
     host.querySelector('.wfs-preview [aria-label="Закрыть просмотр"]').click();
     await drain();
@@ -241,7 +241,7 @@ describe('WorkflowsScreen', () => {
     await render(api);
     host.querySelector('[aria-label="История"]').click();
     await drain();
-    host.querySelector('.wf-hp__row').click();
+    host.querySelector('.wf-hp__row .k-lrow__t').click();
     await drain();
     expect(host.textContent).toContain('Показан прошлый запуск');
   });

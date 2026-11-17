@@ -90,22 +90,22 @@
 </script>
 
 {#if open}
-  <div class="mn-pop" style:left="{pos.left}px" style:top="{pos.top}px" style:width="{pos.width}px" role="listbox" aria-label={tr('Агенты')}>
-    <div class="mn-group">{tr('Агенты')} <span class="mn-count">{bots.length}</span></div>
+  <div class="k-menu k-sharpen-in mn-pop" style:left="{pos.left}px" style:top="{pos.top}px" style:width="{pos.width}px" role="listbox" aria-label={tr('Агенты')}>
+    <div class="k-menu__note mn-group">{tr('Агенты')} <span class="k-menu__value">{bots.length}</span></div>
     {#if filtered.length}
       <ul class="mn-list">
         {#each filtered as bot, i (bot.id)}
           <li>
-            <button type="button" class="mn-item" class:mn-sel={i === selected} role="option" aria-selected={i === selected} onclick={() => insert(bot)} onmouseenter={() => (selected = i)}>
+            <button type="button" class="k-menu__item mn-item" class:mn-sel={i === selected} role="option" aria-selected={i === selected} onclick={() => insert(bot)} onmouseenter={() => (selected = i)}>
               <span class="mn-avatar" aria-hidden="true">{bot.emoji || (bot.name || '?').charAt(0)}</span>
               <span class="mn-name">{bot.name}</span>
-              {#if bot.role}<span class="mn-role">{bot.role}</span>{/if}
+              {#if bot.role}<span class="k-menu__value mn-role">{bot.role}</span>{/if}
             </button>
           </li>
         {/each}
       </ul>
     {:else}
-      <p class="mn-empty">{tr('Ничего не нашлось')}</p>
+      <p class="k-menu__note mn-empty">{tr('Ничего не нашлось')}</p>
     {/if}
   </div>
 {/if}
@@ -115,30 +115,14 @@
     position: fixed;
     z-index: 1000;
     transform: translateY(-100%);
-    margin-top: -8px;
+    margin-top: calc(var(--k-space-2) * -1);
     max-height: 260px;
     overflow: auto;
-    border-radius: var(--k-radius-md, 12px);
-    background: var(--k-surface, #fff);
-    color: var(--k-text, #121212);
-    box-shadow: var(--k-shadow-3, 0 8px 24px rgba(0,0,0,0.18));
-    border: 1px solid var(--k-line, #e8e8e8);
-    padding: 6px;
   }
   .mn-group {
-    padding: 4px 8px;
-    font-size: var(--k-text-xs, 12px);
-    font-weight: 600;
-    color: var(--k-text-3, #6e6e6e);
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-  .mn-count {
-    background: var(--k-surface-3, #e6e6e6);
-    border-radius: 999px;
-    padding: 0 6px;
-    font-size: 11px;
   }
   .mn-list {
     list-style: none;
@@ -148,23 +132,8 @@
     flex-direction: column;
     gap: 2px;
   }
-  .mn-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: var(--k-radius-sm, 8px);
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: var(--k-text-sm, 13px);
-    text-align: left;
-    cursor: pointer;
-  }
-  .mn-item:hover, .mn-item.mn-sel {
-    background: var(--k-surface-2, #f0f0f0);
+  .mn-item.mn-sel {
+    background: var(--k-ink-2);
   }
   .mn-avatar {
     flex: none;
@@ -172,11 +141,10 @@
     height: 24px;
     display: grid;
     place-items: center;
-    border-radius: 6px;
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
-    font-size: 12px;
-    font-weight: 700;
+    border-radius: var(--k-radius-sm);
+    background: var(--k-ink-3);
+    color: var(--k-on-ink);
+    font: 700 var(--k-text-xs) / 1 var(--k-font-body);
   }
   .mn-name {
     flex: 1;
@@ -186,20 +154,9 @@
     white-space: nowrap;
   }
   .mn-role {
-    flex: none;
-    font-size: var(--k-text-xs, 12px);
-    color: var(--k-text-3, #6e6e6e);
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .mn-empty {
-    margin: 8px;
-    font-size: var(--k-text-xs, 12px);
-    color: var(--k-text-3, #6e6e6e);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .mn-pop { transition: none; }
   }
 </style>

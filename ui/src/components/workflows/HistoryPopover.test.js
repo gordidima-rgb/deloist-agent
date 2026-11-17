@@ -37,7 +37,7 @@ describe('HistoryPopover', () => {
     expect(rows[0].textContent).toContain('Вручную');
     expect(rows[0].textContent).toContain('12 с');
     expect(rows[1].textContent).toContain('По расписанию');
-    rows[1].click();
+    rows[1].querySelector('.k-lrow__t').click();
     expect(onview).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }));
   });
 
@@ -68,7 +68,7 @@ describe('HistoryPopover', () => {
     const rows = host.querySelectorAll('.wf-hp__row');
     expect(rows[0].textContent).toContain('Перед запуском');
     expect(rows[1].textContent).toContain('Автосохранение');
-    rows[0].click();
+    rows[0].querySelector('.k-lrow__t').click();
     expect(onpreview).toHaveBeenCalledWith(expect.objectContaining({ v: 2 }));
   });
 

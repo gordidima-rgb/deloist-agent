@@ -498,7 +498,7 @@ import { Icon, Button, IconButton, Select } from '../kit';
   .remove p {
     margin: 0 0 8px;
   }
-  .remove-btn {
+  :global(.remove-btn) {
     align-self: flex-start;
   }
   .ok {

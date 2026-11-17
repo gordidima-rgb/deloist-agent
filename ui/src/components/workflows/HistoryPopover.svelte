@@ -4,7 +4,7 @@
   import { tr, trServer } from '../../lib/i18n.js';
   import { toMs, stepSeconds } from '../../lib/workflows/graph.js';
   import { statusLabel, sourceLabel, sourceIcon, versionKindLabel, whenText, seconds } from './Labels.svelte';
-  import { Button } from '../kit';
+  import { Button, ListRow } from '../kit';
   import WfIcon from './WfIcon.svelte';
 
   /** api(path); workflowId; mode; viewedId — какой запуск сейчас показан; onview(run|null); onpreview(version); onclose(). */
@@ -85,30 +85,26 @@
     {/if}
 
     {#if mode === 'runs'}
-      {#each rows as r (r.id)}
-        <button type="button" class="wf-hp__row" class:on={r.id === viewedId} onclick={() => onview?.(r)}>
-          <span class="wf-hp__chip" data-status={r.status}>{statusLabel(r.status)}</span>
-          <span class="wf-hp__main">
-            <b class="wf-hp__src"><span class="wf-hp__srcico"><WfIcon name={sourceIcon(r.solo ? 'node' : r.source)} size={13} /></span>{sourceLabel(r.solo ? 'node' : r.source)}</b>
-            <small>{whenText(toMs(r.started_at))}</small>
-          </span>
-          <span class="wf-hp__sec">{r.ended_at ? seconds(runSeconds(r)) : ''}</span>
-        </button>
-      {/each}
+      <ul class="k-lrows wf-hp__rows">
+        {#each rows as r (r.id)}
+          <ListRow class="wf-hp__row {r.id === viewedId ? 'on' : ''}" title={sourceLabel(r.solo ? 'node' : r.source)} onclick={() => onview?.(r)}>
+            {#snippet leading()}<span class="wf-hp__chip" data-status={r.status}>{statusLabel(r.status)}</span>{/snippet}
+            {#snippet meta()}<small class="k-lrow__sub">{whenText(toMs(r.started_at))}</small>{/snippet}
+            {#snippet trailing()}<span class="wf-hp__sec">{r.ended_at ? seconds(runSeconds(r)) : ''}</span>{/snippet}
+          </ListRow>
+        {/each}
+      </ul>
       {#if before}
         <Button class="wf-hp__more" variant="ghost" size="sm" disabled={loading} onclick={() => load(true)}>{tr('Показать ещё')}</Button>
       {/if}
     {:else}
-      {#each rows as v (v.v)}
-        <button type="button" class="wf-hp__row" onclick={() => onpreview?.(v)}>
-          <span class="wf-hp__ver"><WfIcon name="versions" size={15} /></span>
-          <span class="wf-hp__main">
-            <b>{versionKindLabel(v.kind)}</b>
-            <small>{whenText(toMs(v.at))}</small>
-          </span>
-          <span class="wf-hp__sec">{tr('Шагов: {n}', { n: v.steps ?? 0 })}</span>
-        </button>
-      {/each}
+      <ul class="k-lrows wf-hp__rows">
+        {#each rows as v (v.v)}
+          <ListRow class="wf-hp__row" icon="wf-versions" title={versionKindLabel(v.kind)} sub={whenText(toMs(v.at))} onclick={() => onpreview?.(v)}>
+            {#snippet trailing()}<span class="wf-hp__sec">{tr('Шагов: {n}', { n: v.steps ?? 0 })}</span>{/snippet}
+          </ListRow>
+        {/each}
+      </ul>
     {/if}
   </div>
 </div>
@@ -153,28 +149,8 @@
   .wf-hp__msg.is-err {
     color: var(--k-attention-text);
   }
-  .wf-hp__row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 10px;
-    border: 0;
-    border-radius: 12px;
-    background: transparent;
-    color: var(--k-text);
-    text-align: left;
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-hp__row:hover,
-  .wf-hp__row.on {
+  :global(.wf-hp__row.on .k-lrow__main) {
     background: var(--k-surface-2);
-  }
-  .wf-hp__row:active {
-    transform: scale(0.98);
   }
   .wf-hp__chip {
     min-width: 66px;
@@ -199,39 +175,6 @@
     background: var(--k-brand-tint);
     color: var(--k-brand-text);
   }
-  .wf-hp__ver {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 10px;
-    background: var(--k-brand-tint);
-    color: var(--k-brand);
-  }
-  .wf-hp__main {
-    display: grid;
-    flex: 1;
-    min-width: 0;
-    gap: 2px;
-  }
-  .wf-hp__main b {
-    font: 600 13.5px/1.2 var(--k-font-body);
-  }
-  .wf-hp__src {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .wf-hp__srcico {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 7px;
-    background: var(--k-surface-2);
-    color: var(--k-text-2);
-  }
-  .wf-hp__main small,
   .wf-hp__sec {
     font: 400 12px/1.2 var(--k-font-body);
     color: var(--k-text-3);
