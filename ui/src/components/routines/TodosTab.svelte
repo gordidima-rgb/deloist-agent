@@ -21,8 +21,7 @@
   } from '../../lib/todos.js';
   import Composer from './Composer.svelte';
   import TodoCard from './TodoCard.svelte';
-import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
-  import Menu from '../Menu.svelte';
+import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } from '../kit';
 
   let { api = defaultApi } = $props();
 
@@ -371,28 +370,30 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
 {#snippet row(todo)}
   {@const due = dueInfo(todo, today)}
   {@const progress = checklistProgress(todo)}
-  <li
-    class="td-row"
-    class:td-row--done={todo.done}
-    class:td-row--picked={selectedId === todo.id}
-    class:td-row--drag={dragId === todo.id}
+  <ListRow
+    class="td-row {todo.done ? 'td-row--done' : ''} {selectedId === todo.id ? 'td-row--picked' : ''} {dragId === todo.id ? 'td-row--drag' : ''}"
+    title={todo.title}
+    titleClass="td-title"
+    done={todo.done}
     draggable={!todo.done}
     ondragstart={(e) => dragStart(e, todo)}
     ondragend={dragEnd}
+    onclick={() => (selectedId = todo.id)}
   >
-    <button
-      type="button"
-      class="td-check"
-      class:td-check--on={todo.done}
-      role="checkbox"
-      aria-checked={todo.done}
-      aria-label={tr('Отметить: {title}', { title: todo.title })}
-      onclick={() => toggle(todo)}
-    >
-      <Icon name="check" size={16} stroke={3} />
-    </button>
-    <button type="button" class="td-main" onclick={() => (selectedId = todo.id)} aria-label={tr('Открыть: {title}', { title: todo.title })}>
-      <span class="td-title">{todo.title}</span>
+    {#snippet leading()}
+      <button
+        type="button"
+        class="td-check"
+        class:td-check--on={todo.done}
+        role="checkbox"
+        aria-checked={todo.done}
+        aria-label={tr('Отметить: {title}', { title: todo.title })}
+        onclick={() => toggle(todo)}
+      >
+        <Icon name="check" size={16} stroke={3} />
+      </button>
+    {/snippet}
+    {#snippet meta()}
       {#if due || todo.recurrence || progress.total}
         <span class="td-meta">
           {#if due}<span class="td-chip" class:td-chip--late={due.overdue && !todo.done}>{dueText(due)}</span>{/if}
@@ -400,20 +401,22 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
           {#if progress.total}<span class="td-chip" aria-label={tr('Чек-лист: {done} из {total}', progress)}>{progress.done}/{progress.total}</span>{/if}
         </span>
       {/if}
-    </button>
-    <div class="td-more">
-      <IconButton label={tr('Действия: {title}', { title: todo.title })} size="sm" aria-haspopup="menu" aria-expanded={menuId === todo.id} data-menu-trigger onclick={() => (menuId = menuId === todo.id ? '' : todo.id)}>
-        {#snippet icon()}
-          <Icon name="more" size={16} stroke={2.5} />
-        {/snippet}
-      </IconButton>
-      {#if menuId === todo.id}
-        <div class="td-menu">
-          <Menu label={tr('Действия: {title}', { title: todo.title })} items={menuItems(todo)} onpick={(id) => pickMenu(todo, id)} onclose={() => (menuId = '')} />
-        </div>
-      {/if}
-    </div>
-  </li>
+    {/snippet}
+    {#snippet trailing()}
+      <div class="td-more">
+        <IconButton label={tr('Действия: {title}', { title: todo.title })} size="sm" aria-haspopup="menu" aria-expanded={menuId === todo.id} data-menu-trigger onclick={() => (menuId = menuId === todo.id ? '' : todo.id)}>
+          {#snippet icon()}
+            <Icon name="more" size={16} stroke={2.5} />
+          {/snippet}
+        </IconButton>
+        {#if menuId === todo.id}
+          <div class="td-menu">
+            <Menu label={tr('Действия: {title}', { title: todo.title })} items={menuItems(todo)} onpick={(id) => pickMenu(todo, id)} onclose={() => (menuId = '')} />
+          </div>
+        {/if}
+      </div>
+    {/snippet}
+  </ListRow>
 {/snippet}
 
 <div class="td">
@@ -492,15 +495,16 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
         {#if !archiveRows.length}
           <EmptyState title={tr('В архиве пусто')} text={tr('Сюда попадают убранные и вчерашние выполненные задачи.')} />
         {:else}
-          <ul class="td-list">
+          <ul class="k-lrows">
             {#each archiveRows as t (t.id)}
-              <li class="td-row td-row--done">
-                <span class="td-main td-main--static">
-                  <span class="td-title">{t.title}</span>
+              <ListRow class="td-row td-row--done" title={t.title} titleClass="td-title" done>
+                {#snippet meta()}
                   {#if t.due_date}<span class="td-meta"><span class="td-chip">{dateLabel(t.due_date, locale())}</span></span>{/if}
-                </span>
-                <Button size="sm" variant="ghost" onclick={() => restore(t)}>{tr('Вернуть')}</Button>
-              </li>
+                {/snippet}
+                {#snippet trailing()}
+                  <Button size="sm" variant="ghost" onclick={() => restore(t)}>{tr('Вернуть')}</Button>
+                {/snippet}
+              </ListRow>
             {/each}
           </ul>
         {/if}
@@ -519,7 +523,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
           >
             <h4 class="td-h">{bucketName(b)} <span class="td-count">{section.open.length}</span></h4>
             {#if section.open.length}
-              <ul class="td-list">
+              <ul class="k-lrows">
                 {#each section.open as t (t.id)}{@render row(t)}{/each}
               </ul>
             {:else}
@@ -531,7 +535,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
                 {tr('Выполнено ({n})', { n: section.done.length })}
               </Button>
               {#if doneOpen[b]}
-                <ul class="td-list">
+                <ul class="k-lrows">
                   {#each section.done as t (t.id)}{@render row(t)}{/each}
                 </ul>
               {/if}
@@ -746,34 +750,16 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
     color: var(--k-text-3);
     font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
-  .td-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .td-row {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: var(--k-space-3, 12px);
-    padding: 8px var(--k-space-3, 12px);
-    border: 1px solid var(--k-line);
-    border-radius: var(--k-radius-md, 18px);
-    background: var(--k-surface);
-  }
-  .td-row[draggable='true'] {
+  :global(.td-row[draggable='true']) {
     cursor: grab;
   }
-  .td-row--picked {
-    border-color: var(--k-brand);
+  :global(.td-row--picked) {
+    box-shadow: inset 0 0 0 1px var(--k-brand);
   }
-  .td-row--drag {
+  :global(.td-row--drag) {
     opacity: 0.5;
   }
-  .td-row--done .td-title {
+  :global(.td-row--done .td-title) {
     color: var(--k-text-3);
     text-decoration: line-through;
   }
@@ -799,26 +785,11 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
     background: var(--k-brand);
     color: var(--k-on-brand);
   }
-  .td-check:focus-visible,
-  .td-main:focus-visible,
-  .td-main {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    padding: 2px 4px;
-    border: 0;
-    border-radius: var(--k-radius-xs, 6px);
-    background: none;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
+  .td-check:focus-visible {
+    outline: none;
+    box-shadow: var(--k-focus);
   }
-  .td-main--static {
-    cursor: default;
-  }
-  .td-title {
+  :global(.td-title) {
     color: var(--k-text);
     font: 600 var(--k-text-md, 15px) / 1.35 var(--k-font-body, system-ui);
     overflow-wrap: anywhere;

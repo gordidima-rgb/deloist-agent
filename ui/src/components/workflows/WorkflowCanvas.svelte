@@ -17,7 +17,8 @@
   import WfShape from './WfShape.svelte';
   import WfEdge from './WfEdge.svelte';
   import AddMenu from './AddMenu.svelte';
-  import ContextMenu from './ContextMenu.svelte';
+  import { Menu } from '../kit';
+  import { wfIconKey } from '../../lib/workflows/iconKey.js';
   import ToolOptions from './ToolOptions.svelte';
   import StrokesLayer from './StrokesLayer.svelte';
   import HistoryPopover from './HistoryPopover.svelte';
@@ -899,7 +900,15 @@
     <AddMenu allowed={menu.allowed} origin={menu.origin} x={menu.x} y={menu.y} onpick={onPick} onclose={() => (menu = null)} />
   {/if}
   {#if ctxMenu}
-    <ContextMenu items={ctxMenu.items} x={ctxMenu.x} y={ctxMenu.y} onpick={onCtxPick} onclose={() => (ctxMenu = null)} />
+    <Menu
+      class="nodrag nopan nowheel"
+      label={tr('Действия')}
+      items={ctxMenu.items.map((it, i) => (it.sep ? { id: `sep${i}`, kind: 'sep' } : { id: it.id, label: it.label, icon: it.icon ? wfIconKey(it.icon) : undefined, danger: it.danger, disabled: it.disabled, shortcut: it.hint }))}
+      x={ctxMenu.x}
+      y={ctxMenu.y}
+      onpick={onCtxPick}
+      onclose={() => (ctxMenu = null)}
+    />
   {/if}
   {#if panel}
     <HistoryPopover

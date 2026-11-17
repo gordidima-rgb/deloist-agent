@@ -195,7 +195,7 @@ import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
   .rp-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-2, 8px); flex-wrap: wrap; }
   .rp-nav-group { display: flex; align-items: center; gap: var(--k-space-2, 8px); }
   .rp-range { font: 700 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, inherit); min-width: 9ch; text-align: center; }
-  .rp-col:focus-visible, .rp-more:focus-visible { outline: none; box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28)); }
+  .rp-col:focus-visible, .rp-more:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .rp-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font: 600 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, inherit); }
   .rp-error { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font-size: var(--k-text-sm, 13px); }
   .rp-skel { display: grid; gap: var(--k-space-3, 12px); }

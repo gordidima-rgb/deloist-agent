@@ -17,6 +17,8 @@
   import Section from './layout/Section.svelte';
   import Row from './layout/Row.svelte';
   import ListItem from './layout/ListItem.svelte';
+  import ListRow from './layout/ListRow.svelte';
+  import Menu from './overlay/Menu.svelte';
   import Avatar from './media/Avatar.svelte';
   import Tabs from './choice/Tabs.svelte';
   import Chip from './status/Chip.svelte';
@@ -286,6 +288,27 @@
   </Modal>
 {/snippet}
 
+{#snippet menuStage()}
+  <div class="gallery__menu">
+    <Menu
+      label={tr('Действия')}
+      items={[
+        { id: 'copy', label: tr('Копировать'), icon: 'copy', shortcut: 'Ctrl+C' },
+        { id: 'pin', label: tr('Закрепить'), icon: 'pin', kind: 'check', checked: true },
+        { id: 's1', kind: 'sep' },
+        { id: 'del', label: tr('Удалить'), icon: 'trash', danger: true },
+      ]}
+    />
+  </div>
+  <ul class="k-lrows">
+    <ListRow icon="link" title={tr('Строка со стрелкой')} sub={tr('Раскрывается по клику')} variant="chevron">
+      {#snippet children()}<p>{tr('Тело строки растёт по высоте.')}</p>{/snippet}
+    </ListRow>
+    <ListRow icon="user" title={tr('Строка с действием')} sub={tr('Кнопка справа, строка не нажимается')} variant="action" actionLabel={tr('Войти')} />
+    <ListRow icon="gear" title={tr('Строка с переключателем')} variant="switch" checked />
+  </ul>
+{/snippet}
+
 {#snippet layoutStage()}
   <SplitView width="200px" sidebar={layoutSidebar}>
     <Toolbar title={tr('Боты')} subtitle={tr('Команда из трёх ботов')} actions={layoutActions} />
@@ -402,6 +425,18 @@
         <div class="gallery__col" data-theme={theme}>
           <div class="gallery__tag">{themeName(theme)}</div>
           <div class="gallery__stage">{@render toastStage()}</div>
+        </div>
+      {/each}
+    </div>
+  </section>
+
+  <section class="gallery__section">
+    <h2>{tr('Меню и строки')}</h2>
+    <div class="gallery__pair">
+      {#each themes as theme (theme)}
+        <div class="gallery__col" data-theme={theme}>
+          <div class="gallery__tag">{themeName(theme)}</div>
+          <div class="gallery__stage">{@render menuStage()}</div>
         </div>
       {/each}
     </div>

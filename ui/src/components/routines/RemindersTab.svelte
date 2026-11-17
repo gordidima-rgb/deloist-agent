@@ -8,7 +8,7 @@
   import { channelsOf, flagsOf, isTelegramPaired } from '../../lib/channels.js';
   import Composer from './Composer.svelte';
   import ChannelChips from './ChannelChips.svelte';
-import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
+import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '../kit';
 
   let { api = defaultApi, routines = [], onchanged, onopentelegram } = $props();
 
@@ -275,39 +275,40 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
   {#if !reminders.length}
     <EmptyState title={tr('Напоминаний пока нет')} text={tr('Напиши, о чём и когда напомнить. Код сам найдёт дату и время, модель не тратится.')} />
   {:else}
-    <ul class="rm-list">
+    <ul class="k-lrows">
       {#each reminders as r (r.id)}
         {@const status = statusText(r)}
         {@const test = tests[r.id]}
-        <li class="rm-item" class:rm-item--off={!r.enabled}>
-          <div class="rm-main">
-            <div class="rm-title">{r.prompt}</div>
-            <div class="rm-meta">
+        <ListRow class="rm-item {r.enabled ? '' : 'is-off'}" title={r.prompt} titleClass="rm-title">
+          {#snippet meta()}
+            <span class="rm-meta">
               <span>{scheduleText(r)}</span>
               {#if leadText(r)}<span>{leadText(r)}</span>{/if}
               <span>{(r.channels?.length ? r.channels : ['windows']).map(channelName).join(', ')}</span>
-            </div>
-            <div class="rm-meta">
+            </span>
+            <span class="rm-meta">
               <span>{nextText(r)}</span>
               {#if status}<span class:rm-bad={status.bad}>{status.label}{status.at ? `, ${status.at}` : ''}</span>{/if}
-            </div>
-            {#if test?.results}<div class="rm-test" class:rm-bad={test.results.some((d) => !d.ok)} role="status">{testText(test)}</div>{/if}
-          </div>
-          <div class="rm-side">
-            <Button size="sm" variant="ghost" loading={test?.busy} onclick={() => testSend(r)}>{tr('Проверить')}</Button>
-            <Switch checked={r.enabled} label={tr('Включено')} onchange={(on) => toggleEnabled(r, on)} />
-            <IconButton label={tr('Изменить')} size="sm" onclick={() => startEdit(r)}>
-              {#snippet icon()}
-                <Icon name="pencil" size={16} />
-              {/snippet}
-            </IconButton>
-            <IconButton label={tr('Удалить')} size="sm" onclick={() => remove(r)}>
-              {#snippet icon()}
-                <Icon name="close" size={16} />
-              {/snippet}
-            </IconButton>
-          </div>
-        </li>
+            </span>
+            {#if test?.results}<span class="rm-test" class:rm-bad={test.results.some((d) => !d.ok)} role="status">{testText(test)}</span>{/if}
+          {/snippet}
+          {#snippet trailing()}
+            <span class="rm-side">
+              <Button size="sm" variant="ghost" loading={test?.busy} onclick={() => testSend(r)}>{tr('Проверить')}</Button>
+              <Switch checked={r.enabled} label={tr('Включено')} onchange={(on) => toggleEnabled(r, on)} />
+              <IconButton label={tr('Изменить')} size="sm" onclick={() => startEdit(r)}>
+                {#snippet icon()}
+                  <Icon name="pencil" size={16} />
+                {/snippet}
+              </IconButton>
+              <IconButton label={tr('Удалить')} size="sm" onclick={() => remove(r)}>
+                {#snippet icon()}
+                  <Icon name="close" size={16} />
+                {/snippet}
+              </IconButton>
+            </span>
+          {/snippet}
+        </ListRow>
       {/each}
     </ul>
   {/if}
@@ -371,35 +372,8 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     display: flex;
     justify-content: flex-end;
   }
-  .rm-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--k-space-2, 8px);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .rm-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--k-space-3, 12px);
-    padding: var(--k-space-3, 12px) var(--k-space-4, 16px);
-    border: 1px solid var(--k-line);
-    border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface);
-  }
-  .rm-item--off .rm-title {
+  :global(.rm-item.is-off .k-lrow__title) {
     color: var(--k-text-2);
-  }
-  .rm-main {
-    flex: 1 1 240px;
-    min-width: 0;
-  }
-  .rm-title {
-    color: var(--k-text);
-    font: 600 var(--k-text-md, 15px) / 1.35 var(--k-font-body, system-ui);
-    overflow-wrap: anywhere;
   }
   .rm-meta {
     display: flex;

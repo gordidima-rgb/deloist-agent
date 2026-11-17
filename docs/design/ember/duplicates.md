@@ -6,44 +6,46 @@
 
 ## Кнопки (свои классы и стили) (488)
 
+Этап C2 (17.11): ✓ — файл переведён на `Button` / `IconButton` / `ListRow` / `Menu`, ◐ — переведена часть (остались строки-карточки, дорожка-полоса отчёта, микрофон и отправка у Stage, `AddMenu` — поиск с группами, а не меню).
+
 Заменить на: `Button` / `IconButton` (`.k-btn`, варианты primary/secondary/ghost/danger/danger-solid)
 
-- `ui/src/components/ChatModelPopover.svelte` — 1: 68
-- `ui/src/components/KnowMe.svelte` — 13: 144, 167, 168, 180, 181, 188, 195, 200, 201, 207, 229, 230, …
-- `ui/src/components/MentionPopover.svelte` — 1: 99
-- `ui/src/components/ModelPicker.svelte` — 11: 169, 178, 198, 205, 227, 246, 258, 450, 463, 467, 471
+- `ui/src/components/ChatModelPopover.svelte` — 1: 68 ✓ C2
+- `ui/src/components/KnowMe.svelte` — 13: 144, 167, 168, 180, 181, 188, 195, 200, 201, 207, 229, 230, … ✓ C2
+- `ui/src/components/MentionPopover.svelte` — 1: 99 ◐ C2 (часть)
+- `ui/src/components/ModelPicker.svelte` — 11: 169, 178, 198, 205, 227, 246, 258, 450, 463, 467, 471 ◐ C2 (часть)
 - `ui/src/components/NewBotModel.svelte` — 3: 49, 55, 60
-- `ui/src/components/ScreenControl.svelte` — 3: 16, 17, 18
-- `ui/src/components/SignInCard.svelte` — 6: 27, 30, 31, 59, 69, 73
-- `ui/src/components/UpdatePlaque.svelte` — 1: 25
-- `ui/src/components/VoiceChat.svelte` — 3: 43, 44, 66
-- `ui/src/components/WhatsNew.svelte` — 2: 196, 212
+- `ui/src/components/ScreenControl.svelte` — 3: 16, 17, 18 ✓ C2
+- `ui/src/components/SignInCard.svelte` — 6: 27, 30, 31, 59, 69, 73 ✓ C2
+- `ui/src/components/UpdatePlaque.svelte` — 1: 25 ✓ C2
+- `ui/src/components/VoiceChat.svelte` — 3: 43, 44, 66 ✓ C2
+- `ui/src/components/WhatsNew.svelte` — 2: 196, 212 ✓ C2
 - `ui/src/components/catalog/CatalogCard.svelte` — 1: 16
-- `ui/src/components/catalog/CatalogDrawer.svelte` — 2: 471, 505
+- `ui/src/components/catalog/CatalogDrawer.svelte` — 2: 471, 505 ✓ C2
 - `ui/src/components/chat/ChatDates.svelte` — 1: 133
-- `ui/src/components/drawer/DrawerFiles.svelte` — 2: 81, 84
-- `ui/src/components/drawer/DrawerProfile.svelte` — 4: 385, 395, 410, 420
-- `ui/src/components/drawer/FileViewer.svelte` — 5: 197, 198, 287, 296, 297
-- `ui/src/components/orchestrator/Stage.svelte` — 5: 427, 458, 482, 493, 496
-- `ui/src/components/providers/ProviderList.svelte` — 1: 32
-- `ui/src/components/remote/RemoteChat.svelte` — 1: 192
+- `ui/src/components/drawer/DrawerFiles.svelte` — 2: 81, 84 ✓ C2
+- `ui/src/components/drawer/DrawerProfile.svelte` — 4: 385, 395, 410, 420 ✓ C2
+- `ui/src/components/drawer/FileViewer.svelte` — 5: 197, 198, 287, 296, 297 ✓ C2
+- `ui/src/components/orchestrator/Stage.svelte` — 5: 427, 458, 482, 493, 496 ◐ C2 (часть)
+- `ui/src/components/providers/ProviderList.svelte` — 1: 32 ✓ C2
+- `ui/src/components/remote/RemoteChat.svelte` — 1: 192 ✓ C2
 - `ui/src/components/remote/RemotePcs.svelte` — 1: 118
-- `ui/src/components/report/Report.svelte` — 4: 113, 117, 146, 179
-- `ui/src/components/rooms/RoomResources.svelte` — 1: 55
+- `ui/src/components/report/Report.svelte` — 4: 113, 117, 146, 179 ◐ C2 (часть)
+- `ui/src/components/rooms/RoomResources.svelte` — 1: 55 ✓ C2
 - `ui/src/components/rooms/TeamScreen.svelte` — 3: 221, 225, 229
 - `ui/src/components/routines/ChannelChips.svelte` — 1: 18
 - `ui/src/components/routines/Composer.svelte` — 1: 182
-- `ui/src/components/routines/HabitsTab.svelte` — 3: 228, 247, 275
-- `ui/src/components/routines/RemindersTab.svelte` — 1: 248
-- `ui/src/components/routines/TodosTab.svelte` — 5: 397, 432, 442, 458, 532
+- `ui/src/components/routines/HabitsTab.svelte` — 3: 228, 247, 275 ◐ C2 (часть)
+- `ui/src/components/routines/RemindersTab.svelte` — 1: 248 ◐ C2 (часть)
+- `ui/src/components/routines/TodosTab.svelte` — 5: 397, 432, 442, 458, 532 ◐ C2 (часть)
 - `ui/src/components/settings/SettingsHint.svelte` — 1: 9
 - `ui/src/components/sidebar/BotList.svelte` — 4: 339, 424, 437, 438
 - `ui/src/components/sidebar/InstaboxCard.svelte` — 1: 25
 - `ui/src/components/sidebar/NeedsBoard.svelte` — 1: 17
 - `ui/src/components/usage/UsageScreen.svelte` — 6: 149, 151, 162, 279, 334, 340
 - `ui/src/components/workflows/BotPicker.svelte` — 7: 39, 71, 89, 92, 95, 125, 141
-- `ui/src/components/workflows/ContextMenu.svelte` — 1: 46
-- `ui/src/components/workflows/HistoryPopover.svelte` — 5: 72, 79, 88, 98, 102
+- `ui/src/components/workflows/ContextMenu.svelte` — 1: 46 ◐ C2 (часть)
+- `ui/src/components/workflows/HistoryPopover.svelte` — 5: 72, 79, 88, 98, 102 ◐ C2 (часть)
 - `ui/src/components/workflows/LinkHint.svelte` — 1: 28
 - `ui/src/components/workflows/ToolOptions.svelte` — 11: 42, 48, 55, 63, 67, 73, 179, 195, 200, 204, 208
 - `ui/src/components/workflows/TriggerFields.svelte` — 7: 58, 74, 84, 187, 208, 224, 244
@@ -99,9 +101,9 @@ web/app.js:6187  <button type="submit" class="primary">${tr('Сохранить'
 
 Заменить на: `Select` (`kit/inputs`) — свой список; нативный `<select>` не рисовать
 
-- `ui/src/components/ChatModelPopover.svelte` — 1: 85
-- `ui/src/components/VoiceChat.svelte` — 2: 47, 68
-- `ui/src/components/catalog/CatalogDrawer.svelte` — 1: 270
+- `ui/src/components/ChatModelPopover.svelte` — 1: 85 ✓ C2
+- `ui/src/components/VoiceChat.svelte` — 2: 47, 68 ✓ C2
+- `ui/src/components/catalog/CatalogDrawer.svelte` — 1: 270 ✓ C2
 - `ui/src/components/workflows/ScheduleEditor.svelte` — 3: 27, 44, 78
 - `ui/src/components/workflows/WfNode.svelte` — 1: 280
 - `ui/src/components/workflows/WfNote.svelte` — 2: 69, 79

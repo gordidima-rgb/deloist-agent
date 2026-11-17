@@ -9,7 +9,7 @@ import Catalog from './components/catalog/Catalog.svelte';
 import Dock from './components/Dock.svelte';
 import StepPill from './components/StepPill.svelte';
 import MicButton from './components/MicButton.svelte';
-import Menu from './components/Menu.svelte';
+import { Menu } from './components/kit';
 import MentionPopover from './components/MentionPopover.svelte';
 import ChatDates from './components/chat/ChatDates.svelte';
 import KnowMe from './components/KnowMe.svelte';

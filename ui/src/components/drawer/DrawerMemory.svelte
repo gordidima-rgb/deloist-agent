@@ -300,7 +300,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     border: 1px solid var(--k-line-strong);
     background: var(--k-surface);
     color: var(--k-text-2);
-    font: 500 var(--k-text-xs) / 1.3 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
   }
   .dm-journal { display: flex; flex-direction: column; }
   .dm-jr { display: flex; flex-direction: column; gap: 4px; padding: var(--k-space-2) 0; border-top: 1px solid var(--k-line); }

@@ -32,6 +32,7 @@ export { default as Toast } from './overlay/Toast.svelte';
 export { default as ToastHost } from './overlay/ToastHost.svelte';
 export { default as Tooltip } from './overlay/Tooltip.svelte';
 export { default as InfoTip } from './overlay/InfoTip.svelte';
+export { default as Menu } from './overlay/Menu.svelte';
 
 // layout
 export { default as Section } from './layout/Section.svelte';
@@ -40,6 +41,7 @@ export { default as SettingsCard } from './layout/SettingsCard.svelte';
 export { default as SplitView } from './layout/SplitView.svelte';
 export { default as Toolbar } from './layout/Toolbar.svelte';
 export { default as ListItem } from './layout/ListItem.svelte';
+export { default as ListRow } from './layout/ListRow.svelte';
 
 // media
 export { default as Avatar } from './media/Avatar.svelte';

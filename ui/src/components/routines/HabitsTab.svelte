@@ -6,7 +6,7 @@
   import { HABIT_ICON_NAMES } from '../../lib/habitIcons.js';
   import { daysFromMask, maskFromDays } from '../../lib/habits.js';
   import { channelsOf, flagsOf, isTelegramPaired } from '../../lib/channels.js';
-import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '../kit';
+import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon, ListRow } from '../kit';
   import HabitIcon from './HabitIcon.svelte';
   import ChannelChips from './ChannelChips.svelte';
 
@@ -287,24 +287,25 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
   {/if}
 
   {#if habits.length}
-    <ul class="hb-list">
+    <ul class="k-lrows">
       {#each habits as h (h.id)}
-        <li class="hb-item" class:hb-item--done={h.today_done} class:hb-item--off={!h.today_scheduled}>
-          <button
-            type="button"
-            class="hb-check"
-            class:hb-check--on={h.today_done}
-            role="checkbox"
-            aria-checked={h.today_done}
-            aria-label={tr('Отметить: {title}', { title: h.title })}
-            onclick={() => toggle(h)}
-          >
-            <Icon name="check" size={22} stroke={2.6} />
-          </button>
-          <span class="hb-icon"><HabitIcon name={h.icon} size={20} /></span>
-          <div class="hb-main">
-            <div class="hb-title">{h.title}</div>
-            <div class="hb-meta">
+        <ListRow class="hb-item" title={h.title} titleClass="hb-title" done={h.today_done} style={h.today_scheduled ? undefined : 'opacity:.6'}>
+          {#snippet leading()}
+            <button
+              type="button"
+              class="hb-check"
+              class:hb-check--on={h.today_done}
+              role="checkbox"
+              aria-checked={h.today_done}
+              aria-label={tr('Отметить: {title}', { title: h.title })}
+              onclick={() => toggle(h)}
+            >
+              <Icon name="check" size={22} stroke={2.6} />
+            </button>
+            <span class="hb-icon"><HabitIcon name={h.icon} size={20} /></span>
+          {/snippet}
+          {#snippet meta()}
+            <span class="hb-meta">
               <span>{tr('Серия: {n} дн.', { n: h.streak })}</span>
               <span>{weekText(h)}</span>
               {#if h.remind_at}
@@ -314,19 +315,21 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
                 </span>
               {/if}
               {#if !h.today_scheduled}<span>{tr('сегодня не по расписанию')}</span>{/if}
-            </div>
-          </div>
-          <div class="hb-week" aria-hidden="true">
-            {#each h.week as d (d.day)}
-              <span class="hb-dot" class:hb-dot--on={d.done} class:hb-dot--skip={!d.scheduled} title={d.day}></span>
-            {/each}
-          </div>
-          <IconButton label={tr('Изменить')} size="sm" onclick={() => openForm(h)}>
-            {#snippet icon()}
-              <Icon name="pencil" size={16} />
-            {/snippet}
-          </IconButton>
-        </li>
+            </span>
+          {/snippet}
+          {#snippet trailing()}
+            <span class="hb-week" aria-hidden="true">
+              {#each h.week as d (d.day)}
+                <span class="hb-dot" class:hb-dot--on={d.done} class:hb-dot--skip={!d.scheduled} title={d.day}></span>
+              {/each}
+            </span>
+            <IconButton label={tr('Изменить')} size="sm" onclick={() => openForm(h)}>
+              {#snippet icon()}
+                <Icon name="pencil" size={16} />
+              {/snippet}
+            </IconButton>
+          {/snippet}
+        </ListRow>
       {/each}
     </ul>
   {/if}
@@ -468,26 +471,6 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     color: var(--k-text-3);
     font-size: var(--k-text-xs, 12px);
   }
-  .hb-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--k-space-2, 8px);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .hb-item {
-    display: flex;
-    align-items: center;
-    gap: var(--k-space-3, 12px);
-    padding: var(--k-space-3, 12px) var(--k-space-4, 16px);
-    border: 1px solid var(--k-line);
-    border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface);
-  }
-  .hb-item--off .hb-title {
-    color: var(--k-text-2);
-  }
   .hb-check {
     display: grid;
     flex: none;
@@ -518,20 +501,6 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     flex: none;
     place-items: center;
     width: 32px;
-    color: var(--k-text-2);
-  }
-  .hb-main {
-    flex: 1;
-    min-width: 0;
-  }
-  .hb-title {
-    overflow: hidden;
-    color: var(--k-text);
-    font: 600 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .hb-item--done .hb-title {
     color: var(--k-text-2);
   }
   .hb-meta {
