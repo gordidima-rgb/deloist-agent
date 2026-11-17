@@ -704,6 +704,10 @@ async fn an_orchestrator_card_fills_its_own_team_and_ends_the_interview() {
     assert!(rooms[0]["botIds"].as_array().unwrap().contains(&author), "{rooms:?}");
     assert!(rooms[0]["botIds"].as_array().unwrap().contains(&json!(orch)), "оркестратор остался в команде");
     assert_eq!(rooms[0]["lead"], orch.as_str(), "ведущий не менялся");
+    // Итог оркестратора после «Создать» виден в чате команды, а не только в его личном.
+    let thread = crew.ok("GET", &format!("/api/rooms/{room}/thread"), None).await;
+    let summary = thread["messages"].as_array().unwrap().iter().find(|m| m["role"] == "assistant" && m["botId"] == orch.as_str()).cloned();
+    assert_eq!(summary.as_ref().map(|m| m["text"].clone()), Some(json!("готово")), "{thread}");
 
     // «Перестроить»: расспрос заново, следующая карточка снова идёт в ту же команду.
     let (status, again) = crew.send("POST", &format!("/api/rooms/{room}/rebuild"), None).await;

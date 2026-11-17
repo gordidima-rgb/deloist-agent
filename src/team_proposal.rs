@@ -410,14 +410,23 @@ pub fn decline(app: &App, offer: &Offer) {
 pub async fn accept(app: &Arc<App>, offer: &Offer, plan: &TeamPlan) -> Result<String, String> {
     let result = build(app, plan).await;
     match &result {
-        Ok(text) => app.offers.decide(&offer.id, text.clone()),
+        Ok((text, room_id)) => {
+            // Расспрос шёл в личном чате оркестратора, а команда живёт в своём: итог «что получилось и с чего начать» — туда.
+            if plan.host_orchestrator {
+                if let Some(room_id) = room_id {
+                    app.offers.note_team_summary(&offer.host_bot_id, room_id);
+                }
+            }
+            app.offers.decide(&offer.id, text.clone())
+        }
         Err(message) => app.offers.decide(&offer.id, format!("Не получилось создать: {message}")),
     }
     app.turns.emit(json!({ "type": "state_changed" }));
-    result
+    result.map(|(text, _)| text)
 }
 
-async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
+/// Итог для бота и id команды, которую создали или обновили.
+async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<(String, Option<String>), String> {
     // Мир мог поменяться, пока карточка висела: проверяем ещё раз и ничего не создаём вслепую.
     let bots = app.store.bots();
     for b in &plan.new_bots {
@@ -503,6 +512,7 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
         }
     }
     let mut room_text = String::new();
+    let mut room_id = None;
     if let Some(room_plan) = &plan.room {
         // Ведущий команды оркестратора — сам оркестратор: его карточка ведущего не меняет.
         let lead_id = if plan.lead.is_empty() || plan.host_orchestrator {
@@ -519,6 +529,7 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
             let room = app.store.add_room(&input).await.map_err(|e| fail(&made, e.to_string()))?;
             crate::rooms::spawn_picture(app, &room.id);
             room_text = format!(" Команда «{}» создана ({}).", room.name, room.id);
+            room_id = Some(room.id.clone());
         } else {
             // Только состав и ведущий: папки и навыки команды не трогаем.
             let mut patch = json!({ "botIds": member_ids });
@@ -532,10 +543,11 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
                 crate::rooms::spawn_picture(app, &room_plan.id);
             }
             room_text = format!(" Команда «{}» обновлена.", room_plan.name);
+            room_id = Some(room_plan.id.clone());
         }
     }
     let created = if made.is_empty() { "новых ботов нет".to_string() } else { made.iter().map(|(n, i)| format!("{n} ({i})")).collect::<Vec<_>>().join(", ") };
-    Ok(format!("Человек согласился. Создано: {created}.{room_text}"))
+    Ok((format!("Человек согласился. Создано: {created}.{room_text}"), room_id))
 }
 
 // ---------------------------------------------------------------------------

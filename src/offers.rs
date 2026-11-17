@@ -50,6 +50,8 @@ pub struct Offers {
     inner: Mutex<HashMap<String, VecDeque<Offer>>>,
     /// Решения по карточкам команды: инструмент `propose_team` ждёт здесь ответа человека.
     decisions: Mutex<HashMap<String, tokio::sync::watch::Sender<Option<String>>>>,
+    /// Оркестратор собрал команду по «Создать»: его итог в конце этого хода уходит и в чат команды.
+    team_summaries: Mutex<HashMap<String, String>>,
 }
 
 impl Offers {
@@ -126,6 +128,16 @@ impl Offers {
             inner.remove(host_bot_id);
         }
         Some(offer)
+    }
+
+    /// Итог хода этого бота продублировать в чат команды `room_id`.
+    pub fn note_team_summary(&self, bot_id: &str, room_id: &str) {
+        self.team_summaries.lock().unwrap().insert(bot_id.to_string(), room_id.to_string());
+    }
+
+    /// Команда, куда отдать итог хода, если в этом ходе её собрали; запись одноразовая.
+    pub fn take_team_summary(&self, bot_id: &str) -> Option<String> {
+        self.team_summaries.lock().unwrap().remove(bot_id)
     }
 }
 

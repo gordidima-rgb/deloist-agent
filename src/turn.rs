@@ -2020,6 +2020,8 @@ fn run_turn_body(
             FloorGuard { app: app.clone(), bot_id: bot.id.clone(), epoch }
         });
         let turn_id = uid("turn");
+        // Отметка «итог — в чат команды» живёт один ход: оставшаяся от хода в группе сюда не переходит.
+        let _ = app.offers.take_team_summary(&bot.id);
         let source = opts.source.clone().unwrap_or_else(|| "chat".to_string());
         // Делегат не видит прошлых ходов: его контекст — системный промпт и бриф.
         let delegated = source.starts_with("delegation:");
@@ -2540,6 +2542,17 @@ fn run_turn_body(
             }
             if let Err(e) = app.store.append_message(&bot_id, entry).await {
                 eprintln!("[turn] не смог сохранить сообщение: {e}");
+            }
+        }
+        // Оркестратор собрал команду в этом ходе: его итог читают в чате команды, а не только в личном.
+        if let Some(room_id) = app.offers.take_team_summary(&bot_id) {
+            let text = final_text.trim();
+            if !quiet && !aborted && failure.is_none() && !text.is_empty() && app.store.room(&room_id).is_some() {
+                let entry = json!({ "role": "assistant", "botId": bot_id, "name": bot.name, "text": text, "at": now() });
+                match app.store.append_room_message(&room_id, entry).await {
+                    Ok(saved) => app.turns.emit(json!({ "type": "room_message", "roomId": room_id, "message": saved })),
+                    Err(e) => eprintln!("[turn] итог оркестратора не записан в чат команды: {e}"),
+                }
             }
         }
         // Метка в конце хода: при чтении по ней отсеиваются все записи этого хода.
