@@ -1135,6 +1135,8 @@ body.drawer-open #chat { margin-right: min(430px, 40vw); }
   gap: var(--k-space-4);
   color: var(--k-text);
 }
+/* Профиль — форма настроек: карточки кита лежат на фоне окна, а не на белом. */
+.drawer-body.is-forms { background: var(--k-canvas); padding: var(--k-space-3); overflow-x: hidden; }
 
 /* Поля: те же значения, что у .k-input и .k-select. */
 #drawer .field { gap: 6px; min-width: 0; }

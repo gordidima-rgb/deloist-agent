@@ -19,6 +19,8 @@
     settings = {},
     value = { driver: '', model: '' },
     label = '',
+    // Метка «Модель» только для скринридера: рядом уже есть заголовок раздела, дубль не нужен.
+    hideLabel = false,
     allowDefault = true,
     onselect,
     onconnect,
@@ -173,8 +175,8 @@
 {/snippet}
 
 <div class="mp" bind:this={root} {onkeydown} role="presentation">
-  <button type="button" class="mp-row" class:bare bind:this={trigger} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? hide() : show())}>
-    <span class="mp-label">{heading}</span>
+  <button type="button" class="mp-row" class:bare class:no-label={hideLabel} bind:this={trigger} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? hide() : show())}>
+    <span class="mp-label" class:sr-only={hideLabel}>{heading}</span>
     <span class="mp-value">
       {#if current.group}
         {@render logo(current.group)}
@@ -314,6 +316,18 @@
   .mp-label {
     color: var(--k-text-3);
     flex: none;
+  }
+  .mp-label.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .mp-row.no-label .mp-value {
+    justify-content: flex-start;
   }
   .mp-value {
     display: flex;

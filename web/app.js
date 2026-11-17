@@ -5685,11 +5685,11 @@ function renderProfile(bot, body) {
     levels: S.levels,
     petBlocked: S.bots.filter((b) => b.pet).length >= MAX_PETS,
     folder: `data/workspaces/${bot.id}`,
-    mountLook: (host) => {
-      look = mountLookPicker(host, bot);
+    mountLook: (host, onpick) => {
+      look = mountLookPicker(host, bot, { onpick });
     },
     mountModel: (host, value, onselect) => {
-      const handle = mountModelPicker(host, { value, onselect });
+      const handle = mountModelPicker(host, { value, onselect, hideLabel: true });
       return { set: (next) => handle.picker.update({ value: next }) };
     },
     contextInfo: async ({ driver, model }) => {
@@ -5719,6 +5719,8 @@ function renderProfile(bot, body) {
         toast(err.message);
       }
     },
+    // Автосохранение: панель зовёт это после каждой правки. Тост только при ошибке; панель не перерисовываем,
+    // иначе пропадут фокус и каретка. Ответ false — «не сохранилось», панель покажет это в шапке.
     onsave: async (fields) => {
       try {
         const patch = {
@@ -5728,15 +5730,18 @@ function renderProfile(bot, body) {
         };
         await api(`/api/bots/${bot.id}`, { method: 'PATCH', body: patch });
         await refreshState();
-        toast(tr('Профиль сохранён'));
-        $('#head-name').textContent = patch.name;
-        $('#head-role').textContent = patch.role;
+        if (S.currentId === bot.id) {
+          if (patch.name) $('#head-name').textContent = patch.name;
+          $('#head-role').textContent = patch.role;
+        }
+        return true;
       } catch (err) {
         toast(err.message);
+        return false;
       }
     },
+    // Подтверждение — окно кита в самой панели (DrawerProfile), здесь только удаление.
     ondelete: async () => {
-      if (!confirm(tr('Удалить «{name}» вместе с чатом и памятью?', { name: bot.name }))) return;
       try {
         await api(`/api/bots/${bot.id}`, { method: 'DELETE' });
         await refreshState();
@@ -5752,7 +5757,7 @@ function renderProfile(bot, body) {
 
 // Выбор внешности в ящике: большой живой просмотр и двенадцать шаров, у каждого свои глаза. Возвращает выбор для сохранения.
 // Шары в сетке не анимируются без наведения: их двенадцать.
-function mountLookPicker(host, bot, { prefix = 'pf', owned = S.picker, size = 168 } = {}) {
+function mountLookPicker(host, bot, { prefix = 'pf', owned = S.picker, size = 168, onpick } = {}) {
   const orbs = window.CrewAvatar ? CrewAvatar.ORBS : [];
   const choice = { skin: bot.skin ?? 0 };
   const buttons = orbs
@@ -5775,6 +5780,7 @@ function mountLookPicker(host, bot, { prefix = 'pf', owned = S.picker, size = 16
     btn.addEventListener('click', () => {
       choice.skin = skin;
       refresh();
+      onpick?.(skin);
     });
     return { btn, skin };
   });
@@ -5806,6 +5812,8 @@ function renderDrawer() {
 
   if (S.tab === 'routines') renderDrawerRoutines(bot, body);
 
+  // Профиль — форма настроек: карточки на фоне окна.
+  body.classList.toggle('is-forms', S.tab === 'profile');
   if (S.tab === 'profile') {
     renderProfile(bot, body);
   }
@@ -7334,13 +7342,14 @@ function newBotLookFields() {
   return skin === undefined ? {} : { skin };
 }
 
-function mountModelPicker(host, { value, allowDefault = true, onselect }) {
+function mountModelPicker(host, { value, allowDefault = true, hideLabel = false, onselect }) {
   pruneModelPickers();
   const picker = DeloistUI.mountModelPicker(host, {
     ...(DeloistProviders.snapshot() || { providers: [], plan: null }),
     settings: S.settings,
     value,
     allowDefault,
+    hideLabel,
     onselect: (next) => {
       picker.update({ value: next });
       onselect?.(next);

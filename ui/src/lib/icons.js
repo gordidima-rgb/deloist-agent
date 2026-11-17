@@ -49,6 +49,13 @@ export const ICONS = {
   'trash-can': '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
 
   // Разделы, вещи и понятия
+  bot: '<path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  puzzle: '<path d="M19.4 14.9c-.2.4.1.9.6 1a2.5 2.5 0 1 0 0-4.9c-.5 0-.8.6-.6 1M19 12V8a1 1 0 0 0-1-1h-4c.4-.2.7-.6.7-1a2.5 2.5 0 1 0-5 0c0 .4.3.8.7 1H6a1 1 0 0 0-1 1v4c.2-.4.6-.7 1-.7a2.5 2.5 0 1 1 0 5c-.4 0-.8-.3-1-.7V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1z"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   'apps-add': '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   'bell-off': '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m3 3 18 18"/>',

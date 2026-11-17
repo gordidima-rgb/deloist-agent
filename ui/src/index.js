@@ -77,6 +77,9 @@ import EmptyState from './components/kit/EmptyState.svelte';
 import Spinner from './components/kit/Spinner.svelte';
 import Skeleton from './components/kit/Skeleton.svelte';
 import Tooltip from './components/kit/Tooltip.svelte';
+import InfoTip from './components/kit/InfoTip.svelte';
+import SettingsCard from './components/kit/SettingsCard.svelte';
+import FieldRow from './components/kit/FieldRow.svelte';
 import Toast from './components/kit/Toast.svelte';
 import SplitView from './components/kit/SplitView.svelte';
 import Toolbar from './components/kit/Toolbar.svelte';
@@ -218,6 +221,9 @@ window.DeloistUI = {
   Spinner,
   Skeleton,
   Tooltip,
+  InfoTip,
+  SettingsCard,
+  FieldRow,
   Toast,
   SplitView,
   Toolbar,

@@ -1583,6 +1583,116 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
   .k-split--right .k-split__side { order: 0; border-left: 0; border-bottom: 1px solid var(--k-line); }
 }
 
+/* ---- Settings forms: cards, field rows, info tip, scrollbar ------------------------- */
+
+/* Форма настроек: карточки на фоне окна. Контейнер задаёт ширину для строк полей (метка слева от 440 px). */
+.k-sform { container-type: inline-size; display: flex; flex-direction: column; gap: var(--k-space-3); min-width: 0; }
+.k-scard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-4);
+  min-width: 0;
+  padding: var(--k-space-5);
+  border-radius: var(--k-radius-lg);
+  background: var(--k-surface);
+  box-shadow: var(--k-shadow-1);
+}
+.k-scard__head { display: flex; align-items: center; gap: var(--k-space-3); }
+.k-scard__text { flex: 1; min-width: 0; }
+.k-scard__title { margin: 0; font: 600 var(--k-text-lg) / 1.2 var(--k-font-display); color: var(--k-text); }
+.k-scard__desc { margin: 2px 0 0; font: 400 var(--k-text-sm) / 1.4 var(--k-font-body); color: var(--k-text-3); }
+/* Плитка со значком: серая; цвет только у действия и у опасного. */
+.k-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--k-radius-sm);
+  background: var(--k-surface-2);
+  color: var(--k-text-2);
+}
+.k-tile svg { width: 18px; height: 18px; }
+.k-tile--sm { width: 28px; height: 28px; border-radius: var(--k-radius-sm); }
+.k-tile--sm svg { width: 15px; height: 15px; }
+.k-tile--danger { background: var(--k-attention-tint); color: var(--k-attention-text); }
+
+/* Строка поля: плитка и метка слева, поле справа; в узкой форме метка над полем. */
+.k-frow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: center; min-width: 0; }
+.k-frow__label { display: flex; align-items: center; gap: var(--k-space-2); min-width: 0; color: var(--k-text); font: 600 var(--k-text-sm) / 1.3 var(--k-font-body); }
+.k-frow__label label { cursor: pointer; }
+.k-frow__control { min-width: 0; }
+.k-frow__control > .k-input,
+.k-frow__control > .k-select { width: 100%; }
+@container (min-width: 440px) {
+  .k-frow:not(.k-frow--block):not(.k-frow--stack) { grid-template-columns: 168px minmax(0, 1fr); gap: var(--k-space-3); }
+  .k-frow--top { align-items: start; }
+}
+/* Пара коротких выборов: в одну строку, метки над полями; в столбик только при ширине меньше 260 px. */
+.k-fpair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--k-space-3); }
+@container (max-width: 260px) { .k-fpair { grid-template-columns: minmax(0, 1fr); } }
+.k-frow--stack { grid-template-columns: minmax(0, 1fr); }
+/* Врезка: рамка вокруг связанного блока (ползунок и подпись). */
+.k-inset { display: flex; flex-direction: column; gap: var(--k-space-3); padding: var(--k-space-4); border: 1px solid var(--k-line); border-radius: var(--k-radius-md); }
+
+/* Значок «i» с подсказкой: чёрная подсказка до 240 px, по наведению и по фокусу с клавиатуры. */
+.k-info { display: inline-flex; vertical-align: middle; }
+.k-info__btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: none;
+  color: var(--k-text-3);
+  cursor: help;
+}
+.k-info__btn svg { width: 15px; height: 15px; }
+.k-info__btn:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-info__btn:focus-visible { outline: none; box-shadow: var(--k-focus); }
+.k-tip--wrap .k-tooltip { width: max-content; max-width: 240px; white-space: pre-line; text-align: left; padding: 8px 12px; border-radius: var(--k-radius-sm); line-height: 1.45; }
+.k-tip--start .k-tooltip { left: var(--k-tip-left, -8px); transform: translate(0, -4px); }
+.k-tip--start:hover .k-tooltip,
+.k-tip--start:focus-within .k-tooltip { transform: translate(0, 0); }
+
+/* Выбор из нескольких вариантов карточками: у каждого название и строка «что это значит». */
+.k-radio-group--cards { gap: var(--k-space-2); }
+.k-radio-group--cards > .k-label { margin-bottom: var(--k-space-1); }
+.k-radio-group--cards .k-radio {
+  align-items: flex-start;
+  padding: var(--k-space-3) var(--k-space-4);
+  border: 1px solid var(--k-line);
+  border-radius: var(--k-radius-md);
+  transition: border-color var(--k-dur-fast) var(--k-ease-out), background var(--k-dur-fast) var(--k-ease-out);
+}
+.k-radio-group--cards .k-radio:hover { border-color: var(--k-line-strong); }
+.k-radio-group--cards .k-radio:has(.k-radio__input:checked) { border-color: var(--k-brand); background: var(--k-brand-tint); }
+.k-radio-group--cards .k-radio__dot { margin-top: 1px; }
+.k-radio-group--cards .k-radio__label { display: flex; flex-direction: column; gap: 2px; }
+.k-radio-group--cards .k-radio__title { font-weight: 600; font-size: var(--k-text-md); line-height: 1.3; }
+.k-radio-group--cards .k-radio__hint { color: var(--k-text-2); font-size: var(--k-text-sm); line-height: 1.4; }
+
+/* Прокрутка как в Arc: тонкая «пилюля» внутри поля, без стрелок и без уголка-ручки. Прозрачная рамка
+   отодвигает её от края, отступ дорожки держит её внутри скруглённых углов. Ярче при наведении. */
+::-webkit-scrollbar { width: 14px; height: 14px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; margin: var(--k-space-4) 0; }
+::-webkit-scrollbar-track:horizontal { margin: 0 var(--k-space-4); }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--k-text-3) 38%, transparent);
+  border: 5px solid transparent;
+  border-radius: var(--k-radius-pill);
+  background-clip: padding-box;
+  min-height: 36px;
+}
+:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--k-text-3) 55%, transparent); }
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--k-text-3) 80%, transparent); border-width: 4px; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner,
+::-webkit-resizer { background: transparent; }
+
 @media (prefers-reduced-motion: reduce) {
   .k-modal,
   .k-modal__panel,
