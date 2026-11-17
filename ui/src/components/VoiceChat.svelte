@@ -1,4 +1,5 @@
 <script>
+  import { Button, Select, Slider } from './kit';
   import { tr } from '../lib/i18n.js';
 
   let {
@@ -31,6 +32,11 @@
   function finish() {
     onfinish?.();
   }
+
+  const voiceOptions = $derived([
+    { value: '', label: tr('Голос по умолчанию') },
+    ...voices.map((v) => ({ value: v.name, label: `${v.name} (${v.lang})` })),
+  ]);
 </script>
 
 <div class="vc-panel">
@@ -40,30 +46,23 @@
   {#if lastPhrase}<div class="vc-phrase">{lastPhrase}</div>{/if}
   {#if lastSentence}<div class="vc-sentence">{lastSentence}</div>{/if}
   <div class="vc-controls">
-    <button class="vc-btn" onclick={togglePause}>{state === 'paused' ? tr('Продолжить') : tr('Пауза')}</button>
-    <button class="vc-btn" onclick={finish}>{tr('Закончить')}</button>
+    <Button variant="secondary" size="sm" onclick={togglePause}>{state === 'paused' ? tr('Продолжить') : tr('Пауза')}</Button>
+    <Button variant="primary" size="sm" onclick={finish}>{tr('Закончить')}</Button>
   </div>
   <div class="vc-settings">
-    <select value={voiceName} onchange={(e) => onvoicechange?.(e.target.value)} class="vc-select">
-      <option value="">{tr('Голос по умолчанию')}</option>
-      {#each voices as v}
-        <option value={v.name}>{v.name} ({v.lang})</option>
-      {/each}
-    </select>
-    <input type="range" min="0.8" max="1.5" step="0.05" value={speed}
-      oninput={(e) => onspeedchange?.(Number(e.target.value))} />
+    <Select class="vc-select" options={voiceOptions} value={voiceName} onchange={(e) => onvoicechange?.(e.currentTarget.value)} />
+    <Slider class="vc-speed" min={0.8} max={1.5} step={0.05} value={speed} label={tr('Скорость')} oninput={(e) => onspeedchange?.(Number(e.currentTarget.value))} />
     <span>{Number(speed).toFixed(2)}</span>
   </div>
 </div>
 
 <style>
-  .vc-panel { padding: 12px; border-radius: 12px; background: var(--color-bg-surface, #fff); color: var(--color-text-primary, #111); display: flex; flex-direction: column; gap: 8px; }
+  .vc-panel { padding: var(--k-space-3); border-radius: var(--k-radius-md); background: var(--k-surface); color: var(--k-text); box-shadow: var(--k-shadow-1); display: flex; flex-direction: column; gap: var(--k-space-2); }
   .vc-state { font-weight: 600; }
-  .vc-meter { height: 6px; background: var(--color-bg-surface-soft, #eee); border-radius: 3px; position: relative; overflow: hidden; }
-  .vc-meter::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--level, 0) * 100%); background: var(--color-accent, #4f46e5); transition: width 80ms linear; }
-  .vc-phrase, .vc-sentence, .vc-notice { font-size: 13px; color: var(--color-text-secondary, #555); }
-  .vc-controls { display: flex; gap: 8px; }
-  .vc-btn { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--color-border-default, #ccc); background: transparent; cursor: pointer; }
-  .vc-settings { display: flex; align-items: center; gap: 8px; }
-  .vc-select { flex: 1; }
+  .vc-meter { height: 6px; background: var(--k-surface-2); border-radius: var(--k-radius-pill); position: relative; overflow: hidden; }
+  .vc-meter::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--level, 0) * 100%); background: var(--k-brand); transition: width 80ms linear; }
+  .vc-phrase, .vc-sentence, .vc-notice { font-size: var(--k-text-sm); color: var(--k-text-2); }
+  .vc-controls { display: flex; gap: var(--k-space-2); }
+  .vc-settings { display: flex; align-items: center; gap: var(--k-space-2); }
+  .vc-settings :global(.vc-select) { flex: 1; }
 </style>

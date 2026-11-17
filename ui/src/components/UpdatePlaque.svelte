@@ -22,7 +22,7 @@ import { Button } from './kit';
     <p class="up-note up-note--error">{error}</p>
   {/if}
   <div class="up-row">
-    <button type="button" class="up-link" onclick={() => onwhatsnew?.()}>{tr('Что нового')}</button>
+    <Button variant="ghost" size="sm" onclick={() => onwhatsnew?.()}>{tr('Что нового')}</Button>
     <Button variant="primary" size="sm" disabled={pending} onclick={() => onrestart?.()}>{tr('Перезапустить')}</Button>
   </div>
 </section>
@@ -56,18 +56,5 @@ import { Button } from './kit';
     align-items: center;
     justify-content: space-between;
     gap: var(--k-space-2, 8px);
-  }
-  .up-link {
-    padding: var(--k-space-1, 4px) 0;
-    border: 0;
-    background: none;
-    color: var(--k-text-2);
-    font: 400 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    cursor: pointer;
-  }
-  .up-link:hover {
-    color: var(--k-text);
   }
 </style>

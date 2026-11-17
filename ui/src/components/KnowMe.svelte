@@ -1,5 +1,5 @@
 <script>
-import { Checkbox } from './kit';
+import { Checkbox, Button, IconButton, TextInput } from './kit';
   import { tr } from '../lib/i18n.js';
   import { api as apiFetch } from '../lib/api.js';
 
@@ -141,7 +141,7 @@ import { Checkbox } from './kit';
             {/each}
           </ul>
           <div class="km-hermes-actions">
-            <button class="km-btn" disabled={hermesBusy || hermesChosen.size === 0} onclick={importHermes}>{tr('Перенести как ботов')}</button>
+            <Button variant="primary" disabled={hermesBusy || hermesChosen.size === 0} onclick={importHermes}>{tr('Перенести как ботов')}</Button>
           </div>
           {#if hermesResult}
             <p class="km-note" class:km-error={hermesFailed}>{hermesResult}</p>
@@ -164,8 +164,8 @@ import { Checkbox } from './kit';
         {/each}
       </ul>
       <div class="km-actions">
-        <button class="km-btn" disabled={loading || selected.size === 0} onclick={read}>{tr('Прочитать')}</button>
-        <button class="km-btn ghost" onclick={close}>{tr('Отмена')}</button>
+        <Button variant="primary" disabled={loading || selected.size === 0} onclick={read}>{tr('Прочитать')}</Button>
+        <Button variant="ghost" onclick={close}>{tr('Отмена')}</Button>
       </div>
 
     {:else if step === 'topics'}
@@ -177,34 +177,34 @@ import { Checkbox } from './kit';
       </ul>
       <p class="km-note">{tr('Темы отправятся модели {model}', { model })}{#if !isLocal} {tr('(облачной модели)')}{/if}</p>
       <div class="km-actions">
-        <button class="km-btn" disabled={loading} onclick={propose}>{tr('Отправить модели {model}', { model })}</button>
-        <button class="km-btn ghost" onclick={() => step = 'sources'}>{tr('Назад')}</button>
+        <Button variant="primary" disabled={loading} onclick={propose}>{tr('Отправить модели {model}', { model })}</Button>
+        <Button variant="ghost" onclick={() => step = 'sources'}>{tr('Назад')}</Button>
       </div>
 
     {:else if step === 'profile'}
       <div class="km-facts">
         {#each facts as f, i}
-          <input class="km-input" value={f} oninput={(e) => updateFact(i, e.currentTarget.value)} />
-          <button class="km-x" onclick={() => removeFact(i)}>×</button>
+          <TextInput class="km-input" value={f} oninput={(e) => updateFact(i, e.currentTarget.value)} />
+          <IconButton name="close" size="sm" label={tr('Убрать')} onclick={() => removeFact(i)} />
         {/each}
       </div>
       <div class="km-agents">
         {#each agents as a, i}
           <div class="km-agent">
             <strong>{a.name || a?.name}</strong> — {a.role || a?.role}
-            <button class="km-x" onclick={() => removeAgent(i)}>×</button>
+            <IconButton name="close" size="sm" label={tr('Убрать')} onclick={() => removeAgent(i)} />
           </div>
         {/each}
       </div>
       <div class="km-actions">
-        <button class="km-btn" disabled={loading} onclick={save}>{tr('Сохранить')}</button>
-        <button class="km-btn ghost" onclick={cancel}>{tr('Отмена')}</button>
+        <Button variant="primary" disabled={loading} onclick={save}>{tr('Сохранить')}</Button>
+        <Button variant="ghost" onclick={cancel}>{tr('Отмена')}</Button>
       </div>
 
     {:else if step === 'saved'}
       <p class="km-note">{tr('Сохранено.')}</p>
       <div class="km-actions">
-        <button class="km-btn" onclick={close}>{tr('Закрыть')}</button>
+        <Button variant="primary" onclick={close}>{tr('Закрыть')}</Button>
       </div>
     {/if}
   </div>
@@ -215,7 +215,7 @@ import { Checkbox } from './kit';
   .km-card { width: min(560px, 100%); max-height: 80vh; overflow: auto; border-radius: var(--k-radius-lg, 26px); background: var(--k-surface, #fff); color: var(--k-text, #121212); box-shadow: var(--k-shadow-3, 0 28px 70px -12px rgba(0,0,0,.22)); padding: var(--k-space-5, 20px); display: flex; flex-direction: column; gap: var(--k-space-3, 12px); }
   .km-title { margin: 0; font: 800 var(--k-text-xl, 22px)/var(--k-leading-tight,1.2) var(--k-font-display, system-ui); }
   .km-note { margin: 0; color: var(--k-text-3, #6e6e6e); font: 400 var(--k-text-sm,13px)/1.4 var(--k-font-body,system-ui); }
-  .km-error { color: #c00; margin: 0; }
+  .km-error { color: var(--k-attention-text); margin: 0; }
   .km-hermes { display: flex; flex-direction: column; gap: var(--k-space-2,8px); padding: var(--k-space-3,12px); border: 1px solid var(--k-line,#e8e8e8); border-radius: var(--k-radius-md,18px); }
   .km-hermes-title { margin: 0; font: 700 var(--k-text-md,15px)/var(--k-leading-tight,1.2) var(--k-font-body,system-ui); }
   .km-hermes-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--k-space-1,4px); }
@@ -226,10 +226,5 @@ import { Checkbox } from './kit';
   .km-sources li label { display: flex; align-items: center; gap: 8px; }
   .km-count { margin-left: auto; color: var(--k-text-3,#6e6e6e); font-size: 12px; }
   .km-actions { display: flex; gap: 8px; justify-content: flex-end; }
-  .km-btn { height: 36px; padding: 0 var(--k-space-4,16px); border: 0; border-radius: var(--k-radius-pill,999px); background: var(--k-brand,#025bff); color: var(--k-on-brand,#fff); font: 600 var(--k-text-sm,13px)/1 var(--k-font-body,system-ui); cursor: pointer; }
-  .km-btn.ghost { background: transparent; color: var(--k-text,#121212); border: 1px solid var(--k-border,#ddd); }
-  .km-btn:disabled { opacity: .5; cursor: default; }
-  .km-input { width: 100%; padding: 6px 8px; border: 1px solid var(--k-border,#ddd); border-radius: 8px; }
-  .km-x { border: 0; background: transparent; cursor: pointer; font-size: 18px; }
   .km-agent { display: flex; align-items: center; gap: 8px; }
 </style>

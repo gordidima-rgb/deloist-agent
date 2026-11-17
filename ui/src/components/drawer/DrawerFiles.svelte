@@ -75,10 +75,10 @@ import { ListItem, EmptyState, Button, Icon } from '../kit';
   <div class="df-bar">
     <Button size="sm" variant="ghost" disabled={!path} onclick={up}>{tr('↑ вверх')}</Button>
     <nav class="df-path" aria-label={tr('Путь')}>
-      <button type="button" class="df-crumb" onclick={() => load('')}>/</button>
+      <Button size="sm" variant="ghost" class="df-crumb" onclick={() => load('')}>/</Button>
       {#each crumbs as name, i (i)}
         <span class="df-sep" aria-hidden="true">/</span>
-        <button type="button" class="df-crumb" onclick={() => load(crumbPath(i))}>{name}</button>
+        <Button size="sm" variant="ghost" class="df-crumb" onclick={() => load(crumbPath(i))}>{name}</Button>
       {/each}
     </nav>
     <Button size="sm" variant="ghost" onclick={() => load(path)}>{tr('Обновить')}</Button>
@@ -118,17 +118,6 @@ import { ListItem, EmptyState, Button, Icon } from '../kit';
     font: 400 var(--k-text-xs) / 1.4 var(--k-font-mono);
     overflow-wrap: anywhere;
   }
-  .df-crumb {
-    padding: 2px 4px;
-    border: 0;
-    border-radius: var(--k-radius-xs);
-    background: none;
-    color: var(--k-text-2);
-    font: inherit;
-    cursor: pointer;
-  }
-  .df-crumb:hover { background: var(--k-surface-2); color: var(--k-text); }
-  .df-crumb:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .df-sep { color: var(--k-text-3); }
   :global(.df-icon) { color: var(--k-text-2); }
   :global(.df-icon--image), :global(.df-icon--presentation) { color: var(--k-ai); }

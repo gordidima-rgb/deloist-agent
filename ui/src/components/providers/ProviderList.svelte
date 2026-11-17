@@ -1,7 +1,7 @@
 <script>
   // Список слева в окне «Подключить свою ИИ»: группы со строками кита, логотип, название и статус.
   // Данные готовит web/providers.js (там же тексты статусов); компонент только рисует и сообщает о выборе.
-import { ListItem } from '../kit';
+import { ListItem, Button } from '../kit';
 
   let { groups = [], selected = '', label = '', onselect, onaction } = $props();
 
@@ -29,7 +29,7 @@ import { ListItem } from '../kit';
       <li class="prov-group" role="presentation">
         <span>{group.title}</span>
         {#if group.action}
-          <button type="button" class="prov-group__action" onclick={() => onaction?.(group.action.name)}>{group.action.label}</button>
+          <Button size="sm" variant="ghost" class="prov-group__action" onclick={() => onaction?.(group.action.name)}>{group.action.label}</Button>
         {/if}
       </li>
     {/if}
@@ -64,19 +64,8 @@ import { ListItem } from '../kit';
     white-space: nowrap;
   }
   .prov-group:first-child { margin-top: 0; }
+  .prov-group :global(.prov-group__action) { flex: none; }
   .prov-group span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .prov-group__action {
-    flex: none;
-    padding: 2px var(--k-space-2);
-    border: 0;
-    border-radius: var(--k-radius-pill);
-    background: transparent;
-    color: var(--k-brand-text);
-    font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
-    cursor: pointer;
-  }
-  .prov-group__action:hover { background: var(--k-surface-3); }
-  .prov-group__action:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .prov-note {
     margin: 0 var(--k-space-2) var(--k-space-2);
     color: var(--k-text-3);

@@ -1,7 +1,7 @@
 <script>
   // Окно «Что нового» посередине экрана: картинка сверху, страница на каждую категорию
   // (Новое, Улучшено, Исправлено), листать стрелками или кнопкой «Далее», внизу «Все изменения».
-import { Modal, Button, Icon } from './kit';
+import { Modal, Button, Icon, IconButton } from './kit';
   import { tr } from '../lib/i18n.js';
   import { markdownToText, buildPages, buildFullList, mergeSections } from '../lib/whatsNew.js';
 
@@ -191,15 +191,15 @@ import { Modal, Button, Icon } from './kit';
     {#if view === 'pager'}
       <div class="wn-foot">
         {#if loadAll}
-          <button type="button" class="wn-link" onclick={showAll}>{tr('Все изменения')}</button>
+          <Button variant="ghost" size="sm" onclick={showAll}>{tr('Все изменения')}</Button>
         {:else}
           <span></span>
         {/if}
         {#if pages.length > 1}
           <div class="wn-pager" role="group" aria-label={tr('Страницы')}>
-            <button type="button" class="k-btn k-btn--ghost k-btn--icon" aria-label={tr('Назад')} disabled={index === 0} onclick={prev}><Icon name="chevron-left" size={null} /></button>
+            <IconButton name="chevron-left" label={tr('Назад')} disabled={index === 0} onclick={prev} />
             <span class="wn-count">{tr('{n} из {total}', { n: index + 1, total: pages.length })}</span>
-            <button type="button" class="k-btn k-btn--ghost k-btn--icon" aria-label={tr('Вперёд')} disabled={last} onclick={next}><Icon name="chevron-right" size={null} /></button>
+            <IconButton name="chevron-right" label={tr('Вперёд')} disabled={last} onclick={next} />
           </div>
         {/if}
         <Button variant="primary" data-autofocus onclick={next}>{last ? tr('Понятно') : tr('Далее')}</Button>
@@ -207,9 +207,7 @@ import { Modal, Button, Icon } from './kit';
     {:else}
       <div class="wn-foot">
         {#if pages.length}
-          <button type="button" class="wn-link" onclick={() => (view = 'pager')}>
-            <Icon name="chevron-left" size={null} class="wn-link__icon" />{tr('Назад')}
-          </button>
+          <Button variant="ghost" size="sm" iconName="chevron-left" onclick={() => (view = 'pager')}>{tr('Назад')}</Button>
         {:else}
           <span></span>
         {/if}
@@ -380,25 +378,5 @@ import { Modal, Button, Icon } from './kit';
     color: var(--k-text-2);
     font: 600 var(--k-text-sm, 13px) / 1 var(--k-font-body, system-ui);
     font-variant-numeric: tabular-nums;
-  }
-  .wn-link {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--k-space-1, 4px);
-    padding: var(--k-space-1, 4px) 0;
-    border: 0;
-    background: none;
-    color: var(--k-text-2);
-    font: 400 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    cursor: pointer;
-  }
-  .wn-link:hover {
-    color: var(--k-text);
-  }
-  .wn-link :global(.wn-link__icon) {
-    width: 16px;
-    height: 16px;
   }
 </style>

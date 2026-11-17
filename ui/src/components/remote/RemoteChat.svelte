@@ -4,7 +4,7 @@
   // «чужой текст» (экранирует всё, ссылки на файлы выключены, у ссылок виден настоящий адрес и пометка источника);
   // ошибки и подписи карточек — только текстом; ссылки сами не открываются.
   import { onMount, tick, untrack } from 'svelte';
-import { Button, Icon } from '../kit';
+import { Button, Icon, IconButton } from '../kit';
   import ApprovalCard from '../chat/ApprovalCard.svelte';
   import RemoteOrb from './RemoteOrb.svelte';
   import RemoteExtras from './RemoteExtras.svelte';
@@ -188,9 +188,7 @@ import { Button, Icon } from '../kit';
 <section class="rc" data-remote-chat>
   <header class="rc-head">
     {#if onmenu}
-      <button type="button" class="rc-menu" aria-label={tr('Открыть боковую панель')} onclick={onmenu}>
-        <Icon name="menu" size={20} />
-      </button>
+      <IconButton class="rc-menu" name="menu" label={tr('Открыть боковую панель')} onclick={onmenu} />
     {/if}
     <RemoteOrb {bot} busy={info.busy} size={40} />
     <div class="rc-title">
@@ -282,8 +280,8 @@ import { Button, Icon } from '../kit';
 <style>
   .rc { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--k-canvas, transparent); }
   .rc-head { display: flex; align-items: center; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px) var(--k-space-4, 16px); border-bottom: 1px solid var(--k-line); }
-  .rc-menu { display: none; border: 0; background: transparent; color: inherit; cursor: pointer; }
-  @media (max-width: 820px) { .rc-menu { display: inline-grid; } }
+  :global(.rc-menu) { display: none; }
+  @media (max-width: 820px) { :global(.rc-menu) { display: inline-grid; } }
   .rc-title { flex: 1; min-width: 0; }
   .rc-name { font: 600 var(--k-text-md, 15px) / 1.3 var(--k-font-body, inherit); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rc-sub { display: flex; align-items: center; gap: 6px; font: 400 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, inherit); color: var(--k-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

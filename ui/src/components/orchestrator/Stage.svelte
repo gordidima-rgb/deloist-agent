@@ -5,7 +5,7 @@
   import { untrack, onMount, tick } from 'svelte';
   import { tr } from '../../lib/i18n.js';
   import { markdown } from '../../lib/markdown.js';
-import { Icon } from '../kit';
+import { Icon, Button } from '../kit';
   import { lookForPhase, phaseOf, bubbleOf } from './model.js';
 
   let {
@@ -424,7 +424,7 @@ import { Icon } from '../kit';
   {#if assembly}
     <div class="orch-assembly" aria-live="polite">
       {#if assembly.playing}
-        <button type="button" class="orch-skip" onclick={skip}>{tr('Пропустить')}</button>
+        <Button variant="ghost" size="sm" class="orch-skip" onclick={skip}>{tr('Пропустить')}</Button>
       {/if}
       <div class="orch-bots">
         {#each assembly.bots as b (b.id)}
@@ -455,7 +455,7 @@ import { Icon } from '../kit';
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div class="orch-card" {@attach it.attach} onclick={(e) => echoAnswer(e, it)}></div>
             {#if it.sub === 'question' && !it.answered}
-              <button type="button" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</button>
+              <Button variant="secondary" size="sm" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</Button>
             {/if}
           </div>
         </div>
@@ -479,7 +479,7 @@ import { Icon } from '../kit';
 
   <div class="orch-foot" hidden={Boolean(assembly)}>
     {#if started && !questionOpen && !proposalOpen && stage === 'interview'}
-      <button type="button" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</button>
+      <Button variant="secondary" size="sm" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</Button>
     {/if}
     <form class="orch-composer" onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <textarea
@@ -639,21 +639,6 @@ import { Icon } from '../kit';
     align-items: flex-start;
     transition: opacity var(--k-dur-exit) var(--k-ease-in);
   }
-  .orch-enough {
-    padding: var(--k-space-1) var(--k-space-3);
-    border: 1px solid var(--k-line-strong);
-    border-radius: var(--k-radius-pill);
-    background: var(--k-surface);
-    color: var(--k-text);
-    font: inherit;
-    font-size: var(--k-text-sm);
-    cursor: pointer;
-    transition: background var(--k-dur-fast) var(--k-ease-out);
-  }
-  .orch-enough:hover {
-    background: var(--k-surface-2);
-  }
-  .orch-enough:focus-visible,
   .orch-mic:focus-visible,
   .orch-send:focus-visible,
   .orch-input:focus-visible {
@@ -745,20 +730,8 @@ import { Icon } from '../kit';
     transform-origin: top left;
     transition: opacity var(--k-dur-exit) var(--k-ease-in), transform var(--k-dur-morph) var(--k-ease-morph);
   }
-  .orch-skip {
+  :global(.orch-skip) {
     align-self: flex-end;
-    padding: var(--k-space-1) var(--k-space-3);
-    border: 1px solid var(--k-line-strong);
-    border-radius: var(--k-radius-pill);
-    background: var(--k-surface);
-    color: var(--k-text);
-    font: inherit;
-    font-size: var(--k-text-sm);
-    cursor: pointer;
-  }
-  .orch-skip:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
   }
   .orch-bots {
     display: flex;

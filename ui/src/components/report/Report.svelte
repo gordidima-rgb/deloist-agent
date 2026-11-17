@@ -15,7 +15,7 @@
     toneOf,
     weekLabel,
   } from '../../lib/report.js';
-import { Button, EmptyState, Skeleton, Icon } from '../kit';
+import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
 
   let { api = defaultApi, today = mondayOf() } = $props();
 
@@ -107,13 +107,9 @@ import { Button, EmptyState, Skeleton, Icon } from '../kit';
 <section class="rp" aria-busy={loading}>
   <div class="rp-nav">
     <div class="rp-nav-group">
-      <button type="button" class="rp-step" aria-label={tr('Прошлая неделя')} disabled={!data || loading} onclick={() => go(addDays(data.weekStart, -7))}>
-        <Icon name="chevron-left" size={16} />
-      </button>
+      <IconButton class="rp-step" size="sm" name="chevron-left" label={tr('Прошлая неделя')} disabled={!data || loading} onclick={() => go(addDays(data.weekStart, -7))} />
       <span class="rp-range" aria-live="polite">{data ? weekLabel(data.weekStart, data.weekEnd, locale) : ''}</span>
-      <button type="button" class="rp-step" aria-label={tr('Следующая неделя')} disabled={!data || loading || isCurrent} onclick={() => go(addDays(data.weekStart, 7))}>
-        <Icon name="chevron-right" size={16} />
-      </button>
+      <IconButton class="rp-step" size="sm" name="chevron-right" label={tr('Следующая неделя')} disabled={!data || loading || isCurrent} onclick={() => go(addDays(data.weekStart, 7))} />
     </div>
     <Button variant="ghost" size="sm" disabled={!data || loading || isCurrent} onclick={() => go('')}>{tr('Сегодня')}</Button>
   </div>
@@ -199,10 +195,7 @@ import { Button, EmptyState, Skeleton, Icon } from '../kit';
   .rp-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-2, 8px); flex-wrap: wrap; }
   .rp-nav-group { display: flex; align-items: center; gap: var(--k-space-2, 8px); }
   .rp-range { font: 700 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, inherit); min-width: 9ch; text-align: center; }
-  .rp-step { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--k-radius-pill, 999px); background: var(--k-surface-2, #f1f0ec); color: var(--k-text-2, inherit); cursor: pointer; }
-  .rp-step:hover:not(:disabled) { background: var(--k-surface-3, #e7e5e0); color: var(--k-text, inherit); }
-  .rp-step:focus-visible, .rp-col:focus-visible, .rp-more:focus-visible { outline: none; box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28)); }
-  .rp-step:disabled { opacity: 0.4; cursor: default; }
+  .rp-col:focus-visible, .rp-more:focus-visible { outline: none; box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28)); }
   .rp-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font: 600 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, inherit); }
   .rp-error { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font-size: var(--k-text-sm, 13px); }
   .rp-skel { display: grid; gap: var(--k-space-3, 12px); }

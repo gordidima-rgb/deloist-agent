@@ -236,10 +236,11 @@ describe('DrawerProfile form', () => {
     const onrevokesite = vi.fn();
     mount({ bot: { id: 'b1', name: 'К', browserSites: ['example.com'] }, onrevokesite });
     const panel = host.querySelector('#dp-sites');
-    expect(panel.hidden).toBe(true);
-    host.querySelector('[aria-controls="dp-sites"]').click();
+    const row = panel.closest('.k-lrow');
+    expect(row.classList.contains('is-open')).toBe(false);
+    row.querySelector('button.k-lrow__main').click();
     flushSync();
-    expect(panel.hidden).toBe(false);
+    expect(row.classList.contains('is-open')).toBe(true);
     panel.querySelector('.dp-x').click();
     expect(onrevokesite).toHaveBeenCalledWith('example.com');
   });
@@ -247,10 +248,10 @@ describe('DrawerProfile form', () => {
   it('opens the browser for the Google sign-in from its row', () => {
     const ongoogle = vi.fn();
     mount({ bot: { id: 'b1', name: 'К' }, ongoogle });
-    const row = [...host.querySelectorAll('.dp-link')].find((el) => el.textContent.includes('Аккаунт Google'));
+    const row = host.querySelector('.dp-google');
     expect(row.textContent).toContain('Бот не вошёл');
     expect(row.textContent).toContain('Войти');
-    row.click();
+    row.querySelector('.k-btn').click();
     expect(ongoogle).toHaveBeenCalled();
   });
 });

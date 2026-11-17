@@ -2,7 +2,7 @@
   // Общие папки и навыки команды в окне правки команды. Действуют на каждого бота команды,
   // но только в разговоре этой команды. Сервер проверяет пути при сохранении (src/rooms.rs).
   import { untrack } from 'svelte';
-import { Button, Checkbox, TextInput } from '../kit';
+import { Button, Checkbox, TextInput, IconButton } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { folders = [], skills = [], allSkills = [], max = 8, onchange } = $props();
@@ -50,7 +50,7 @@ import { Button, Checkbox, TextInput } from '../kit';
         {#each list as path (path)}
           <li class="rr-item">
             <span class="rr-path" title={path}>{path}</span>
-            <button type="button" class="rr-del" aria-label={tr('Убрать папку {path}', { path })} onclick={() => remove(path)}>×</button>
+            <IconButton class="rr-del" size="sm" name="close" label={tr('Убрать папку {path}', { path })} onclick={() => remove(path)} />
           </li>
         {/each}
       </ul>
@@ -98,18 +98,6 @@ import { Button, Checkbox, TextInput } from '../kit';
   .rr-skills :global(.k-check) { position: relative; }
   .rr-item { display: flex; align-items: center; gap: var(--k-space-2); }
   .rr-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text-2); font: 400 var(--k-text-sm) / 1.4 var(--k-font-mono, monospace); }
-  .rr-del {
-    flex: none;
-    width: 24px;
-    height: 24px;
-    border: 0;
-    border-radius: var(--k-radius-pill);
-    background: transparent;
-    color: var(--k-text-3);
-    cursor: pointer;
-  }
-  .rr-del:hover { color: var(--k-text); background: var(--k-surface-2, transparent); }
-  .rr-del:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .rr-add { display: flex; gap: var(--k-space-2); align-items: center; }
   .rr-add :global(.k-input) { flex: 1; min-width: 0; }
 </style>

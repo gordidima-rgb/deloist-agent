@@ -4,7 +4,7 @@
   // (например, «Скорость») компактными селектами кита и ссылка на все настройки модели.
   import { tr } from '../lib/i18n.js';
   import ModelPicker from './ModelPicker.svelte';
-import { Select } from './kit';
+import { Select, Button } from './kit';
 
   let {
     providers = [],
@@ -65,7 +65,7 @@ import { Select } from './kit';
       <Select id="cmp-opt-{o.id}" class="cmp-select" options={optionChoices(o)} value={o.values.some((v) => v.id === agentOptions?.[o.id]) ? agentOptions[o.id] : ''} onchange={(e) => onoption?.(o.id, e.currentTarget.value)} />
     </div>
   {/each}
-  <button type="button" class="cmp-more" onclick={() => onmore?.()}>{tr('Все настройки модели…')}</button>
+  <Button variant="ghost" size="sm" class="cmp-more" onclick={() => onmore?.()}>{tr('Все настройки модели…')}</Button>
 {/snippet}
 
 <ModelPicker {providers} {plan} {loading} {settings} {value} {defaultLabel} activeDriver={settings.driver || ''} {anchor} {onselect} {onconnect} {onclose} startOpen bare {footer} />
@@ -84,23 +84,5 @@ import { Select } from './kit';
   }
   .cmp-row :global(.k-select) {
     min-width: 150px;
-  }
-  .cmp-more {
-    margin-top: var(--k-space-1);
-    border: 0;
-    background: none;
-    padding: 0;
-    font: inherit;
-    font-size: var(--k-text-xs);
-    color: var(--k-text-2);
-    text-decoration: underline;
-    cursor: pointer;
-  }
-  .cmp-more:hover {
-    color: var(--k-text);
-  }
-  .cmp-more:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
   }
 </style>

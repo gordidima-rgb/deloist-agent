@@ -7,7 +7,7 @@
   import { tick, onMount } from 'svelte';
   import { tr } from '../lib/i18n.js';
   import { buildGroups, filterGroups, toValue, isCurrent, labelOf, iconSvg, splitModels } from '../lib/modelPicker.js';
-import { Tooltip, Badge, TextInput, Icon } from './kit';
+import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
 
   let {
     providers = [],
@@ -252,10 +252,7 @@ import { Tooltip, Badge, TextInput, Icon } from './kit';
             {/if}
           {/each}
           {#if !searching && shown.reduce((n, g) => n + g.models.length, 0) < 6}
-            <button type="button" class="mp-connect" onclick={addProvider}>
-              <Icon name="plus" size={null} />
-              <span>{tr('Подключить новую ИИ…')}</span>
-            </button>
+            <Button variant="ghost" size="sm" iconName="plus" class="mp-connect" onclick={addProvider}>{tr('Подключить новую ИИ…')}</Button>
           {/if}
           {#if !shown.length && !showDefault}
             <p class="mp-hint">{tr('Ничего не нашлось')}</p>
@@ -620,34 +617,10 @@ import { Tooltip, Badge, TextInput, Icon } from './kit';
     font-size: var(--k-text-xs);
     font-weight: 600;
   }
-  .mp-connect {
-    display: flex;
-    align-items: center;
-    gap: var(--k-space-3);
+  :global(.mp-connect) {
     width: 100%;
-    min-height: 38px;
+    justify-content: flex-start;
     margin-top: var(--k-space-1);
-    padding: 6px var(--k-space-3);
-    border: 1px dashed var(--k-line-strong);
-    border-radius: var(--k-radius-sm);
-    background: transparent;
-    color: var(--k-text-2);
-    font: inherit;
-    font-size: var(--k-text-sm);
-    cursor: pointer;
-  }
-  .mp-connect :global(svg) {
-    flex: none;
-    width: 18px;
-    height: 14px;
-  }
-  .mp-connect:hover {
-    background: var(--k-surface-2);
-    color: var(--k-text);
-  }
-  .mp-connect:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
   }
   :global(.mp-more-chev) {
     flex: none;

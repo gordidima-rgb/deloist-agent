@@ -5,7 +5,7 @@
   // отложенное. Конструктор внешности и выбор модели монтирует app.js в свои места (mountLook, mountModel):
   // у них свои движки аватаров и список провайдеров.
   import { untrack } from 'svelte';
-import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, Switch, Checkbox, RadioGroup, Button, IconButton, Modal, Icon } from '../kit';
+import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, Switch, Checkbox, RadioGroup, Button, IconButton, Modal, Icon, ListRow } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let {
@@ -366,53 +366,38 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
   <SettingsCard title={tr('Разрешения')} icon="shield-check">
     <RadioGroup variant="cards" name="dp-approval" legend={tr('Когда бот спрашивает тебя')} options={approvalOptions} bind:value={approval} />
 
-    <ul class="dp-links">
-      <li>
-        {#if sites.length}
-          <button type="button" class="dp-link" aria-expanded={openSites} aria-controls="dp-sites" onclick={() => (openSites = !openSites)}>
-            <span class="k-tile k-tile--sm" aria-hidden="true"><Icon name="link" size={null} /></span>
-            <span class="dp-link__text"><b>{tr('Сайты')}</b><small>{sitesLine}</small></span>
-            <Icon name="chevron-right" size={16} class={['dp-chev', openSites && 'is-open']} />
-          </button>
-          <div class="dp-more" id="dp-sites" hidden={!openSites}>
+    <ul class="k-lrows">
+      <ListRow icon="link" title={tr('Сайты')} sub={sitesLine} variant={sites.length ? 'chevron' : 'plain'} bind:expanded={openSites} id="dp-sites-row">
+        {#snippet children()}
+          <div id="dp-sites">
             <ul class="dp-sites">
               {#each sites as site (site)}
                 <li>
                   <span>{site}</span>
-                  <button type="button" class="dp-x" title={tr('Забрать разрешение')} aria-label={tr('Забрать разрешение')} onclick={() => onrevokesite?.(site)}>
-                    <Icon name="close" size={14} stroke={2.2} />
-                  </button>
+                  <IconButton class="dp-x" size="sm" name="close" label={tr('Забрать разрешение')} onclick={() => onrevokesite?.(site)} />
                 </li>
               {/each}
             </ul>
           </div>
-        {:else}
-          <div class="dp-link is-static">
-            <span class="k-tile k-tile--sm" aria-hidden="true"><Icon name="link" size={null} /></span>
-            <span class="dp-link__text"><b>{tr('Сайты')}</b><small>{sitesLine}</small></span>
+        {/snippet}
+      </ListRow>
+      <ListRow
+        icon="user-round"
+        title={tr('Аккаунт Google')}
+        sub={googleDone ? tr('Бот вошёл в свой браузер.') : tr('Бот не вошёл. Нужно, чтобы он работал в Почте и Диске.')}
+        variant="action"
+        actionVariant={googleDone ? 'secondary' : 'primary'}
+        actionLabel={googleDone ? tr('Открыть') : tr('Войти')}
+        onaction={() => ongoogle?.()}
+        class="dp-google"
+      />
+      <ListRow icon="file-lines" title={tr('Что бот делал')} sub={tr('По правилам и по твоим ответам на карточки.')} variant="chevron" bind:expanded={openActivity}>
+        {#snippet children()}
+          <div id="dp-activity">
+            <ul class="activity-list dp-activity" id="pf-activity"></ul>
           </div>
-        {/if}
-      </li>
-      <li>
-        <button type="button" class="dp-link" onclick={() => ongoogle?.()}>
-          <span class="k-tile k-tile--sm" aria-hidden="true"><Icon name="user-round" size={null} /></span>
-          <span class="dp-link__text">
-            <b>{tr('Аккаунт Google')}</b>
-            <small>{googleDone ? tr('Бот вошёл в свой браузер.') : tr('Бот не вошёл. Нужно, чтобы он работал в Почте и Диске.')}</small>
-          </span>
-          <span class="dp-link__act">{googleDone ? tr('Открыть') : tr('Войти')}</span>
-        </button>
-      </li>
-      <li>
-        <button type="button" class="dp-link" aria-expanded={openActivity} aria-controls="dp-activity" onclick={() => (openActivity = !openActivity)}>
-          <span class="k-tile k-tile--sm" aria-hidden="true"><Icon name="file-lines" size={null} /></span>
-          <span class="dp-link__text"><b>{tr('Что бот делал')}</b><small>{tr('По правилам и по твоим ответам на карточки.')}</small></span>
-          <Icon name="chevron-right" size={16} class={['dp-chev', openActivity && 'is-open']} />
-        </button>
-        <div class="dp-more" id="dp-activity" hidden={!openActivity}>
-          <ul class="activity-list dp-activity" id="pf-activity"></ul>
-        </div>
-      </li>
+        {/snippet}
+      </ListRow>
     </ul>
   </SettingsCard>
 
@@ -468,53 +453,11 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
   .dp-compact__warn { color: var(--k-attention-text); }
   .dp-note { margin: 0; color: var(--k-text-3); font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); }
 
-  .dp-links { margin: 0; padding: 0; list-style: none; border: 1px solid var(--k-line); border-radius: var(--k-radius-md); overflow: hidden; }
-  .dp-links > li + li { border-top: 1px solid var(--k-line); }
-  .dp-link {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: var(--k-space-3);
-    padding: var(--k-space-3);
-    border: 0;
-    background: none;
-    color: var(--k-text);
-    text-align: left;
-    font: inherit;
-    cursor: pointer;
-    transition: background var(--k-dur-fast) var(--k-ease-out);
-  }
-  .dp-link:hover { background: var(--k-surface-2); }
-  .dp-link:focus-visible { outline: none; box-shadow: inset var(--k-focus); }
-  .dp-link.is-static { cursor: default; }
-  .dp-link.is-static:hover { background: none; }
-  .dp-link__text { flex: 1; min-width: 0; }
-  .dp-link__text b { display: block; font: 600 var(--k-text-sm) / 1.3 var(--k-font-body); }
-  .dp-link__text small { display: block; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); }
-  .dp-link__act { flex: none; color: var(--k-brand-text); font: 600 var(--k-text-sm) / 1 var(--k-font-body); }
-  .dp-link :global(.dp-chev) { flex: none; color: var(--k-text-3); transition: transform var(--k-dur-fast) var(--k-ease-out); }
-  .dp-link :global(.dp-chev.is-open) { transform: rotate(90deg); }
-  .dp-more { padding: 0 var(--k-space-3) var(--k-space-3); }
-  .dp-more[hidden] { display: none; }
   .dp-activity { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow-y: auto; color: var(--k-text-2); font: 400 var(--k-text-xs) / 1.5 var(--k-font-body); }
   .dp-sites { margin: 0; padding: 0; list-style: none; }
   .dp-sites li { display: flex; align-items: center; gap: var(--k-space-2); min-height: 36px; color: var(--k-text); font: 400 var(--k-text-sm) / 1.3 var(--k-font-body); }
   .dp-sites li + li { border-top: 1px solid var(--k-line); }
   .dp-sites span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .dp-x {
-    display: inline-grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--k-radius-pill);
-    background: none;
-    color: var(--k-text-3);
-    cursor: pointer;
-  }
-  .dp-x:hover { background: var(--k-surface-2); color: var(--k-text); }
-  .dp-x:focus-visible { outline: none; box-shadow: var(--k-focus); }
 
   .dp-skills { display: flex; flex-direction: column; gap: var(--k-space-2); }
   .dp-skills :global(.k-check) { position: relative; }

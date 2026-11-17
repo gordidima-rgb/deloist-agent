@@ -7,7 +7,7 @@
   import ConnectFlow from './ConnectFlow.svelte';
   import DiffView from './DiffView.svelte';
 
-import { Icon } from '../kit';
+import { Icon, Button, IconButton, Select } from '../kit';
   let { id, bots = [], onclose, onchanged, onopenbot } = $props();
 
   let item = $state.raw(null);
@@ -134,9 +134,7 @@ import { Icon } from '../kit';
 <div class="scrim" role="presentation" onclick={() => onclose?.()}></div>
 <aside class="cat-drawer" aria-label={title || tr('Подробности')} tabindex="-1" bind:this={panel}>
   <header class="top">
-    <button type="button" class="k-btn k-btn--ghost k-btn--icon" aria-label={tr('Закрыть')} title={tr('Закрыть')} onclick={() => onclose?.()}>
-      <Icon name="close" size={18} />
-    </button>
+    <IconButton name="close" label={tr('Закрыть')} onclick={() => onclose?.()} />
   </header>
 
   {#if !item && error}
@@ -207,15 +205,15 @@ import { Icon } from '../kit';
           </div>
         {/each}
         <div class="buttons">
-          <button type="button" class="k-btn" disabled={busy} onclick={() => update('mine')}>{tr('Оставить мою')}</button>
-          <button type="button" class="k-btn k-btn--primary" disabled={busy} onclick={() => update('theirs')}>{tr('Взять новую')}</button>
+          <Button variant="secondary" disabled={busy} onclick={() => update('mine')}>{tr('Оставить мою')}</Button>
+          <Button variant="primary" disabled={busy} onclick={() => update('theirs')}>{tr('Взять новую')}</Button>
         </div>
         <p class="k-hint">{tr('Ваша версия навыка останется в истории: её можно вернуть кнопкой «Отменить правку».')}</p>
       {:else}
         {#if st.update}
           <div class="update">
             <span>{tr('Вышла версия {version}', { version: item.version })}</span>
-            <button type="button" class="k-btn k-btn--primary k-btn--sm" disabled={busy} onclick={() => update('')}>{tr('Обновить')}</button>
+            <Button variant="primary" size="sm" disabled={busy} onclick={() => update('')}>{tr('Обновить')}</Button>
           </div>
         {/if}
 
@@ -235,12 +233,12 @@ import { Icon } from '../kit';
             </div>
           {/if}
           <div class="buttons">
-            <button type="button" class="k-btn k-btn--primary" disabled={busy} onclick={saveSkill}>{st.installed ? tr('Сохранить') : tr('Добавить')}</button>
+            <Button variant="primary" disabled={busy} onclick={saveSkill}>{st.installed ? tr('Сохранить') : tr('Добавить')}</Button>
           </div>
         {:else if item.kind === 'agent'}
           {#if st.installed}
             <div class="buttons">
-              <button type="button" class="k-btn k-btn--primary" onclick={() => onopenbot?.(st.botId)}>{tr('Открыть бота')}</button>
+              <Button variant="primary" onclick={() => onopenbot?.(st.botId)}>{tr('Открыть бота')}</Button>
             </div>
           {:else}
             {#if item.agent?.sites?.length}
@@ -250,7 +248,7 @@ import { Icon } from '../kit';
               </label>
             {/if}
             <div class="buttons">
-              <button type="button" class="k-btn k-btn--primary" disabled={busy} onclick={addAgent}>{tr('Добавить в команду')}</button>
+              <Button variant="primary" disabled={busy} onclick={addAgent}>{tr('Добавить в команду')}</Button>
             </div>
           {/if}
         {:else if item.mode === 'cabinet'}
@@ -259,24 +257,22 @@ import { Icon } from '../kit';
             <p class="quiet">{loc(item.app?.web_cabinet?.note) || tr('Вы входите сами в окне бота. Пароль и коды бот не вводит.')}</p>
             {#if st.installed}
               <div class="buttons">
-                <button type="button" class="k-btn k-btn--ink" disabled={busy} onclick={() => openBrowser(st.botId)}>{tr('Открыть браузер бота')}</button>
-                <button type="button" class="k-btn" onclick={() => onopenbot?.(st.botId)}>{tr('Открыть бота')}</button>
+                <Button variant="ink" disabled={busy} onclick={() => openBrowser(st.botId)}>{tr('Открыть браузер бота')}</Button>
+                <Button variant="secondary" onclick={() => onopenbot?.(st.botId)}>{tr('Открыть бота')}</Button>
               </div>
             {:else if bots.length === 0}
               <p class="quiet">{tr('Сначала добавьте бота в команду.')}</p>
             {:else}
               <label class="k-field">
                 <span class="k-label">{tr('Какой бот')}</span>
-                <select class="k-input" bind:value={cabinetBot}>
-                  {#each bots as bot (bot.id)}<option value={bot.id}>{bot.name}</option>{/each}
-                </select>
+                <Select bind:value={cabinetBot} options={bots.map((bot) => ({ value: bot.id, label: bot.name }))} />
               </label>
               <label class="consent">
                 <input type="checkbox" bind:checked={cabinetConsent} />
                 {tr('Разрешить этому боту нажимать и вводить текст на сайтах: {sites}', { sites: (item.app?.web_cabinet?.sites || []).join(', ') })}
               </label>
               <div class="buttons">
-                <button type="button" class="k-btn k-btn--primary" disabled={busy || !cabinetConsent} onclick={addCabinet}>{tr('Подключить кабинет')}</button>
+                <Button variant="primary" disabled={busy || !cabinetConsent} onclick={addCabinet}>{tr('Подключить кабинет')}</Button>
               </div>
             {/if}
           </div>
@@ -293,12 +289,12 @@ import { Icon } from '../kit';
             <div class="remove">
               <p>{removeWarning()}</p>
               <div class="buttons">
-                <button type="button" class="k-btn k-btn--attention" disabled={busy} onclick={remove}>{tr('Удалить')}</button>
-                <button type="button" class="k-btn k-btn--ghost" onclick={() => (confirmRemove = false)}>{tr('Отмена')}</button>
+                <Button variant="attention" disabled={busy} onclick={remove}>{tr('Удалить')}</Button>
+                <Button variant="ghost" onclick={() => (confirmRemove = false)}>{tr('Отмена')}</Button>
               </div>
             </div>
           {:else}
-            <button type="button" class="k-btn k-btn--ghost k-btn--sm remove-btn" onclick={() => (confirmRemove = true)}>{tr('Удалить')}</button>
+            <Button variant="ghost" size="sm" class="remove-btn" onclick={() => (confirmRemove = true)}>{tr('Удалить')}</Button>
           {/if}
         {/if}
       {/if}

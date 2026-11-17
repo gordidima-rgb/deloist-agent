@@ -2,7 +2,7 @@
   // Просмотрщик файла в ящике бота: текст и код с номерами строк, Markdown с видом «Просмотр»/«Исходник»,
   // таблицы CSV и TSV, картинки, звук и видео. Данные: GET /api/bots/{id}/file?path= (текст, первые 200 000 знаков)
   // и GET /api/bots/{id}/file/raw?path= (файл как есть: картинки, медиа, «Скачать»).
-import { Button, Spinner } from '../kit';
+import { Button, Spinner, Tabs } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';
@@ -192,10 +192,7 @@ import { Button, Spinner } from '../kit';
     <p class="fv-name" title={file.path}>{name}</p>
     <div class="fv-tools">
       {#if isMarkdown}
-        <div class="fv-seg" role="group" aria-label={tr('Вид')}>
-          <button type="button" class="fv-seg-btn" class:on={view === 'rendered'} aria-pressed={view === 'rendered'} onclick={() => (view = 'rendered')}>{tr('Просмотр')}</button>
-          <button type="button" class="fv-seg-btn" class:on={view === 'source'} aria-pressed={view === 'source'} onclick={() => (view = 'source')}>{tr('Исходник')}</button>
-        </div>
+        <Tabs label={tr('Вид')} items={[{ id: 'rendered', label: tr('Просмотр') }, { id: 'source', label: tr('Исходник') }]} bind:value={view} />
       {/if}
       {#if !isMedia && !isBinary && !isTable && !(isMarkdown && view === 'rendered')}
         <Button size="sm" variant="ghost" aria-pressed={wrap} onclick={() => (wrap = !wrap)}>{tr('Перенос строк')}</Button>
@@ -282,18 +279,6 @@ import { Button, Spinner } from '../kit';
     white-space: nowrap;
   }
   .fv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
-  .fv-seg { display: inline-flex; padding: 2px; border-radius: var(--k-radius-sm); background: var(--k-surface-2); }
-  .fv-seg-btn {
-    padding: 3px 10px;
-    border: 0;
-    border-radius: var(--k-radius-xs);
-    background: none;
-    color: var(--k-text-2);
-    font: 500 var(--k-text-xs) / 1.4 var(--k-font-body);
-    cursor: pointer;
-  }
-  .fv-seg-btn.on { background: var(--k-surface); color: var(--k-text); box-shadow: var(--k-shadow-1); }
-  .fv-seg-btn:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .fv-body {
     flex: 1;
     min-width: 0;

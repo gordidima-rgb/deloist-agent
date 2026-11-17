@@ -47,7 +47,7 @@ async function waitFor(check) {
   });
 }
 
-const importButton = () => host.querySelector('.km-hermes-actions .km-btn');
+const importButton = () => host.querySelector('.km-hermes-actions .k-btn');
 
 afterEach(() => {
   handle?.destroy();
