@@ -399,7 +399,9 @@ pub async fn journal(app: &App, scope: Option<&str>, limit: usize) -> Vec<Value>
     let mut out = Vec::new();
     for entry in load_journal(app).await.into_iter().rev() {
         if let Some(scope) = scope {
-            if !entry["scopes"].as_array().is_some_and(|s| s.iter().any(|v| v == scope)) {
+            // Запись бота в общую память тоже его: иначе в журнале бота «пока без правок», хотя он писал.
+            let by_bot = scope != SHARED && entry["who"]["botId"] == scope;
+            if !by_bot && !entry["scopes"].as_array().is_some_and(|s| s.iter().any(|v| v == scope)) {
                 continue;
             }
         }
@@ -1087,7 +1089,8 @@ pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String,
         // Правка ничего не изменила: не говорим «обновлён», иначе бот считает, что записал.
         return Ok(format!("Факт [{}] уже такой, ничего не изменилось. Чтобы поменять текст, передай body (или id и title).", fact.id));
     }
-    Ok(if created { format!("Записано [{}] в {place}.", fact.id) } else { format!("Факт [{}] обновлён.", fact.id) })
+    let title = service::take_chars(&one_line(&fact.title), 80);
+    Ok(if created { format!("Записано [{}] в {place}: «{title}».", fact.id) } else { format!("Факт [{}] обновлён: «{title}».", fact.id) })
 }
 
 /// Внешний агент через MCP (`deloist --mcp`): пишет в общую память, как бот со scope shared.
@@ -1386,6 +1389,11 @@ pub async fn forget_bot(app: &Arc<App>, bot_id: &str) {
 
 pub async fn facts(app: &App, scope: &str) -> Vec<Fact> {
     load(app).await.facts.into_iter().filter(|f| f.scope == scope).collect()
+}
+
+/// Факты в общей памяти, которые записал этот бот: на его экране памяти они иначе не видны.
+pub async fn shared_by(app: &App, bot_id: &str) -> Vec<Fact> {
+    load(app).await.facts.into_iter().filter(|f| f.scope == SHARED && f.author == bot_id).collect()
 }
 
 pub async fn usage(app: &App, scope: &str) -> usize {

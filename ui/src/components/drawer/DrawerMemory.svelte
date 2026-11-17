@@ -70,6 +70,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   const groups = $derived(
     KINDS.map((kind) => ({ kind, facts: (data?.facts || []).filter((f) => f.kind === kind) })).filter((g) => g.facts.length),
   );
+  const sharedByBot = $derived(Array.isArray(data?.sharedByBot) ? data.sharedByBot : []);
   const journal = $derived(Array.isArray(data?.journal) ? data.journal : []);
   const countText = $derived(
     data?.limit ? tr('{n} из {limit} знаков', { n: numberRu(data.used || 0), limit: numberRu(data.limit) }) : '',
@@ -230,7 +231,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
 
   {#if adding}{@render factForm()}{/if}
 
-  {#if data && !groups.length}
+  {#if data && !groups.length && !sharedByBot.length}
     <EmptyState title={tr('Фактов пока нет.')} />
   {/if}
 
@@ -245,6 +246,22 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
       {/each}
     </Section>
   {/each}
+
+  {#if sharedByBot.length}
+    <Section title={tr('Записал в общую память · {n}', { n: sharedByBot.length })}>
+      <p class="dm-note">{tr('Эти факты видят все боты. Править их можно на экране общей памяти.')}</p>
+      {#each sharedByBot as fact (fact.id)}
+        <div class="dm-fact">
+          <ul class="k-list">
+            <ListItem title={fact.title} meta={`[${fact.id}]`} onclick={() => toggle(fact.id)} />
+          </ul>
+          {#if expanded[fact.id] && fact.body}
+            <div class="dm-detail"><p class="dm-body">{fact.body}</p></div>
+          {/if}
+        </div>
+      {/each}
+    </Section>
+  {/if}
 
   <Section title={tr('Журнал')}>
     {#if journal.length}

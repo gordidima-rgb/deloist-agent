@@ -1606,6 +1606,7 @@ async fn get_memory(State(app): Shared, Path(id): Path<String>) -> Response {
     }
     ok(json!({
         "facts": crate::memory::facts(&app, &id).await,
+        "sharedByBot": crate::memory::shared_by(&app, &id).await,
         "used": crate::memory::usage(&app, &id).await,
         "limit": crate::memory::BOT_LIMIT,
         "journal": crate::memory::journal(&app, Some(&id), 30).await,

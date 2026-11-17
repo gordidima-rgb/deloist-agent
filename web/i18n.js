@@ -595,6 +595,8 @@
     'Навёл порядок': 'Tidied up',
     'Отменил правку': 'Undid an edit',
     'Пока без правок.': 'No edits yet.',
+    'Записал в общую память · {n}': 'Saved to shared memory · {n}',
+    'Эти факты видят все боты. Править их можно на экране общей памяти.': 'All bots see these facts. Edit them on the shared memory screen.',
     // Ящик бота: вкладки «Память», «Файлы», «Цели» (ui/src/components/drawer)
     'Память подмешивается в каждый ход. Бот дописывает сюда сам через инструмент {tool}.': 'Memory is added to every turn. The bot adds notes here itself through the {tool} tool.',
     'Путь': 'Path',
