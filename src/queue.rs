@@ -16,13 +16,19 @@ pub const MAX_ITEMS: usize = 50;
 #[serde(rename_all = "snake_case")]
 pub enum PauseReason {
     Manual,
-    Restart,
+}
+
+/// Файлы версий до 0.4.4 помнят причину «restart»: такая пауза снимается, а очередь читается целиком.
+fn manual_reason<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Option<PauseReason>, D::Error> {
+    let reason = Option::<String>::deserialize(de)?;
+    Ok((reason.as_deref() == Some("manual")).then_some(PauseReason::Manual))
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BotQueue {
     pub paused: bool,
+    #[serde(deserialize_with = "manual_reason")]
     pub pause_reason: Option<PauseReason>,
     pub items: Vec<Value>,
 }
@@ -51,12 +57,12 @@ impl Queues {
             Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
             Err(_) => HashMap::new(),
         };
-        // После перезапуска очередь стоит: старые сообщения не должны поехать сами ночью.
+        // Перезапуск очередь не останавливает: стоит только то, что человек остановил сам.
         for queue in loaded.values_mut() {
-            if !queue.paused || queue.pause_reason != Some(PauseReason::Manual) {
-                queue.pause_reason = Some(PauseReason::Restart);
+            if queue.pause_reason != Some(PauseReason::Manual) {
+                queue.paused = false;
+                queue.pause_reason = None;
             }
-            queue.paused = true;
         }
         let this = Self {
             path,

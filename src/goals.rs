@@ -357,7 +357,7 @@ impl Goals {
 // ---------------------------------------------------------------------------
 
 /// Какой ход идёт у бота. Инструментам нужно знать это, чтобы отказать там, где человек не присутствует.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Run {
     /// Запуск цели (по просьбе или рутиной).
     Goal(String),
@@ -496,6 +496,8 @@ pub async fn start_goal_run(app: &Arc<App>, goal: &Goal, unattended: bool, floor
         window: false,
         voice: false,
         run: Some(Run::Goal(goal.id.clone())),
+        origin: None,
+        resume: None,
     };
     start_turn(app, &goal.bot_id, &goal_prompt(goal), opts)?;
     app.goals.edit(&goal.id, |g| g.last_run = now()).await;
@@ -584,6 +586,8 @@ pub async fn tick(app: &Arc<App>) {
             window: false,
             voice: false,
             run: Some(Run::CheckIn),
+            origin: None,
+            resume: None,
         };
         let started = start_turn(app, &check.bot_id, &checkin_prompt(app, &check.bot_id), opts);
         match started {

@@ -28,6 +28,7 @@ mod pets;
 mod queue;
 mod reminders;
 mod routines_chat;
+mod runs;
 mod slack;
 mod specialist_offer;
 mod team_async;
