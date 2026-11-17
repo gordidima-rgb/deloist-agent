@@ -261,6 +261,8 @@ pub fn platform_json() -> serde_json::Value {
             "localStt": !cloud,
             "obscura": !cloud,
             "stdioMcp": !cloud,
+            // Связь с телефоном и другими ПК живёт в закрытой части; в открытой сборке её нет, кнопок тоже нет.
+            "relay": cfg!(deloist_private),
         },
     })
 }
@@ -269,6 +271,11 @@ pub fn platform_json() -> serde_json::Value {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn device_link_is_offered_only_with_the_private_part() {
+        assert_eq!(platform_json()["features"]["relay"], cfg!(deloist_private));
+    }
 
     #[derive(Default)]
     struct Recorder {

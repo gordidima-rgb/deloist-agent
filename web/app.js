@@ -7369,6 +7369,7 @@ function applyPlatform() {
   if (!platformHas('dock')) hide('#sub-dock', true);
   hide('#set-pets', !platformHas('pets'));
   hide('#set-hotkeys', !platformHas('hotkeys'));
+  hide('[data-s-link="devices"]', !platformHas('relay'));
 }
 
 function mountSettingsNav() {
@@ -8487,6 +8488,7 @@ function remotePcsProps() {
 }
 
 function mountRemote() {
+  if (!platformHas('relay')) return;
   const plaques = $('#pair-plaques');
   if (plaques && window.DeloistUI?.mountPairPlaques) window.DeloistUI.mountPairPlaques(plaques, { api });
   const host = $('#remote-pcs');
