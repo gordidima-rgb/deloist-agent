@@ -233,8 +233,11 @@ async fn shared_memory_reaches_every_bot_and_can_be_undone() {
     crew.ok("POST", &format!("/api/bots/{}/clear", bots[0]), Some(json!({}))).await;
     turn(&crew, &bots[0], "и ещё").await;
     let own = last_system(&fake);
-    // Не закреплённый личный факт идёт в промпт заголовком (подробности — recall или «Из памяти»).
-    assert!(own.contains("Отчёт делаю в Excel …") && !own.contains("Шаблон в папке reports"), "свои факты бот видит заголовком: {own}");
+    // Маленький memory.md (до OWN_FULL_LIMIT) идёт в ход целиком; большой — заголовками (unit-тест memory.rs).
+    assert!(own.contains("Отчёт делаю в Excel\nШаблон в папке reports"), "маленькая память — целиком: {own}");
+    assert!(own.contains("memory.md в твоей папке"), "{own}");
+    let file = std::fs::read_to_string(crew.data_dir.join("workspaces").join(&bots[0]).join("memory.md")).expect("memory.md в папке бота");
+    assert!(file.contains("- Отчёт делаю в Excel\n  Шаблон в папке reports"), "{file}");
     assert!(own.contains("Занято "), "бот видит, сколько памяти занято: {own}");
     fake.script.lock().unwrap().push_back(("remember".into(), json!({ "title": "Отчёт делаю в Excel", "pinned": true })));
     turn(&crew, &bots[0], "закрепи").await;

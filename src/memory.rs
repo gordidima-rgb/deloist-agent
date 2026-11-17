@@ -38,6 +38,8 @@ pub const PIN_BOT_LIMIT: usize = 2_000;
 pub const PIN_TEAM_LIMIT: usize = 1_500;
 /// Оглавление остальных личных фактов (заголовки) в промпте: на бота и на команду.
 const OWN_INDEX_LIMIT: usize = 3_000;
+/// Маленький memory.md идёт в ход целиком: оглавление тут не экономит, а бот видит всё.
+pub const OWN_FULL_LIMIT: usize = 2_500;
 const HARD_PERCENT: usize = 125;
 pub(crate) const TITLE_LIMIT: usize = 150;
 pub(crate) const BODY_LIMIT: usize = 1_500;
@@ -734,7 +736,16 @@ pub fn index_text(all: &[Fact], limit: usize) -> String {
 
 /// Личная память бота для промпта: закреплённое целиком, остальное — оглавлением.
 fn own_text(book: &Book, bot_id: &str) -> String {
-    scope_text(book, bot_id, PIN_BOT_LIMIT)
+    let used = scope_size(book, bot_id);
+    if used == 0 || used > OWN_FULL_LIMIT {
+        return scope_text(book, bot_id, PIN_BOT_LIMIT);
+    }
+    let mut own: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == bot_id).collect();
+    own.sort_by_key(|f| number(&f.id));
+    let mut out = vec![format!("Занято {used} из {} знаков: держи память в порядке, объединяй близкое и удаляй устаревшее.", limit_of(bot_id))];
+    out.extend(own.iter().map(|f| full_of(f)));
+    out.join("
+")
 }
 
 /// Одна память в промпте. Закреплённые факты («Всегда в ходе») идут целиком, самые новые вперёд,
@@ -1322,11 +1333,95 @@ fn refuse_human_fact_edit(before: &Fact, writer_is_human: bool) -> Result<(), St
 
 /// Инструмент `remember`.
 pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
+    if args.get("forget").and_then(Value::as_bool) == Some(true) {
+        if learn_rules::is_reflecting(&bot.id) {
+            return Err("в разборе после задачи записи не удаляются: устаревшее исправь правкой (id и новый body)".into());
+        }
+        return forget_own(app, bot, &bare_id(args.get("id").and_then(Value::as_str).unwrap_or_default())).await;
+    }
     let mut draft = Draft::from_args(args);
     reflective_checks(app, bot, args, &mut draft).await?;
     let (fact, created, entry) = write(app, &Writer::Bot(bot), draft).await?;
     let team = if is_room_scope(&fact.scope) { app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name) } else { None };
     Ok(remember_reply(&fact, created, entry.as_deref(), now(), team.as_deref()))
+}
+
+/// `remember` с `forget`: бот убирает свою запись или запись своей команды. Записи человека — нет; в журнале и отменяется.
+async fn forget_own(app: &Arc<App>, bot: &Bot, id: &str) -> Result<String, String> {
+    if id.is_empty() {
+        return Err("forget: укажи id записи (например m12)".into());
+    }
+    let scope = {
+        let _gate = GATE.lock().await;
+        let mut book = load(app).await;
+        let rooms = app.store.rooms();
+        let index = book.facts.iter().position(|f| f.id == id).ok_or_else(|| format!("записи [{id}] нет"))?;
+        let fact = book.facts[index].clone();
+        if fact.scope == SHARED || !bot_may_touch(&rooms, &bot.id, &fact.scope) {
+            return Err(format!("[{id}] — не твоя память и не память твоей команды: убрать её может только человек"));
+        }
+        refuse_human_fact_edit(&fact, false)?;
+        book.facts.remove(index);
+        let mut changes: Vec<Change> = vec![(Some(fact.clone()), None)];
+        for other in &mut book.facts {
+            if other.links.iter().any(|l| l == id) {
+                let before = other.clone();
+                other.links.retain(|l| l != id);
+                changes.push((Some(before), Some(other.clone())));
+            }
+        }
+        let entry = commit(app, &book, who_bot(bot), "remove", "Убрано ботом", changes, json!({})).await.map_err(|e| e.to_string())?;
+        (fact, entry)
+    };
+    let (fact, entry) = scope;
+    forget_prompts_for(app, std::slice::from_ref(&fact.scope)).await;
+    let journal = entry.map(|e| format!(" [журнал: {e}]")).unwrap_or_default();
+    Ok(format!("Убрано [{}]: «{}».{journal}", fact.id, service::take_chars(&one_line(&fact.title), 80)))
+}
+
+/// memory.md бота текстом — для ящика бота.
+pub async fn bot_file_text(app: &App, bot_id: &str) -> String {
+    let name = app.store.bot(bot_id).map(|b| b.name).unwrap_or_default();
+    let facts: Vec<Fact> = load(app).await.facts.into_iter().filter(|f| f.scope == bot_id).collect();
+    bot_file::render(&name, &facts)
+}
+
+/// Человек правит memory.md в ящике бота: новые и изменённые строки — его, удалённое не выучивается заново.
+pub async fn human_file_write(app: &Arc<App>, bot_id: &str, text: &str) -> Result<Option<String>, String> {
+    if app.store.bot(bot_id).is_none() {
+        return Err("бот не найден".into());
+    }
+    if secret_in(text).is_some() {
+        return Err(SECRET_REFUSAL.into());
+    }
+    let lines = bot_file::parse(text);
+    let size: usize = lines.iter().map(|l| chars(&l.title) + chars(&l.body)).sum();
+    let hard = BOT_LIMIT * HARD_PERCENT / 100;
+    if size > hard {
+        return Err(format!("память больше {hard} знаков ({size}): убери устаревшее"));
+    }
+    let (entry, removed) = {
+        let _gate = GATE.lock().await;
+        let mut book = load(app).await;
+        let old: Vec<Fact> = book.facts.iter().filter(|f| f.scope == bot_id).cloned().collect();
+        let mut next = book.next;
+        let (facts, changes) = bot_file::merge(&lines, &old, bot_id, &mut next, "human", now());
+        if changes.is_empty() {
+            return Ok(None);
+        }
+        let removed: Vec<String> = changes.iter().filter(|(_, after)| after.is_none()).filter_map(|(before, _)| before.as_ref().map(|f| f.title.clone())).collect();
+        book.facts.retain(|f| f.scope != bot_id);
+        book.facts.extend(facts);
+        book.facts.sort_by_key(|f| number(&f.id));
+        book.next = next;
+        let entry = commit(app, &book, who_human(), "files", "memory.md правлен вручную", changes, json!({})).await.map_err(|e| e.to_string())?;
+        (entry, removed)
+    };
+    for title in removed {
+        learn_rules::forget_title(app, &title).await;
+    }
+    forget_prompts_for(app, &[bot_id.to_string()]).await;
+    Ok(entry)
 }
 
 /// Пока бот размышляет о памяти после задачи, его `remember` идёт по тем же правилам, что и извлечение:
@@ -2488,9 +2583,27 @@ mod tests {
         Book { next: 6, facts, broken: false }
     }
 
+    /// Та же книга, но больше порога OWN_FULL_LIMIT: оглавление включается.
+    fn big_pinned_book() -> Book {
+        let mut book = pinned_book();
+        book.facts.push(Fact { body: "Ещё один длинный факт, чтобы память не влезла целиком. ".repeat(4), ..fact("m7", "b1", "project", "Правило номер 7") });
+        book.next = 7;
+        book
+    }
+
+    #[test]
+    fn a_small_memory_goes_in_full_and_a_big_one_as_an_index() {
+        let small = pinned_book();
+        assert!(scope_size(&small, "b1") <= OWN_FULL_LIMIT);
+        let text = own_text(&small, "b1");
+        assert!(text.starts_with("Занято ") && text.contains("Подробности факта 1:") && text.contains("Подробности факта 6:"), "{text}");
+        let big = own_text(&big_pinned_book(), "b1");
+        assert!(!big.contains("Подробности факта 1:") && big.contains("[m1] поправка: Правило номер 1"), "{big}");
+    }
+
     #[test]
     fn pinned_facts_go_in_full_and_the_rest_as_index_lines() {
-        let book = pinned_book();
+        let book = big_pinned_book();
         let text = own_text(&book, "b1");
         assert!(text.starts_with("Занято "), "{text}");
         assert!(text.contains(&format!("из {BOT_LIMIT} знаков")), "{text}");
@@ -2536,7 +2649,7 @@ mod tests {
 
     #[test]
     fn auto_recall_still_brings_the_body_of_an_index_only_fact_but_not_a_pinned_one() {
-        let book = pinned_book();
+        let book = big_pinned_book();
         let prompt = PromptMemory { own: own_text(&book, "b1"), ..PromptMemory::default() };
         let pick = |q: &str| pick_recall(&book.facts, &[], q, &HashSet::new(), &prompt, Some("b1"), &[]);
         let block = pick("правило номер 4 подробности").expect("факт из оглавления подаётся с телом");

@@ -5,7 +5,7 @@
 //! Инструменты только для оркестратора и только про его команду: чужая команда для него не существует,
 //! личные факты участников он читает, но не правит, факты «от человека» не меняются никогда.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -22,7 +22,6 @@ const MARK: &str = "[разбор-памяти-команды:";
 const AT: &str = "12:00";
 const MAX_DROPS: usize = 8;
 const REVIEW_LIMIT: usize = 14_000;
-const MAIN_EXCERPT: usize = 1_200;
 const REPORT_LIMIT: usize = 1_500;
 
 pub fn is_tool(name: &str) -> bool {
@@ -42,7 +41,7 @@ pub fn defs() -> Vec<Value> {
         function(
             "team_memory_review",
             "Только для оркестратора. Показать всё, что нужно для разбора памяти своей команды: факты памяти команды, личные факты участников (только чтение), \
-             факты участников в общей памяти и начало MAIN.md каждого. Чужие команды не показываются.",
+             факты участников в общей памяти (их memory.md — среди личных фактов). Чужие команды не показываются.",
             json!({ "team": team }),
             &[],
         ),
@@ -101,7 +100,7 @@ fn fact_block(fact: &Fact, bots: &[Bot]) -> String {
 }
 
 /// Всё для разбора одной команды. Другие команды и чужие личные факты сюда не попадают.
-pub(crate) fn review_text(book: &Book, room: &Room, bots: &[Bot], orchestrator: &str, mains: &HashMap<String, String>) -> String {
+pub(crate) fn review_text(book: &Book, room: &Room, bots: &[Bot], orchestrator: &str) -> String {
     let scope = room_scope(&room.id);
     let mut out = format!("# Память команды «{}» ({})\n", room.name, scope);
     let team: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == scope).collect();
@@ -123,9 +122,6 @@ pub(crate) fn review_text(book: &Book, room: &Room, bots: &[Bot], orchestrator: 
             out.push_str(&fact_block(fact, bots));
             out.push('\n');
         }
-        if let Some(main) = mains.get(&member.id).filter(|m| !m.trim().is_empty()) {
-            out.push_str(&format!("MAIN.md:\n{}\n", service::take_chars(main.trim(), MAIN_EXCERPT)));
-        }
     }
     let ids: HashSet<&str> = members.iter().map(|b| b.id.as_str()).collect();
     let shared: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == SHARED && ids.contains(f.author.as_str())).collect();
@@ -144,14 +140,7 @@ pub async fn review(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, S
     let room = team_of(&app.store.rooms(), bot, args)?;
     let book = load(app).await;
     let bots = app.store.bots();
-    let mut mains = HashMap::new();
-    for id in room.bot_ids.iter().filter(|id| **id != bot.id) {
-        let path = app.store.workspace(id).join(crate::turn::MAIN_FILE);
-        if let Ok(text) = tokio::fs::read_to_string(path).await {
-            mains.insert(id.clone(), text);
-        }
-    }
-    Ok(review_text(&book, &room, &bots, &bot.id, &mains))
+    Ok(review_text(&book, &room, &bots, &bot.id))
 }
 
 /// Слияние дублей внутри памяти команды. Меняет книгу и возвращает изменения для журнала.
@@ -267,8 +256,8 @@ fn prompt_for(room: &Room) -> String {
     format!(
         "{MARK}{id}]\n\
          Ежедневный тихий разбор памяти команды «{name}». Ты её оркестратор и доктор её памяти. Человека рядом нет: ничего не спрашивай.\n\
-         1. Вызови team_memory_review: память команды, личные факты участников (только чтение), их факты в общей памяти, начало MAIN.md каждого.\n\
-         2. Наведи порядок в памяти команды. Дубли слей через team_memory_merge. Пустой факт, ответ на который очевиден из MAIN.md участника, \
+         1. Вызови team_memory_review: память команды, личные факты участников (только чтение), их факты в общей памяти.\n\
+         2. Наведи порядок в памяти команды. Дубли слей через team_memory_merge. Пустой факт, ответ на который очевиден из личных фактов участника, \
          дополни через remember (id факта, scope team). Факты с автором «человек» не правь и не удаляй.\n\
          3. Договорённости, которые касаются только этой команды, но лежат в общей памяти или у участников, сам не переноси и не удаляй: предложи человеку в итоге \
          («перенести [m12] в память команды?»).\n\
@@ -387,9 +376,8 @@ mod tests {
     #[test]
     fn review_shows_own_team_and_hides_other_teams() {
         let bots = vec![bot("b1", "Оркестратор", true), bot("b2", "Автор", false), bot("b9", "Чужой", false)];
-        let mains = HashMap::from([("b2".to_string(), "Задача: посты".to_string())]);
-        let text = review_text(&book(), &room("r1", &["b1", "b2"]), &bots, "b1", &mains);
-        for need in ["Посты — по средам", "Тон — спокойный", "Личное Автора", "Общий факт Автора", "Задача: посты", "автор: человек"] {
+        let text = review_text(&book(), &room("r1", &["b1", "b2"]), &bots, "b1");
+        for need in ["Посты — по средам", "Тон — спокойный", "Личное Автора", "Общий факт Автора", "автор: человек"] {
             assert!(text.contains(need), "нет «{need}»: {text}");
         }
         for hidden in ["Чужая команда", "Личное чужого", "Общий факт чужого"] {

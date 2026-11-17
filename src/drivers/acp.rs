@@ -1997,6 +1997,9 @@ async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, canc
 async fn write_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, cancel: &CancellationToken) -> Result<(), String> {
     let raw = params["path"].as_str().unwrap_or_default();
     let path = inside_workspace(req, raw)?;
+    if let Some(refusal) = crate::tools::memory_file_refusal(req.app, &path) {
+        return Err(refusal.to_string());
+    }
     let content = params["content"].as_str().ok_or("нет содержимого файла")?;
     let mut bot = req.app.store.bot(&req.bot.id).unwrap_or_else(|| req.bot.clone());
     bot.approval = req.app.turns.effective_approval(&req.app.store, &bot.id, &bot.approval);

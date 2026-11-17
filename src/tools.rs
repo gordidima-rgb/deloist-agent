@@ -163,7 +163,7 @@ fn base_tool_defs() -> Value {
             "remember",
             "Записать факт в долгую память или исправить его. Один факт — одна мысль. scope shared — общая память \
              всех ботов: о человеке (имя, предпочтения, контакты); team — память твоей команды: договорённости и знания \
-             только этой команды, боты вне её их не увидят; self — твоя: рабочие наработки и настройки. \
+             только этой команды, боты вне её их не увидят; self — твоя (файл memory.md в твоей папке): рабочие наработки, текущие задачи и настройки. \
              С id или тем же заголовком факт правится, а не дублируется. Запомненное перестало работать, а ты нашёл, что работает, — исправь этот же факт сразу; ошибку записывай вместе с обходом.",
             json!({
                 "title": { "type": "string", "description": "Суть одной строкой: «Отчёты Ozon — по понедельникам к 10:00»." },
@@ -179,8 +179,9 @@ fn base_tool_defs() -> Value {
                 "id": { "type": "string", "description": "Номер факта, чтобы исправить его." },
                 "pinned": { "type": "boolean", "description": "Закрепить: факт идёт в твой промпт целиком в каждом ходе (место мало, ~2000 знаков). Закрепляй только то, что нужно почти в каждом ходе; остальные факты видны заголовком и открываются через recall. Только для self и team. По умолчанию false." },
                 "quote": { "type": "string", "description": "Дословная цитата слов человека, из которой следует факт о нём (kind user). Нужна при записи после задачи; обычно не нужна." },
+                "forget": { "type": "boolean", "description": "true вместе с id — убрать устаревшую запись из своей памяти или памяти команды (записи человека не убираются). title тогда не нужен." },
             }),
-            &["title"],
+            &[],
         ),
         function(
             "recall",
@@ -945,6 +946,30 @@ fn plain_components(raw: &str) -> bool {
 
 /// Путь для записи и признак «вне своей папки» (или файл автозапуска).
 pub(crate) fn write_target(app: &App, bot_id: &str, raw: &str) -> Result<(std::path::PathBuf, bool), String> {
+    let target = write_target_raw(app, bot_id, raw)?;
+    if let Some(refusal) = memory_file_refusal(app, &target.0) {
+        return Err(format!("{raw}: {refusal}"));
+    }
+    Ok(target)
+}
+
+/// memory.md и brain.md в корне папки любого бота пишет только программа: память — через `remember`
+/// (там проверки и журнал), правила — карточкой `propose_rule`.
+pub(crate) fn memory_file_refusal(app: &App, path: &Path) -> Option<&'static str> {
+    let name = path.file_name()?.to_string_lossy().to_lowercase();
+    let message = match name.as_str() {
+        "memory.md" => "memory.md — твоя память: пиши в неё через remember (forget — убрать запись), а не write_file",
+        "brain.md" => "brain.md — правила от человека: их меняет только человек, предложи правило через propose_rule",
+        _ => return None,
+    };
+    let workspaces = app.store.data_dir().join("workspaces");
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let parent = path.parent()?;
+    let in_workspace = canon(parent.parent()?) == canon(&workspaces) || parent.parent() == Some(workspaces.as_path());
+    in_workspace.then_some(message)
+}
+
+fn write_target_raw(app: &App, bot_id: &str, raw: &str) -> Result<(std::path::PathBuf, bool), String> {
     let store = &app.store;
     if crate::cloud::active() {
         return cloud_target(store, bot_id, raw).map(|path| {

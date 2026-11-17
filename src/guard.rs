@@ -583,6 +583,8 @@ fn human_only(path: &str) -> bool {
         // Профиль человека и доктор памяти (он переписывает и удаляет факты): тоже только окно, не скрипт бота с ключом программы.
         || path.starts_with("/api/memory/profile")
         || path.starts_with("/api/memory/doctor")
+        // memory.md бота текстом и его brain.md (правила от человека): правит только человек в ящике бота.
+        || (path.starts_with("/api/bots/") && (path.trim_end_matches('/').ends_with("/memory-file") || path.trim_end_matches('/').ends_with("/brain")))
         // Токен своего бота Telegram, привязка чата и переписка от лица человека — только окно.
         || path.starts_with("/api/telegram")
         // Токен своего бота Discord, привязка личной переписки и ответы от лица человека — тоже.
