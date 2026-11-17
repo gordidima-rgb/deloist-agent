@@ -121,6 +121,55 @@ async fn a_signed_newer_version_is_offered_and_installed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_scheduled_check_installs_in_the_background_and_waits_for_a_restart() {
+    let url = release_host("99.0.0", SEED, NEW_EXE, NEW_EXE).await;
+    let fx = start("update-auto", &url, &[("CREW_TEST_UPDATE_SCHEDULE", "1")]).await;
+    let updates = wait_state(&fx.crew, "ready").await;
+    assert_eq!(updates["app"]["latest"], "99.0.0");
+    assert_eq!(std::fs::read(&fx.target).unwrap(), NEW_EXE, "новая версия уже на месте");
+    assert_eq!(std::fs::read(fx.target.with_extension("old.exe")).unwrap(), b"MZ old version");
+    // Сама программа не перезапускается, повторная проверка готовое не сбрасывает.
+    let checked = fx.crew.ok("POST", "/api/updates/check", None).await;
+    assert_eq!(checked["app"]["state"], "ready", "{checked}");
+    fx.crew.ok("POST", "/api/updates/restart", None).await;
+    wait_state(&fx.crew, "installed").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_whole_changelog_is_served_and_images_stay_inside_their_folder() {
+    let crew = Crew::start("update-changelog").await;
+    let all = crew.ok("GET", "/api/whats-new?all=1", None).await;
+    assert_eq!(all["all"], true);
+    assert!(all["sections"].as_array().unwrap().len() > 3, "{all}");
+    let some = crew.ok("GET", "/api/whats-new?from=0.3.6", None).await;
+    assert!(some["sections"].as_array().unwrap().len() < all["sections"].as_array().unwrap().len());
+    for name in ["..%2f..%2fCargo.toml", "%2e%2e%5cCargo.toml", "nope.png"] {
+        let (status, _) = crew.send("GET", &format!("/api/whats-new/image/{name}"), None).await;
+        assert_eq!(status, 404, "{name}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_without_a_ready_version_is_refused() {
+    let url = release_host("99.0.0", SEED, NEW_EXE, NEW_EXE).await;
+    let fx = start("update-norestart", &url, &[]).await;
+    let (status, _) = fx.crew.send("POST", "/api/updates/restart", None).await;
+    assert_eq!(status, 409);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_update_off_keeps_the_manual_flow() {
+    let url = release_host("99.0.0", SEED, NEW_EXE, NEW_EXE).await;
+    let fx = start("update-auto-off", &url, &[("CREW_TEST_UPDATE_SCHEDULE", "4")]).await;
+    fx.crew.ok("PUT", "/api/settings", Some(json!({ "autoUpdate": false }))).await;
+    // Первая плановая проверка идёт через 4 секунды; ждём, пока она найдёт версию.
+    wait_state(&fx.crew, "available").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fx.crew.ok("GET", "/api/updates", None).await["app"]["state"], "available");
+    assert_eq!(std::fs::read(&fx.target).unwrap(), b"MZ old version");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_wrong_signature_is_refused_and_shown() {
     let url = release_host("99.0.0", [9; 32], NEW_EXE, NEW_EXE).await;
     let fx = start("update-badsig", &url, &[]).await;

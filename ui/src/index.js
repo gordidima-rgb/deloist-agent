@@ -19,6 +19,8 @@ import SignInCard from './components/SignInCard.svelte';
 import ConsentCard from './components/ConsentCard.svelte';
 import AccountRights from './components/AccountRights.svelte';
 import WhatsNew from './components/WhatsNew.svelte';
+import UpdatePlaque from './components/UpdatePlaque.svelte';
+import { parseNotes } from './lib/whatsNew.js';
 import SettingsNav, { select, current } from './components/settings/SettingsNav.svelte';
 import ProviderList from './components/providers/ProviderList.svelte';
 import AgentCard from './components/providers/AgentCard.svelte';
@@ -112,6 +114,10 @@ window.DeloistUI = {
   mountChatDates: (target, props) => mountComponent(ChatDates, target, props),
   mountMentionPopover: (target, props) => mountComponent(MentionPopover, target, props),
   mountWhatsNew: (target, props) => mountComponent(WhatsNew, target, props),
+  // Заметки версии из подписанного описания → разделы для окна «Что нового».
+  parseNotes,
+  // Плашка «Deloist X готов» внизу боковой панели.
+  mountUpdatePlaque: (target, props) => mountComponent(UpdatePlaque, target, props),
   mountKnowMe: (target, props) => mountComponent(KnowMe, target, props),
   mountVoiceChat: (target, props) => mountComponent(VoiceChat, target, props),
   // Чат: карточка «Нужно разрешение» и разметка ответов (абзацы, списки, таблицы, ссылки со значком).

@@ -498,7 +498,7 @@ fn verdict(guard: &Guard, peer: std::net::IpAddr, method: &Method, path: &str, q
 
 /// Пути, закрытые в облаке (`norm` уже в нижнем регистре, без повторных слэшей).
 pub(crate) fn cloud_closed(norm: &str) -> bool {
-    const PREFIXES: [&str; 18] = [
+    const PREFIXES: [&str; 19] = [
         "/api/vault",              // менеджеры паролей через op и bw
         "/api/selfdev",            // самодоработка: git и cargo
         "/api/browser/obscura",    // чужой движок, скачивание и запуск
@@ -509,6 +509,7 @@ pub(crate) fn cloud_closed(norm: &str) -> bool {
         "/api/dock",
         "/api/shortcut",
         "/api/updates/app",        // обновление идёт новым образом, а не заменой файла
+        "/api/updates/restart",    // перезапуск на поставленную версию
         "/api/updates/tools",      // npm и CLI-агенты
         "/api/providers/scan",
         "/api/voice/prepare",      // локальное распознавание речи
@@ -563,6 +564,9 @@ fn human_only(path: &str) -> bool {
         // Правка выделенного вставляет текст в окно человека, сочетания клавиш — его настройка,
         // распознавание речи тратит его баланс: скрипту бота сюда нельзя.
         || path.starts_with("/api/selection/")
+        // Установка и перезапуск на новую версию: меняют то, что запускается на компьютере.
+        || path == "/api/updates/app"
+        || path == "/api/updates/restart"
         || path.starts_with("/api/hotkeys")
         || path.starts_with("/api/voice/")
         // Режим разработки открывает боту исходники программы: включает его только человек.
@@ -1192,7 +1196,7 @@ mod tests {
     fn cloud_policy_closes_console_install_and_desktop_routes() {
         for path in [
             "/api/vault", "/api/vault/logins", "/api/selfdev/clone", "/api/browser/obscura/install", "/api/browser/moli/install",
-            "/api/providers/x/install", "/api/providers/scan", "/api/providers/x/check", "/api/providers/x/connect", "/api/updates/app",
+            "/api/providers/x/install", "/api/providers/scan", "/api/providers/x/check", "/api/providers/x/connect", "/api/updates/app", "/api/updates/restart",
             "/api/updates/tools/x", "/api/voice/prepare", "/api/voice/local/x/download", "/api/user-chrome/connect", "/api/selection/current",
             "/api/hotkeys", "/api/dock/new-bot", "/api/shortcut", "/api/bots/x/screen", "/api/bots/x/screen/input", "/api/bots/x/pet-place", "/api/bots/x/file/open-in-vscode",
             "/api/import/hermes", "/api/know-me/read", "/api/voice/settings",

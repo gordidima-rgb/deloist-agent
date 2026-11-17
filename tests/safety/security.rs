@@ -1573,6 +1573,21 @@ async fn the_program_key_cannot_accept_or_decline_specialist_offers() {
 }
 
 #[tokio::test]
+async fn the_program_key_cannot_install_or_restart_the_program() {
+    let crew = Crew::start("update-restart-agent").await;
+    let token = agent_token(&crew);
+    for path in ["/api/updates/restart", "/api/updates/app"] {
+        let response = reqwest::Client::new()
+            .post(format!("{}{path}", crew.base))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "ключ программы дошёл до {path}");
+    }
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_touch_the_optimizer() {
     let crew = Crew::start("optimizer-agent").await;
     let state = crew.ok("GET", "/api/state", None).await;

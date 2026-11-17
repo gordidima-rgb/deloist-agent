@@ -5,6 +5,8 @@ window.DeloistUpdates = (() => {
 
   let api = null;
   let toast = () => {};
+  let openWhatsNew = null;
+  let plaque = null;
   let snapshot = null;
   let checked = false;
   let checking = false;
@@ -59,13 +61,19 @@ window.DeloistUpdates = (() => {
 
   const closable = (id, version) => dismissed()[id] !== version;
 
+  // В карточку идёт только короткая строка: полные заметки (раздел журнала) показывает окно «Что нового».
+  const shortNotes = (text) => (text && !text.trim().includes('\n') && text.length <= 200 ? text.trim() : '');
+
   function appCard(app, current) {
     const version = app.latest || '';
     const range = version ? `${current} → ${version}` : '';
     switch (app.state) {
       case 'available':
         if (!closable('app', version)) return null;
-        return { id: 'app', title: tr('Вышла новая версия Deloist'), meta: range, notes: app.notes, note: tr('Программа перезапустится сама.'), action: tr('Обновить'), run: installApp, close: version };
+        return { id: 'app', title: tr('Вышла новая версия Deloist'), meta: range, notes: shortNotes(app.notes), note: tr('Программа перезапустится сама.'), action: tr('Обновить'), run: installApp, close: version };
+      case 'ready':
+        // Версия уже на месте: вместо карточки справа внизу боковой панели стоит плашка с «Перезапустить».
+        return null;
       case 'waiting':
         return { id: 'app', title: tr('Новая версия Deloist на подходе'), meta: range, note: tr('Поставлю, как только боты закончат работу.') };
       case 'downloading':
@@ -168,8 +176,38 @@ window.DeloistUpdates = (() => {
     }
   }
 
+  // Плашка «Deloist X готов»: свою версию программа уже поставила, осталось перезапустить.
+  function renderPlaque() {
+    const host = document.getElementById('update-plaque');
+    if (!host) return;
+    const app = snapshot?.app;
+    if (app?.state !== 'ready' || !app.latest || !window.DeloistUI?.mountUpdatePlaque) {
+      if (plaque) {
+        try { plaque.destroy(); } catch {}
+        plaque = null;
+      }
+      host.replaceChildren();
+      return;
+    }
+    const props = { version: app.latest, pending: Boolean(app.restartPending), error: app.error ? trServer(app.error) : '' };
+    if (plaque) {
+      plaque.update(props);
+      return;
+    }
+    plaque = window.DeloistUI.mountUpdatePlaque(host, { ...props, onrestart: restartApp, onwhatsnew: showNotes });
+  }
+
+  // Заметки поставленной версии лежат в подписанном описании: до перезапуска их показывает это окно.
+  function showNotes() {
+    const app = snapshot?.app;
+    if (!app || !openWhatsNew) return;
+    const sections = window.DeloistUI.parseNotes(app.notes, app.latest);
+    openWhatsNew({ current: app.latest, from: snapshot.current, sections });
+  }
+
   function appLine() {
     const { current, app } = snapshot;
+    if (app.state === 'ready') return tr('Версия {latest} установлена, осталось перезапустить', { latest: app.latest });
     if (app.latest && app.state !== 'error') return tr('Версия {current}, вышла {latest}', { current, latest: app.latest });
     if (app.state === 'error') return trServer(app.error);
     return checked ? tr('Версия {current}, это последняя', { current }) : tr('Версия {current}', { current });
@@ -183,6 +221,11 @@ window.DeloistUpdates = (() => {
     if (summaryVersion) summaryVersion.textContent = snapshot.current;
     const foot = document.getElementById('upd-settings-foot');
     if (foot) foot.textContent = tr('Deloist Боты {version}', { version: snapshot.current });
+    const restart = document.getElementById('upd-restart');
+    if (restart) {
+      restart.hidden = snapshot.app.state !== 'ready';
+      restart.disabled = Boolean(snapshot.app.restartPending);
+    }
     const button = document.getElementById('upd-check');
     button.disabled = checking;
     button.textContent = checking ? tr('Проверяю…') : tr('Проверить');
@@ -223,6 +266,7 @@ window.DeloistUpdates = (() => {
 
   function render() {
     renderCards();
+    renderPlaque();
     renderSettings();
   }
 
@@ -249,6 +293,7 @@ window.DeloistUpdates = (() => {
   }
 
   const installApp = () => call('/api/updates/app');
+  const restartApp = () => call('/api/updates/restart');
   const updateTool = (id) => call(`/api/updates/tools/${encodeURIComponent(id)}`);
 
   async function check() {
@@ -264,7 +309,9 @@ window.DeloistUpdates = (() => {
   async function start(deps) {
     api = deps.api;
     toast = deps.toast;
+    openWhatsNew = deps.openWhatsNew || null;
     document.getElementById('upd-check').addEventListener('click', check);
+    document.getElementById('upd-restart')?.addEventListener('click', restartApp);
     try {
       apply(await api('/api/updates'));
     } catch {

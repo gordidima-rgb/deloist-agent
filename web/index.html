@@ -81,6 +81,7 @@
             </button>
             </div>
           </div>
+          <div id="update-plaque" class="update-plaque-host"></div>
         </div>
       </aside>
 
@@ -594,6 +595,7 @@
                         <span class="k-row__sub update-meta" id="upd-app-line"></span>
                       </div>
                       <div class="k-row__control">
+                        <button type="button" class="primary" id="upd-restart" hidden>Перезапустить</button>
                         <button type="button" class="ghost" id="upd-check">Проверить</button>
                         <button type="button" class="ghost" id="upd-whatsnew">Что нового</button>
                       </div>
@@ -605,6 +607,13 @@
                         <span class="k-row__sub">Раз в шесть часов. Если выключить, только по кнопке «Проверить»</span>
                       </div>
                       <span class="switch"><input type="checkbox" name="checkUpdates" /><span></span></span>
+                    </label>
+                    <label class="k-row">
+                      <div class="k-row__text">
+                        <span class="k-row__label">Обновлять автоматически</span>
+                        <span class="k-row__sub">Новая версия скачивается в фоне, боты не прерываются. Запустится при следующем открытии или по кнопке «Перезапустить»</span>
+                      </div>
+                      <span class="switch"><input type="checkbox" name="autoUpdate" /><span></span></span>
                     </label>
                   </div>
                   <p class="note s-note" id="upd-settings-foot"></p>

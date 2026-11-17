@@ -253,6 +253,8 @@ pub struct Settings {
     pub ui_font: String,
     /// Сама проверять, не вышла ли новая версия.
     pub check_updates: bool,
+    /// Ставить найденную версию сама, в фоне: перезапуск только по кнопке или при следующем запуске.
+    pub auto_update: bool,
     /// Порт окна. Один и тот же между запусками: на нём держатся адреса вебхуков и настройки браузера.
     pub local_port: i64,
     /// Ярлык на рабочем столе уже предлагали: удалённый человеком ярлык заново не появляется.
@@ -333,6 +335,7 @@ impl Default for Settings {
             ui_lang: String::new(),
             ui_font: "system".into(),
             check_updates: true,
+            auto_update: true,
             local_port: 0,
             desktop_shortcut_done: false,
             team_onboarded: false,
@@ -1706,6 +1709,9 @@ impl Store {
             }
             if let Some(v) = patch.get("checkUpdates").filter(|v| !v.is_null()) {
                 s.check_updates = truthy(v);
+            }
+            if let Some(v) = patch.get("autoUpdate").filter(|v| !v.is_null()) {
+                s.auto_update = truthy(v);
             }
             if let Some(v) = patch.get("lastSeenVersion").and_then(Value::as_str) {
                 s.last_seen_version = v.chars().take(40).collect();

@@ -1470,6 +1470,10 @@ body.drawer-open #chat { margin-right: min(430px, 40vw); }
 .update-row .ghost { flex: none; }
 .update-list { display: flex; flex-direction: column; gap: var(--space-3); }
 
+/* Плашка «Deloist X готов» внизу боковой панели; в свёрнутой панели ей места нет, версия видна в настройках. */
+.update-plaque-host:empty { display: none; }
+body.side-collapsed .update-plaque-host { display: none; }
+
 /* Сравнение движков браузера в настройках: числа наших замеров. */
 .engine-tests { display: flex; flex-direction: column; gap: var(--space-2); }
 .engine-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }

@@ -40,6 +40,12 @@ fn main() {
                 panic!("sign <ключ> <exe> <версия> <адрес exe> <заметки> <папка>");
             };
             let bytes = std::fs::read(exe).expect("нет exe");
+            // `@файл` — заметки лежат в файле (несколько строк, кириллица без пересказа через командную строку).
+            let notes = match notes.strip_prefix('@') {
+                Some(path) => std::fs::read_to_string(path).expect("нет файла заметок"),
+                None => notes.clone(),
+            };
+            assert!(notes.len() <= 16 * 1024, "заметки длиннее 16 КБ: клиент читает описание до 64 КБ, но заметки должны быть короткими");
             let mut manifest = serde_json::json!({
                 "version": version,
                 "notes": notes,

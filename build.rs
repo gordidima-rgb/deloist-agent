@@ -10,6 +10,7 @@ fn main() {
     println!("cargo:rerun-if-changed=web/icons");
     println!("cargo:rerun-if-changed=web/ui");
     println!("cargo:rerun-if-changed=catalog");
+    println!("cargo:rerun-if-changed=docs/images/whats-new");
     println!("cargo:rerun-if-changed=private");
     println!("cargo:rustc-check-cfg=cfg(deloist_private)");
     if Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("private").is_dir() {
@@ -18,6 +19,7 @@ fn main() {
     write_icon_table();
     write_ui_table();
     write_catalog_table();
+    write_whats_new_images();
     if std::env::var("CARGO_CFG_WINDOWS").is_err() {
         return;
     }
@@ -78,6 +80,34 @@ fn write_ui_table() {
 ");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("ui_files.rs");
     std::fs::write(out, table).expect("запись таблицы web/ui");
+}
+
+/// Картинки окна «Что нового» (docs/images/whats-new/*) встраиваются в exe и отдаются
+/// только по имени файла из этой таблицы: путь из адреса на диск не доходит.
+fn write_whats_new_images() {
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let root = manifest.join("docs").join("images").join("whats-new");
+    let mut files = Vec::new();
+    collect_files(&root, &mut files);
+    files.sort();
+    let mut table = String::from("&[
+");
+    for file in &files {
+        let kind = match file.extension().and_then(|e| e.to_str()) {
+            Some("webp") => "image/webp",
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            _ => continue,
+        };
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        table.push_str(&format!("    ({:?}, {:?}, include_bytes!({:?}) as &[u8]),
+", name, kind, file.display().to_string()));
+    }
+    table.push_str("]
+");
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("whats_new_images.rs");
+    std::fs::write(out, table).expect("запись таблицы картинок");
 }
 
 /// Каталог навыков, агентов и приложений: каждый JSON из catalog/** встраивается как текст.

@@ -512,6 +512,13 @@ async fn install_update(State(app): Shared) -> Response {
     }
 }
 
+async fn restart_update(State(app): Shared) -> Response {
+    match crate::update::request_restart(&app) {
+        Ok(()) => ok(app.updates.snapshot()),
+        Err(message) => fail(StatusCode::CONFLICT, message),
+    }
+}
+
 async fn update_tool(State(app): Shared, Path(id): Path<String>) -> Response {
     match crate::update::request_tool_update(&app, &id) {
         Ok(()) => ok(app.updates.snapshot()),
@@ -539,10 +546,27 @@ async fn health(State(app): Shared) -> Response {
 struct WhatsNewQuery {
     #[serde(default)]
     from: String,
+    /// `all=1` — весь журнал изменений, а не только новое с прошлого раза.
+    #[serde(default)]
+    all: String,
+}
+
+const WHATS_NEW_IMAGES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/whats_new_images.rs"));
+
+/// Картинка окна «Что нового»: только файл из docs/images/whats-new, встроенный при сборке.
+async fn whats_new_image(Path(name): Path<String>) -> Response {
+    match WHATS_NEW_IMAGES.iter().find(|(file, _, _)| *file == name) {
+        Some((_, kind, bytes)) => ([(header::CONTENT_TYPE, *kind), (header::CACHE_CONTROL, "max-age=3600"), (header::X_CONTENT_TYPE_OPTIONS, "nosniff")], *bytes).into_response(),
+        None => fail(StatusCode::NOT_FOUND, "нет такой картинки"),
+    }
 }
 
 async fn whats_new(Query(q): Query<WhatsNewQuery>) -> Response {
     let current = env!("CARGO_PKG_VERSION");
+    if !q.all.is_empty() && q.all != "0" {
+        let sections = crate::changelog::parse(crate::changelog::CHANGELOG);
+        return ok(json!({ "current": current, "from": "", "all": true, "sections": sections }));
+    }
     let (current, from, sections) = crate::changelog::since(crate::changelog::CHANGELOG, current, &q.from);
     ok(json!({ "current": current, "from": from, "sections": sections }))
 }
@@ -3802,6 +3826,7 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/whats-new", get(whats_new))
+        .route("/api/whats-new/image/{name}", get(whats_new_image))
         .route("/api/state", get(state))
         .route("/api/feedback", post(send_feedback))
         .route("/api/account", get(get_account))
@@ -3842,6 +3867,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/updates", get(get_updates))
         .route("/api/updates/check", post(check_updates))
         .route("/api/updates/app", post(install_update))
+        .route("/api/updates/restart", post(restart_update))
         .route("/api/updates/tools/{id}", post(update_tool))
         .route("/api/events", get(events))
         .route("/api/bots", post(add_bot))

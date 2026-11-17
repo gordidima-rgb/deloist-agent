@@ -80,7 +80,7 @@ describe('settings window layout', () => {
     for (const id of ['skills-list', 'skill-name', 'skill-desc', 'skill-body', 'skill-add', 'mcp-list', 'mcp-name', 'mcp-transport', 'mcp-command', 'mcp-url', 'mcp-args', 'mcp-auto', 'mcp-add', 'team-export', 'team-import', 'team-file', 'team-note', 'rules-list', 'user-chrome-body', 'dock-enabled', 'dock-layer', 'dock-display', 'dock-edge', 'dock-autohide', 'dock-activity', 'dock-results', 'dock-bots', 'pets-mode', 'pet-picks', 'obscura-action', 'obscura-line', 'browser-engine', 'upd-check', 'upd-whatsnew', 'upd-tools', 'upd-app-line', 'upd-summary-version', 'upd-settings-foot', 'selfdev-checkout', 'selfdev-save', 'selfdev-clone', 'btn-know-me', 'settings-path', 'set-model', 'stt-models-host', 'sub-telegram', 'sub-discord', 'sub-slack', 'sub-vault', 'sub-cloud']) {
       expect(doc.getElementById(id), id).not.toBeNull();
     }
-    for (const name of ['driver', 'model', 'acpModel', 'planModel', 'baseUrl', 'apiKey', 'anthropicApiKey', 'geminiApiKey', 'apiKeyEnv', 'cliCommand', 'acpCommand', 'fallbackDriver', 'fallbackModel', 'fallbackBaseUrl', 'fallbackApiKey', 'fallbackCliCommand', 'temperature', 'historyLimit', 'vision', 'browserPath', 'browserEngine', 'imageBaseUrl', 'imageModel', 'imageDaily', 'imageApiKey', 'dailyTokenLimit', 'autostart', 'keepAwake', 'checkUpdates', 'petsMode', 'skillLearning']) {
+    for (const name of ['driver', 'model', 'acpModel', 'planModel', 'baseUrl', 'apiKey', 'anthropicApiKey', 'geminiApiKey', 'apiKeyEnv', 'cliCommand', 'acpCommand', 'fallbackDriver', 'fallbackModel', 'fallbackBaseUrl', 'fallbackApiKey', 'fallbackCliCommand', 'temperature', 'historyLimit', 'vision', 'browserPath', 'browserEngine', 'imageBaseUrl', 'imageModel', 'imageDaily', 'imageApiKey', 'dailyTokenLimit', 'autostart', 'keepAwake', 'checkUpdates', 'autoUpdate', 'petsMode', 'skillLearning']) {
       expect(form.elements[name], name).toBeTruthy();
     }
   });
@@ -101,7 +101,7 @@ describe('settings window layout', () => {
   });
 
   it('turns the yes/no selects into switches', () => {
-    for (const name of ['autostart', 'keepAwake', 'checkUpdates', 'vision']) {
+    for (const name of ['autostart', 'keepAwake', 'checkUpdates', 'autoUpdate', 'vision']) {
       expect(form.elements[name].type, name).toBe('checkbox');
     }
   });

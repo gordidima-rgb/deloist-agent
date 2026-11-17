@@ -86,6 +86,10 @@ struct Inner {
     percent: u64,
     error: String,
     install_when_idle: bool,
+    /// Версия уже лежит на месте старой; перезапуск ждёт, пока боты закончат работу.
+    restart_when_idle: bool,
+    /// Куда встала новая версия (путь работающей копии после переименования может быть другим).
+    ready_exe: Option<PathBuf>,
     tools: Vec<ToolStatus>,
 }
 
@@ -110,6 +114,7 @@ impl Updates {
                 "state": if inner.state.is_empty() { "idle" } else { inner.state },
                 "percent": inner.percent,
                 "error": inner.error,
+                "restartPending": inner.restart_when_idle,
             },
             "tools": tools,
         })
@@ -247,7 +252,7 @@ async fn read_manifest() -> Result<Option<Manifest>, String> {
 }
 
 async fn check_app(app: &App, manual: bool) {
-    if matches!(app.updates.app_state(), "waiting" | "downloading" | "installing") {
+    if matches!(app.updates.app_state(), "waiting" | "downloading" | "installing" | "ready") {
         return;
     }
     match read_manifest().await {
@@ -412,18 +417,105 @@ async fn install(app: Arc<App>) {
         let _ = std::fs::rename(old_exe(&exe), &exe);
         return fail(e);
     }
-    // Браузеры закрываем штатно: они успеют записать cookies, и вход не пропадёт.
+    exit_gracefully(&app).await
+}
+
+/// Браузеры закрываем штатно: они успеют записать cookies, и вход не пропадёт.
+async fn exit_gracefully(app: &Arc<App>) -> ! {
     app.browsers.close_all().await;
-    crate::mcp::shutdown(&app).await;
+    crate::mcp::shutdown(app).await;
     crate::sandbox::shutdown();
     app.pets.stop();
     tokio::time::sleep(Duration::from_millis(300)).await;
     std::process::exit(0);
 }
 
+/// Фоновая установка: скачать, проверить, положить на место старой. Ничего не перезапускается:
+/// боты работают дальше, а новая версия запустится при следующем запуске или по кнопке «Перезапустить».
+async fn auto_install(app: Arc<App>) {
+    if crate::cloud::active() {
+        return;
+    }
+    // Отладочная сборка подменяет только тестовый файл, а не самого себя.
+    if cfg!(debug_assertions) && test_env("CREW_TEST_UPDATE_EXE").is_none() {
+        return;
+    }
+    let Some(manifest) = app.updates.inner.lock().unwrap().latest.clone() else {
+        return;
+    };
+    let fail = |message: String| {
+        app.updates.set_app("error", &format!("Не удалось обновить: {message}"));
+        emit(&app);
+    };
+    let exe = match target_exe() {
+        Ok(exe) => exe,
+        Err(e) => return fail(e),
+    };
+    let fresh = temp_exe(&exe);
+    app.updates.inner.lock().unwrap().percent = 0;
+    app.updates.set_app("downloading", "");
+    emit(&app);
+    if let Err(e) = download(&app, &manifest, &fresh).await {
+        let _ = tokio::fs::remove_file(&fresh).await;
+        return fail(e);
+    }
+    if let Err(e) = swap_files(&exe, &fresh) {
+        let _ = tokio::fs::remove_file(&fresh).await;
+        return fail(e);
+    }
+    app.updates.inner.lock().unwrap().ready_exe = Some(exe);
+    app.updates.set_app("ready", "");
+    emit(&app);
+}
+
+/// Перезапуск на уже поставленную версию.
+async fn restart_ready(app: Arc<App>) {
+    let Some(exe) = app.updates.inner.lock().unwrap().ready_exe.clone() else {
+        return;
+    };
+    app.updates.set_app("installing", "");
+    emit(&app);
+    // Тест подменяет отдельный файл: самого себя он не перезапускает.
+    if test_env("CREW_TEST_UPDATE_EXE").is_some() {
+        app.updates.set_app("installed", "");
+        emit(&app);
+        return;
+    }
+    if let Err(e) = restart(&exe) {
+        app.updates.set_app("ready", &format!("Не удалось перезапустить: {e}"));
+        emit(&app);
+        return;
+    }
+    exit_gracefully(&app).await
+}
+
+/// Нажатие «Перезапустить». Идущую работу не обрываем: подождём, пока боты закончат.
+pub fn request_restart(app: &Arc<App>) -> Result<(), String> {
+    crate::cloud::deny(crate::cloud::NO_INSTALL)?;
+    {
+        let mut inner = app.updates.inner.lock().unwrap();
+        if inner.state != "ready" || inner.ready_exe.is_none() {
+            return Err("готовой версии нет".to_string());
+        }
+        if !app.turns.busy_bots().is_empty() {
+            inner.restart_when_idle = true;
+            inner.error.clear();
+            drop(inner);
+            emit(app);
+            return Ok(());
+        }
+        inner.restart_when_idle = false;
+    }
+    tokio::spawn(restart_ready(app.clone()));
+    Ok(())
+}
+
 /// Нажатие «Обновить». Идущую работу не обрываем: подождём, пока боты закончат.
 pub fn request_install(app: &Arc<App>) -> Result<(), String> {
     crate::cloud::deny(crate::cloud::NO_INSTALL)?;
+    if app.updates.app_state() == "ready" {
+        return request_restart(app);
+    }
     {
         let mut inner = app.updates.inner.lock().unwrap();
         if inner.latest.is_none() {
@@ -447,16 +539,24 @@ pub fn request_install(app: &Arc<App>) -> Result<(), String> {
 
 /// Зовётся планировщиком: не пора ли поставить версию, которую отложили до конца работы.
 pub fn tick(app: &Arc<App>) {
-    let ready = {
+    let (ready, restart_now) = {
         let mut inner = app.updates.inner.lock().unwrap();
-        let ready = inner.install_when_idle && app.turns.busy_bots().is_empty();
+        let idle = app.turns.busy_bots().is_empty();
+        let ready = inner.install_when_idle && idle;
+        let restart_now = inner.restart_when_idle && idle && inner.state == "ready";
         if ready {
             inner.install_when_idle = false;
         }
-        ready
+        if restart_now {
+            inner.restart_when_idle = false;
+        }
+        (ready, restart_now)
     };
     if ready {
         tokio::spawn(install(app.clone()));
+    }
+    if restart_now {
+        tokio::spawn(restart_ready(app.clone()));
     }
 }
 
@@ -634,17 +734,22 @@ pub enum ToolUpdateError {
 // ---------------------------------------------------------------------------
 
 pub fn start(app: Arc<App>) {
-    // В отладочной сборке проверку запускает только сам тест.
-    if cfg!(debug_assertions) {
+    // В отладочной сборке проверку запускает только сам тест (или стенд с CREW_TEST_UPDATE_SCHEDULE).
+    let scheduled = test_env("CREW_TEST_UPDATE_SCHEDULE").map(|v| v.parse::<u64>().unwrap_or(1));
+    if cfg!(debug_assertions) && scheduled.is_none() {
         return;
     }
     tokio::spawn(async move {
-        tokio::time::sleep(FIRST_CHECK_AFTER).await;
+        tokio::time::sleep(scheduled.map_or(FIRST_CHECK_AFTER, Duration::from_secs)).await;
         loop {
-            if app.store.settings().check_updates {
+            let settings = app.store.settings();
+            if settings.check_updates {
                 check_all(&app, false).await;
+                if settings.auto_update && app.updates.app_state() == "available" {
+                    auto_install(app.clone()).await;
+                }
             }
-            tokio::time::sleep(CHECK_EVERY).await;
+            tokio::time::sleep(if scheduled.is_some() { Duration::from_secs(3600) } else { CHECK_EVERY }).await;
         }
     });
 }

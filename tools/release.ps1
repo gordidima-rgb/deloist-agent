@@ -1,11 +1,12 @@
 # Выпуск новой версии: сборка, подпись и загрузка в открытый репозиторий выпусков.
 # Версия берётся из Cargo.toml: подними её там и закоммить до запуска.
 #
-#   powershell -File tools\release.ps1 -Notes "Что нового одной строкой"
+#   pwsh -NoProfile -File tools\release.ps1                        (заметки: раздел версии из CHANGELOG.md)
+#   pwsh -NoProfile -File tools\release.ps1 -Notes "Одна строка"   (свои заметки вместо раздела)
 #
 # Закрытый ключ лежит вне репозитория. Без него новые версии не поставятся ни у кого.
 param(
-  [Parameter(Mandatory = $true)][string]$Notes,
+  [string]$Notes = '',
   [string]$Repo = 'gordidima-rgb/deloist-agent',
   [string]$Key = (Join-Path $env:USERPROFILE '.deloist\release-signing.key'),
   [string]$Target = 'C:\Users\Public\crew-target'
@@ -22,6 +23,23 @@ if ($LASTEXITCODE -ne 0) { throw 'Проверка специалистов ка
 
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
 $tag = "v$version"
+# Заметки выпуска: без -Notes берём раздел этой версии из CHANGELOG.md. Они уходят в подписанное описание
+# (окно «Что нового» показывает их до перезапуска) и в тело выпуска на GitHub. Строки-картинки убираем:
+# старая копия программы файла картинки ещё не знает.
+$notesFile = Join-Path ([IO.Path]::GetTempPath()) "deloist-notes-$version.md"
+if ($Notes) {
+  $notesText = $Notes
+} else {
+  $inSection = $false
+  $lines = foreach ($line in (Get-Content -Encoding UTF8 (Join-Path $root 'CHANGELOG.md'))) {
+    if ($line -match '^## \[') { $inSection = ($line -match ('^## \[' + [regex]::Escape($version) + '\]')) ; continue }
+    if ($inSection -and $line -notmatch '^\s*!\[') { $line }
+  }
+  $notesText = (($lines -join "`n").Trim())
+  if (-not $notesText) { throw "В CHANGELOG.md нет раздела [$version]: допиши его или передай -Notes." }
+}
+if ([Text.Encoding]::UTF8.GetByteCount($notesText) -gt 16384) { throw 'Заметки длиннее 16 КБ: сократи раздел CHANGELOG.md.' }
+[IO.File]::WriteAllText($notesFile, $notesText, (New-Object Text.UTF8Encoding($false)))
 gh release view $tag --repo $Repo 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) { throw "Выпуск $tag уже есть: подними версию в Cargo.toml." }
 
@@ -47,7 +65,7 @@ Copy-Item "$Target\release\deloist.exe" "$out\deloist.exe" -Force
 Copy-Item "$Target\release\deloist-setup.exe" "$out\Deloist-Setup.exe" -Force
 
 $url = "https://github.com/$Repo/releases/download/$tag/deloist.exe"
-& "$Target\release\examples\release_sign.exe" sign $Key "$out\deloist.exe" $version $url $Notes $out | Out-Null
+& "$Target\release\examples\release_sign.exe" sign $Key "$out\deloist.exe" $version $url "@$notesFile" $out | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Подпись не прошла.' }
 # Публичная история — коммит за коммитом, без private/; метка выпуска встаёт на код, из которого собран файл.
 git fetch -q origin
@@ -56,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Выпускаемый коммит ещё н�
 & pwsh -NoProfile -File (Join-Path $root 'private\tools\sync-public.ps1') -Source HEAD -Push
 if ($LASTEXITCODE -ne 0) { throw 'Публичная история не обновилась (private\tools\sync-public.ps1).' }
 $publicHead = (git rev-parse refs/public/head).Trim()
-gh release create $tag --repo $Repo --target $publicHead --title "Deloist $version" --notes $Notes `
+gh release create $tag --repo $Repo --target $publicHead --title "Deloist $version" --notes-file $notesFile `
   "$out\Deloist-Setup.exe" "$out\deloist.exe" "$out\latest.json" "$out\latest.json.sig"
 if ($LASTEXITCODE -ne 0) { throw 'Загрузка не прошла.' }
 "Готово: https://github.com/$Repo/releases/tag/$tag"

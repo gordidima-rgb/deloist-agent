@@ -6985,6 +6985,7 @@ function openKnowMe() {
   });
 }
 
+// Окно «Что нового». Полный журнал берётся с сервера по ссылке «Все изменения».
 function openWhatsNew(data) {
   if (!window.DeloistUI?.mountWhatsNew) return;
   if (whatsNewHandle) {
@@ -6997,6 +6998,8 @@ function openWhatsNew(data) {
     current: data?.current || '',
     from: data?.from || '',
     sections: data?.sections || [],
+    startAll: Boolean(data?.all),
+    loadAll: async () => (await api('/api/whats-new?all=1')).sections || [],
     onclose: () => {
       try { whatsNewHandle?.destroy(); } catch {}
       whatsNewHandle = null;
@@ -7061,6 +7064,7 @@ function fillSettings() {
   f.autostart.checked = Boolean(S.settings.autostart);
   f.keepAwake.checked = Boolean(S.settings.keepAwake);
   f.checkUpdates.checked = S.settings.checkUpdates !== false;
+  f.autoUpdate.checked = S.settings.autoUpdate !== false;
   markPets();
   $('#settings-path').textContent = tr('Данные: {path}', { path: S.dataDir });
   const current = { driver: S.settings.driver || 'demo', model: S.settings.model || '' };
@@ -8510,6 +8514,7 @@ function bindUi() {
       autostart: f.autostart.checked,
       keepAwake: f.keepAwake.checked,
       checkUpdates: f.checkUpdates.checked,
+      autoUpdate: f.autoUpdate.checked,
       petsMode: f.petsMode.value,
       skillLearning: f.skillLearning.value,
     };
@@ -9224,7 +9229,7 @@ async function boot() {
     reloadModelPickers();
     return;
   }
-  DeloistUpdates.start({ api, toast });
+  DeloistUpdates.start({ api, toast, openWhatsNew });
   // «Что нового» показываем один раз на новую версию.
   (async () => {
     try {
