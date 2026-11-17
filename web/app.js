@@ -2273,6 +2273,7 @@ async function selectRoom(id) {
   S.queueEdit = null;
   abortQueueDrag();
   S.view = { kind: 'room', id };
+  attachFollowView();
   S.currentId = null;
   S.live = null;
   S.roomLive = null;
@@ -4948,6 +4949,7 @@ async function selectBot(id) {
   S.currentId = id;
   window.dispatchEvent(new CustomEvent('deloist:bot', { detail: id }));
   S.view = { kind: 'bot', id };
+  attachFollowView();
   S.roomLive = null;
   $('#head-avatar').classList.remove('room-icon');
   setPanelTitle(tr('Профиль, память, файлы'));
@@ -5240,10 +5242,20 @@ const attachOwner = () => (inRoom() ? currentRoom()?.botIds?.[0] : S.currentId) 
 
 let attachBox = null;
 let attachView = '';
+// Недописанный текст у каждого бота и команды свой: уходя из чата, поле оставляет черновик ему,
+// а в новом чате показывает его собственный.
+const drafts = new Map();
 // Вложения принадлежат открытому чату: при переходе в другой они не должны уехать не туда.
 function attachFollowView() {
   const key = `${S.view.kind}:${S.view.id}`;
   if (key === attachView) return;
+  const input = $('#input');
+  if (input) {
+    if (input.value) drafts.set(attachView, input.value);
+    else drafts.delete(attachView);
+    input.value = drafts.get(key) || '';
+    autosize();
+  }
   attachView = key;
   attachBox?.clear();
 }
@@ -5262,7 +5274,12 @@ async function postWithFiles(url, uploadUrl, text, files, input, extra = {}) {
   } catch (err) {
     toast(err.message);
     // Человек ушёл в другой чат, пока файлы ехали: текст и файлы чужому полю не отдаём.
-    if (!input || view !== attachView) return { error: err };
+    if (!input) return { error: err };
+    if (view !== attachView) {
+      // Текст возвращается в черновик того чата, откуда его отправляли.
+      if (!drafts.get(view)) drafts.set(view, text);
+      return { error: err };
+    }
     if (!input.value) input.value = text;
     attachBox.restore(files);
     autosize();
@@ -7919,6 +7936,7 @@ function clearChatView() {
   S.queueEdit = null;
   abortQueueDrag();
   S.view = { kind: 'bot', id: '' };
+  attachFollowView();
   S.currentId = null;
   S.live = null;
   S.roomLive = null;
