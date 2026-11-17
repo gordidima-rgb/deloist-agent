@@ -22,6 +22,8 @@ use crate::store::{now, uid, Bot, Room};
 use crate::vault;
 use crate::App;
 
+pub mod team_review;
+
 /// Сколько знаков (заголовки и тексты) может занимать общая память.
 pub const SHARED_LIMIT: usize = 20_000;
 /// Оглавление общей памяти в каждом запросе.

@@ -172,6 +172,7 @@ pub async fn recover_interrupted(app: &Arc<App>) {
 async fn tick(app: &Arc<App>) {
     crate::update::tick(app);
     crate::memory::daily_tick(app);
+    crate::memory::team_review::ensure_routines(app).await;
     crate::optimizer::tick(app);
     crate::todos::tick(app);
     crate::habits::remind_tick(app).await;
