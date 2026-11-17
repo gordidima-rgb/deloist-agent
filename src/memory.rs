@@ -924,12 +924,18 @@ impl Draft {
         let text = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         // Старая форма инструмента: одно поле `text`.
         let title = if text("title").is_empty() { text("text") } else { text("title") };
+        // Модель шлёт и `title`, и `text` с подробностями: без `body` текст пропадал, и факт оставался пустым
+        // (так потерялись критерии подбора постов, 17.11.2026).
+        let body = args.get("body").and_then(Value::as_str).map(str::to_string).or_else(|| {
+            let extra = text("text");
+            (!text("title").is_empty() && !extra.trim().is_empty() && extra != text("title")).then_some(extra)
+        });
         Self {
             id: bare_id(&text("id")),
             scope: text("scope"),
             kind: text("kind"),
             title,
-            body: args.get("body").and_then(Value::as_str).map(str::to_string),
+            body,
             entities: args.get("entities").filter(|v| !v.is_null()).map(strings),
             links: args.get("links").filter(|v| !v.is_null()).map(strings),
         }
@@ -1077,6 +1083,10 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
 pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
     let (fact, created) = write(app, &Writer::Bot(bot), Draft::from_args(args)).await?;
     let place = if fact.scope == SHARED { "общую память — это узнают все боты" } else { "твою память" };
+    if !created && now() - fact.updated_at > 5_000 {
+        // Правка ничего не изменила: не говорим «обновлён», иначе бот считает, что записал.
+        return Ok(format!("Факт [{}] уже такой, ничего не изменилось. Чтобы поменять текст, передай body (или id и title).", fact.id));
+    }
     Ok(if created { format!("Записано [{}] в {place}.", fact.id) } else { format!("Факт [{}] обновлён.", fact.id) })
 }
 
@@ -1806,6 +1816,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn text_next_to_title_becomes_the_body() {
+        let both = Draft::from_args(&json!({ "title": "Критерии", "text": "не больше 5 ответов" }));
+        assert_eq!((both.title.as_str(), both.body.as_deref()), ("Критерии", Some("не больше 5 ответов")));
+        let old = Draft::from_args(&json!({ "text": "одна строка" }));
+        assert_eq!((old.title.as_str(), old.body.as_deref()), ("одна строка", None), "старая форма: text — это заголовок");
+        let explicit = Draft::from_args(&json!({ "title": "T", "body": "B", "text": "X" }));
+        assert_eq!(explicit.body.as_deref(), Some("B"), "явный body главнее");
+    }
 
     fn fact(id: &str, scope: &str, kind: &str, title: &str) -> Fact {
         Fact { id: id.into(), scope: scope.into(), kind: kind.into(), title: title.into(), updated_at: 1, ..Fact::default() }

@@ -44,6 +44,10 @@ const STDERR_LINES: usize = 30;
 /// Сколько прошлых сообщений пересказать новой сессии и сколько символов на каждое.
 const RECAP_MESSAGES: usize = 12;
 const RECAP_CHARS: usize = 2000;
+/// Дальше последних `RECAP_MESSAGES` сообщения короче, всего не больше `RECAP_MAX_MESSAGES` и `RECAP_BUDGET` знаков.
+const RECAP_OLD_CHARS: usize = 500;
+const RECAP_MAX_MESSAGES: usize = 80;
+const RECAP_BUDGET: usize = 40_000;
 /// Заполненность окна агента, после которой прежнюю сессию не продолжаем: 85% — уже тесно.
 const FRESH_SESSION_AT: f64 = 0.85;
 const MAX_READ: u64 = 4 * 1024 * 1024;
@@ -277,6 +281,42 @@ fn pool() -> &'static Mutex<HashMap<String, Arc<Agent>>> {
 fn known_sessions() -> &'static Mutex<HashMap<(String, String), (String, String)>> {
     static SESSIONS: OnceLock<Mutex<HashMap<(String, String), (String, String)>>> = OnceLock::new();
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Файл с последними сессиями на диске: после перезапуска программы (Dev обновляется после каждого слияния)
+/// агент продолжает прежнюю сессию через `session/load`, а не начинает с коротким пересказом.
+fn sessions_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("acp-sessions.json")
+}
+
+fn saved_session(data_dir: &Path, key: &(String, String)) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(sessions_path(data_dir)).ok()?;
+    let map: HashMap<String, (String, String)> = serde_json::from_str(&text).ok()?;
+    map.get(&format!("{}\u{1}{}", key.0, key.1)).cloned()
+}
+
+/// Записать (или убрать, если `value` пуст) сессию в файл. Ошибки записи не мешают ходу.
+fn save_session(data_dir: &Path, key: &(String, String), value: Option<(String, String)>) {
+    let path = sessions_path(data_dir);
+    let mut map: HashMap<String, (String, String)> =
+        std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let name = format!("{}\u{1}{}", key.0, key.1);
+    match value {
+        Some(value) if map.get(&name) == Some(&value) => return,
+        Some(value) => {
+            map.insert(name, value);
+        }
+        None => {
+            if map.remove(&name).is_none() {
+                return;
+            }
+        }
+    }
+    let Ok(text) = serde_json::to_string(&map) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
 }
 
 /// Погасить агентов всех ботов: при выходе программы.
@@ -574,6 +614,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         // Окно агента почти полно: прежнюю сессию не продолжаем, начинаем новую и уносим в неё сводку.
         sessions.remove(req.thread);
         known_sessions().lock().unwrap().remove(&key);
+        save_session(req.app.store.data_dir(), &key, None);
         forget_usage(&bot_id, req.thread);
         carry = fresh_session_summary(req.app, req.bot, &writer, req.thread).await;
     }
@@ -585,7 +626,8 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         false
     };
     let session_id = sessions.get(req.thread).cloned().unwrap_or_default();
-    known_sessions().lock().unwrap().insert(key, (agent.signature.clone(), session_id.clone()));
+    known_sessions().lock().unwrap().insert(key.clone(), (agent.signature.clone(), session_id.clone()));
+    save_session(req.app.store.data_dir(), &key, Some((agent.signature.clone(), session_id.clone())));
 
     let prompt = prompt_blocks(&agent, req.messages, fresh, carry.as_deref());
     *agent.inbox.lock().unwrap() = Some(tx);
@@ -738,7 +780,8 @@ async fn open_session(agent: &Agent, req: &Request<'_>, cancel: &CancellationTok
             { "name": TURN_KEY_ENV, "value": turn_key_path(req.app.store.data_dir(), &req.bot.id).to_string_lossy() },
         ] }]);
 
-    let previous = known_sessions().lock().unwrap().get(&(req.bot.id.clone(), req.thread.to_string())).cloned();
+    let session_key = (req.bot.id.clone(), req.thread.to_string());
+    let previous = known_sessions().lock().unwrap().get(&session_key).cloned().or_else(|| saved_session(req.app.store.data_dir(), &session_key));
     if let Some((signature, id)) = previous {
         if signature == agent.signature && init["agentCapabilities"]["loadSession"] == true {
             // Агент повторит историю уведомлениями: хода нет, поэтому они никуда не попадут.
@@ -1345,10 +1388,23 @@ fn prompt_blocks(agent: &Agent, messages: &[Value], fresh: bool, carry: Option<&
             .collect();
         if !history.is_empty() {
             let mut recap = String::from("# Начало разговора (пересказ, отвечать на это не нужно)");
-            for m in history.iter().skip(history.len().saturating_sub(RECAP_MESSAGES)) {
+            // С конца: свежие сообщения целиком, старые короче, пока не выйдет бюджет знаков. Раньше шли
+            // только последние 12, и всё, что было до них (подбор постов, критерии), терялось.
+            let mut lines: Vec<String> = Vec::new();
+            let mut used = 0usize;
+            for (back, m) in history.iter().rev().take(RECAP_MAX_MESSAGES).enumerate() {
                 let who = if m["role"] == "user" { "Человек" } else { "Ты" };
-                let text: String = content_text(&m["content"]).chars().take(RECAP_CHARS).collect();
-                recap.push_str(&format!("\n{who}: {text}"));
+                let limit = if back < RECAP_MESSAGES { RECAP_CHARS } else { RECAP_OLD_CHARS };
+                let text: String = content_text(&m["content"]).chars().take(limit).collect();
+                let line = format!("\n{who}: {text}");
+                used += line.chars().count();
+                if used > RECAP_BUDGET && !lines.is_empty() {
+                    break;
+                }
+                lines.push(line);
+            }
+            for line in lines.iter().rev() {
+                recap.push_str(line);
             }
             intro.push(recap);
         }
@@ -2109,6 +2165,21 @@ mod tests {
         assert_eq!(reported_usage("ub"), Some((10, 100)), "забыть команду — не трогать личную сессию");
         forget_usage("ub", "bot");
     }
+    #[test]
+    fn sessions_survive_a_restart_through_the_file() {
+        let dir = std::env::temp_dir().join(format!("acp-sessions-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = ("bot_1".to_string(), "main".to_string());
+        assert_eq!(saved_session(&dir, &key), None);
+        save_session(&dir, &key, Some(("sig".into(), "sess-7".into())));
+        save_session(&dir, &("bot_2".into(), "main".into()), Some(("sig".into(), "sess-8".into())));
+        assert_eq!(saved_session(&dir, &key), Some(("sig".into(), "sess-7".into())));
+        save_session(&dir, &key, None);
+        assert_eq!(saved_session(&dir, &key), None);
+        assert_eq!(saved_session(&dir, &("bot_2".into(), "main".into())), Some(("sig".into(), "sess-8".into())));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_full_window_needs_a_fresh_session() {
         assert!(!needs_fresh_session(84, 100), "84% — ещё можно продолжать");
