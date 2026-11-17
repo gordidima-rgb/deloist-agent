@@ -23,6 +23,7 @@ use crate::store::{now, uid, Bot, Room};
 use crate::vault;
 use crate::App;
 
+pub mod bot_file;
 pub mod team_review;
 
 /// Сколько знаков (заголовки и тексты) может занимать общая память.
@@ -311,7 +312,60 @@ async fn read_vault(app: &App) -> Result<Option<Book>, String> {
     Ok(Some(Book { next: loaded.next, facts: loaded.facts, broken: false }))
 }
 
+/// Индекс файлов личной памяти ботов (`memory.md` в их папках): кто и когда записал строку.
+fn files_index_path(app: &App) -> PathBuf {
+    app.store.data_dir().join("memory-files.json")
+}
+
+fn bot_files(app: &App) -> Vec<bot_file::BotFile> {
+    app.store
+        .bots()
+        .into_iter()
+        .map(|b| {
+            let dir = app.store.workspace(&b.id);
+            bot_file::BotFile { id: b.id, name: b.name, path: dir.join(bot_file::FILE), main: dir.join(crate::turn::MAIN_FILE) }
+        })
+        .collect()
+}
+
+/// Личные факты ботов берутся из их `memory.md`, а не из папки памяти. Первый раз факты бота из папки
+/// и его MAIN.md переезжают в файл — и книга сразу записывается.
+async fn with_bot_files(app: &App, mut book: Book) -> Book {
+    if book.broken {
+        return book;
+    }
+    let (over, next) = match bot_file::read_async(files_index_path(app), bot_files(app), book.facts.clone(), book.next, now()).await {
+        Ok(read) => read,
+        Err(e) => {
+            eprintln!("[memory] файлы памяти ботов не прочитались: {e}");
+            return Book { broken: true, ..Book::default() };
+        }
+    };
+    book.facts.retain(|f| !over.owned.contains(&f.scope));
+    book.facts.extend(over.facts);
+    book.facts.sort_by_key(|f| number(&f.id));
+    book.next = next;
+    if !over.external.is_empty() {
+        let who = json!({ "kind": "human", "via": "files" });
+        if let Err(e) = journal_entry(app, who, "files", "Правка в memory.md мимо программы", over.external, json!({})).await {
+            eprintln!("[memory] правка memory.md не записана в журнал: {e}");
+        }
+    }
+    if over.needs_write {
+        let _gate = MIGRATION.lock().await;
+        if let Err(e) = save(app, &book).await {
+            eprintln!("[memory] memory.md не записан: {e}");
+        }
+    }
+    book
+}
+
 async fn load(app: &App) -> Book {
+    let book = load_vault(app).await;
+    with_bot_files(app, book).await
+}
+
+async fn load_vault(app: &App) -> Book {
     let broken = |e: String| {
         eprintln!("[memory] память не прочиталась: {e}");
         Book { broken: true, ..Book::default() }
@@ -344,7 +398,11 @@ async fn save(app: &App, book: &Book) -> std::io::Result<()> {
     if book.broken {
         return Err(std::io::Error::other("память не прочиталась — запись отменена, чтобы не стереть её"));
     }
-    vault::write(dir(app), index_path(app), book.facts.clone(), book.next, bot_refs(app)).await
+    let bots = bot_files(app);
+    let owned: HashSet<&str> = bots.iter().map(|b| b.id.as_str()).collect();
+    let (mine, rest): (Vec<Fact>, Vec<Fact>) = book.facts.iter().cloned().partition(|f| owned.contains(f.scope.as_str()));
+    vault::write(dir(app), index_path(app), rest, book.next, bot_refs(app)).await?;
+    bot_file::write_async(files_index_path(app), bots, mine).await
 }
 
 /// Файлы памяти, которые не разобрались и лежат в `_unparsed/`.
