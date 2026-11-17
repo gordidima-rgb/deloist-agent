@@ -6963,6 +6963,7 @@ async function obscuraAction() {
 }
 
 let knowMeHandle = null;
+let whatsNewHandle = null;
 
 function openKnowMe() {
   if (!window.DeloistUI?.mountKnowMe) return;

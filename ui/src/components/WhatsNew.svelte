@@ -244,13 +244,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--k-space-1, 4px);
-    padding: var(--k-space-3, 12px);
+    gap: var(--k-space-3, 12px);
+    padding: var(--k-space-4, 16px) var(--k-space-3, 12px);
   }
   .wn-strip:empty {
     display: none;
   }
   .wn-strip :global(.wn-orb) {
+    position: relative;
     display: block;
     width: 72px;
     height: 72px;
