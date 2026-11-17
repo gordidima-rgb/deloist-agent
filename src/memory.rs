@@ -355,11 +355,38 @@ async fn with_bot_files(app: &App, mut book: Book) -> Book {
     }
     if over.needs_write {
         let _gate = MIGRATION.lock().await;
+        backup_bot_folders(app);
         if let Err(e) = save(app, &book).await {
             eprintln!("[memory] memory.md не записан: {e}");
         }
     }
     book
+}
+
+/// Перед первым переездом личной памяти в memory.md папка `memory/bots` (0.4.2) копируется в
+/// `memory-bots-0.4.2` рядом с данными: переезд удаляет её файлы, а копия остаётся на случай ошибки.
+fn backup_bot_folders(app: &App) {
+    let from = dir(app).join("bots");
+    let to = app.store.data_dir().join("memory-bots-0.4.2");
+    if !from.is_dir() || to.exists() {
+        return;
+    }
+    fn copy(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(())
+    }
+    if let Err(e) = copy(&from, &to) {
+        eprintln!("[memory] копия memory/bots перед переездом не сделана: {e}");
+    }
 }
 
 async fn load(app: &App) -> Book {
