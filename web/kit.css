@@ -626,7 +626,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 /* Badges: working = smouldering ember dot bottom-right; needs you = lava pill top-right; done and unopened = ember dot top-right. */
 .k-ring__work, .k-ring__done, .k-ring__need { position: absolute; z-index: 1; pointer-events: none; --k-badge-cut: var(--k-ink); }
 .k-ring__work { right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: var(--k-ink); box-shadow: 0 0 0 2px var(--k-badge-cut); display: grid; place-items: center; }
-.k-ring__work::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 140, 40, 0.9); }
+.k-ring__work::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 140, 40, 0.9); animation: k-ember 1.4s ease-in-out infinite; }
 .k-ring__done { right: -2px; top: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 3px rgba(255, 120, 20, 0.85); }
 .k-ring__need { right: -3px; top: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; display: grid; place-items: center; font: 800 10px/1 var(--k-font-body); color: var(--k-on-brand); background: var(--k-btn-fill); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 3px rgba(255, 100, 10, 0.8); }
 
@@ -1633,7 +1633,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 .k-badge--neutral { background: var(--k-surface-2); color: var(--k-text-2); box-shadow: inset 0 0 0 1px var(--k-line-strong); }
 .k-badge--brand, .k-badge--attention { color: #fff; background: var(--k-btn-fill); box-shadow: inset 0 0 0 1px rgba(255, 200, 140, 0.75), inset 0 1px 0 rgba(255, 235, 200, 0.55), 0 0 3px rgba(255, 100, 10, 0.75); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.4); }
 .k-badge--ai { background: var(--k-brand-tint); color: var(--k-brand-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-brand) 45%, transparent); }
-.k-badge--ai::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 130, 30, 0.85); }
+.k-badge--ai::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 130, 30, 0.85); animation: k-ember 1.8s ease-in-out infinite; }
 .k-badge--ai.is-dot::before { content: none; }
 .k-badge--done { background: var(--k-surface-2); color: var(--k-text-2); box-shadow: inset 0 0 0 1px var(--k-line); }
 .k-badge--done::before { content: ""; flex: none; width: 9px; height: 5px; margin-top: -2px; border-left: 2px solid var(--k-brand); border-bottom: 2px solid var(--k-brand); transform: rotate(-45deg) scale(0.9); }
@@ -1642,6 +1642,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 .k-badge--outline { background: transparent; color: var(--k-brand-text); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--k-brand) 70%, transparent); }
 .k-badge--error { background: var(--k-danger-tint); color: var(--k-danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-danger) 45%, transparent); }
 .k-badge--error::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-danger); }
+@keyframes k-ember { 50% { box-shadow: 0 0 2px 0 rgba(255, 130, 30, 0.4); transform: scale(0.8); } }
 /* dot: something new, no number */
 .k-badge.is-dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-surface), 0 0 3px rgba(255, 120, 20, 0.8); }
 .k-badge.is-dot.k-badge--neutral { background: var(--k-text-3); box-shadow: 0 0 0 2px var(--k-surface); }

@@ -17,6 +17,9 @@
     docx: 'doc', doc: 'doc', odt: 'doc', rtf: 'doc', md: 'doc', markdown: 'doc', txt: 'doc',
   };
   const DRAW_TOOLS = new Set(['generate_image', 'image', 'image_edit', 'edit_image', 'draw']);
+  // Рисование в любом виде: навык imagegen, сервисы картинок, чтение/правка картинок (образцы и готовые кадры).
+  const DRAW_TEXT = /image[-_ ]?gen|gpt-image|generated_images|openrouter-image|polza-image|xai-imagine|chatgpt-image|grok.?imagine/i;
+  const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']);
   const SEARCH_TOOLS = new Set(['web_search', 'fetch', 'fetch_url', 'web_fetch']);
   // Сборка и компиляция: команды, которые строят программу.
   const BUILD = /\b(cargo\s+(build|check|test|clippy|run)|npm\s+(run\s+)?(build|test|ci|install|i)|pnpm\s+(build|install|test)|yarn\s+(build|install)|make|cmake|ninja|msbuild|dotnet\s+(build|publish|run|test)|gradlew?|mvn|tsc|vite\s+build|webpack|go\s+(build|test)|rustc|gcc|g\+\+|clang|javac|pip\s+install|pytest|vitest|jest)\b/i;
@@ -121,6 +124,9 @@
     const path = String(args.path || args.file || args.filename || '');
 
     if (DRAW_TOOLS.has(name) || /(^|_)image($|_)/.test(name) || kind === 'generate') return { act: 'draw' };
+    if (DRAW_TEXT.test(name) || DRAW_TEXT.test(command) || DRAW_TEXT.test(String(tool?.title || ''))) return { act: 'draw' };
+    // Просмотр или правка картинки — тоже рисование (но не браузерные инструменты: там знак сайта или поиска).
+    if (!browserTool(name) && (IMAGE_EXT.has(extOf(path)) || (kind === 'read' && IMAGE_EXT.has(extOf(tool?.title))))) return { act: 'draw' };
     const icon = siteIcon(args.url);
     if (icon && (browserTool(name) || kind === 'fetch')) return { act: 'app', icon };
     if (browserTool(name) || SEARCH_TOOLS.has(name) || kind === 'search' || kind === 'fetch') {

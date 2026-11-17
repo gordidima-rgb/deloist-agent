@@ -20,6 +20,13 @@ describe('toolLook', () => {
     expect(S.toolLook({ name: 'image', args: {} })).toEqual({ act: 'draw' });
   });
 
+  it('рисует: навык imagegen и работа с картинками у внешнего агента', () => {
+    expect(S.toolLook({ name: 'execute', kind: 'execute', args: { command: 'codex exec --skill imagegen "кадр"' } })).toEqual({ act: 'draw' });
+    expect(S.toolLook({ name: 'read', kind: 'read', title: 'Читает файл Лавовый шар.png', args: {} })).toEqual({ act: 'draw' });
+    expect(S.toolLook({ name: 'read_file', args: { path: 'attachments/снимок.jpg' } })).toEqual({ act: 'draw' });
+    expect(S.toolLook({ name: 'read_file', args: { path: 'notes.md' } })).toEqual({ act: 'doc' });
+  });
+
   it('ищет: поиск в сети и браузер, а у внешних агентов вид search и fetch', () => {
     expect(S.toolLook({ name: 'web_search', args: { query: 'x' } })).toEqual({ act: 'search' });
     expect(S.toolLook({ name: 'browser_nav', args: { url: 'https://github.com' } })).toEqual({ act: 'app', icon: 'icons/apps/github.svg' });

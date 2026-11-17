@@ -1573,8 +1573,18 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
             if task.chars().count() > MAX_BRIEF_CHARS {
                 return Err(BRIEF_TOO_LONG.into());
             }
-            let result = crate::turn::delegate_to(app.clone(), bot.clone(), target.to_string(), task.to_string(), depth).await?;
-            Ok(result)
+            match crate::turn::delegate_to(app.clone(), bot.clone(), target.to_string(), task.to_string(), depth).await {
+                // Получатель занят: задача встаёт в очередь команды и начнётся, когда он освободится (до 30 минут),
+                // а не возвращается отправителю с ошибкой.
+                Err(e) if e.ends_with(crate::turn::BUSY_SUFFIX) => {
+                    let queued = crate::team_tasks::exec(app, bot, "assign_task", &json!({ "bot": target, "text": task }), depth).await;
+                    match queued {
+                        Ok(text) => Ok(format!("Получатель сейчас занят, задача поставлена в его очередь. {text}")),
+                        Err(_) => Err(e),
+                    }
+                }
+                other => other,
+            }
         }
 
         "offer_specialist" => {

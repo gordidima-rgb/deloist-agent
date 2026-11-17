@@ -1039,15 +1039,34 @@ fn launch_exit(code: Option<i32>) -> Result<(), String> {
 // События браузера
 // ---------------------------------------------------------------------------
 
+/// Адреса этой машины и локальной сети для запросов страницы (XHR, fetch, картинки, WebSocket): без остановки запроса.
+/// Раньше XHR и fetch перехватывались через `Fetch.enable`, и отправка файла (загрузка картинки в X, вложение в почту)
+/// зависала: запрос с телом из файла не доходил до сети (замер 17.11.2026 на Chrome 157: X отвечал на INIT и
+/// предзапрос, а APPEND с файлом не уходил). Навигации по-прежнему проверяются в `check_request`, с разбором DNS.
+fn blocked_url_patterns() -> Vec<String> {
+    let mut hosts: Vec<String> = ["localhost", "127.", "0.", "10.", "192.168.", "169.254.", "[::1]", "[fc", "[fd", "[fe80"].iter().map(|h| h.to_string()).collect();
+    hosts.extend((16..=31).map(|n| format!("172.{n}.")));
+    let mut out = Vec::new();
+    for scheme in ["http", "https", "ws", "wss"] {
+        for host in &hosts {
+            out.push(format!("{scheme}://{host}*"));
+        }
+    }
+    out
+}
+
 async fn prepare_page(cdp: Arc<Cdp>, tabs: Arc<Mutex<Tabs>>, target: String, session: String) {
     let sid = Some(session.as_str());
     // Сначала проверка адресов: она живёт в процессе браузера и отвечает, пока вкладка ждёт отладчик.
     // Первый переход вкладки уже должен идти через неё.
-    let patterns = json!({ "patterns": [{ "resourceType": "Document" }, { "resourceType": "XHR" }, { "resourceType": "Fetch" }] });
+    // Только переходы между страницами: перехват XHR и fetch ломал отправку файлов (см. `blocked_url_patterns`).
+    let patterns = json!({ "patterns": [{ "resourceType": "Document" }] });
     let _ = cdp.call(sid, "Fetch.enable", patterns).await;
     // Остальное вкладка, открытая со страницы, не ответит, пока её не отпустить. Поэтому всё разом.
     let steps = ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable", "DOM.enable", "Runtime.runIfWaitingForDebugger"];
     join_all(steps.map(|method| cdp.call(sid, method, json!({})))).await;
+    // Запросы страницы к этой машине и локальной сети закрыты списком адресов, без остановки самих запросов.
+    let _ = cdp.call(sid, "Network.setBlockedURLs", json!({ "urls": blocked_url_patterns() })).await;
     if let Some(page) = tabs.lock().unwrap().pages.get_mut(&target) {
         page.ready = true;
     }

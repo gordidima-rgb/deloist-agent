@@ -2687,7 +2687,13 @@ pub fn delegate_to(
             if app.store.bots().iter().any(|b| b.name.to_lowercase() == target_name.trim().to_lowercase()) {
                 format!("«{target_name}» {}", crate::team_tasks::OUTSIDE_TEAM)
             } else {
-                format!("нет бота «{target_name}»")
+                // Бота могли переименовать: называем тех, кому можно передать задачу, и бот не гадает.
+                let names: Vec<String> = allowed.iter().map(|b| format!("«{}»", b.name)).collect();
+                if names.is_empty() {
+                    format!("нет бота «{target_name}»")
+                } else {
+                    format!("нет бота «{target_name}» (возможно, его переименовали). Можно передать: {}", names.join(", "))
+                }
             }
         })?;
         delegate_to_bot(app, from, target, task, depth).await
