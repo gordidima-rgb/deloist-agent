@@ -1,6 +1,6 @@
 ﻿[package]
 name = "deloist"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 default-run = "deloist"
 description = "Команда AI-ботов в отдельном приложении: свои модели, инструменты, подтверждения, память и рутины."
