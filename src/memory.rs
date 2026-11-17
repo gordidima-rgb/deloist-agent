@@ -520,6 +520,9 @@ fn who_is_human(who: &Value) -> bool {
 // Что в память не пишется никогда
 // ---------------------------------------------------------------------------
 
+/// Правило боту: память устаревает, и поправить её — его дело.
+pub const PRACTICE_RULE: &str = "Память — подсказки, а не истина: если запомненное перестало работать, а ты нашёл, что работает, исправь этот же факт сразу (тот же заголовок или id), а не только рабочие заметки; ошибку записывай вместе с обходом.";
+
 pub const SECRET_REFUSAL: &str = "пароли, коды, данные карт и токены в память не пишутся";
 
 // ---------------------------------------------------------------------------
@@ -1097,6 +1100,8 @@ pub struct Extracted {
     pub entry: Option<String>,
     /// Заголовки запомненного — для строки «Запомнил: …».
     pub learned: Vec<String>,
+    /// Из них исправленные (edit/supersede): строка «Исправил: …».
+    pub fixed: Vec<String>,
     /// Чужие контакты без «запомни»: о них спросим человека карточкой.
     pub contacts: Vec<Value>,
     /// Новые заголовок и пересказ эпизодов: номер, заголовок, текст.
@@ -1227,6 +1232,7 @@ fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: C
                     fact.body = service::take_chars(&[fact.body.trim(), &was].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("\n"), BODY_LIMIT);
                 }
                 if *fact != old {
+                    out.fixed.push(fact.title.clone());
                     out.learned.push(fact.title.clone());
                 }
             }
@@ -1936,6 +1942,7 @@ mod tests {
         assert_eq!(profile.as_deref(), Some("Ваня"));
         assert_eq!(out.episodes, vec![("e2".to_string(), "Отчёт".to_string(), "Сделали".to_string())]);
         assert_eq!(out.learned, vec!["любит кофе", "Выгрузка за 14 дней", "Отчёт Ozon по средам"]);
+        assert_eq!(out.fixed, vec!["Отчёт Ozon по средам"], "замена попадает в «Исправил»");
 
         // «Запомни» засчитывается, только если контакт в том же сообщении человека.
         let other = ["запомни, что отчёт по средам".to_string()];

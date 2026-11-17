@@ -422,6 +422,7 @@
     'Нарисовал картинку': 'Drew a picture',
     'Запомнил': 'Remembered',
     'Запомнил: {what}': 'Remembered: {what}',
+    'Исправил: {what}': 'Corrected: {what}',
     'профиль': 'profile',
     'запомнил': 'remembered',
     'Запомнить контакт?': 'Remember this contact?',

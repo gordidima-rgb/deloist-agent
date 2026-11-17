@@ -1936,13 +1936,17 @@ async function undoSkill(id) {
 }
 
 // Тихая строка после задачи: что программа запомнила, и отмена всей записи журнала.
-function memoryCard({ entryId, titles, profile }) {
+function memoryCard({ entryId, titles, fixed, profile }) {
   const card = document.createElement('div');
   card.className = 'card skill-card memory-card';
   const title = document.createElement('div');
   title.className = 'card-title';
-  const what = [...(titles || []), ...(profile ? [tr('профиль')] : [])];
-  title.textContent = tr('Запомнил: {what}', { what: what.join('; ') });
+  const fixedTitles = fixed || [];
+  const what = [...(titles || []).filter((t) => !fixedTitles.includes(t)), ...(profile ? [tr('профиль')] : [])];
+  const parts = [];
+  if (what.length) parts.push(tr('Запомнил: {what}', { what: what.join('; ') }));
+  if (fixedTitles.length) parts.push(tr('Исправил: {what}', { what: fixedTitles.join('; ') }));
+  title.textContent = parts.join(' · ');
   const actions = document.createElement('div');
   actions.className = 'card-actions';
   const undo = document.createElement('button');
