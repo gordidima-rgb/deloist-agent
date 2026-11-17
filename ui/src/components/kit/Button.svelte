@@ -1,5 +1,5 @@
 <script>
-  // Кнопка кита «Тушь и сигнал» (.k-btn, docs/design/kit.md). Вид задаёт variant, высоту — size.
+  // Кнопка кита «Угли» (.k-btn, docs/design/kit.md). Вид задаёт variant: primary (лава, одна на экран), secondary (оранжевый контур), ghost, danger (красный контур), danger-solid (подтверждение удаления). Высоту — size.
   // Загрузка показывает девять пикселей «действует» и держит кнопку недоступной (aria-busy).
   let {
     variant = 'secondary',
@@ -23,7 +23,11 @@
           ? 'k-btn--ghost'
           : variant === 'attention'
             ? 'k-btn--attention'
-            : '',
+            : variant === 'danger'
+              ? 'k-btn--danger'
+              : variant === 'danger-solid'
+                ? 'k-btn--danger-solid'
+                : '',
   );
 </script>
 

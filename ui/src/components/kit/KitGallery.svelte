@@ -97,6 +97,9 @@
     <Button variant="ghost">{tr('Тихая')}</Button>
     <Button variant="ink">{tr('Тушь')}</Button>
     <Button variant="attention">{tr('Внимание')}</Button>
+    <Button variant="danger">{tr('Удалить')}</Button>
+    <Button variant="danger-solid">{tr('Да, удалить')}</Button>
+    <Button disabled>{tr('Недоступна')}</Button>
   </div>
   <div class="gallery__row">
     <Button size="sm">{tr('Малая')}</Button>
@@ -219,7 +222,7 @@
 {#snippet tabsStage()}
   <Tabs bind:value={tab} label={tr('Вкладки, фишки, значки')} items={[{ id: 'chat', label: tr('Чат') }, { id: 'files', label: tr('Файлы') }, { id: 'reports', label: tr('Отчёты') }]} />
   <div class="gallery__row">
-    <Chip selected={chip === 'all'} onclick={() => (chip = 'all')} color="#4fb4ff">{tr('Все')}</Chip>
+    <Chip selected={chip === 'all'} onclick={() => (chip = 'all')} color="var(--k-bot-sky)">{tr('Все')}</Chip>
     <Chip selected={chip === 'bots'} onclick={() => (chip = 'bots')}>{tr('Боты')}</Chip>
     <Chip selected={chip === 'groups'} onclick={() => (chip = 'groups')}>{tr('Команды')}</Chip>
     <Chip selected>{tr('Выбранная')}</Chip>
@@ -230,6 +233,14 @@
     <Badge text="AI" tone="ai" />
     <Badge dot tone="attention" label={tr('Внимание')} />
     <Badge text="!" tone="attention" />
+  </div>
+  <div class="gallery__row">
+    <Badge tone="attention" text={tr('Ждёт тебя')} />
+    <Badge tone="ai" text={tr('Работает')} />
+    <Badge tone="done" text={tr('Готово')} />
+    <Badge tone="sleep" text={tr('Спит')} />
+    <Badge tone="error" text={tr('Ошибка')} />
+    <Badge tone="outline" text={tr('Бета')} />
   </div>
 {/snippet}
 
@@ -250,7 +261,7 @@
   <div class="gallery__row">
     <Button onclick={announce}>{tr('Показать уведомление')}</Button>
   </div>
-  <Toast text={tr('Профиль сохранён')} action={{ label: tr('Отменить'), onclick: () => {} }} />
+  <Toast icon="check" text={tr('Профиль сохранён')} action={{ label: tr('Отменить'), onclick: () => {} }} />
 {/snippet}
 
 {#snippet dialogsStage(theme)}
