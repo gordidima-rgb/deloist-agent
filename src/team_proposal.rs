@@ -504,7 +504,8 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
     }
     let mut room_text = String::new();
     if let Some(room_plan) = &plan.room {
-        let lead_id = if plan.lead.is_empty() {
+        // Ведущий команды оркестратора — сам оркестратор: его карточка ведущего не меняет.
+        let lead_id = if plan.lead.is_empty() || plan.host_orchestrator {
             None
         } else {
             let everyone = app.store.bots();

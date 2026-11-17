@@ -685,7 +685,7 @@ async fn an_orchestrator_card_fills_its_own_team_and_ends_the_interview() {
     assert_eq!(made["bot"]["skin"], 13);
 
     // Агент просит «новую команду», но состав идёт в команду оркестратора.
-    crew.say(&orch, &format!("PROPOSE {}", json!({ "newBots": [{ "name": "Автор", "role": "пишет", "instructions": "Пиши." }], "room": { "new": "Чужая" } }))).await;
+    crew.say(&orch, &format!("PROPOSE {}", json!({ "newBots": [{ "name": "Автор", "role": "пишет", "instructions": "Пиши." }], "room": { "new": "Чужая" }, "lead": "Автор" }))).await;
     let event = crew.wait_event("карточка", |e| e["type"] == "team_proposal" && e["botId"] == orch.as_str()).await;
     assert_eq!(event["proposal"]["room"]["isNew"], false, "{event}");
     assert_eq!(event["proposal"]["room"]["id"], room.as_str());
