@@ -13,6 +13,16 @@ use crate::App;
 const TICK: Duration = Duration::from_secs(30);
 
 const BROWSER_IDLE_MS: i64 = 10 * 60_000;
+/// В облаке память на сервере общая: браузер бота засыпает через 5 минут бездействия (владелец, 14.11.2026).
+const CLOUD_BROWSER_IDLE_MS: i64 = 5 * 60_000;
+
+fn browser_idle_ms() -> i64 {
+    if crate::cloud::active() {
+        CLOUD_BROWSER_IDLE_MS
+    } else {
+        BROWSER_IDLE_MS
+    }
+}
 
 fn tick_period() -> Duration {
     if cfg!(debug_assertions) {
@@ -167,7 +177,7 @@ async fn tick(app: &Arc<App>) {
     crate::habits::remind_tick(app).await;
     crate::goals::tick(app).await;
     crate::workflow_run::tick(app);
-    app.browsers.close_idle(BROWSER_IDLE_MS, |bot| app.turns.is_busy(bot)).await;
+    app.browsers.close_idle(browser_idle_ms(), |bot| app.turns.is_busy(bot)).await;
 
     let routines = app.store.routines();
     let settings = app.store.settings();
