@@ -4378,18 +4378,18 @@ async function refreshNeeds() {
 function needTitle(item) {
   if (item.kind === 'question') return item.question || '';
   if (item.kind === 'handoff') return item.detail || tr('Нужна твоя помощь в браузере');
+  if (item.kind === 'run') return item.text || '';
   return trServer(item.title || item.tool || '');
 }
 
 function needKind(item) {
-  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение') }[item.kind] || '';
+  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение'), run: tr('прервано') }[item.kind] || '';
 }
 
 // Почему сообщение ждёт в очереди. Код приходит с сервера (`holdReason`), слова подбираем здесь.
 function holdText(code) {
   return {
     paused_manual: tr('на паузе: остановлено вручную'),
-    paused_restart: tr('на паузе после перезапуска'),
     limit: tr('ждёт: лимит токенов на месяц'),
     card: tr('ждёт твоего ответа на карточку'),
     busy: tr('ждёт конца хода'),
@@ -4399,7 +4399,7 @@ function holdText(code) {
 // Причина для очереди открытого бота: пауза и лимит знает сервер, карточку и занятость видно по событиям.
 function queueHold(id) {
   const data = S.queues.get(id);
-  if (data?.paused) return data.pauseReason === 'manual' ? 'paused_manual' : 'paused_restart';
+  if (data?.paused) return 'paused_manual';
   if (data?.hold === 'limit') return 'limit';
   if (S.waiting.get(id)?.size) return 'card';
   return S.busy.has(id) ? 'busy' : '';
@@ -4470,6 +4470,8 @@ async function openNeed(item) {
   if (item.roomId && roomById(item.roomId)) await selectRoom(item.roomId);
   else if (botById(item.botId)) await selectBot(item.botId);
   else return;
+  // Прерванный ход: строка о нём уже в чате бота, карточки у него нет.
+  if (item.kind === 'run') return;
   let card = S.cards.get(item.id);
   if (!card?.isConnected) {
     S.cards.delete(item.id);

@@ -1172,6 +1172,72 @@ pub fn label(name: &str) -> &str {
     }
 }
 
+/// Что вызов делает с миром: по этому журнал запусков решает, можно ли повторять шаг после обрыва.
+/// Таблицы чужие: «только читает» — `is_read_only` и объявление MCP-сервера, команды — `reach` и `grants`.
+pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
+    use crate::runs::Effect;
+    if is_read_only(name) || crate::mcp::is_read_only(name) {
+        return Effect::Read;
+    }
+    match name {
+        "run_command" => command_effect(args["command"].as_str().unwrap_or_default()),
+        "web_fetch" | "web_search" | "telegram_posts" => Effect::Read,
+        // Нажатия и ввод на сайте, вход паролем, отладчик с произвольным кодом, платная картинка.
+        "browser_mouse" | "browser_keyboard" | "browser_login" | "browser_human" | "browser_devtools" | "generate_image" => Effect::External,
+        // Инструмент MCP-сервера, не объявленный «только чтение», может сделать что угодно снаружи.
+        _ if name.starts_with("mcp__") => Effect::External,
+        _ => Effect::Local,
+    }
+}
+
+/// Команда оболочки: читающая — Read; выпуск, отправка, удаление, оплата, пароли и непонятная команда — External.
+fn command_effect(command: &str) -> crate::runs::Effect {
+    use crate::runs::Effect;
+    if crate::grants::is_plain_read_only(command) {
+        return Effect::Read;
+    }
+    if crate::reach::release_command(command).is_some() {
+        return Effect::External;
+    }
+    match crate::reach::command_place(command) {
+        Some((_, "")) => Effect::Local,
+        _ => Effect::External,
+    }
+}
+
+/// Подпись шага для журнала: название инструмента, у записи файла ещё и путь. Аргументы команд и сайтов не берём: в них бывают секреты.
+pub fn step_label(name: &str, args: &Value) -> String {
+    let base = if let Some((server, tool)) = crate::mcp::split_name(name) {
+        format!("{server}: {tool}")
+    } else {
+        label(name).to_string()
+    };
+    match (name, args["path"].as_str()) {
+        ("write_file", Some(path)) => format!("{base} {path}"),
+        _ => base,
+    }
+}
+
+/// Шаг по строке хода внешнего агента (ACP): `(инструмент, подпись, действие)`. Названия и команды агента — не берём, в них бывают секреты.
+pub fn activity_step(row: &Value) -> (String, String, crate::runs::Effect) {
+    use crate::runs::Effect;
+    let kind = row["kind"].as_str().unwrap_or("other");
+    let path = row["args"]["path"].as_str().unwrap_or_default();
+    let with_path = |what: &str| if path.is_empty() { what.to_string() } else { format!("{what} {path}") };
+    let (label, effect) = match kind {
+        "read" => (with_path("чтение"), Effect::Read),
+        "search" => ("поиск".to_string(), Effect::Read),
+        "think" => ("размышление".to_string(), Effect::Read),
+        "fetch" => ("запрос в сеть".to_string(), Effect::Read),
+        "edit" => (with_path("правка"), Effect::Local),
+        "delete" => (with_path("удаление"), Effect::Local),
+        "move" => (with_path("перенос"), Effect::Local),
+        "execute" => ("команда агента".to_string(), command_effect(row["args"]["command"].as_str().unwrap_or_default())),
+        _ => ("действие агента".to_string(), Effect::External),
+    };
+    (format!("acp:{kind}"), label, effect)
+}
+
 // ---------------------------------------------------------------------------
 // Вспомогательное
 // ---------------------------------------------------------------------------

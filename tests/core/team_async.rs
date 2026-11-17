@@ -282,15 +282,21 @@ async fn another_bots_task_id_is_not_found_and_a_running_task_resumes_after_a_re
     let model = t.model.clone();
     let Team { crew, .. } = t;
     drop(crew);
+    // Задача старше шести часов: прежний предел возраста не действует, решает журнал запусков.
+    let path = data_dir.join("team_tasks.json");
+    let mut tasks: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    for task in tasks.iter_mut() {
+        task["created"] = json!(task["created"].as_i64().unwrap() - 10 * 3600 * 1000);
+    }
+    std::fs::write(&path, serde_json::to_vec(&tasks).unwrap()).unwrap();
     let crew = Crew::start_at(data_dir, &[]).await;
     crew.listen().await;
     let state = crew.ok("GET", "/api/state", None).await;
     let alpha = state["bots"].as_array().unwrap().iter().find(|b| b["name"] == "Альфа").unwrap()["id"].as_str().unwrap().to_string();
-    // Задача, что шла, встаёт в очередь заново (одна попытка потрачена), а не помечается прерванной.
+    // Задача, что шла, встаёт в очередь заново, а не помечается прерванной, как бы давно она ни началась.
     let tasks: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("team_tasks.json")).unwrap()).unwrap();
     let task = tasks.iter().find(|t| t["id"] == id).unwrap_or_else(|| panic!("задачи {id} нет: {tasks:?}"));
     assert_ne!(task["state"], "interrupted", "{task}");
-    assert_eq!(task["attempts"], 1, "{task}");
     crew.say(&alpha, &script(&[("task_status", json!({}))])).await;
     crew.wait_event("конец", |e| e["type"] == "turn_end").await;
     let thread = crew.ok("GET", &format!("/api/bots/{alpha}/thread?limit=200"), None).await;

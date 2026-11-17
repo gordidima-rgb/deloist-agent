@@ -1960,6 +1960,21 @@ async fn question(State(app): Shared, Path(id): Path<String>, body: axum::body::
     }
 }
 
+/// «Продолжить» на карточке прерванного хода: он идёт дальше с заметкой о том, что уже сделано.
+async fn run_continue(State(app): Shared, Path(id): Path<String>) -> Response {
+    match crate::runs::resume_by_human(&app, &id).await {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err(e) => fail(StatusCode::CONFLICT, &e),
+    }
+}
+
+async fn run_dismiss(State(app): Shared, Path(id): Path<String>) -> Response {
+    match crate::runs::dismiss(&app, &id).await {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err(e) => fail(StatusCode::NOT_FOUND, &e),
+    }
+}
+
 async fn dismiss_question(State(app): Shared, Path(id): Path<String>) -> Response {
     if app.turns.dismiss_question(&id) {
         ok(json!({ "ok": true }))
@@ -1972,10 +1987,16 @@ async fn dismiss_question(State(app): Shared, Path(id): Path<String>) -> Respons
 async fn needs(State(app): Shared) -> Response {
     let rooms: std::collections::HashMap<String, String> = app.store.rooms().into_iter().map(|r| (r.id, r.name)).collect();
     let bots: std::collections::HashMap<String, String> = app.store.bots().into_iter().map(|b| (b.id, b.name)).collect();
-    let items: Vec<Value> = app
+    // Ходы, которые оборвал перезапуск и которые ждут «Продолжить» (журнал запусков).
+    let interrupted = app.runs.needs().into_iter().filter_map(|run| match run.state {
+        crate::runs::RunState::NeedsHuman { text, .. } => Some(json!({ "kind": "run", "id": run.id, "botId": run.bot_id, "text": text, "at": run.updated_ms })),
+        _ => None,
+    });
+    let mut items: Vec<Value> = app
         .turns
         .needs()
         .into_iter()
+        .chain(interrupted)
         .filter(|item| item["botId"].as_str().is_some_and(|id| bots.contains_key(id)))
         .map(|mut item| {
             let bot = item["botId"].as_str().unwrap_or_default().to_string();
@@ -1988,6 +2009,7 @@ async fn needs(State(app): Shared) -> Response {
             item
         })
         .collect();
+    items.sort_by_key(|e| e["at"].as_i64().unwrap_or(0));
     let (working, waiting) = crate::board::build(&app);
     ok(json!({ "items": items, "count": items.len(), "working": working, "waiting": waiting }))
 }
@@ -3813,10 +3835,16 @@ async fn fire_hook(app: &Arc<App>, routine: &crate::store::Routine, text: &str) 
         window: false,
         voice: false,
         run: None,
+        origin: None,
+        resume: None,
     };
-    start_turn(app, &routine.bot_id, text, opts)?;
+    // «Идёт» ставим до старта, как у рутины: быстрый ход не должен закончиться раньше отметки.
     let _ = app.store.mark_routine_run(&routine.id, true).await;
-    Ok(())
+    let started = start_turn(app, &routine.bot_id, text, opts);
+    if started.is_err() {
+        let _ = app.store.set_routine_status(&routine.id, "error").await;
+    }
+    started
 }
 
 // ---------------------------------------------------------------------------
@@ -4094,6 +4122,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/bots/{id}/messengers/{messenger}/rules", axum::routing::put(put_messenger_rule))
         .route("/api/approvals/{id}", post(approval))
         .route("/api/questions/{id}", post(question).merge(delete(dismiss_question)))
+        .route("/api/runs/{id}/continue", post(run_continue))
+        .route("/api/runs/{id}/dismiss", post(run_dismiss))
         .route("/api/needs", get(needs))
         .route("/api/server-mode", get(server_mode_get).put(server_mode_put))
         .route("/api/devices", get(devices_list))

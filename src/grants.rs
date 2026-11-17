@@ -739,6 +739,11 @@ fn read_only_command(command: &str) -> bool {
     READ_ONLY_PROGRAMS.contains(&first.as_str())
 }
 
+/// Простая читающая команда без перенаправлений и цепочек: ничего не меняет (для журнала запусков).
+pub(crate) fn is_plain_read_only(command: &str) -> bool {
+    command_tokens_ok(command) && read_only_command(command)
+}
+
 /// Настоящий путь без ссылок: самая длинная существующая часть канонизируется, остальное достраивается как есть.
 fn canonical(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut rest = Vec::new();

@@ -523,11 +523,6 @@ pub enum RoutineOutcome {
     GaveUp { attempts: u32 },
 }
 
-/// Повторяем только то, что сорвалось само: ошибку модели или обрыв хода перезапуском.
-pub fn routine_retryable(status: &str) -> bool {
-    matches!(status, "failed" | "interrupted")
-}
-
 impl Default for Routine {
     fn default() -> Self {
         Self {
@@ -2811,7 +2806,7 @@ impl Store {
             };
             let t = now();
             // Цель ведёт свои запуски сама, вебхук без расписания, выключенную не будим.
-            let repeatable = routine_retryable(status) && r.enabled && !r.hook && r.goal_id.is_empty();
+            let repeatable = status == "failed" && r.enabled && !r.hook && r.goal_id.is_empty();
             let outcome = if repeatable {
                 let since = if r.retry_attempt == 0 || r.retry_since == 0 { started_at.min(t) } else { r.retry_since };
                 let attempt = r.retry_attempt + 1;
@@ -3653,7 +3648,7 @@ mod tests {
         assert_eq!(store.routine(&r.id).unwrap().last_status.as_deref(), Some("running"), "до конца хода — не «готово»");
 
         let t = now();
-        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "interrupted", t).await.unwrap() else { panic!("ждали повтор") };
+        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "failed", t).await.unwrap() else { panic!("ждали повтор") };
         assert_eq!(attempt, 1);
         assert!((at - t - 5 * 60_000).abs() < 5_000, "первый повтор через 5 минут");
         let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "failed", t).await.unwrap() else { panic!("ждали повтор") };

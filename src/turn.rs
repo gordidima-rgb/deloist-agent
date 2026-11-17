@@ -1432,6 +1432,10 @@ pub struct TurnOptions {
     pub voice: bool,
     /// Какой это ход: запуск цели или самопроверка. Отметку ставит `start_turn`, когда бот правда взят.
     pub run: Option<crate::goals::Run>,
+    /// Чей это ход для журнала запусков (`runs`). `start_turn_with` выводит сам; пусто у делегата и шага процесса: их журнал не ведёт.
+    pub origin: Option<crate::runs::Origin>,
+    /// Продолжение прерванного хода: запись журнала, которую он берёт вместо новой.
+    pub resume: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1456,6 +1460,10 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
     let Some(cancel) = app.turns.begin(bot_id) else {
         return Err(StartError { status: 409, message: "бот ещё думает над предыдущим сообщением".into() });
     };
+    let mut opts = opts;
+    if opts.origin.is_none() {
+        opts.origin = Some(origin_of(&opts));
+    }
     if opts.unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
@@ -1467,6 +1475,17 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
         let _ = run_turn_body(app, bot, task, attachments, opts, cancel).await;
     });
     Ok(())
+}
+
+/// Чей ход для журнала: цель, рутина, вебхук или человек (чат, мессенджеры, очередь).
+fn origin_of(opts: &TurnOptions) -> crate::runs::Origin {
+    use crate::runs::Origin;
+    match (&opts.routine, &opts.run) {
+        (Some(r), Some(run)) => Origin::Goal { id: r.id.clone(), title: r.title.clone(), run: run.clone() },
+        (Some(r), None) if opts.source.as_deref() == Some("webhook") => Origin::Webhook { id: r.id.clone(), title: r.title.clone() },
+        (Some(r), None) => Origin::Routine { id: r.id.clone(), title: r.title.clone() },
+        _ => Origin::Human,
+    }
 }
 
 /// Следующее сообщение очереди. Элемент уходит только после успешного старта: если бот занят,
@@ -2011,6 +2030,8 @@ fn run_turn_body(
         let bot_id = bot.id.clone();
 
         let mut saved: Vec<Value> = Vec::new();
+        // Сколько из `saved` уже в треде: шаги пишутся по мере хода, чтобы после обрыва там было видно сделанное.
+        let mut flushed: usize = 0;
         let mut final_text = String::new();
         let mut failure: Option<String> = None;
         let mut steered = false;
@@ -2024,6 +2045,15 @@ fn run_turn_body(
         let mut turn_usage = Usage::default();
         let mut steps_run: usize = 0;
         let unattended = app.turns.is_unattended(&bot_id);
+        // Запись в журнал запусков до первого шага: продолжение берёт прежнюю, остальные заводят новую.
+        let journaled = match (&opts.resume, &opts.origin) {
+            (Some(id), _) => app.runs.activate(id),
+            (None, Some(origin)) => {
+                app.runs.begin(crate::runs::Run::new(&bot_id, origin.clone(), &opts));
+                true
+            }
+            _ => false,
+        };
         // Ход, начатый человеком в личном чате, — это «разговор»: в нём действуют его разрешения.
         if opts.window && opts.depth == 0 && opts.routine.is_none() && !unattended {
             app.turns.set_conv(&bot_id, &format!("bot:{bot_id}"));
@@ -2197,6 +2227,7 @@ fn run_turn_body(
                     }
                     app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
                     saved.push(entry);
+                    flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
                     let content = crate::attach::user_content(&app.store, &bot_id, &text, &files, crate::attach::sees_images(&app, &bot), true);
                     model_messages.push(json!({ "role": "user", "content": content }));
                     steered = true;
@@ -2232,6 +2263,7 @@ fn run_turn_body(
                             DriverEvent::Usage(usage) => reported = Some(usage),
                             DriverEvent::Activity(update) => {
                                 let row = merge_activity(&mut activity, update);
+                                turns.runs.activity(&bid, &row);
                                 turns.turns.emit(json!({
                                     "type": "activity", "botId": bid, "turnId": tid, "step": step, "call": row,
                                 }));
@@ -2381,6 +2413,7 @@ fn run_turn_body(
                 if calls.is_empty() {
                     crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len) + text.chars().count()).await;
                     saved.push(first);
+                    flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
                     if continue_task {
                         continuations += 1;
                         model_messages.push(json!({ "role": "assistant", "content": text }));
@@ -2422,6 +2455,7 @@ fn run_turn_body(
                     step_entry["usage"] = usage_json(usage);
                 }
                 saved.push(step_entry);
+                flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
                 session_step.tool_ms = now() - model_done;
                 crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len)).await;
                 if cancel.is_cancelled() { return Err("остановлено".into()); }
@@ -2487,6 +2521,14 @@ fn run_turn_body(
         // Что не решил делегат, заберёт его начальник; журнал пишет только сама рутина.
         let missed = if opts.routine.is_some() { app.turns.take_missed(&bot_id) } else { Vec::new() };
         app.turns.finish(&bot_id);
+        if journaled {
+            let state = match (&failure, aborted) {
+                (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
+                (Some(message), false) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Unknown, text: shorten(message, JOURNAL_TEXT_LIMIT) },
+                (None, false) => crate::runs::RunState::Done,
+            };
+            app.runs.close(&bot_id, state);
+        }
         // Резерв считает дни от последнего законченного хода, а не от создания бота.
         if let Err(e) = app.store.note_bot_active(&bot_id, now()).await {
             eprintln!("[turn] не смог записать активность: {e}");
@@ -2506,14 +2548,7 @@ fn run_turn_body(
                 && !steered
                 && is_quiet_answer(&final_text));
 
-        for mut entry in saved {
-            if opts.routine.is_some() {
-                entry["turnId"] = json!(turn_id);
-            }
-            if let Err(e) = app.store.append_message(&bot_id, entry).await {
-                eprintln!("[turn] не смог сохранить сообщение: {e}");
-            }
-        }
+        flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
         // Оркестратор собрал команду в этом ходе: его итог читают в чате команды, а не только в личном.
         if let Some(room_id) = app.offers.take_team_summary(&bot_id) {
             let text = final_text.trim();
@@ -2605,6 +2640,20 @@ fn run_turn_body(
     })
 }
 
+/// Дописать в тред шаги хода, которых там ещё нет.
+async fn flush_saved(app: &App, bot_id: &str, turn_id: &str, routine: bool, saved: &[Value], flushed: &mut usize) {
+    for entry in &saved[*flushed..] {
+        let mut entry = entry.clone();
+        if routine {
+            entry["turnId"] = json!(turn_id);
+        }
+        if let Err(e) = app.store.append_message(bot_id, entry).await {
+            eprintln!("[turn] не смог сохранить сообщение: {e}");
+        }
+    }
+    *flushed = saved.len();
+}
+
 /// Строка хода агента: новое действие добавляется, обновление того же `id` дописывает поля.
 pub(crate) fn merge_activity(rows: &mut Vec<Value>, update: Value) -> Value {
     let id = update["id"].as_str().unwrap_or_default().to_string();
@@ -2675,11 +2724,14 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         }
     }
 
+    // Шаг записан до выполнения: если программа умрёт посреди него, журнал знает, что шло и можно ли это повторять.
+    app.runs.step_start(&bot.id, &call.id, &call.name, &tools::step_label(&call.name, &call.args), tools::effect(&call.name, &call.args));
     let outcome = if call.name.starts_with("mcp__") {
         crate::mcp::call(app, &call.name, &call.args).await
     } else {
         exec_tool(app, bot, &call.name, &call.args, depth, cancel).await
     };
+    app.runs.step_end(&bot.id, &call.id, outcome.is_ok());
     if cancel.is_cancelled() {
         return ("denied".into(), "Остановлено пользователем.".into());
     }
@@ -2784,6 +2836,10 @@ pub struct Carried {
     pub floor: String,
     /// Отправитель работал без человека (рутина, ночь).
     pub unattended: bool,
+    /// Командная задача, ради которой идёт ход: по ней ход попадает в журнал запусков. Пусто — не ведётся.
+    pub task_id: String,
+    /// Запись журнала прерванного хода этой задачи, если его продолжают.
+    pub resume: Option<String>,
 }
 
 /// Начало брифа получателю: кто просит. Бот не человек, права и подтверждения у получателя свои.
@@ -2847,6 +2903,8 @@ pub fn delegate_to_bot_with(
             window: false,
             voice: false,
             run: None,
+            origin: carried.as_ref().filter(|c| !c.task_id.is_empty()).map(|c| crate::runs::Origin::Team { task_id: c.task_id.clone() }),
+            resume: carried.as_ref().and_then(|c| c.resume.clone()),
         };
         // Получатель не видит нашу переписку: бриф несёт всё нужное и просит короткий итог.
         let brief = format!("{}\n\n{DELEGATION_TAIL}", framed_brief(&from.name, &task, carried.is_some()));

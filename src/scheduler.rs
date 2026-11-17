@@ -103,6 +103,8 @@ pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool,
         window: false,
         voice: false,
         run,
+        origin: None,
+        resume: None,
     };
     // «Идёт» ставим до старта: быстрый ход не должен закончиться раньше, чем его отметили запущенным.
     if let Err(e) = app.store.mark_routine_run(&routine.id, true).await {
@@ -122,8 +124,7 @@ fn clock(ms: i64) -> String {
     chrono::Local.timestamp_millis_opt(ms).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
 }
 
-/// Ход рутины кончился (или оборвался перезапуском): статус по итогу, повтор по лестнице,
-/// через сутки неудач — ошибка. Всё, что не «выполнено», человек видит строкой в чате бота.
+/// Ход рутины кончился: статус по итогу, повтор по лестнице, через сутки неудач — ошибка. Всё, что не «выполнено», человек видит строкой в чате бота.
 pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str, status: &str, started_at: i64) {
     use crate::store::RoutineOutcome;
     let outcome = match app.store.finish_routine_run(&routine.id, status, started_at).await {
@@ -135,17 +136,15 @@ pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str
     };
     let english = app.store.settings().ui_lang == "en";
     let title = &routine.title;
-    let interrupted = status == "interrupted";
     let text = match &outcome {
         RoutineOutcome::Done => return,
         RoutineOutcome::Retry { at, attempt } => {
             let at = clock(*at);
             let n = attempt + 1;
-            match (interrupted, english) {
-                (true, false) => format!("Рутина «{title}» прервалась: программа закрылась посреди хода. Повторю в {at} (попытка {n})."),
-                (true, true) => format!("Routine “{title}” was cut off: the app closed mid-turn. Retrying at {at} (attempt {n})."),
-                (false, false) => format!("Рутина «{title}» не выполнена. Повторю в {at} (попытка {n})."),
-                (false, true) => format!("Routine “{title}” did not finish. Retrying at {at} (attempt {n})."),
+            if english {
+                format!("Routine “{title}” did not finish. Retrying at {at} (attempt {n}).")
+            } else {
+                format!("Рутина «{title}» не выполнена. Повторю в {at} (попытка {n}).")
             }
         }
         RoutineOutcome::GaveUp { attempts } => {
@@ -170,15 +169,15 @@ pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str
     app.turns.emit(json!({ "type": "message", "botId": bot_id, "message": entry }));
 }
 
-/// Программа закрылась, пока рутина шла: её ход пропал целиком. При запуске отмечаем обрыв и ставим повтор.
-pub async fn recover_interrupted(app: &Arc<App>) {
+/// Рутина числится «идёт», а живого хода у неё нет: запись журнала о нём потеряна (старая версия, стёртый файл).
+/// Ход продолжает или закрывает `runs::recover`, здесь остаётся только не оставить рутину «идущей» навсегда.
+pub async fn settle_orphans(app: &Arc<App>) {
     for routine in app.store.routines() {
-        if routine.last_status.as_deref() != Some("running") || crate::reminders::is_reminder(&routine) {
+        if routine.last_status.as_deref() != Some("running") || crate::reminders::is_reminder(&routine) || app.turns.is_busy(&routine.bot_id) {
             continue;
         }
-        note(app, &routine, "interrupted", "Программа закрылась посреди хода.").await;
-        let rref = RoutineRef { id: routine.id.clone(), title: routine.title.clone() };
-        routine_finished(app, &rref, &routine.bot_id, "interrupted", routine.last_run).await;
+        note(app, &routine, "failed", "Программа закрылась посреди хода.").await;
+        let _ = app.store.set_routine_status(&routine.id, "error").await;
     }
 }
 
@@ -264,7 +263,7 @@ pub fn start(app: Arc<App>) {
     tokio::spawn(async move {
         // Запуски процессов, прерванные перезапуском, продолжают проход.
         crate::workflow_run::resume(&app);
-        recover_interrupted(&app).await;
+        settle_orphans(&app).await;
         let mut timer = tokio::time::interval(tick_period());
         timer.tick().await;
         loop {

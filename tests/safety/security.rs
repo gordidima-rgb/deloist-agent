@@ -614,6 +614,8 @@ async fn the_agent_key_cannot_answer_cards_or_touch_rules() {
         call(reqwest::Method::POST, "/api/approvals/ap_x", Some(json!({ "answer": "always" }))).await.unwrap(),
         call(reqwest::Method::POST, "/api/questions/ap_x", Some(json!({ "answer": "да" }))).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/questions/ap_x", None).await.unwrap(),
+        call(reqwest::Method::POST, "/api/runs/run_x/continue", None).await.unwrap(),
+        call(reqwest::Method::POST, "/api/runs/run_x/dismiss", None).await.unwrap(),
         call(reqwest::Method::GET, "/api/permissions", None).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/permissions/rules/rule_x", None).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/permissions/grants/grant_x", None).await.unwrap(),
