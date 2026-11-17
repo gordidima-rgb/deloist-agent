@@ -5,20 +5,7 @@
   // отложенное. Конструктор внешности и выбор модели монтирует app.js в свои места (mountLook, mountModel):
   // у них свои движки аватаров и список провайдеров.
   import { untrack } from 'svelte';
-  import SettingsCard from '../kit/SettingsCard.svelte';
-  import FieldRow from '../kit/FieldRow.svelte';
-  import InfoTip from '../kit/InfoTip.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import TextArea from '../kit/TextArea.svelte';
-  import Select from '../kit/Select.svelte';
-  import Slider from '../kit/Slider.svelte';
-  import Switch from '../kit/Switch.svelte';
-  import Checkbox from '../kit/Checkbox.svelte';
-  import RadioGroup from '../kit/RadioGroup.svelte';
-  import Button from '../kit/Button.svelte';
-  import IconButton from '../kit/IconButton.svelte';
-  import Modal from '../kit/Modal.svelte';
-  import Icon from '../kit/Icon.svelte';
+import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, Switch, Checkbox, RadioGroup, Button, IconButton, Modal, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let {

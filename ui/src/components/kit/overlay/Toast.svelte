@@ -1,6 +1,6 @@
 <script>
   // Уведомление кита «Угли»: тёмный уголь с оранжевым значком, одна строка и не больше одного действия.
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   let { text = '', icon = '', action = null, class: className = '', ...rest } = $props();
 </script>
 

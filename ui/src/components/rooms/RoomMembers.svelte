@@ -3,7 +3,7 @@
   // Настоящие <input type="checkbox" value="id"> остаются в DOM: app.js читает отмеченных
   // через `#room-members input:checked` и слушает change на контейнере.
   import { untrack } from 'svelte';
-  import Checkbox from '../kit/Checkbox.svelte';
+import { Checkbox } from '../kit';
 
   let { bots = [], selected = [], empty = '' } = $props();
 

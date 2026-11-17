@@ -18,7 +18,7 @@
 
 <script>
   // Навигация настроек: строки кита. Стрелки ведут фокус, Enter выбирает раздел.
-  import ListItem from '../kit/ListItem.svelte';
+import { ListItem } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { sections = [], onselect } = $props();

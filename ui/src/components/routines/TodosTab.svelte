@@ -21,12 +21,9 @@
   } from '../../lib/todos.js';
   import Composer from './Composer.svelte';
   import TodoCard from './TodoCard.svelte';
-  import Button from '../kit/Button.svelte';
-  import IconButton from '../kit/IconButton.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
+import { Button, IconButton, EmptyState, Icon } from '../kit';
   import Menu from '../Menu.svelte';
 
-  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi } = $props();
 
   let todos = $state([]);

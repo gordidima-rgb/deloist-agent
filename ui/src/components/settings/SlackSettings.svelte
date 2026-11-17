@@ -2,11 +2,7 @@
   // Экран «Slack» окна настроек: своё приложение, привязка личных сообщений кодом и отключение моста.
   // Оба токена живут только в полях ввода и в PUT: обратно их не показываем и никуда не пишем.
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
+import { Section, Field, TextInput, Select, Button } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { api, bots = [], onchanged } = $props();

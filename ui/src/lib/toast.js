@@ -1,7 +1,7 @@
 // Уведомления кита: один хост на документ и toast(message, { action }).
 // Очередь обычная (не руны), чтобы файл оставался .js и им могли пользоваться старые страницы.
 import { mount } from 'svelte';
-import ToastHost from '../components/kit/ToastHost.svelte';
+import { ToastHost } from '../components/kit';
 
 const items = [];
 const listeners = new Set();

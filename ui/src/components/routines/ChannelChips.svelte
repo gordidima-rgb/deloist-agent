@@ -2,7 +2,7 @@
   // Куда прислать напоминание: фишки Windows и Telegram. Telegram доступен, только когда чат привязан;
   // без привязки рядом ссылка на настройки. Общие для вкладок «Напоминания» и «Привычки».
   import { tr } from '../../lib/i18n.js';
-  import Chip from '../kit/Chip.svelte';
+import { Chip } from '../kit';
 
   let { windows = $bindable(true), telegram = $bindable(false), paired = false, onopentelegram } = $props();
 </script>

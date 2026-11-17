@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Icon from './Icon.svelte';
-import { ICONS } from '../../lib/icons.js';
+import { ICONS } from '../../../lib/icons.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let instance;

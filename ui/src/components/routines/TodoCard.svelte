@@ -4,16 +4,9 @@
   import { untrack } from 'svelte';
   import { api as defaultApi, serverText } from '../../lib/api.js';
   import { tr } from '../../lib/i18n.js';
-  import Button from '../kit/Button.svelte';
-  import IconButton from '../kit/IconButton.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import TextArea from '../kit/TextArea.svelte';
-  import Select from '../kit/Select.svelte';
-  import Checkbox from '../kit/Checkbox.svelte';
+import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon } from '../kit';
   import TodoRecurrence from './TodoRecurrence.svelte';
 
-  import Icon from '../kit/Icon.svelte';
   let { todo, api = defaultApi, onsaved, onclose, onarchive } = $props();
 
   let title = $state(untrack(() => todo.title));

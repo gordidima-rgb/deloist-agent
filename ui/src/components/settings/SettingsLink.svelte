@@ -1,5 +1,5 @@
 <script>
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
   // Строка-ссылка раздела настроек: подпись, текущее значение текстом и «›».
   // Нажатие открывает подэкран в той же колонке (onclick приходит от окна настроек).
   let { label = '', sublabel = '', value = '', onclick, id = '' } = $props();

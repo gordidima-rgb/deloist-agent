@@ -2,7 +2,7 @@
   // Вкладки на .k-tabs: чёрная капсула переезжает к выбранной вкладке.
   // Стрелки, Home и End переключают без анимации (как требует docs/design/kit.md).
   import { tick } from 'svelte';
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
 
   let { items = [], value = $bindable(''), label = '', class: className = '', onchange, ...rest } = $props();
 

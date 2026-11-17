@@ -1,7 +1,7 @@
 <script>
   // Список слева в окне «Подключить свою ИИ»: группы со строками кита, логотип, название и статус.
   // Данные готовит web/providers.js (там же тексты статусов); компонент только рисует и сообщает о выборе.
-  import ListItem from '../kit/ListItem.svelte';
+import { ListItem } from '../kit';
 
   let { groups = [], selected = '', label = '', onselect, onaction } = $props();
 

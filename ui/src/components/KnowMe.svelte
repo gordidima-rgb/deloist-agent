@@ -1,5 +1,5 @@
 <script>
-  import Checkbox from './kit/Checkbox.svelte';
+import { Checkbox } from './kit';
   import { tr } from '../lib/i18n.js';
   import { api as apiFetch } from '../lib/api.js';
 

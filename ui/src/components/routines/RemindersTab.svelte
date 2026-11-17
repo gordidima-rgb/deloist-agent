@@ -8,13 +8,8 @@
   import { channelsOf, flagsOf, isTelegramPaired } from '../../lib/channels.js';
   import Composer from './Composer.svelte';
   import ChannelChips from './ChannelChips.svelte';
-  import Button from '../kit/Button.svelte';
-  import IconButton from '../kit/IconButton.svelte';
-  import Select from '../kit/Select.svelte';
-  import Switch from '../kit/Switch.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
+import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
 
-  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi, routines = [], onchanged, onopentelegram } = $props();
 
   let composer = $state();

@@ -1,7 +1,7 @@
 <script>
   // Раздел формы настроек: карточка с плиткой-значком, заголовком и необязательным серым пояснением.
   // Лежит внутри .k-sform. Значок — имя из lib/icons.js. Строки полей — FieldRow.
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
 
   let { title = '', description = '', icon = '', class: className = '', actions = null, children, ...rest } = $props();
 </script>

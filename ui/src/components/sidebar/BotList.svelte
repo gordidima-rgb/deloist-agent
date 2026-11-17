@@ -4,11 +4,10 @@
   // Данные и выбор держит app.js; аватар рисует его же движок через paint(el, id, slot),
   // потому что живые аватары кэшируются по месту и переезжают между строками. Бот в двух командах
   // получает по своему месту (slot) на каждую строку, иначе аватар ушёл бы из первой.
-  import ListItem from '../kit/ListItem.svelte';
+import { ListItem, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { plainPreview, teamSubtitle } from '../../lib/preview.js';
 
-  import Icon from '../kit/Icon.svelte';
   let {
     bots = [],
     rooms = [],

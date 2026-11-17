@@ -4,8 +4,7 @@
   // «чужой текст» (экранирует всё, ссылки на файлы выключены, у ссылок виден настоящий адрес и пометка источника);
   // ошибки и подписи карточек — только текстом; ссылки сами не открываются.
   import { onMount, tick, untrack } from 'svelte';
-  import Button from '../kit/Button.svelte';
-  import Icon from '../kit/Icon.svelte';
+import { Button, Icon } from '../kit';
   import ApprovalCard from '../chat/ApprovalCard.svelte';
   import RemoteOrb from './RemoteOrb.svelte';
   import RemoteExtras from './RemoteExtras.svelte';

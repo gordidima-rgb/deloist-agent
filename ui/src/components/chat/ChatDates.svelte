@@ -8,7 +8,7 @@
   import { api as defaultApi } from '../../lib/api.js';
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
 
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
   let { input = null, chipsHost = null, api = defaultApi, debounce = 200 } = $props();
 
   let value = $state('');

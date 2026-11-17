@@ -1,7 +1,7 @@
 <script>
   // Значок привычки: имя из набора приложения рисуем штрихом, любой другой знак (эмодзи) выводим текстом.
   import { habitIconName } from '../../lib/habitIcons.js';
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
 
   let { name = '', size = 22 } = $props();
 

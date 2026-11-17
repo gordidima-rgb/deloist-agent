@@ -1,6 +1,6 @@
 <script>
   // «?» рядом с подписью: длинное пояснение живёт в подсказке кита, а не в потоке строк.
-  import Tooltip from '../kit/Tooltip.svelte';
+import { Tooltip } from '../kit';
 
   let { text = '', label = '?' } = $props();
 </script>

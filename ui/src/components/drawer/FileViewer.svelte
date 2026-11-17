@@ -2,8 +2,7 @@
   // Просмотрщик файла в ящике бота: текст и код с номерами строк, Markdown с видом «Просмотр»/«Исходник»,
   // таблицы CSV и TSV, картинки, звук и видео. Данные: GET /api/bots/{id}/file?path= (текст, первые 200 000 знаков)
   // и GET /api/bots/{id}/file/raw?path= (файл как есть: картинки, медиа, «Скачать»).
-  import Button from '../kit/Button.svelte';
-  import Spinner from '../kit/Spinner.svelte';
+import { Button, Spinner } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';

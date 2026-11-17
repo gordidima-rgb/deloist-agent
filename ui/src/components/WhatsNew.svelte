@@ -1,9 +1,7 @@
 <script>
   // Окно «Что нового» посередине экрана: картинка сверху, страница на каждую категорию
   // (Новое, Улучшено, Исправлено), листать стрелками или кнопкой «Далее», внизу «Все изменения».
-  import Modal from './kit/Modal.svelte';
-  import Button from './kit/Button.svelte';
-  import Icon from './kit/Icon.svelte';
+import { Modal, Button, Icon } from './kit';
   import { tr } from '../lib/i18n.js';
   import { markdownToText, buildPages, buildFullList, mergeSections } from '../lib/whatsNew.js';
 

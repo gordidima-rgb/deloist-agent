@@ -1,7 +1,7 @@
 <script>
   // Плашка внизу боковой панели: версия уже стоит на месте, осталось перезапустить.
   // «Что нового» открывает заметки этой версии, пока она ещё не запущена.
-  import Button from './kit/Button.svelte';
+import { Button } from './kit';
   import { tr } from '../lib/i18n.js';
 
   let {

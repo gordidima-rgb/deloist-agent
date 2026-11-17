@@ -2,9 +2,7 @@
   // Общие папки и навыки команды в окне правки команды. Действуют на каждого бота команды,
   // но только в разговоре этой команды. Сервер проверяет пути при сохранении (src/rooms.rs).
   import { untrack } from 'svelte';
-  import Button from '../kit/Button.svelte';
-  import Checkbox from '../kit/Checkbox.svelte';
-  import TextInput from '../kit/TextInput.svelte';
+import { Button, Checkbox, TextInput } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { folders = [], skills = [], allSkills = [], max = 8, onchange } = $props();

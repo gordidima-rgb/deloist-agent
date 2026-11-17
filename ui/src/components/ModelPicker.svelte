@@ -7,11 +7,8 @@
   import { tick, onMount } from 'svelte';
   import { tr } from '../lib/i18n.js';
   import { buildGroups, filterGroups, toValue, isCurrent, labelOf, iconSvg, splitModels } from '../lib/modelPicker.js';
-  import Tooltip from './kit/Tooltip.svelte';
-  import Badge from './kit/Badge.svelte';
-  import TextInput from './kit/TextInput.svelte';
+import { Tooltip, Badge, TextInput, Icon } from './kit';
 
-  import Icon from './kit/Icon.svelte';
   let {
     providers = [],
     plan = null,

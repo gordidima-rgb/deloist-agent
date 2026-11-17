@@ -1,7 +1,7 @@
 <script>
   // Компактная панель другого ПК: рутины (только чтение и «Запустить») и лимиты. Правятся они на самом ПК.
   import { onMount } from 'svelte';
-  import Button from '../kit/Button.svelte';
+import { Button } from '../kit';
   import { tr, trServer } from '../../lib/i18n.js';
   import { enc, errorText } from '../../lib/remote.js';
   import { whenText } from '../../lib/when.js';

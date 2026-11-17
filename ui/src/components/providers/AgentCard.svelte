@@ -36,9 +36,7 @@
   // Блоки без данных не рисуются: нет аккаунтов — нет «Аккаунтов», нет `latest` — нет строки про обновление.
   // Данные и действия даёт web/providers.js: компонент рисует и сообщает о нажатии через onaction.
   import { trServer } from '../../lib/i18n.js';
-  import Button from '../kit/Button.svelte';
-  import Switch from '../kit/Switch.svelte';
-  import TextInput from '../kit/TextInput.svelte';
+import { Button, Switch, TextInput } from '../kit';
 
   // logo: { svg } (логотип кита) или { img } (значок из реестра); иначе первая буква названия.
   let { provider = {}, logo = {}, onaction } = $props();

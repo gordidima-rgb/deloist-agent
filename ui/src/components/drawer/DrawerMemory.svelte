@@ -1,14 +1,7 @@
 <script>
   // Вкладка «Память» в ящике бота: факты по типам, правка в строке, журнал правок с отменой.
   // Данные: GET /api/bots/{id}/memory. Перечитывание по событию памяти идёт через registerReload(load).
-  import Section from '../kit/Section.svelte';
-  import ListItem from '../kit/ListItem.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import TextArea from '../kit/TextArea.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
+import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Button } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { whenText, numberRu } from '../../lib/when.js';

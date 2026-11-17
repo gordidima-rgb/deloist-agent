@@ -2,11 +2,9 @@
   // Шапка панели бота: вкладки кита, «Развернуть» и «Свернуть». Содержимое вкладок рисует app.js:
   // он знает данные бота и обработчики, шапка только сообщает, какую вкладку выбрали.
   // Свёрнутая панель (rail) — столбик значков разделов, как свёрнутая левая колонка.
-  import Tabs from '../kit/Tabs.svelte';
-  import IconButton from '../kit/IconButton.svelte';
+import { Tabs, IconButton, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
-  import Icon from '../kit/Icon.svelte';
   let { value = 'profile', full = false, rail = false, onchange, onclose, onexpand, onfull } = $props();
 
   const items = $derived([

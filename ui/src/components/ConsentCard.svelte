@@ -30,9 +30,7 @@
   // Отдельное согласие с документами Deloist (152-ФЗ, ст. 9): у каждого документа своя галочка,
   // по умолчанию пустая, и «Принимаю» доступна только когда отмечено всё. До согласия
   // не работает только баланс Deloist; свои ключи и подписки работают как раньше.
-  import Modal from './kit/Modal.svelte';
-  import Checkbox from './kit/Checkbox.svelte';
-  import Button from './kit/Button.svelte';
+import { Modal, Checkbox, Button } from './kit';
 
   let { docs = [], onaccept = null, onlater = null } = $props();
 

@@ -1,5 +1,5 @@
 <script>
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   // Флажок на токенах кита. Нативный input остаётся доступным и с клавиатуры,
   // видимая рамка — соседний .k-check__box.
   let {

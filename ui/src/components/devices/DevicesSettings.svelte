@@ -3,12 +3,7 @@
   // и «Другие ПК» — знакомство с другим ПК аккаунта, чьих ботов видно в боковой панели.
   // Имена и всё прочее с устройств и других ПК показываются только текстом.
   import { onMount } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Row from '../kit/Row.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import Button from '../kit/Button.svelte';
-  import Switch from '../kit/Switch.svelte';
+import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
   import { tr, trServer } from '../../lib/i18n.js';
   import { enc, groupCode, digitsOnly, kindLabel, agoText, errorText, linkText } from '../../lib/remote.js';
 

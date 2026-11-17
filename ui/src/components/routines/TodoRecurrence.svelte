@@ -4,8 +4,7 @@
   import { untrack } from 'svelte';
   import { tr } from '../../lib/i18n.js';
   import { editorFromRecurrence, recurrenceFromEditor, toggleWeekday, weekdayOf } from '../../lib/todos.js';
-  import Select from '../kit/Select.svelte';
-  import Chip from '../kit/Chip.svelte';
+import { Select, Chip } from '../kit';
 
   let { rule = null, dueDate = null, onchange } = $props();
 

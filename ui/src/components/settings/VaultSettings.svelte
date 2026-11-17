@@ -2,10 +2,7 @@
   // Экран «Менеджер паролей»: Bitwarden, 1Password и проверка сохранённых входов для сайта.
   // Мастер-пароль и токен живут только в поле ввода и в запросе: обратно их не показываем и никуда не пишем.
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import Button from '../kit/Button.svelte';
+import { Section, Field, TextInput, Button } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { api } = $props();

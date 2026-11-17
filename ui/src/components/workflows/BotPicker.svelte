@@ -1,7 +1,7 @@
 <script>
   // Выбор бота для шага: кнопка с аватаром и выпадающий список. Список ботов приносит app.js.
   import { tr } from '../../lib/i18n.js';
-  import Avatar from '../kit/Avatar.svelte';
+import { Avatar } from '../kit';
   import WfIcon from './WfIcon.svelte';
 
   let { bots = [], value = '', onchange } = $props();

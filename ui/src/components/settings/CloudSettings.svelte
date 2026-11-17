@@ -3,9 +3,7 @@
   // Ответы /api/cloud/instabox/* не содержат секретов (ключи остаются на ПК), поэтому здесь их нет.
   // Адрес облака показываем текстом; открывать его можно только кнопкой «Открыть облако».
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Button from '../kit/Button.svelte';
-  import Badge from '../kit/Badge.svelte';
+import { Section, Button, Badge } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { api } = $props();

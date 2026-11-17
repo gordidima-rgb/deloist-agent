@@ -3,12 +3,7 @@
   // Данные приходят из app.js (S.goals, S.checkins); после каждого изменения app перечитывает состояние
   // и перерисовывает вкладку через onchanged().
   import { untrack } from 'svelte';
-  import Switch from '../kit/Switch.svelte';
-  import Field from '../kit/Field.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
-  import ListItem from '../kit/ListItem.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
+import { Switch, Field, Select, Button, ListItem, EmptyState } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { whenText } from '../../lib/when.js';

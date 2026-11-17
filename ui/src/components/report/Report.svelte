@@ -15,11 +15,8 @@
     toneOf,
     weekLabel,
   } from '../../lib/report.js';
-  import Button from '../kit/Button.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
-  import Skeleton from '../kit/Skeleton.svelte';
+import { Button, EmptyState, Skeleton, Icon } from '../kit';
 
-  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi, today = mondayOf() } = $props();
 
   let data = $state(null);

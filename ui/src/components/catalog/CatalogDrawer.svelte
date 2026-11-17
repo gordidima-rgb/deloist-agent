@@ -7,7 +7,7 @@
   import ConnectFlow from './ConnectFlow.svelte';
   import DiffView from './DiffView.svelte';
 
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
   let { id, bots = [], onclose, onchanged, onopenbot } = $props();
 
   let item = $state.raw(null);

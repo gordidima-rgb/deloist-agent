@@ -6,8 +6,8 @@
   // Строка поля формы настроек: серая плитка 28 px и метка 13/600, поле рядом (форма шире 440 px)
   // или под меткой. block — поле на всю ширину под меткой (инструкции), stack — метка всегда сверху
   // (пара выборов в .k-fpair). tip — пояснение в подсказке «i». children получает { id }.
-  import Icon from './Icon.svelte';
-  import InfoTip from './InfoTip.svelte';
+  import Icon from '../media/Icon.svelte';
+  import InfoTip from '../overlay/InfoTip.svelte';
 
   let { label = '', icon = '', tip = '', tipLabel = '', block = false, stack = false, top = false, for: htmlFor = '', class: className = '', children, ...rest } = $props();
 

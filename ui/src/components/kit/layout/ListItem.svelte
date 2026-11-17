@@ -1,9 +1,9 @@
 <script>
   // Строка списка ботов, чатов или файлов. Живёт внутри <ul class="k-list">.
   // avatar и context — сниппеты; context — место для кнопки меню «…».
-  import Badge from './Badge.svelte';
+  import Badge from '../status/Badge.svelte';
 
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   let {
     avatar = null,
     title = '',

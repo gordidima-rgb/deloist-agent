@@ -3,7 +3,7 @@
   // Пояснение лежит в подсказке, а не под полем: под полем остаётся только то, что нужно видеть всегда.
   // Перенос строк в text (\n) сохраняется. label — имя кнопки для скринридера.
   // Подсказка не выходит за края формы (.k-sform) и окна: при показе её сдвигает place().
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   import Tooltip from './Tooltip.svelte';
 
   let { text = '', label = '', placement = 'bottom', class: className = '', ...rest } = $props();

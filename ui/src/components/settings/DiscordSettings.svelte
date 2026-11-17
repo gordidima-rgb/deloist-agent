@@ -2,11 +2,7 @@
   // Экран «Discord» окна настроек: свой бот, привязка личных сообщений кодом и отключение моста.
   // Токен живёт только в поле ввода и в PUT: обратно его не показываем и никуда не пишем.
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
+import { Section, Field, TextInput, Select, Button } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let { api, bots = [], onchanged } = $props();

@@ -2,8 +2,7 @@
   // Окно аккаунта: возврат оплаченных денег, выгрузка своих данных, цены и удаление аккаунта.
   // Удаление — в два шага: сначала «Удалить аккаунт», потом подтверждение. Если на балансе
   // остались оплаченные деньги, сайт откажет, и окно предложит вернуть их или отказаться от них.
-  import Button from './kit/Button.svelte';
-  import Checkbox from './kit/Checkbox.svelte';
+import { Button, Checkbox } from './kit';
   import { tr } from '../lib/i18n.js';
 
   let { api, siteUrl = '', ondeleted = null, onnotice = null } = $props();

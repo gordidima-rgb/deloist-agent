@@ -3,7 +3,7 @@
   // стопкой сверху окна. Решение уходит только после ввода кода с экрана устройства. Имя, браузер и геометка
   // приходят от устройства и показываются только текстом.
   import { onMount } from 'svelte';
-  import Button from '../kit/Button.svelte';
+import { Button } from '../kit';
   import { tr, trServer } from '../../lib/i18n.js';
   import { enc, groupCode, digitsOnly, kindLabel, errorText } from '../../lib/remote.js';
   import { whenText } from '../../lib/when.js';

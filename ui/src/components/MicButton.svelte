@@ -3,7 +3,7 @@
   // Полоски берут уровень из событий записи: нет событий — нет движения. Бесконечных анимаций нет.
   import { tr } from '../lib/i18n.js';
 
-  import Icon from './kit/Icon.svelte';
+import { Icon } from './kit';
   let { state = 'idle', level = 0, progress = 0, onpress } = $props();
 
   // Средние полоски выше крайних; лёгкий разброс без случайности, чтобы кадр зависел только от уровня.

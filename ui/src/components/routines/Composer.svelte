@@ -9,7 +9,7 @@
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
   import MentionPopover from '../MentionPopover.svelte';
 
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
   let {
     value = $bindable(''),
     placeholder = '',

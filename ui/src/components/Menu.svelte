@@ -3,7 +3,7 @@
   // Пункты — данные: { id, label, kind: 'item' | 'check' | 'sep' | 'note', checked, disabled, hint, danger, icon, autofocus }.
   // icon — имя значка из lib/icons.js, hint — тихая подпись справа, disabled — серая строка, tip — её подсказка.
   // Стрелки, Home и End ходят по пунктам; Esc и щелчок мимо закрывают меню (onclose). Текст уже переведён вызывающим.
-  import Icon from './kit/Icon.svelte';
+import { Icon } from './kit';
 
   let { items = [], label = '', onpick, onclose } = $props();
 

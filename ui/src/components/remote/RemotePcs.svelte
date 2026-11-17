@@ -3,8 +3,7 @@
   // Заголовок — имя ПК (точка «в сети» или «не в сети»), внутри боты этого ПК. Пока ПК не в сети, раздел серый.
   // Всё, что пришло с другого ПК, — только текст; цвет проходит проверку; id — только через enc().
   import { onMount } from 'svelte';
-  import ListItem from '../kit/ListItem.svelte';
-  import Icon from '../kit/Icon.svelte';
+import { ListItem, Icon } from '../kit';
   import RemoteOrb from './RemoteOrb.svelte';
   import { tr } from '../../lib/i18n.js';
   import { enc } from '../../lib/remote.js';

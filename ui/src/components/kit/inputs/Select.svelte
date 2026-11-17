@@ -1,6 +1,6 @@
 <script>
   import { tick } from 'svelte';
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   // Выпадающий список кита «Угли»: своя кнопка и свой список вместо списка ОС (тот не слушает тему).
   // Контракт прежний: options (строки или { value, label, disabled }), bind:value, onchange(event) с
   // event.currentTarget.value. Под капотом лежит скрытый нативный select: он держит значение и

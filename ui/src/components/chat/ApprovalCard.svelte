@@ -2,7 +2,7 @@
   // Карточка «Нужно разрешение» (.k-approval, docs/design/kit.md): единственная громкая карточка чата.
   // Данные ей даёт web/app.js (approvalCard), решение уходит обратно через onanswer(answer):
   // сервер получает только ответ, что именно разрешается, он берёт из своей карточки.
-  import Button from '../kit/Button.svelte';
+import { Button } from '../kit';
 
   // actions: [{ answer, label, variant? }] по порядку; resolved: подпись после решения.
   // Человеческая карточка: title — короткая фраза, которую собрала программа; risk — low | medium | high (считает программа);

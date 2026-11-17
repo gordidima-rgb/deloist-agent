@@ -31,6 +31,8 @@ afterEach(() => {
 });
 
 const row = (text) => [...host.querySelectorAll('.mp-item')].find((b) => b.textContent.includes(text));
+// Select кита: видимая кнопка несёт id, значение держит скрытый нативный select рядом.
+const nativeOf = (selector) => host.querySelector(selector)?.closest('.k-select')?.querySelector('select');
 const change = (el, value) => {
   el.value = value;
   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -68,7 +70,7 @@ describe('ChatModelPopover', () => {
   it('effort uses the provider list and saves; auto clears', () => {
     const oneffort = vi.fn();
     mount({ oneffort, value: { driver: 'acp:codex', model: 'gpt-5' }, effort: 'low' });
-    const select = host.querySelector('#cmp-effort');
+    const select = nativeOf('#cmp-effort');
     expect([...select.options].map((o) => o.textContent)).toEqual(['Авто (Низкое)', 'Низкое', 'Очень высокое']);
     expect(select.value).toBe('low');
     change(select, 'xhigh');
@@ -80,7 +82,7 @@ describe('ChatModelPopover', () => {
   it('extra agent options render a select and save', () => {
     const onoption = vi.fn();
     mount({ onoption, value: { driver: 'acp:codex', model: 'gpt-5' }, agentOptions: { speed: 'fast' } });
-    const select = host.querySelector('#cmp-opt-speed');
+    const select = nativeOf('#cmp-opt-speed');
     expect(select.value).toBe('fast');
     change(select, '');
     expect(onoption).toHaveBeenLastCalledWith('speed', '');
@@ -88,7 +90,7 @@ describe('ChatModelPopover', () => {
 
   it('falls back to low/medium/high for API drivers and hides effort for ACP without efforts', () => {
     mount();
-    expect([...host.querySelector('#cmp-effort').options].map((o) => o.value)).toEqual(['', 'low', 'medium', 'high']);
+    expect([...nativeOf('#cmp-effort').options].map((o) => o.value)).toEqual(['', 'low', 'medium', 'high']);
     handle.update({ value: { driver: 'acp:other', model: 'm1' } });
     flushSync();
     expect(host.querySelector('#cmp-effort')).toBeNull();

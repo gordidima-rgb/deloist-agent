@@ -1,7 +1,7 @@
 <script>
   // Значок кита по имени из lib/icons.js: линейный SVG 24x24, цвет берёт у текста рядом (currentColor).
   // size = null — размер задаёт CSS (как у значков с классом i/k-i); stroke 2 — толщина для меню и поиска.
-  import { ICONS } from '../../lib/icons.js';
+  import { ICONS } from '../../../lib/icons.js';
 
   let { name, size = 18, stroke = 2, class: className = '', label = '', ...rest } = $props();
 

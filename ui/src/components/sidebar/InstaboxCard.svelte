@@ -1,8 +1,7 @@
 <script>
   // Карточка над нижним меню: предлагает бесплатный сервер, пока Instabox не подключён.
   import { onMount } from 'svelte';
-  import Button from '../kit/Button.svelte';
-  import Icon from '../kit/Icon.svelte';
+import { Button, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { instaboxFeed, cardVisible, readDismissed, writeDismissed } from '../../lib/instabox.js';
 

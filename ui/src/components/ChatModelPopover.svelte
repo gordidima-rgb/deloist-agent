@@ -4,7 +4,7 @@
   // (например, «Скорость») компактными селектами кита и ссылка на все настройки модели.
   import { tr } from '../lib/i18n.js';
   import ModelPicker from './ModelPicker.svelte';
-  import Select from './kit/Select.svelte';
+import { Select } from './kit';
 
   let {
     providers = [],

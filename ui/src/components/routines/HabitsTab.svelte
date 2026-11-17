@@ -6,16 +6,10 @@
   import { HABIT_ICON_NAMES } from '../../lib/habitIcons.js';
   import { daysFromMask, maskFromDays } from '../../lib/habits.js';
   import { channelsOf, flagsOf, isTelegramPaired } from '../../lib/channels.js';
-  import Button from '../kit/Button.svelte';
-  import IconButton from '../kit/IconButton.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import Chip from '../kit/Chip.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
+import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '../kit';
   import HabitIcon from './HabitIcon.svelte';
   import ChannelChips from './ChannelChips.svelte';
 
-  import Icon from '../kit/Icon.svelte';
   let { api = defaultApi, onopentelegram } = $props();
 
   let habits = $state([]);

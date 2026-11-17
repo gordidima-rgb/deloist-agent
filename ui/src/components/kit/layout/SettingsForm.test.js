@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import InfoTip from './InfoTip.svelte';
-import RadioGroup from './RadioGroup.svelte';
+import InfoTip from '../overlay/InfoTip.svelte';
+import RadioGroup from '../choice/RadioGroup.svelte';
 import FormHarness from './SettingsFormHarness.test.svelte';
 
 let instance;

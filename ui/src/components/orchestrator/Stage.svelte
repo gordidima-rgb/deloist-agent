@@ -5,7 +5,7 @@
   import { untrack, onMount, tick } from 'svelte';
   import { tr } from '../../lib/i18n.js';
   import { markdown } from '../../lib/markdown.js';
-  import Icon from '../kit/Icon.svelte';
+import { Icon } from '../kit';
   import { lookForPhase, phaseOf, bubbleOf } from './model.js';
 
   let {

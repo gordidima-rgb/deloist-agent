@@ -1,5 +1,5 @@
 <script module>
-  import Icon from './Icon.svelte';
+  import Icon from '../media/Icon.svelte';
   let seq = 0;
 </script>
 
@@ -9,7 +9,7 @@
   // на то, что открыло окно. variant="sheet" — та же панель снизу.
   import { tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { tr } from '../../lib/i18n.js';
+  import { tr } from '../../../lib/i18n.js';
 
   let {
     open = $bindable(false),

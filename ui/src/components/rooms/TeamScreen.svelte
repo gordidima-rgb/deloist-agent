@@ -2,9 +2,7 @@
   // Экран команды: шапка с картинкой, вкладки «Структура» и «Чат», схема «Ты → ведущий → участники».
   // Чат остаётся старым экраном app.js: этот компонент рисует только вкладки и схему, а при вкладке
   // «Чат» занимает одну полосу с вкладками. Данные и переходы держит app.js (props и колбэки).
-  import Tabs from '../kit/Tabs.svelte';
-  import Button from '../kit/Button.svelte';
-  import Icon from '../kit/Icon.svelte';
+import { Tabs, Button, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
 
   let {

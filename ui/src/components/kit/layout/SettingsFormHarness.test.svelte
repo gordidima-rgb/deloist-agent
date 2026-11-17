@@ -1,8 +1,8 @@
 <script>
   // Только для SettingsForm.test.js: карточка с одной строкой поля.
   import SettingsCard from './SettingsCard.svelte';
-  import FieldRow from './FieldRow.svelte';
-  import TextInput from './TextInput.svelte';
+  import FieldRow from '../inputs/FieldRow.svelte';
+  import TextInput from '../inputs/TextInput.svelte';
 </script>
 
 <div class="k-sform">

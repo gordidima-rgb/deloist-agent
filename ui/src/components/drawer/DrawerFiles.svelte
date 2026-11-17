@@ -1,13 +1,10 @@
 <script>
   // Вкладка «Файлы» в ящике бота: только чтение. Папки открываются, файл открывает просмотрщик (FileViewer).
   // Данные: GET /api/bots/{id}/files?path=, GET /api/bots/{id}/file?path=.
-  import ListItem from '../kit/ListItem.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
-  import Button from '../kit/Button.svelte';
+import { ListItem, EmptyState, Button, Icon } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { fileType } from '../../lib/fileType.js';
-  import Icon from '../kit/Icon.svelte';
   import FileViewer from './FileViewer.svelte';
   import { FILE_MIME, fileRef } from '../../lib/fileRef.js';
 
