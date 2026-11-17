@@ -7027,6 +7027,7 @@ const settingsLinks = {};
 let telegramView = null;
 let discordView = null;
 let slackView = null;
+let mailView = null;
 let vaultView = null;
 let cloudView = null;
 
@@ -7086,6 +7087,7 @@ function loadSubscreen(subId) {
   if (subId === 'telegram') mountTelegramSettings();
   if (subId === 'discord') mountDiscordSettings();
   if (subId === 'slack') mountSlackSettings();
+  if (subId === 'mail') mountMailSettings();
   if (subId === 'vault') mountVaultSettings();
   if (subId === 'devices') mountDevicesSettings();
   if (subId === 'cloud') mountCloudSettings();
@@ -7128,6 +7130,20 @@ function mountSlackSettings() {
   };
   if (slackView) slackView.update(props);
   else slackView = window.DeloistUI.mountSlackSettings(host, props);
+}
+
+// Экран «Почта»: ящики ботов, триггеры рутин и журнал отправленного; монтируем один раз.
+function mountMailSettings() {
+  const host = $('#sub-mail');
+  if (!host || !window.DeloistUI?.mountMailSettings) return;
+  const props = {
+    api,
+    bots: S.bots,
+    routines: S.routines,
+    onchanged: () => refreshState(),
+  };
+  if (mailView) mailView.update(props);
+  else mailView = window.DeloistUI.mountMailSettings(host, props);
 }
 
 // Экран «Облако»: машина Instabox. Секреты остаются на ПК, окно получает только состояние.
@@ -7186,6 +7202,7 @@ const SETTINGS_LINKS = {
   telegram: { label: tr('Telegram'), sub: tr('Писать боту из своего Telegram') },
   discord: { label: tr('Discord'), sub: tr('Писать боту из личных сообщений Discord') },
   slack: { label: tr('Slack'), sub: tr('Писать боту из личных сообщений Slack') },
+  mail: { label: tr('Почта'), sub: tr('Ящики ботов: читать и отправлять письма') },
   cloud: { label: tr('Облако'), sub: tr('Боты в облаке, даже когда компьютер выключен') },
   vault: { label: tr('Менеджер паролей'), sub: tr('Bitwarden и 1Password: бот входит на сайты сам') },
   devices: { label: tr('Устройства'), sub: tr('Телефон, второй ПК и боты других ваших ПК') },
@@ -7899,6 +7916,7 @@ const STATUS_LABELS = {
   limit: tr('упёрлось в предел токенов'),
   paused: tr('на паузе'),
   skipped: tr('пропущено: компьютер спал'),
+  no_mail: tr('нет новых писем'),
   error: tr('не запустилась'),
   running: tr('идёт'),
   busy: tr('бот был занят'),

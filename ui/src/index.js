@@ -33,6 +33,7 @@ import SettingsHint from './components/settings/SettingsHint.svelte';
 import TelegramSettings from './components/settings/TelegramSettings.svelte';
 import DiscordSettings from './components/settings/DiscordSettings.svelte';
 import SlackSettings from './components/settings/SlackSettings.svelte';
+import MailSettings from './components/settings/MailSettings.svelte';
 import CloudSettings from './components/settings/CloudSettings.svelte';
 import VaultSettings from './components/settings/VaultSettings.svelte';
 import PairPlaques from './components/devices/PairPlaques.svelte';
@@ -133,6 +134,8 @@ window.DeloistUI = {
   mountDiscordSettings: (target, props) => mountComponent(DiscordSettings, target, props),
   // Экран «Slack»: два токена приложения, выбор отвечающего бота и привязка личных сообщений.
   mountSlackSettings: (target, props) => mountComponent(SlackSettings, target, props),
+  // Экран «Почта»: ящики ботов, доступ, триггеры рутин и журнал отправленного.
+  mountMailSettings: (target, props) => mountComponent(MailSettings, target, props),
   // Экран «Менеджер паролей»: Bitwarden, 1Password и проверка входов для сайта.
   // Экран «Облако»: машина Instabox для ботов.
   mountCloudSettings: (target, props) => mountComponent(CloudSettings, target, props),
