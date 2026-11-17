@@ -363,6 +363,7 @@
     z-index: 2;
   }
   .orch-orb-host {
+    position: relative;
     width: 240px;
     height: 240px;
     max-width: 100%;
