@@ -1618,6 +1618,19 @@ async fn the_program_key_cannot_touch_the_optimizer() {
 }
 
 #[tokio::test]
+async fn the_program_key_cannot_undo_memory_edits() {
+    let crew = Crew::start("memory-undo-agent").await;
+    let token = agent_token(&crew);
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/memory/undo/mem_x", crew.base))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 403, "ключ программы дошёл до отмены правки памяти");
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_touch_workflows() {
     let crew = Crew::start("workflows-agent").await;
     let made = crew.ok("POST", "/api/workflows", Some(json!({ "title": "Мой" }))).await;

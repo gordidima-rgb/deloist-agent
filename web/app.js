@@ -1194,6 +1194,8 @@ const toolLabel = (call) => TOOL_LABELS[plainName(call.name)] || TOOL_LABELS[cal
 // Семья шага: все браузерные шаги идут одной строкой, остальные собираются по имени инструмента.
 const toolFamily = (call) => {
   const plain = plainName(call.name);
+  // Запись в память — всегда своя строка: в группе «3 шага» не видно, что и куда записано.
+  if (plain === 'remember') return '';
   return plain.startsWith('browser_') ? 'browser' : plain;
 };
 
@@ -1359,6 +1361,77 @@ function feedMade(call, result) {
   appendInFeed(card);
 }
 
+// Где память, в которую записал бот. Новая память (команда) — ещё одна строка здесь и слово в ответе `remember` (src/memory.rs).
+const MEMORY_PLACES = {
+  shared: { open: () => openSharedMemory(), made: tr('Запомнил в общей памяти'), fixed: tr('Обновил в общей памяти') },
+  bot: { open: () => openDrawer('memory'), made: tr('Запомнил в своей памяти'), fixed: tr('Обновил в своей памяти') },
+  team: { open: () => openDrawer('memory'), made: tr('Запомнил в памяти команды'), fixed: tr('Обновил в памяти команды') },
+};
+
+// Что бот записал, из ответа `remember` («Записано [m18] в общую память …: «название». [журнал: mem_…]»).
+// Тот же разбор для ботов на API и для внешних агентов (ACP): у обоих ответ приходит текстом.
+function rememberNote(call) {
+  if (plainName(call.name) !== 'remember' || call.status !== 'ok') return null;
+  const text = String(call.result || '');
+  const unchanged = /^Факт \[(m\d+)\] уже такой/.exec(text);
+  if (unchanged) return { id: unchanged[1], title: '', place: '', label: tr('Уже было записано'), entry: '' };
+  const m = /^(Записано|Факт) \[(m\d+)\] в (общую|общей|твою|твоей|памят[ьи] команды «[^»]*»)[^«]*«([\s\S]*?)»\.(?: \[журнал: (mem_[0-9a-f]+)\])?/.exec(text);
+  if (!m) return null;
+  const place = /^общ/.test(m[3]) ? 'shared' : /команды/.test(m[3]) ? 'team' : 'bot';
+  return { id: m[2], title: m[4], place, label: MEMORY_PLACES[place][/^Записано/.test(m[1]) ? 'made' : 'fixed'], entry: m[5] || '' };
+}
+
+// Строка шага `remember`: что и куда записано, номер факта открывает память, «Отменить» откатывает запись в журнале.
+function decorateRemember(d) {
+  const note = rememberNote(d._call);
+  const summary = d.querySelector(':scope > summary');
+  if (!note || !summary || summary.querySelector('.mem-id')) return;
+  summary.querySelector('.t-label').textContent = note.label;
+  const target = summary.querySelector('.t-target');
+  if (note.title) {
+    target.textContent = '«' + clip(note.title, 80) + '»';
+    target.title = note.title;
+  } else {
+    target.remove();
+  }
+  const status = summary.querySelector('.t-status');
+  const id = document.createElement('button');
+  id.type = 'button';
+  id.className = 'k-btn k-btn--sm k-btn--ghost mem-id';
+  id.textContent = note.id;
+  id.title = tr('Открыть память');
+  id.disabled = !note.place;
+  id.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    MEMORY_PLACES[note.place]?.open();
+  });
+  status.before(id);
+  if (!note.entry) return;
+  const undo = document.createElement('button');
+  undo.type = 'button';
+  undo.className = 'k-btn k-btn--sm k-btn--ghost mem-undo';
+  undo.textContent = tr('Отменить');
+  undo.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    undo.disabled = true;
+    try {
+      await api(`/api/memory/undo/${encodeURIComponent(note.entry)}`, { method: 'POST' });
+      const done = document.createElement('span');
+      done.className = 'resolved';
+      done.textContent = tr('Отменено');
+      undo.replaceWith(done);
+      if (sharedMemoryOpen()) loadSharedMemory();
+      else if (drawerShown() && S.tab === 'memory') S.drawerMemoryLoad?.();
+    } catch (err) {
+      undo.disabled = false;
+      toast(err.message);
+    }
+  });
+  status.before(undo);
+}
+
 function toolNode(call) {
   const d = document.createElement('details');
   d.className = 'tool';
@@ -1385,6 +1458,7 @@ function toolNode(call) {
     body.append(res);
   }
   d.append(summary, body);
+  decorateRemember(d);
   // Скрипт, которого нет в списке (его только что построили), подтягиваем и дописываем описание в готовую строку.
   const plain = plainName(call.name);
   if ((plain === 'run_script' || plain === 'save_script') && call.args?.name && !scriptAbout(call.args.name)) {
@@ -3189,6 +3263,10 @@ function updateTool(ev) {
   if (['error', 'denied', 'timeout'].includes(ev.status)) markWorkError(node.closest('.work-group'));
   const status = node.querySelector('.t-status');
   if (status) status.textContent = statusLabel(ev.status);
+  if (node._call) {
+    node._call = { ...node._call, status: ev.status, result: ev.result || node._call.result };
+    decorateRemember(node);
+  }
   const spent = stepTrack(ev.callId, ev.status);
   if (spent != null && status && !node.querySelector('.t-dur')) status.before(stepDurNode(spent));
   refreshGroup(node.closest('.tool-grp'));

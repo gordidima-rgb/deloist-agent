@@ -645,6 +645,8 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
 .tool .t-chev, .tool-grp .t-chev { width: 14px; height: 14px; }
 .tool .t-label { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; color: var(--k-text); }
 .tool .t-target { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--k-font-mono); font-size: var(--k-text-xs); color: var(--k-text-3); }
+/* Номер факта и «Отменить» в строке записи в память: кнопки кита, в строку встают без растяжения. */
+.tool > summary .mem-id, .tool > summary .mem-undo { flex: none; font-family: var(--k-font-mono); }
 /* Статус шага: слово и значок. Готово — тихо, с оранжевой галкой; идёт — оранжевый круг; ждёт тебя — оранжевая точка; отказ и ошибка — красные. */
 .tool .t-status, .tool-grp > summary .t-status { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: var(--k-text-xs); color: var(--k-text-3); }
 .tool .t-status::before, .tool-grp > summary .t-status::before {

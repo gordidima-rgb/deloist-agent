@@ -1051,7 +1051,8 @@ pub enum Writer<'a> {
 }
 
 /// Записать черновик.
-async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fact, bool), String> {
+/// Ответ: факт, создан ли он и запись журнала (по ней «Отменить» в чате).
+async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fact, bool, Option<String>), String> {
     let actor = match writer {
         Writer::Bot(bot) => Some(*bot),
         _ => None,
@@ -1070,7 +1071,7 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
     }
     let rooms = app.store.rooms();
     let wanted_scope = target_scope(&draft, actor, &rooms)?;
-    let (fact, created, size) = {
+    let (fact, created, size, entry) = {
         let _gate = GATE.lock().await;
         let mut book = load(app).await;
         let ids: HashSet<String> = book.facts.iter().map(|f| f.id.clone()).collect();
@@ -1118,7 +1119,7 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
                     fact.scope = wanted_scope.clone();
                 }
                 if *fact == before {
-                    return Ok((before, false));
+                    return Ok((before, false, None));
                 }
                 fact.updated_at = now();
                 (fact.clone(), false, Some(before))
@@ -1164,34 +1165,46 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
         };
         let verb = if created { "новый факт" } else { "правка факта" };
         let action = if created { "add" } else { "edit" };
-        commit(app, &book, who, action, &format!("{name}: {verb} — {place}"), vec![(before, Some(fact.clone()))], json!({}))
+        let entry = commit(app, &book, who, action, &format!("{name}: {verb} — {place}"), vec![(before, Some(fact.clone()))], json!({}))
             .await
             .map_err(|e| e.to_string())?;
-        (fact, created, size)
+        (fact, created, size, entry)
     };
     if size > limit_of(&fact.scope) {
         trigger_doctor(app, "overflow");
     }
-    Ok((fact, created))
+    Ok((fact, created, entry))
 }
 
 /// Инструмент `remember`.
 pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
-    let (fact, created) = write(app, &Writer::Bot(bot), Draft::from_args(args)).await?;
-    let place = if fact.scope == SHARED {
-        "общую память — это узнают все боты".to_string()
+    let (fact, created, entry) = write(app, &Writer::Bot(bot), Draft::from_args(args)).await?;
+    let team = if is_room_scope(&fact.scope) { app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name) } else { None };
+    Ok(remember_reply(&fact, created, entry.as_deref(), now(), team.as_deref()))
+}
+
+/// Ответ боту на `remember`. Чат разбирает его же для строки шага: номер «[m18]», место (общая, команды, личная)
+/// и хвост «[журнал: mem_…]» (по нему «Отменить»). Менять слова — вместе с `rememberNote` в `web/app.js`.
+fn remember_reply(fact: &Fact, created: bool, entry: Option<&str>, at: i64, team: Option<&str>) -> String {
+    let (place, in_place) = if fact.scope == SHARED {
+        ("общую память — это узнают все боты".to_string(), "общей памяти".to_string())
     } else if is_room_scope(&fact.scope) {
-        let name = app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name).unwrap_or_default();
-        format!("память команды «{name}» — её увидят только боты этой команды")
+        let name = team.unwrap_or_default();
+        (format!("память команды «{name}» — её увидят только боты этой команды"), format!("памяти команды «{name}»"))
     } else {
-        "твою память".to_string()
+        ("твою память".to_string(), "твоей памяти".to_string())
     };
-    if !created && now() - fact.updated_at > 5_000 {
+    if !created && at - fact.updated_at > 5_000 {
         // Правка ничего не изменила: не говорим «обновлён», иначе бот считает, что записал.
-        return Ok(format!("Факт [{}] уже такой, ничего не изменилось. Чтобы поменять текст, передай body (или id и title).", fact.id));
+        return format!("Факт [{}] уже такой, ничего не изменилось. Чтобы поменять текст, передай body (или id и title).", fact.id);
     }
     let title = service::take_chars(&one_line(&fact.title), 80);
-    Ok(if created { format!("Записано [{}] в {place}: «{title}».", fact.id) } else { format!("Факт [{}] обновлён: «{title}».", fact.id) })
+    let journal = entry.map(|id| format!(" [журнал: {id}]")).unwrap_or_default();
+    if created {
+        format!("Записано [{}] в {place}: «{title}».{journal}", fact.id)
+    } else {
+        format!("Факт [{}] в {in_place} обновлён: «{title}».{journal}", fact.id)
+    }
 }
 
 /// Внешний агент через MCP (`deloist --mcp`): пишет в общую память, как бот со scope shared.
@@ -1199,7 +1212,7 @@ pub async fn agent_remember(app: &Arc<App>, args: &Value) -> Result<String, Stri
     let mut draft = Draft::from_args(args);
     draft.scope = SHARED.into();
     let writer = Writer::Program { who: json!({ "kind": "agent", "via": "mcp" }), author: "mcp", name: "Внешний агент" };
-    let (fact, created) = write(app, &writer, draft).await?;
+    let (fact, created, _) = write(app, &writer, draft).await?;
     Ok(if created { format!("Записано [{}] в общую память Deloist.", fact.id) } else { format!("Факт [{}] обновлён.", fact.id) })
 }
 
@@ -1443,7 +1456,7 @@ pub async fn human_write(app: &Arc<App>, input: &Value, id: Option<&str>) -> Res
             scopes.push(old.scope);
         }
     }
-    let fact = write(app, &Writer::Human, draft).await.map(|(fact, _)| fact)?;
+    let fact = write(app, &Writer::Human, draft).await.map(|(fact, _, _)| fact)?;
     scopes.push(fact.scope.clone());
     forget_prompts_for(app, &scopes).await;
     Ok(fact)
@@ -1945,6 +1958,19 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn remember_reply_names_the_fact_the_place_and_the_journal_entry() {
+        let shared = fact("m18", SHARED, "user", "Картинки Deloist: сюжет");
+        let own = fact("m3", "bot_a", "user", "Любит кофе");
+        let fresh = Fact { updated_at: now(), ..shared.clone() };
+        assert_eq!(remember_reply(&fresh, true, Some("mem_ab"), now(), None), "Записано [m18] в общую память — это узнают все боты: «Картинки Deloist: сюжет». [журнал: mem_ab]");
+        assert_eq!(remember_reply(&Fact { updated_at: now(), ..own.clone() }, true, Some("mem_cd"), now(), None), "Записано [m3] в твою память: «Любит кофе». [журнал: mem_cd]");
+        assert_eq!(remember_reply(&Fact { updated_at: now(), ..own.clone() }, false, Some("mem_ef"), now(), None), "Факт [m3] в твоей памяти обновлён: «Любит кофе». [журнал: mem_ef]");
+        assert!(!remember_reply(&fresh, true, None, now(), None).contains("журнал"), "без правки нет и записи журнала");
+        let same = remember_reply(&shared, false, None, now(), None);
+        assert!(same.contains("[m18]") && same.contains("ничего не изменилось"), "{same}");
+    }
 
     #[test]
     fn text_next_to_title_becomes_the_body() {
