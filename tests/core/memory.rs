@@ -388,6 +388,36 @@ fn last_tool_result(fake: &Fake) -> String {
     last["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").cloned().unwrap()["content"].as_str().unwrap().to_string()
 }
 
+// memory.md: бот убирает свою запись через remember с forget, запись человека — нет; человек правит файл текстом.
+#[tokio::test(flavor = "multi_thread")]
+async fn memory_md_forget_and_human_edit() {
+    let (fake, crew, bots) = setup("memory-md-forget", json!({}), &[]).await;
+    let bot = &bots[0];
+    let file = crew.data_dir.join("workspaces").join(bot).join("memory.md");
+    fake.script.lock().unwrap().push_back(("remember".into(), json!({ "title": "Отчёт по средам" })));
+    turn(&crew, bot, "запомни").await;
+    assert!(std::fs::read_to_string(&file).unwrap().contains("- Отчёт по средам"));
+
+    // Человек дописал строку в ящике: она его, бот её не уберёт.
+    let text = std::fs::read_to_string(&file).unwrap().replace("- Отчёт по средам\n", "- Отчёт по средам\n- Кабинет WB — у Ани\n");
+    let saved = crew.ok("PUT", &format!("/api/bots/{bot}/memory-file"), Some(json!({ "text": text }))).await;
+    assert!(saved["entryId"].as_str().is_some(), "{saved}");
+    let facts = crew.ok("GET", &format!("/api/bots/{bot}/memory"), None).await["facts"].as_array().cloned().unwrap();
+    let human = facts.iter().find(|f| f["title"] == "Кабинет WB — у Ани").expect("строка человека стала фактом");
+    assert_eq!(human["author"], "human");
+    fake.script.lock().unwrap().push_back(("remember".into(), json!({ "forget": true, "id": human["id"] })));
+    turn(&crew, bot, "убери кабинет").await;
+    assert!(last_tool_result(&fake).contains("записал человек"), "{}", last_tool_result(&fake));
+
+    let own = facts.iter().find(|f| f["title"] == "Отчёт по средам").unwrap();
+    fake.script.lock().unwrap().push_back(("remember".into(), json!({ "forget": true, "id": own["id"] })));
+    turn(&crew, bot, "убери отчёт").await;
+    let reply = last_tool_result(&fake);
+    assert!(reply.starts_with(&format!("Убрано [{}] из твоей памяти: «Отчёт по средам».", own["id"].as_str().unwrap())), "{reply}");
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert!(!after.contains("Отчёт по средам") && after.contains("Кабинет WB — у Ани"), "{after}");
+}
+
 /// Задача кончилась (тишина после хода) — программа сама пишет эпизод: что просили, чем работали,
 // чем кончилось. Эпизод личного чата видит только этот бот: через recall и в блоке «Из памяти».
 #[tokio::test(flavor = "multi_thread")]

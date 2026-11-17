@@ -1313,7 +1313,13 @@ async fn forget_own(app: &Arc<App>, bot: &Bot, id: &str) -> Result<String, Strin
     let (fact, entry) = scope;
     forget_prompts_for(app, std::slice::from_ref(&fact.scope)).await;
     let journal = entry.map(|e| format!(" [журнал: {e}]")).unwrap_or_default();
-    Ok(format!("Убрано [{}]: «{}».{journal}", fact.id, service::take_chars(&one_line(&fact.title), 80)))
+    let place = if is_room_scope(&fact.scope) {
+        format!("из памяти команды «{}»", app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name).unwrap_or_default())
+    } else {
+        "из твоей памяти".to_string()
+    };
+    // Окно разбирает этот текст (`rememberNote` в web/app.js): меняя его, поменяй и там.
+    Ok(format!("Убрано [{}] {place}: «{}».{journal}", fact.id, service::take_chars(&one_line(&fact.title), 80)))
 }
 
 /// memory.md бота текстом — для ящика бота.

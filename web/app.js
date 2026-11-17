@@ -1375,6 +1375,9 @@ function rememberNote(call) {
   const text = String(call.result || '');
   const unchanged = /^Факт \[(m\d+)\] уже такой/.exec(text);
   if (unchanged) return { id: unchanged[1], title: '', place: '', label: tr('Уже было записано'), entry: '' };
+  // `remember` с forget: «Убрано [m5] из твоей памяти: «…». [журнал: mem_…]».
+  const removed = /^Убрано \[(m\d+)\] из (твоей памяти|памяти команды «[^»]*»): «([\s\S]*?)»\.(?: \[журнал: (mem_[0-9a-f]+)\])?/.exec(text);
+  if (removed) return { id: removed[1], title: removed[3], place: /команды/.test(removed[2]) ? 'team' : 'bot', label: tr('Убрал из памяти'), entry: removed[4] || '' };
   const m = /^(Записано|Факт) \[(m\d+)\] в (общую|общей|твою|твоей|памят[ьи] команды «[^»]*»)[^«]*«([\s\S]*?)»\.(?: \[журнал: (mem_[0-9a-f]+)\])?/.exec(text);
   if (!m) return null;
   const place = /^общ/.test(m[3]) ? 'shared' : /команды/.test(m[3]) ? 'team' : 'bot';
