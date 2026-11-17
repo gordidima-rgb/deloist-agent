@@ -30,6 +30,12 @@ pub const SHARED_LIMIT: usize = 20_000;
 pub const INDEX_LIMIT: usize = 3_000;
 /// Личные факты бота, которые он видит целиком.
 pub const BOT_LIMIT: usize = 8_000;
+/// Закреплённые факты бота, которые идут в каждый ход целиком.
+pub const PIN_BOT_LIMIT: usize = 2_000;
+/// То же для памяти одной команды.
+pub const PIN_TEAM_LIMIT: usize = 1_500;
+/// Оглавление остальных личных фактов (заголовки) в промпте: на бота и на команду.
+const OWN_INDEX_LIMIT: usize = 3_000;
 const HARD_PERCENT: usize = 125;
 pub(crate) const TITLE_LIMIT: usize = 150;
 const BODY_LIMIT: usize = 1_500;
@@ -133,6 +139,8 @@ pub struct Fact {
     pub author: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// «Всегда в ходе»: личный факт бота или команды идёт в промпт целиком, остальные — строкой оглавления.
+    pub pinned: bool,
 }
 
 impl Fact {
@@ -656,34 +664,71 @@ pub fn index_text(all: &[Fact], limit: usize) -> String {
     out.trim_end().to_string()
 }
 
-/// Личные факты бота целиком: самые новые, если не влезают все.
+/// Личная память бота для промпта: закреплённое целиком, остальное — оглавлением.
 fn own_text(book: &Book, bot_id: &str) -> String {
-    scope_text(book, bot_id)
+    scope_text(book, bot_id, PIN_BOT_LIMIT)
 }
 
-/// Факты одной памяти целиком: самые новые, если не влезают все.
-fn scope_text(book: &Book, scope: &str) -> String {
+/// Одна память в промпте. Закреплённые факты («Всегда в ходе») идут целиком, самые новые вперёд,
+/// пока влезают в `pin_limit`; остальные — строкой `[m12] тип: заголовок` в порядке номеров
+/// (номер растёт, новый факт встаёт в конец и не сдвигает начало, кэш префикса живёт).
+/// Подробности строки — через recall или блок «Из памяти». Сверху: сколько памяти занято.
+fn scope_text(book: &Book, scope: &str, pin_limit: usize) -> String {
     let mut own: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == scope).collect();
-    own.sort_by_key(|f| number(&f.id));
-    let mut kept: Vec<String> = Vec::new();
-    let mut used = 0;
-    for fact in own.iter().rev() {
-        let text = full_of(fact);
-        if used + chars(&text) + 1 > BOT_LIMIT {
-            break;
-        }
-        used += chars(&text) + 1;
-        kept.push(text);
+    if own.is_empty() {
+        return String::new();
     }
-    kept.reverse();
-    kept.join("\n")
+    own.sort_by_key(|f| number(&f.id));
+    let mut pinned: Vec<&Fact> = Vec::new();
+    let mut spent = 0;
+    let mut over = 0;
+    for fact in own.iter().rev().filter(|f| f.pinned) {
+        let size = chars(&full_of(fact)) + 1;
+        if spent + size > pin_limit {
+            over += 1;
+            continue;
+        }
+        spent += size;
+        pinned.push(fact);
+    }
+    pinned.reverse();
+    let rest: Vec<&Fact> = own.iter().copied().filter(|f| !pinned.iter().any(|p| p.id == f.id)).collect();
+    let mut index: Vec<&Fact> = Vec::new();
+    let mut used = 0;
+    let mut skipped = 0;
+    for fact in rest.iter().rev() {
+        let size = chars(&line_of(fact)) + 1;
+        if used + size > OWN_INDEX_LIMIT {
+            skipped += 1;
+            continue;
+        }
+        used += size;
+        index.push(fact);
+    }
+    index.reverse();
+    let mut out = vec![format!("Занято {} из {} знаков: держи память в порядке, объединяй близкое и удаляй устаревшее.", scope_size(book, scope), limit_of(scope))];
+    if !pinned.is_empty() || over > 0 {
+        out.push("Закреплено, всегда в ходе:".into());
+        out.extend(pinned.iter().map(|f| full_of(f)));
+        if over > 0 {
+            out.push(format!("…ещё {over} закреплённых не влезли — открой recall."));
+        }
+    }
+    if !index.is_empty() {
+        out.push("Остальное — заголовки; «…» значит есть подробности: открой recall с номером (или они придут в блоке «Из памяти»):".into());
+        out.extend(index.iter().map(|f| line_of(f)));
+        if skipped > 0 {
+            out.push(format!("…и ещё {skipped} — ищи через recall."));
+        }
+    }
+    out.join("\n")
 }
 
 /// Личная память бота и память его команд: у каждой команды свой раздел, чужих команд здесь нет.
 fn own_with_teams(book: &Book, rooms: &[Room], bot_id: &str) -> String {
     let mut parts = vec![own_text(book, bot_id)];
     for room in teams_in(rooms, bot_id) {
-        let text = scope_text(book, &room_scope(&room.id));
+        let text = scope_text(book, &room_scope(&room.id), PIN_TEAM_LIMIT);
         if !text.is_empty() {
             parts.push(format!("Память команды «{}» (её видят только боты этой команды):\n{text}", room.name));
         }
@@ -817,12 +862,16 @@ fn line_ids(text: &str) -> impl Iterator<Item = (&str, &str)> {
 /// модель и так видит целиком в своём промпте (`prompt`): строку оглавления без подробностей,
 /// личные факты бота — и то, что уже показано в окне. Новое после снимка промпта приходит только сюда.
 fn pick_recall(facts: &[Fact], episodes: &[episodes::Episode], query: &str, shown: &HashSet<String>, prompt: &PromptMemory, own: Option<&str>, teams: &[String]) -> Option<String> {
-    let mut whole: HashSet<&str> = line_ids(&prompt.own).map(|(id, _)| id).collect();
+    // Личная память в промпте: закреплённое целиком, остальное строкой с « …» (подробностей в промпте нет).
+    let mut whole: HashSet<&str> = line_ids(&prompt.own).filter(|(_, line)| !line.ends_with(" …")).map(|(id, _)| id).collect();
     whole.extend(line_ids(&prompt.shared).filter(|(_, line)| !line.ends_with(" …")).map(|(id, _)| id));
+    // В ленте группы снимка личной памяти нет: закреплённое команды отвечающий видит у себя целиком.
+    let team_pinned = prompt.own.is_empty();
     let candidates: Vec<&Fact> = facts
         .iter()
         .filter(|f| f.scope == SHARED || Some(f.scope.as_str()) == own || teams.contains(&f.scope))
         .filter(|f| !(whole.contains(f.id.as_str()) && (f.body.trim().is_empty() || f.scope != SHARED)))
+        .filter(|f| !(team_pinned && f.pinned && is_room_scope(&f.scope)))
         .filter(|f| !shown.contains(&f.id))
         .collect();
     let mut lines: Vec<String> = Vec::new();
@@ -998,6 +1047,8 @@ pub struct Draft {
     pub body: Option<String>,
     pub entities: Option<Vec<String>>,
     pub links: Option<Vec<String>>,
+    /// «Всегда в ходе»; только для личной памяти и памяти команды.
+    pub pinned: Option<bool>,
 }
 
 impl Draft {
@@ -1020,6 +1071,7 @@ impl Draft {
             body,
             entities: args.get("entities").filter(|v| !v.is_null()).map(strings),
             links: args.get("links").filter(|v| !v.is_null()).map(strings),
+            pinned: args.get("pinned").and_then(Value::as_bool),
         }
     }
 }
@@ -1120,6 +1172,13 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
                 if human && !draft.scope.trim().is_empty() {
                     fact.scope = wanted_scope.clone();
                 }
+                if let Some(pinned) = draft.pinned {
+                    fact.pinned = pinned;
+                }
+                // В общей памяти закрепления нет: там оглавление для всех.
+                if fact.scope == SHARED {
+                    fact.pinned = false;
+                }
                 if *fact == before {
                     return Ok((before, false, None));
                 }
@@ -1142,6 +1201,7 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
                     author: author.clone(),
                     created_at: now(),
                     updated_at: now(),
+                    pinned: draft.pinned.unwrap_or(false) && wanted_scope != SHARED,
                 };
                 book.facts.push(fact.clone());
                 (fact, true, None)
@@ -1332,6 +1392,7 @@ fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: C
                         author: "extractor".into(),
                         created_at: at,
                         updated_at: at,
+                        pinned: false,
                     });
                 }
                 out.learned.push(title);
@@ -2161,6 +2222,86 @@ mod tests {
         let body = block.strip_prefix(RECALL_HEAD).unwrap();
         assert!(chars(body) <= RECALL_FACT_CHARS + 1, "{}", chars(body));
         assert!(body.matches("\n[m").count() <= RECALL_FACTS);
+    }
+
+    /// Бот с шестью личными фактами по ~400 знаков; закреплён только m2.
+    fn pinned_book() -> Book {
+        let facts = (1..=6)
+            .map(|n| Fact {
+                body: format!("Подробности факта {n}: ").to_string() + &"шаг за шагом, с причиной и примером. ".repeat(10),
+                pinned: n == 2,
+                ..fact(&format!("m{n}"), "b1", "feedback", &format!("Правило номер {n}"))
+            })
+            .collect();
+        Book { next: 6, facts, broken: false }
+    }
+
+    #[test]
+    fn pinned_facts_go_in_full_and_the_rest_as_index_lines() {
+        let book = pinned_book();
+        let text = own_text(&book, "b1");
+        assert!(text.starts_with("Занято "), "{text}");
+        assert!(text.contains(&format!("из {BOT_LIMIT} знаков")), "{text}");
+        assert!(text.contains("Подробности факта 2:"), "закреплённое целиком: {text}");
+        assert!(!text.contains("Подробности факта 1:") && !text.contains("Подробности факта 6:"), "остальные без текста: {text}");
+        assert!(text.contains("[m1] поправка: Правило номер 1 …") && text.contains("[m6] поправка: Правило номер 6 …"), "{text}");
+        // Порядок оглавления по номеру: правка факта не двигает строки.
+        let mut edited = book.clone();
+        edited.facts[0].updated_at = 99;
+        edited.facts[3].title = "Правило номер 4".into();
+        assert_eq!(text, own_text(&edited, "b1"), "updated_at порядок не меняет");
+        let (m1, m5) = (text.find("[m1]").unwrap(), text.find("[m5]").unwrap());
+        assert!(m1 < m5);
+        let before: usize = book.facts.iter().map(|f| chars(&full_of(f)) + 1).sum();
+        eprintln!("MEMSIZE before(all full)={before} after(pinned+index)={}", chars(&text));
+        assert!(chars(&text) < before / 2, "{} против {before}", chars(&text));
+    }
+
+    #[test]
+    fn pinned_budget_keeps_the_newest_and_says_how_many_are_left() {
+        let mut book = pinned_book();
+        for fact in &mut book.facts {
+            fact.pinned = true;
+        }
+        let text = scope_text(&book, "b1", 900);
+        let full: Vec<&str> = text.lines().filter(|l| l.starts_with("Подробности")).collect();
+        assert_eq!(full.len(), 2, "в 900 знаков влезают два по ~410: {text}");
+        assert!(text.contains("Подробности факта 6:") && text.contains("Подробности факта 5:"), "новые вперёд: {text}");
+        assert!(text.contains("…ещё 4 закреплённых не влезли — открой recall."), "{text}");
+        assert!(text.contains("[m1] поправка: Правило номер 1 …"), "не влезшие видны заголовком: {text}");
+        let team = scope_text(&book, "b1", PIN_TEAM_LIMIT);
+        assert!(chars(&team.lines().filter(|l| l.starts_with("Подробности")).collect::<String>()) <= PIN_TEAM_LIMIT);
+    }
+
+    #[test]
+    fn a_long_index_is_cut_to_its_budget_and_keeps_the_newest() {
+        let facts: Vec<Fact> = (1..=200).map(|n| fact(&format!("m{n}"), "b1", "project", &format!("Дело {n} с довольно длинным заголовком для проверки"))).collect();
+        let text = own_text(&Book { next: 200, facts, broken: false }, "b1");
+        assert!(text.contains("[m200]") && !text.contains("[m1] "), "{text}");
+        assert!(text.contains("…и ещё ") && text.contains("ищи через recall"), "{text}");
+        assert!(chars(&text) < OWN_INDEX_LIMIT + 400);
+    }
+
+    #[test]
+    fn auto_recall_still_brings_the_body_of_an_index_only_fact_but_not_a_pinned_one() {
+        let book = pinned_book();
+        let prompt = PromptMemory { own: own_text(&book, "b1"), ..PromptMemory::default() };
+        let pick = |q: &str| pick_recall(&book.facts, &[], q, &HashSet::new(), &prompt, Some("b1"), &[]);
+        let block = pick("правило номер 4 подробности").expect("факт из оглавления подаётся с телом");
+        assert!(block.contains("[m4] поправка: Правило номер 4\n  Подробности факта 4"), "{block}");
+        assert!(!block.contains("[m2]"), "закреплённое уже в промпте целиком: {block}");
+        assert!(pick("правило номер 2 подробности 2").map_or(true, |b| !b.contains("[m2]")));
+    }
+
+    #[test]
+    fn old_facts_without_pinned_load_and_the_flag_roundtrips() {
+        let old: Fact = serde_json::from_str(r#"{"id":"m1","scope":"b1","kind":"user","title":"T","body":"","entities":[],"links":[],"author":"human","createdAt":1,"updatedAt":2}"#).unwrap();
+        assert!(!old.pinned);
+        let json = serde_json::to_value(Fact { pinned: true, ..old }).unwrap();
+        assert_eq!(json["pinned"], true);
+        let draft = Draft::from_args(&json!({ "title": "T", "pinned": true }));
+        assert_eq!(draft.pinned, Some(true));
+        assert_eq!(Draft::from_args(&json!({ "title": "T" })).pinned, None);
     }
 
     #[test]

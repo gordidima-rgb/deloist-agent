@@ -18,6 +18,7 @@ function fakeApi() {
     if (path === '/api/bots/b1/memory') return memory;
     if (path === '/api/memory/facts' && opts.method === 'POST') return { id: 'f3' };
     if (path === '/api/memory/facts/f2' && opts.method === 'DELETE') return {};
+    if (path === '/api/memory/facts/f1' && opts.method === 'PATCH') return { fact: {} };
     if (path === '/api/memory/undo/j1' && opts.method === 'POST') return {};
     throw new Error(`unexpected request: ${path} ${opts.method || 'GET'}`);
   });
@@ -112,5 +113,16 @@ describe('DrawerMemory', () => {
       expect(titles).toContain('Память команды «Картинки» · 1');
     });
     expect(host.textContent).toContain('Сюжет выбирает человек');
+  });
+
+  it('pins a fact with the "always in context" switch', async () => {
+    const api = fakeApi();
+    mount({ bot: { id: 'b1' }, api });
+    await waitFor(() => expect(host.querySelectorAll('.dm-fact').length).toBe(2));
+    const row = [...host.querySelectorAll('.dm-fact')].find((el) => el.textContent.includes('Любит кофе'));
+    const toggle = row.querySelector('[role="switch"]');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    toggle.click();
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/facts/f1', { method: 'PATCH', body: { pinned: true } }));
   });
 });

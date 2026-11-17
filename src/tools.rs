@@ -177,6 +177,7 @@ fn base_tool_defs() -> Value {
                 "entities": { "type": "array", "items": { "type": "string" }, "description": "Люди, компании, проекты, кабинеты, о которых факт." },
                 "links": { "type": "array", "items": { "type": "string" }, "description": "Номера связанных фактов: m12." },
                 "id": { "type": "string", "description": "Номер факта, чтобы исправить его." },
+                "pinned": { "type": "boolean", "description": "Закрепить: факт идёт в твой промпт целиком в каждом ходе (место мало, ~2000 знаков). Закрепляй только то, что нужно почти в каждом ходе; остальные факты видны заголовком и открываются через recall. Только для self и team. По умолчанию false." },
             }),
             &["title"],
         ),

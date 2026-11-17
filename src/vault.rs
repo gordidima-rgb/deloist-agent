@@ -203,6 +203,15 @@ fn render(fact: &Fact, targets: &HashMap<String, String>) -> String {
         stamp(fact.created_at),
         stamp(fact.updated_at),
     );
+    if fact.pinned {
+        // Только у закреплённых: файлы остальных фактов не меняются.
+        out = out.replacen("
+---
+", "
+pinned: true
+---
+", 1);
+    }
     if !fact.body.trim().is_empty() {
         out.push('\n');
         out.push_str(fact.body.trim());
@@ -410,6 +419,7 @@ fn parse(text: &str, stem: &str, modified: i64) -> Result<Parsed, String> {
             author: if author.is_empty() { "human".into() } else { author },
             created_at: created,
             updated_at: updated,
+            pinned: get("pinned").trim() == "true",
         },
         had_id,
         scope_hint: get("scope"),

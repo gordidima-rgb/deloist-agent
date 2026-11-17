@@ -233,7 +233,16 @@ async fn shared_memory_reaches_every_bot_and_can_be_undone() {
     crew.ok("POST", &format!("/api/bots/{}/clear", bots[0]), Some(json!({}))).await;
     turn(&crew, &bots[0], "и ещё").await;
     let own = last_system(&fake);
-    assert!(own.contains("Отчёт делаю в Excel\nШаблон в папке reports"), "свои факты бот видит целиком: {own}");
+    // Не закреплённый личный факт идёт в промпт заголовком (подробности — recall или «Из памяти»).
+    assert!(own.contains("Отчёт делаю в Excel …") && !own.contains("Шаблон в папке reports"), "свои факты бот видит заголовком: {own}");
+    assert!(own.contains("Занято "), "бот видит, сколько памяти занято: {own}");
+    fake.script.lock().unwrap().push_back(("remember".into(), json!({ "title": "Отчёт делаю в Excel", "pinned": true })));
+    turn(&crew, &bots[0], "закрепи").await;
+    crew.ok("POST", &format!("/api/bots/{}/clear", bots[0]), Some(json!({}))).await;
+    turn(&crew, &bots[0], "и ещё раз").await;
+    let pinned = last_system(&fake);
+    assert!(pinned.contains("Отчёт делаю в Excel
+Шаблон в папке reports"), "закреплённое — целиком: {pinned}");
 
     // Тот же заголовок — правка, а не второй факт.
     fake.script.lock().unwrap().push_back(("remember".into(), json!({ "title": "человека зовут ваня", "scope": "shared", "body": "Иван, можно Ваня" })));

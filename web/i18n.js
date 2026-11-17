@@ -608,7 +608,8 @@
     'Память команды «{name}» · {n}': 'Team memory “{name}” · {n}',
     'Эти факты видят только боты этой команды. Договорённости команды бот пишет сюда сам (remember со scope team).': 'Only the bots of this team see these facts. The bot writes team agreements here itself (remember with scope team).',
     // Ящик бота: вкладки «Память», «Файлы», «Цели» (ui/src/components/drawer)
-    'Память подмешивается в каждый ход. Бот дописывает сюда сам через инструмент {tool}.': 'Memory is added to every turn. The bot adds notes here itself through the {tool} tool.',
+    'В каждом ходе бот видит закреплённые факты целиком, остальные — заголовком, подробности открывает сам. Бот дописывает сюда сам через инструмент {tool}.': 'Each turn the bot sees pinned facts in full and the rest by title only, and opens details itself. The bot adds notes here itself through the {tool} tool.',
+    'Всегда в ходе': 'Always in context',
     'Путь': 'Path',
     'Как часто проверять': 'How often to check',
     '{n} из {limit} знаков': '{n} of {limit} characters',

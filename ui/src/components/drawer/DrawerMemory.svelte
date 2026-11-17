@@ -1,7 +1,7 @@
 <script>
   // Вкладка «Память» в ящике бота: факты по типам, правка в строке, журнал правок с отменой.
   // Данные: GET /api/bots/{id}/memory. Перечитывание по событию памяти идёт через registerReload(load).
-import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Button } from '../kit';
+import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Button, Switch } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { whenText, numberRu } from '../../lib/when.js';
@@ -146,6 +146,17 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     }
   }
 
+  // «Всегда в ходе»: закреплённый факт идёт в промпт бота целиком, остальные — заголовком.
+  async function setPinned(fact, pinned) {
+    try {
+      await api(`/api/memory/facts/${encodeURIComponent(fact.id)}`, { method: 'PATCH', body: { pinned } });
+      await load();
+    } catch (err) {
+      toast(err.message);
+      await load();
+    }
+  }
+
   async function moveShared(fact) {
     try {
       await api(`/api/memory/facts/${encodeURIComponent(fact.id)}`, { method: 'PATCH', body: { scope: 'shared' } });
@@ -196,6 +207,13 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   </form>
 {/snippet}
 
+{#snippet pinSwitch(fact)}
+  <div class="dm-pin">
+    <Switch label={tr('Всегда в ходе')} checked={!!fact.pinned} onchange={(value) => setPinned(fact, value)} />
+    <span class="dm-note">{tr('Всегда в ходе')}</span>
+  </div>
+{/snippet}
+
 {#snippet factRow(fact)}
   {#snippet actions()}
     <div class="dm-actions">
@@ -208,6 +226,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     <ul class="k-list">
       <ListItem title={fact.title} meta={`[${fact.id}]`} onclick={() => toggle(fact.id)} context={actions} />
     </ul>
+    {@render pinSwitch(fact)}
     {#if expanded[fact.id]}
       <div class="dm-detail">
         {#if fact.body}<p class="dm-body">{fact.body}</p>{/if}
@@ -223,7 +242,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
 {/snippet}
 
 <div class="dm">
-  <p class="dm-note">{tr('Память подмешивается в каждый ход. Бот дописывает сюда сам через инструмент {tool}.', { tool: 'remember' })}</p>
+  <p class="dm-note">{tr('В каждом ходе бот видит закреплённые факты целиком, остальные — заголовком, подробности открывает сам. Бот дописывает сюда сам через инструмент {tool}.', { tool: 'remember' })}</p>
 
   <div class="dm-bar">
     <span class="dm-note">{countText}</span>
@@ -261,6 +280,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
           <ul class="k-list">
             <ListItem title={fact.title} meta={`[${fact.id}]`} onclick={() => toggle(fact.id)} context={teamActions} />
           </ul>
+          {@render pinSwitch(fact)}
           {#if expanded[fact.id] && fact.body}
             <div class="dm-detail"><p class="dm-body">{fact.body}</p></div>
           {/if}
@@ -325,6 +345,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   .dm-form-actions { display: flex; justify-content: flex-end; gap: var(--k-space-2); }
   .dm-fact { border-top: 1px solid var(--k-line); }
   .dm-fact:first-child { border-top: 0; }
+  .dm-pin { display: flex; align-items: center; gap: var(--k-space-2); padding: 0 var(--k-space-3) var(--k-space-2); }
   .dm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--k-space-1); }
   .dm-detail { display: flex; flex-direction: column; gap: var(--k-space-2); padding: 0 var(--k-space-3) var(--k-space-3); }
   .dm-body {
