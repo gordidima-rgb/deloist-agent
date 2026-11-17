@@ -1,5 +1,5 @@
 <script>
-  // Док ботов «Тушь и сигнал» (docs/design/kit.md): чёрный островок у края, кольцо лимита вокруг аватара
+  // Док ботов «Угли» (docs/design/kit.md): островок тёплого угля у края, кольцо лимита вокруг аватара
   // каждого бота, спрятанный лоток с микрофоном, шестерёнкой и «+», меню дока и голосовой поток.
   // Окно, область мыши, перетаскивание, чат и карточки ведёт web/dock.js; аватары он же монтирует в
   // ячейки, которые компонент отдаёт через onface. Стили — классы .k-* из /kit.css и dock.html.
@@ -7,7 +7,7 @@
   import { tr } from '../lib/i18n.js';
   import MicButton from './MicButton.svelte';
 
-import { Icon } from './kit';
+import { Icon, LimitRing } from './kit';
   let {
     bots = [],
     side = 'right',
@@ -194,6 +194,7 @@ import { Icon } from './kit';
           class:is-voice-hit={hitId === bot.id}
           class:is-speaking={speaking.botId === bot.id}
           data-seat={bot.id}
+          style:--seat-spk={speaking.botId === bot.id ? Math.min(1, Math.max(0, speaking.level || 0)) : undefined}
           aria-label={speaking.botId === bot.id ? tr('{name} читает ответ вслух: нажми, чтобы остановить', { name: bot.name }) : seatLabel(bot)}
           onclick={(e) => pressSeat(bot, e.currentTarget)}
           onpointerenter={(e) => onseatenter?.(bot.id, e.currentTarget)}
@@ -201,30 +202,18 @@ import { Icon } from './kit';
           onfocus={(e) => onseatenter?.(bot.id, e.currentTarget)}
           onblur={() => onseatleave?.(bot.id)}
         >
-          <span
-            class="k-ring"
-            class:is-free={!bot.limit}
-            class:is-low={bot.limit && bot.limit.left > 0 && bot.limit.left < 0.15}
-            class:is-empty={bot.limit && bot.limit.left <= 0}
-            style:--ring-color={bot.color}
-            style:--left={bot.limit ? bot.limit.left : 0}
-            style:--spk={speaking.botId === bot.id ? Math.min(1, Math.max(0, speaking.level || 0)) : undefined}
+          <LimitRing
+            left={bot.limit ? bot.limit.left : null}
+            badge={bot.needs ? 'need' : bot.working ? 'work' : bot.unread ? 'done' : ''}
+            selected={bot.selected}
           >
-            <svg viewBox="0 0 52 52" aria-hidden="true"
-              ><circle class="k-ring__track" cx="26" cy="26" r="24.75" pathLength="100" /><circle class="k-ring__arc" cx="26" cy="26" r="24.75" pathLength="100" /></svg
-            >
-            <span class="k-ring__face" {@attach faceOf(bot.id)}></span>
-          </span>
+            {#snippet face()}<span class="k-ring__face" {@attach faceOf(bot.id)}></span>{/snippet}
+          </LimitRing>
           {#if bot.queued || bot.failed}
             <span class="avatar-badges">
               {#if bot.queued}<span class="avatar-badge">{bot.queued}</span>{/if}
               {#if bot.failed}<span class="avatar-badge is-error" role="img" aria-label={tr('Последний ход не удался')}>!</span>{/if}
             </span>
-          {/if}
-          {#if bot.needs}
-            <span class="seat-dot is-need" role="img" aria-label={tr('Ждёт тебя')}></span>
-          {:else if bot.unread}
-            <span class="seat-dot"></span>
           {/if}
           <span class="k-seat__voice" aria-hidden="true"
             ><Icon name="mic-round" size={null} stroke={3} /></span

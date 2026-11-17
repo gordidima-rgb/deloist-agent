@@ -66,8 +66,7 @@ describe('icon registry', () => {
 // Что не значок и поэтому остаётся рисунком на месте: [файл, подстрока в svg или в теге]. '*' — весь файл.
 const NOT_ICONS = [
   // Кольца лимитов и использования
-  ['ui/src/components/LimitRing.svelte', '*'],
-  ['ui/src/components/Dock.svelte', 'k-ring__track'],
+  ['ui/src/components/kit/status/LimitRing.svelte', '*'],
   ['ui/src/components/MicButton.svelte', 'k-mic__ring'],
   ['web/app.js', 'class="ring"'],
   ['web/providers.js', 'usage-ring'],

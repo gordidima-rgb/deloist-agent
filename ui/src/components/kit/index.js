@@ -24,6 +24,7 @@ export { default as Chip } from './status/Chip.svelte';
 export { default as Spinner } from './status/Spinner.svelte';
 export { default as Skeleton } from './status/Skeleton.svelte';
 export { default as EmptyState } from './status/EmptyState.svelte';
+export { default as LimitRing } from './status/LimitRing.svelte';
 
 // overlay
 export { default as Modal } from './overlay/Modal.svelte';

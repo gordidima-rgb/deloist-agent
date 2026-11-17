@@ -44,7 +44,7 @@ const host = document.getElementById('rings');
 const rings = values.map((value, i) => {
   const cell = document.createElement('div');
   host.appendChild(cell);
-  return window.DeloistUI.mountLimitRing(cell, { value, color: colors[i], size: i % 2 ? 48 : 64, label: names[i] });
+  return window.DeloistUI.mountLimitRing(cell, { left: value, size: i % 2 ? 48 : 52, label: names[i] });
 });
 document.getElementById('slider').addEventListener('input', (e) => rings[0].update({ value: e.target.value / 100 }));
 

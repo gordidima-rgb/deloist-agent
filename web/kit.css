@@ -127,7 +127,7 @@
   --k-ring-gap: 1.5px;
   --k-ring-stroke: 2.5px;
   --k-seat: calc(var(--k-avatar) + 2 * (var(--k-ring-gap) + var(--k-ring-stroke))); /* 52px */
-  --k-dock-width: 62px;       /* old 60 + 2: five px of air each side of the seat */
+  --k-dock-width: 64px;       /* Ember: 62 + 2, the reference dock; the window is 480 wide, nothing depends on it */
   --k-dock-gap: 6px;          /* between seats; old 10 between bare avatars, the ring eats the rest */
   --k-gear: 40px;
 
@@ -559,7 +559,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-ring {
   --ring-size: var(--k-seat);
   --ring-stroke: var(--k-ring-stroke);
-  --ring-color: var(--k-bot-sky);
+  --ring-track: color-mix(in srgb, var(--k-text) 13%, transparent); /* the dock sets a light track on ink */
   --left: 1;
   position: relative;
   display: inline-grid;
@@ -567,32 +567,50 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   width: var(--ring-size);
   height: var(--ring-size);
   flex: none;
+  border-radius: 50%;
 }
 .k-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
-.k-ring__track { fill: none; stroke: var(--ring-color); stroke-opacity: 0.22; stroke-width: var(--ring-stroke); }
+.k-ring__track { fill: none; stroke: var(--ring-track); stroke-width: var(--ring-stroke); }
 .k-ring__arc {
   fill: none;
-  stroke: var(--ring-color);
+  /* the lava gradient comes from <linearGradient id="k-ring-lava"> that the dock puts in its svg defs; solid brand if absent */
+  stroke: var(--k-brand);
+  stroke: url(#k-ring-lava) var(--k-brand);
   stroke-width: var(--ring-stroke);
   stroke-linecap: round;
-  /* pathLength="100" on the circle: dasharray in percent */
+  /* pathLength="100" on the circle: dasharray in percent; the arc starts at 12 o'clock and runs clockwise */
   stroke-dasharray: calc(var(--left) * 100) 100;
-  /* only the length travels; the colour switches at once: a tween between two hues (mint → coral) passes through olive */
+  filter: drop-shadow(0 0 3px rgba(255, 120, 20, 0.7));
   transition: stroke-dasharray var(--k-dur-ring) var(--k-ease-out);
 }
-.k-ring.is-low { --ring-color: var(--k-attention); }
-.k-ring.is-empty .k-ring__arc { stroke-opacity: 0; }
-.k-ring.is-free .k-ring__arc { stroke-opacity: 0; } /* no limit known: only the faint rim in the bot's colour */
+/* less than 15%: the arc turns red and the ring flashes once */
+.k-ring.is-low .k-ring__arc { stroke: var(--k-danger); filter: drop-shadow(0 0 4px rgba(255, 60, 40, 0.8)); }
+.k-ring.is-low { animation: k-ring-flash 1200ms var(--k-ease-out) 1; }
+@keyframes k-ring-flash { 0% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0.7); } 40% { box-shadow: 0 0 0 7px rgba(255, 74, 50, 0.16), 0 0 16px 2px rgba(255, 74, 50, 0.5); } 100% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0); } }
+/* empty: no arc, the face goes grey */
+.k-ring.is-empty .k-ring__arc { stroke-opacity: 0; filter: none; }
 .k-ring.is-empty .k-ring__face { filter: grayscale(1) brightness(0.6); }
+/* limit unknown (no budget to count): dashed track, no arc */
+.k-ring.is-free .k-ring__arc, .k-ring.is-unknown .k-ring__arc { stroke-opacity: 0; filter: none; }
+.k-ring.is-free .k-ring__track, .k-ring.is-unknown .k-ring__track { stroke-dasharray: 3 4.5; }
+/* selected: orange halo outside the ring */
+.k-ring.is-sel::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--k-brand) 70%, transparent), 0 0 14px -2px rgba(255, 110, 20, 0.6); }
 .k-ring__face {
   /* the bot's own avatar sits here at full size: the glass orb the person chose */
   width: calc(var(--ring-size) - 2 * (var(--k-ring-gap) + var(--ring-stroke)));
   height: calc(var(--ring-size) - 2 * (var(--k-ring-gap) + var(--ring-stroke)));
   border-radius: 50%;
   overflow: hidden;
-  background: #050505; /* LED screen */
+  background: var(--k-ink-2); /* warm coal under a transparent orb */
   transition: filter var(--k-dur-base) var(--k-ease-out);
 }
+/* Badges: working = smouldering ember dot bottom-right; needs you = lava pill top-right; done and unopened = ember dot top-right. */
+.k-ring__work, .k-ring__done, .k-ring__need { position: absolute; z-index: 1; pointer-events: none; --k-badge-cut: var(--k-ink); }
+.k-ring__work { right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: var(--k-ink); box-shadow: 0 0 0 2px var(--k-badge-cut); display: grid; place-items: center; }
+.k-ring__work::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 6px 1px rgba(255, 140, 40, 0.9); animation: k-ember 1.4s ease-in-out infinite; }
+.k-ring__done { right: -2px; top: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 8px 1px rgba(255, 120, 20, 0.85); }
+.k-ring__need { right: -3px; top: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; display: grid; place-items: center; font: 800 10px/1 var(--k-font-body); color: var(--k-on-brand); background: var(--k-btn-fill); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 10px rgba(255, 100, 10, 0.8); }
+
 /* Percent text: NOT used in the dock (owner, round 1: the ring is the information; the exact value
    lives in the hover tip). Kept for settings and reports, where a ring sits next to a table. */
 .k-ring__pct {
@@ -712,15 +730,16 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
    Use: <div class="k-edge"><i class="k-fillet k-fillet--top"></i><div class="k-island">…</div><i class="k-fillet k-fillet--bottom"></i></div>
    Mirror with .k-edge--left.
    ===================================================================================== */
-.k-edge { display: flex; flex-direction: column; align-items: flex-end; filter: var(--k-island-filter); }
-.k-edge--left { align-items: flex-start; }
+.k-edge { display: flex; flex-direction: column; align-items: flex-end; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(-5px 0 12px rgba(255, 100, 20, 0.24)); } /* follows the silhouette, fillets included: warm brown plus a light orange halo, at most ~17px out so the window edge never cuts it */
+.k-edge--left { align-items: flex-start; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(5px 0 12px rgba(255, 100, 20, 0.24)); }
 .k-island {
   background: var(--k-ink);
   color: var(--k-on-ink);
   width: var(--k-dock-width);
   border-radius: var(--k-radius-island) 0 0 var(--k-radius-island);
+  box-shadow: inset 1px 0 0 rgba(255, 150, 70, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06); /* warm rim on the outer edge */
 }
-.k-edge--left .k-island { border-radius: 0 var(--k-radius-island) var(--k-radius-island) 0; }
+.k-edge--left .k-island { border-radius: 0 var(--k-radius-island) var(--k-radius-island) 0; box-shadow: inset -1px 0 0 rgba(255, 150, 70, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
 .k-fillet { display: block; width: var(--k-fillet); height: var(--k-fillet); flex: none; }
 .k-fillet--top { background: radial-gradient(circle at 0 0, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
 .k-fillet--bottom { background: radial-gradient(circle at 0 100%, transparent calc(var(--k-fillet) - 0.5px), var(--k-ink) var(--k-fillet)); }
@@ -729,6 +748,8 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 
 /* Dock seat: ring + percent under it. Hover lifts the face, press sinks it. */
 .k-seat {
+  position: relative;
+  --k-badge-cut: var(--k-ink);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -849,14 +870,14 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
    C: ink with a REC dot. Ink disc, white bars, one small red-coral dot top right while recording. */
 .k-mic, .k-voice-fly, .k-seat__voice {
   --k-mic-idle: var(--k-on-ink-2);
-  --k-mic-disc: #ffffff;
-  --k-mic-bar: var(--k-ink);
-  --k-mic-glyph: var(--k-ink);
-  --k-mic-halo: rgba(255, 255, 255, 0.16);
+  --k-mic-disc: radial-gradient(circle at 40% 35%, #ff7a3a, #d9360f); /* Ember: the recording mic is a live coal */
+  --k-mic-bar: #ffffff;
+  --k-mic-glyph: #ffffff;
+  --k-mic-halo: rgba(255, 90, 40, 0.22);
   --k-mic-halo-line: transparent;
-  --k-mic-ring: #ffffff;
-  --k-mic-fly: #ffffff;
-  --k-mic-badge: #ffffff;
+  --k-mic-ring: #ff8a3a;
+  --k-mic-fly: #ff8a3a;
+  --k-mic-badge: #ff8a3a;
   --k-mic-badge-fg: var(--k-ink);
   --k-mic-rec: transparent;
 }
@@ -927,6 +948,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-mic:not([data-state="idle"]) .k-mic__disc { transform: scale(1); }
 
 /* recording: bars from the real level, the halo breathes with the level */
+.k-mic[data-state="recording"] { box-shadow: var(--k-ink-rim), 0 0 18px rgba(255, 90, 40, 0.8); }
 .k-mic[data-state="recording"] .k-mic__halo { transform: scale(calc(0.86 + var(--lvl) * 0.26)); }
 .k-mic[data-state="recording"] .k-mic__bars > i { transform: scaleY(calc(0.2 + var(--b) * 0.8)); }
 
@@ -998,9 +1020,9 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 /* speaking: the bot reads its answer aloud. A thin outer ring in the bot's own colour, separated by a
    hairline of ink, widens with --spk (0…1), which script sets from voice_state "speaking" level events
    (~20 a second). No level, no motion; the colour is always the full ring colour, never dimmed. */
-.k-seat .k-ring { --spk: 0; border-radius: 50%; }
+.k-seat .k-ring { --spk: var(--seat-spk, 0); --ring-track: rgba(255, 255, 255, 0.12); } /* light track on the coal island */
 .k-seat.is-speaking .k-ring {
-  box-shadow: 0 0 0 calc(1px + var(--spk) * 1.5px) var(--k-ink), 0 0 0 calc(2.5px + var(--spk) * 3.5px) var(--ring-color);
+  box-shadow: 0 0 0 calc(1px + var(--spk) * 1.5px) var(--k-ink), 0 0 0 calc(2.5px + var(--spk) * 3.5px) var(--k-brand);
   transition: transform var(--k-dur-base) var(--k-ease-spring), box-shadow 60ms linear;
 }
 
@@ -1017,8 +1039,8 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 }
 
 /* Grip: the thin curved handle under the gear. */
-.k-grip { width: 28px; height: 10px; display: block; color: var(--k-ink); opacity: 0.75; cursor: grab; transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out); }
-.k-grip:hover { opacity: 1; transform: scaleX(1.15); }
+.k-grip { width: 28px; height: 10px; display: block; color: var(--k-ink); opacity: 1; cursor: grab; transition: opacity var(--k-dur-fast) var(--k-ease-out), transform var(--k-dur-fast) var(--k-ease-out); }
+.k-grip:hover { transform: scaleX(1.15); }
 
 /* =====================================================================================
    Status mark — one 16px glyph per state, shared by steps, runs and routines.

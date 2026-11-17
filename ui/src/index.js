@@ -1,7 +1,7 @@
 // Точка входа: window.DeloistUI с помощниками mount*() для старых страниц.
 // Новый компонент: файл в src/components, функция mountX здесь. См. docs/ui-svelte.md.
 import { mountComponent } from './lib/mount.svelte.js';
-import LimitRing from './components/LimitRing.svelte';
+import { LimitRing } from './components/kit';
 import ModelPicker from './components/ModelPicker.svelte';
 import NewBotModel from './components/NewBotModel.svelte';
 import ChatModelPopover from './components/ChatModelPopover.svelte';

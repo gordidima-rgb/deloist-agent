@@ -311,6 +311,7 @@
       limit: bot.limit || null,
       queued: queued.get(bot.id) || 0,
       failed: Boolean(bot.preview?.error) && !busy.has(bot.id),
+      working: busy.has(bot.id),
       needs: Boolean(waiting.get(bot.id)?.size),
       unread: unread.has(bot.id),
     };
