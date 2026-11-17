@@ -69,9 +69,21 @@ export function workspaceRef(target) {
   return { owner: m[1], rel: m[2] };
 }
 
+// Настоящий адрес файла для href: «Копировать ссылку» в меню WebView берёт href, а с `#` копировался адрес окна.
+// Щелчок по-прежнему перехватывает app.js (preventDefault) и открывает «Файлы», навигации по file: нет.
+export function fileHref(path) {
+  let raw = String(path ?? '').trim().replace(/^file:\/\/\//i, '');
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    // Не процентная запись: путь как есть.
+  }
+  return `file:///${encodeURI(raw.replace(/\\/g, '/')).replace(/#/g, '%23').replace(/\?/g, '%3F')}`;
+}
+
 function fileAnchor(path, label) {
   const attr = path.replace(/"/g, '&quot;');
-  return `<a href="#" class="md-file" data-file="${attr}" title="${attr}">${label}</a>`;
+  return `<a href="${fileHref(path)}" class="md-file" data-file="${attr}" title="${attr}">${label}</a>`;
 }
 
 // Режим «чужой текст» (ответы ботов другого ПК): ссылки на файлы не оживают, а у каждой ссылки рядом виден настоящий адрес

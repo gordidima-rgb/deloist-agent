@@ -1735,7 +1735,7 @@ function taskRow(msg) {
     list.className = 'task-line-files';
     for (const path of files) {
       const link = document.createElement('a');
-      link.href = '#';
+      link.href = window.DeloistUI.fileHref(path);
       link.className = 'md-file task-line-file';
       link.dataset.file = path;
       link.title = path;
@@ -8496,6 +8496,13 @@ function bindUi() {
     if (PANE) parent.postMessage({ deloist: 'pane-settings', section: trigger.dataset.openSettings || 'model' }, location.origin);
     else openSettings(trigger.dataset.openSettings || 'model');
   });
+  // У ссылок на файлы настоящий href (для «Копировать ссылку»), но окно по file: не переходит нигде:
+  // ни вне переписки (карточки разрешений), ни средней кнопкой в новое окно.
+  for (const type of ['click', 'auxclick']) {
+    document.addEventListener(type, (e) => {
+      if (e.target.closest?.('a.md-file')) e.preventDefault();
+    });
+  }
   // Ссылка на файл из ответа бота: открываем его в ящике «Файлы» (путь проверяет сервер), а не по file:.
   $('#messages').addEventListener('click', async (e) => {
     const link = e.target.closest('a.md-file');

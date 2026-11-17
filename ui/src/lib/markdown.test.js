@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { markdown, linkIcon, workspaceRef } from './markdown.js';
+import { markdown, linkIcon, workspaceRef, fileHref } from './markdown.js';
 
 describe('markdown', () => {
   it('escapes tags from the model', () => {
@@ -102,6 +102,16 @@ describe('local workspace file links', () => {
     });
     expect(workspaceRef('file:///C:/data/workspaces/bot_1/%D0%BE%D1%82%D1%87%D1%91%D1%82.md')).toEqual({ owner: 'bot_1', rel: 'отчёт.md' });
     expect(markdown('[x](C:\\d\\workspaces\\bot_1\\a b.md)')).toContain('class="md-file"');
+  });
+
+  it('gives file links a real file:/// href so "Copy link" copies the path, not the window address', () => {
+    expect(markdown(`[x](${ws}/github-konkurenty.md)`)).toContain(`href="file:///${ws}/github-konkurenty.md"`);
+    expect(markdown(`[x](file:///${ws}/a.md)`)).toContain(`href="file:///${ws}/a.md"`);
+    expect(markdown(`[x](${ws}/a.md)`)).not.toContain('href="#"');
+    expect(fileHref('C:\\d\\workspaces\\bot_1\\Мои заметки\\#1?.md')).toBe(
+      'file:///C:/d/workspaces/bot_1/%D0%9C%D0%BE%D0%B8%20%D0%B7%D0%B0%D0%BC%D0%B5%D1%82%D0%BA%D0%B8/%231%3F.md',
+    );
+    expect(fileHref('file:///C:/d/workspaces/bot_1/%D0%BE.md')).toBe('file:///C:/d/workspaces/bot_1/%D0%BE.md');
   });
 
   it('leaves links outside bot workspaces and traversal as plain text', () => {

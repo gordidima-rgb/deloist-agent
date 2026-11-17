@@ -376,6 +376,13 @@
 
   // --- Мини-чат -------------------------------------------------------
 
+  // Ссылка на файл в ответе: настоящий href только для «Копировать ссылку», переходить по file: окно не должно.
+  for (const type of ['click', 'auxclick']) {
+    chatLog.addEventListener(type, (e) => {
+      if (e.target.closest?.('a.md-file')) e.preventDefault();
+    });
+  }
+
   // Одна разметка с главным чатом: ui/src/lib/markdown.js (таблицы, списки, ссылки со значком сервиса).
   function md(text) {
     return window.DeloistUI.markdown(text);

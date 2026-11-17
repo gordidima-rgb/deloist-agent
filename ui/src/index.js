@@ -89,7 +89,7 @@ import { iconSvg } from './lib/modelPicker.js';
 import * as voiceChatLib from './lib/voiceChat.js';
 import * as signInLib from './lib/signIn.js';
 import * as toastLib from './lib/toast.js';
-import { markdown, workspaceRef } from './lib/markdown.js';
+import { markdown, workspaceRef, fileHref } from './lib/markdown.js';
 import { turnDurations, durationText } from './lib/turnTime.js';
 import { plainPreview } from './lib/preview.js';
 import { offerEventsToShow } from './lib/pendingOffers.js';
@@ -132,6 +132,7 @@ window.DeloistUI = {
   ICONS,
   paintIcons,
   workspaceRef,
+  fileHref,
   turnDurations,
   durationText,
   plainPreview,
