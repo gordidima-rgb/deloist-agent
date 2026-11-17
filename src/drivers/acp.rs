@@ -1744,6 +1744,12 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
     {
         ask = false;
     }
+    // Дописать строки данных в свой файл (`cat >> x.csv <<'EOF'`): карточка не нужна, пока файл не защищённый и лежит в своей папке.
+    if ask && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
+        && crate::tools::acp_title_command_is_own_data_write(req.app, bot, title_command)
+    {
+        ask = false;
+    }
     // Правка своего файла командой PowerShell: если строгий разбор доказал, что она только пишет в своих папках, карточка не нужна.
     // Выключено слиянием с main (91e808d): его тесты требуют карточку и для массива аргументов, пока владелец не решит иначе.
     if ACP_OWN_SCRIPT_WITHOUT_CARD && ask && !releases && touch.is_none() && !conflicting_known && kind == "execute" && bot.approval == "ask" && call["rawInput"]["shell_command"].is_null() {
