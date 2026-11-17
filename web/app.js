@@ -183,31 +183,8 @@ const stoppedByHuman = new Set();
 
 function syncAvatar(id, extra = {}) {
   const state = botState(id);
-  orbLog('sync', id, { state, extra, waiting: [...(S.waiting.get(id) || [])], busy: S.busy.has(id) });
   avatarsOf(id).forEach((avatar) => avatar.set({ state, ...extra }));
 }
-
-// Отладка орбов (временная): последние 80 переходов и снимок всех орбов бота. Ctrl+Alt+O кладёт их в буфер обмена.
-const orbEvents = [];
-function orbLog(kind, id, data) {
-  orbEvents.push({ at: new Date().toISOString().slice(11, 23), kind, bot: botById(id)?.name || id, ...data });
-  if (orbEvents.length > 80) orbEvents.shift();
-}
-function orbDump(id = S.currentId) {
-  const slots = [...S.avatars].filter(([slot]) => slotBotId(slot) === id || slot === 'head').map(([slot, avatar]) => ({ slot, ...(avatar.debug?.() || {}) }));
-  return {
-    bot: botById(id)?.name || id, currentIsHead: id === S.currentId,
-    app: { busy: S.busy.has(id), waiting: [...(S.waiting.get(id) || [])], waitTitle: S.waitTitle.get(id) || '', state: botState(id) },
-    orbs: slots, events: orbEvents.slice(-40),
-  };
-}
-window.orbDump = orbDump;
-document.addEventListener('keydown', (e) => {
-  if (!(e.ctrlKey && e.altKey && e.code === 'KeyO') || !S.currentId) return;
-  const text = JSON.stringify(orbDump(), null, 1);
-  navigator.clipboard?.writeText(text).catch(() => {});
-  console.info('[orb] dump', text);
-});
 
 // Пока человек пишет боту, его аватары «слушают» поле ввода; замолчал на пару секунд — снова за мышью.
 let listeners = [];
@@ -228,9 +205,6 @@ function trackMood(ev) {
   avatarStates?.feed(ev);
   const set = S.waiting.get(ev.botId);
   const wait = window.CrewAvatarStates?.waitOf(ev);
-  if (wait || ev.type === 'turn_start' || ev.type === 'turn_end' || ev.type === 'tool_start' || (ev.type === 'activity' && ev.call?.status === 'running')) {
-    orbLog('event', ev.botId, { type: ev.type, wait: wait || undefined, tool: ev.name || ev.call?.name, kind: ev.call?.kind });
-  }
   if (wait?.open) {
     if (set) set.add(wait.open);
     else S.waiting.set(ev.botId, new Set([wait.open]));
