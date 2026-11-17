@@ -89,6 +89,54 @@ const SPACING = new Set([0, 1, 2, 4, 6, 8, 12, 16, 20, 24, 32, 48]);
 // Угли: 6 галочки · 10 кнопки, фишки, пункты · 14 поля, строки, меню · 20 врезки · 24 карточки · 30 окно; 999 и 50% — пилюля и круг.
 const RADII = new Set([0, 6, 10, 14, 20, 24, 30, 999]);
 
+
+// «Свечение»: тёплая тень (оранжевая) с размытием больше 3px — это ореол; в «Углях» он не толще 3px.
+// Чёрные и серые тени глубины (rgba(0,0,0,…), --k-shadow-*) не свечение и не проверяются.
+const WARM_VAR = /var\(--k-(?:brand|ember|lava|ai|glow|accent)[\w-]*/;
+function splitTop(value) {
+  const parts = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of value) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      parts.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+function isWarm(layer) {
+  if (WARM_VAR.test(layer)) return true;
+  const rgb = /rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/.exec(layer);
+  if (rgb) {
+    const [r, g, b] = rgb.slice(1).map(Number);
+    return r >= 180 && r - b >= 90 && r >= g;
+  }
+  const hex = /#([0-9a-f]{6}|[0-9a-f]{3})/i.exec(layer);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3) h = [...h].map((c) => c + c).join('');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    return r >= 180 && r - b >= 90 && r >= g;
+  }
+  return false;
+}
+function glowBlur(code) {
+  let worst = 0;
+  for (const m of code.matchAll(/(?:box-shadow|text-shadow|drop-shadow|filter)\s*[:(]\s*([^;}]*)/g)) {
+    const value = m[1].replace(/\)\s*drop-shadow\(/g, ',');
+    for (const layer of splitTop(value)) {
+      if (!isWarm(layer)) continue;
+      const nums = (layer.replace(/(?:rgba?|hsla?|var|color-mix)\([^)]*\)/g, ' ').match(/-?\d*\.?\d+(?:px)?/g) || []).map(parseFloat);
+      if (nums.length >= 3 && nums[2] > worst) worst = nums[2];
+    }
+  }
+  return worst;
+}
+
 function lineFindings(file, text, n, ctx) {
   const out = [];
   if (ALLOW.test(text)) return out;
@@ -114,6 +162,10 @@ function lineFindings(file, text, n, ctx) {
       }
     }
   }
+
+  // «Свечение»: тёплая тень с размытием больше 3px. Вне кита — ошибка, внутри — предупреждение.
+  const glow = glowBlur(code);
+  if (glow > 3) add(kit ? 'warn' : 'error', 'glow', 'Свечение', `свечение ${glow}px: ореол в «Углях» не толще 3px (--k-glow)`);
 
   // «Цвет»: нет градиентного текста.
   if (/(?:-webkit-)?background-clip\s*:\s*text/.test(code)) add('error', 'gradient-text', 'Цвет', 'градиентный текст');
