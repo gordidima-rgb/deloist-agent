@@ -612,3 +612,8 @@ web/style.css:2052  .mem-fact-actions .ghost, .mem-foot .ghost → .mem-fact-act
 - `web/style.css`
 - `web/turn-card.js`
 - `web/ui-demo.html`
+
+## Этап C1 (старые экраны в `web/`) — 17.11.2026
+
+Сделано: кнопки `.primary/.ghost/.danger` в `index.html`, `app.js`, `providers.js`, `signin.js`, `screen.js`, `attach.js`, `updates.js`, `voice.js`, `snap.js` переписаны на `.k-btn k-btn--*`, самодельные скины кнопок в `style.css` (`#drawer`, `#modal-settings`, `.kit-dialog`) удалены; все нативные `<select>` одеты в `.k-select` (`app.js`, блок «Выпадающие списки кита», `window.DeloistKitSelect`), скины `.s-select/.dock-select/.field select` удалены; переключатели `.switch` → `.k-switch-box`, галочки `.quiet-check/.skill-check` → `.k-check`; `input[type=time|number]` → `.k-input`; логотип → `.k-logo`; зелёный/синий/жёлтый в `style.css` и `screen.js` заменены на `--k-brand/--k-attention/--k-danger`; свечение карточек чата снято (остаётся у поля ввода и главной кнопки).
+Остаётся: алиасы `.primary/.ghost/.danger` в `kit.css` (их ещё используют Svelte-экраны этапа C2), `.msg-chip/.msg-seg/.tc-stop` и кнопки `snap.html`, `dock.html` (свои классы), кольца в `app.js`/`providers.js`/`team.js` (не значки), `ui-demo.html`, `pet.html`, `#8e6ac9` в `signin.js` (цвет заглушки аватара), `BOT_COLORS` в `app.js`, `voice.js` (свой `<style>` с `--color-*`), около 270 предупреждений `style.css` (размеры и шрифты вне токенов).
