@@ -72,7 +72,7 @@
     );
     const folder = el('div', { class: 'update-row' },
       el('code', { class: 'user-chrome-path', text: st.extensionDir }),
-      el('button', { type: 'button', class: 'ghost', text: tr('Открыть папку'), onclick: () => act('/api/user-chrome/folder', 'POST') }),
+      el('button', { type: 'button', class: 'k-btn k-btn--ghost', text: tr('Открыть папку'), onclick: () => act('/api/user-chrome/folder', 'POST') }),
     );
     list.append(folder);
     list.append(el('li', { text: tr('Закрепи значок Deloist на панели браузера: там видно, кто работает, и есть «Остановить всё».') }));
@@ -136,14 +136,14 @@
     const head = el('div', { class: 'update-row' },
       el('div', {}, el('strong', { text: tr('Расширение Deloist') }), el('span', { class: 'update-meta', text: statusLine(st) })),
       st.registered
-        ? el('button', { type: 'button', class: 'ghost', text: tr('Отключить'), onclick: () => act('/api/user-chrome/disconnect', 'POST') })
-        : el('button', { type: 'button', class: 'primary', text: tr('Подключить'), disabled: !st.browsers.length, onclick: () => act('/api/user-chrome/connect', 'POST') }),
+        ? el('button', { type: 'button', class: 'k-btn k-btn--ghost', text: tr('Отключить'), onclick: () => act('/api/user-chrome/disconnect', 'POST') })
+        : el('button', { type: 'button', class: 'k-btn k-btn--primary', text: tr('Подключить'), disabled: !st.browsers.length, onclick: () => act('/api/user-chrome/connect', 'POST') }),
     );
     body.append(head);
     const pairBlock = el('div', { class: 'update-row' },
       st.paired
-        ? el('button', { type: 'button', class: 'ghost', text: tr('Отвязать'), onclick: async () => { pairingCode = null; await act('/api/user-chrome/unpair', 'POST'); } })
-        : el('button', { type: 'button', class: 'primary', text: tr('Связать с расширением'), onclick: async () => {
+        ? el('button', { type: 'button', class: 'k-btn k-btn--ghost', text: tr('Отвязать'), onclick: async () => { pairingCode = null; await act('/api/user-chrome/unpair', 'POST'); } })
+        : el('button', { type: 'button', class: 'k-btn k-btn--primary', text: tr('Связать с расширением'), onclick: async () => {
             if (busy) return;
             busy = true;
             try { const data = await call('/api/user-chrome/pairing', 'POST'); pairingCode = data.code; say(''); }
@@ -156,7 +156,7 @@
       body.append(el('p', { class: 'note', text: tr('Код для расширения (скопируй один раз):') }));
       body.append(el('div', { class: 'update-row' },
         el('code', { class: 'user-chrome-path', text: pairingCode }),
-        el('button', { type: 'button', class: 'ghost', text: tr('Скопировать'), onclick: async () => { try { await navigator.clipboard.writeText(pairingCode); } catch {} } }),
+        el('button', { type: 'button', class: 'k-btn k-btn--ghost', text: tr('Скопировать'), onclick: async () => { try { await navigator.clipboard.writeText(pairingCode); } catch {} } }),
       ));
     }
     if (!st.browsers.length) body.append(el('p', { class: 'note', text: tr('Не нашёл Chrome или Edge на этом компьютере.') }));
@@ -169,7 +169,7 @@
     fallback.value = st.default;
     body.append(el('label', { class: 'field mid' }, el('span', { text: tr('Где боты работают по умолчанию') }), fallback));
     for (const bot of st.bots) body.append(botRow(bot));
-    body.append(el('button', { type: 'button', class: 'danger', text: tr('Остановить всё'), onclick: () => act('/api/user-chrome/stop', 'POST') }));
+    body.append(el('button', { type: 'button', class: 'k-btn k-btn--danger', text: tr('Остановить всё'), onclick: () => act('/api/user-chrome/stop', 'POST') }));
     body.append(el('p', { class: 'note', text: tr('«Остановить всё» сразу отключает ботов от всех вкладок твоего браузера. Та же кнопка есть в окне расширения, а Chrome показывает полосу «Deloist отлаживает этот браузер», пока бот подключён.') }));
   }
 

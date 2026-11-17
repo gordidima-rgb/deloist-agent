@@ -47,7 +47,7 @@
     icon.className = 'attach-icon attach-type';
     icon.dataset.kind = kind;
     if (BRAND[e]) icon.dataset.brand = BRAND[e];
-    if (known) icon.textContent = SHORT[e] || e.slice(0, 4);
+    if (known) icon.textContent = (SHORT[e] || e.slice(0, 4)).toUpperCase();
     else icon.innerHTML = CLIP;
     icon.setAttribute('aria-hidden', 'true');
     return icon;
@@ -355,7 +355,7 @@
           box.className = 'attach-thumb-box';
           const label = document.createElement('span');
           label.className = 'attach-ext';
-          label.textContent = ext(item.name).slice(0, 4);
+          label.textContent = ext(item.name).slice(0, 4).toUpperCase();
           box.append(thumb, label);
           if (item.preview) thumb.src = item.preview;
           else {

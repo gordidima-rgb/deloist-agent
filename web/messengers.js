@@ -91,7 +91,7 @@
     const browserShown = !document.getElementById('btn-browser')?.hidden;
     box.hidden = !browserShown || !list.length;
     box.innerHTML = list
-      .map((m) => `<button type="button" class="msg-chip" data-id="${esc(m.id)}" data-status="${esc(m.status)}" aria-label="${esc(`${nameOf(m)}: ${statusText(m)}`)}">${badge(m)}<i class="msg-dot"></i></button>`)
+      .map((m) => `<button type="button" class="msg-chip k-btn k-btn--ghost k-btn--icon k-btn--sm" data-id="${esc(m.id)}" data-status="${esc(m.status)}" aria-label="${esc(`${nameOf(m)}: ${statusText(m)}`)}">${badge(m)}<i class="msg-dot k-dot"></i></button>`)
       .join('');
     if (openId) {
       const m = list.find((x) => x.id === openId);
@@ -145,7 +145,7 @@
     const p = ensurePop();
     const rules = RULES.map(([key, label]) => {
       const now = (m.rules && m.rules[key]) || 'ask';
-      const seg = LEVELS.map(([value, text]) => `<button type="button" role="radio" aria-checked="${now === value}" class="msg-seg msg-${value}${now === value ? ' on' : ''}" data-rule="${key}" data-value="${value}">${esc(tr(text))}</button>`).join('');
+      const seg = LEVELS.map(([value, text]) => `<button type="button" role="radio" aria-checked="${now === value}" class="msg-seg k-chip k-chip--tool msg-${value}${now === value ? ' on is-on' : ''}" data-rule="${key}" data-value="${value}">${esc(tr(text))}</button>`).join('');
       return `<div class="msg-rule"><span>${esc(tr(label))}</span><div class="msg-segs" role="radiogroup" aria-label="${esc(tr(label))}">${seg}</div></div>`;
     }).join('');
     const grants = grantsOf(m);
@@ -153,7 +153,7 @@
     const allowed = grants.length
       ? `<div class="msg-grants"><span>${esc(tr('Разрешено в этом разговоре: {what}', { what }))}</span> <button type="button" class="msg-grants-off" data-act="grants-off">${esc(tr('Выключить'))}</button></div>`
       : '';
-    const reconnect = m.status === 'signed_out' ? `<button type="button" class="msg-open" data-act="open-browser">${esc(tr('Открыть браузер бота'))}</button>` : '';
+    const reconnect = m.status === 'signed_out' ? `<button type="button" class="msg-open k-btn k-btn--sm" data-act="open-browser">${esc(tr('Открыть браузер бота'))}</button>` : '';
     p.dataset.id = m.id;
     p.innerHTML = `<div class="msg-title">${badge(m)}<b>${esc(nameOf(m))}</b></div><div class="msg-status ${esc(m.status)}">${esc(statusText(m))}</div>${reconnect}${allowed}<div class="msg-rules">${rules}</div>`;
   }

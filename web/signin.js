@@ -401,7 +401,7 @@ window.DeloistSignin = (() => {
     // Без WebGL2 ряд просто пустой.
     box.querySelectorAll('.team-mascot').forEach((el) => {
       const size = 88 - Math.abs(Number(el.style.getPropertyValue('--i'))) * 14;
-      if (!window.CrewAvatar?.mount(el, { size, skin: Number(el.dataset.skin), color: '#8e6ac9', still: true })) el.remove();
+      if (!window.CrewAvatar?.mount(el, { size, skin: Number(el.dataset.skin), color: getComputedStyle(document.documentElement).getPropertyValue('--k-bot-tangerine').trim(), still: true })) el.remove();
     });
 
     return new Promise((resolve) => {

@@ -83,7 +83,7 @@
       el.setAttribute('role', 'group');
       el.innerHTML = '<span class="tc-orb"></span><div class="tc-main"><div class="tc-name"></div>'
         + '<div class="tc-line"><span class="tc-status" aria-live="polite"></span><span class="tc-time" aria-hidden="true"></span></div></div>'
-        + '<button type="button" class="tc-stop"></button>';
+        + '<button type="button" class="tc-stop k-btn k-btn--ghost k-btn--sm"></button>';
       const stop = el.querySelector('.tc-stop');
       stop.innerHTML = STOP + '<span></span>';
       stop.querySelector('span').textContent = labels.stop;

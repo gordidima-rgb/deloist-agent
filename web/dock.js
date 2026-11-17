@@ -66,7 +66,7 @@
   let live = null; // пишущийся ответ: { turnId, text, el }
   let closing = null;
 
-  const safeColor = (color) => (/^#[0-9a-f]{6}$/i.test(color || '') ? color : '#7a8595');
+  const safeColor = (color) => (/^#[0-9a-f]{6}$/i.test(color || '') ? color : getComputedStyle(document.documentElement).getPropertyValue('--k-text-3').trim());
   const initial = (who) => (who.name || '?').trim().charAt(0).toUpperCase() || '?';
   const right = () => settings.dockEdge !== 'left';
   const autohide = () => Boolean(settings.dockAutohide);
@@ -554,6 +554,7 @@
     text.textContent = tr('Бот ждёт твоего решения');
     const button = document.createElement('button');
     button.type = 'button';
+    button.className = 'k-btn k-btn--sm';
     button.textContent = tr('Открыть в Deloist');
     button.addEventListener('click', () => openFull(openId));
     note.append(text, button);

@@ -296,8 +296,7 @@
 /* =====================================================================================
    Buttons
    ===================================================================================== */
-/* .primary / .ghost / .danger: старые классы экранов. Вид один, из кита: primary = лавовая заливка, остальные = тихая кнопка. */
-.k-btn, .primary, .ghost, .danger {
+.k-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -318,21 +317,21 @@
   transition: background var(--k-dur-micro) var(--k-ease-out), transform var(--k-dur-ui) var(--k-ease-press),
     box-shadow var(--k-dur-micro) var(--k-ease-out), color var(--k-dur-micro) var(--k-ease-out);
 }
-.k-btn:hover, .primary:hover, .ghost:hover, .danger:hover { background: color-mix(in srgb, var(--k-brand) 16%, transparent); }
-.k-btn:active, .primary:active, .ghost:active, .danger:active { transform: scale(0.95); transition-duration: var(--k-dur-instant); }
-.k-btn:focus-visible, .primary:focus-visible, .ghost:focus-visible, .danger:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
-.k-btn:disabled, .k-btn:disabled:hover, .primary:disabled, .primary:disabled:hover, .ghost:disabled, .danger:disabled { background: var(--k-surface-3); color: var(--k-text-3); box-shadow: none; text-shadow: none; cursor: not-allowed; transform: none; }
-.k-btn .k-i, .primary .i, .ghost .i, .danger .i { width: 16px; height: 16px; }
-a.ghost, a.primary { text-decoration: none; }
+.k-btn:hover { background: color-mix(in srgb, var(--k-brand) 16%, transparent); }
+.k-btn:active { transform: scale(0.95); transition-duration: var(--k-dur-instant); }
+.k-btn:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
+.k-btn:disabled, .k-btn:disabled:hover { background: var(--k-surface-3); color: var(--k-text-3); box-shadow: none; text-shadow: none; cursor: not-allowed; transform: none; }
+.k-btn .k-i { width: 16px; height: 16px; }
+a.k-btn { text-decoration: none; }
 /* primary: the one glossy lava fill on a screen */
-.k-btn--primary, .primary { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
-.k-btn--primary:hover, .primary:hover { background: var(--k-btn-fill-hover); }
+.k-btn--primary { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
+.k-btn--primary:hover { background: var(--k-btn-fill-hover); }
 .k-btn--primary .k-i { stroke-width: 2.6; }
 /* ink: kept for old screens, now a warm coal with an orange rim */
 .k-btn--ink { background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim); }
 .k-btn--ink:hover { background: var(--k-ink-2); }
-.k-btn--ghost, .ghost, .danger { background: transparent; color: var(--k-text-2); box-shadow: none; }
-.k-btn--ghost:hover, .ghost:hover, .danger:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-btn--ghost { background: transparent; color: var(--k-text-2); box-shadow: none; }
+.k-btn--ghost:hover { background: var(--k-surface-2); color: var(--k-text); }
 .k-btn--attention { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
 /* danger: red outline; --solid-danger is the confirm of a destructive dialog */
 .k-btn--danger { color: var(--k-danger); background: color-mix(in srgb, var(--k-danger) 7%, transparent); box-shadow: inset 0 0 0 1.5px var(--k-danger), inset 0 0 3px rgba(255, 60, 40, 0.5), 0 0 3px rgba(255, 60, 40, 0.8); }
@@ -1321,7 +1320,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-switch-button--sm .k-switch::after { top: 3px; left: 3px; width: 14px; height: 14px; }
 .k-switch-button--sm[aria-checked="true"] > .k-switch::after { transform: translateX(14px); }
 /* hidden wins over the display of kit controls */
-.k-btn[hidden], .k-chip[hidden], .k-switch-button[hidden], .primary[hidden], .ghost[hidden], .danger[hidden] { display: none; }
+.k-btn[hidden], .k-chip[hidden], .k-switch-button[hidden] { display: none; }
 
 .k-check,
 .k-radio {
@@ -2139,3 +2138,34 @@ button.k-lrow__main:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .k-lrow__chev, .k-lrow__acc, .k-lrow__in { transition: none; }
 }
 /* ===== /stage C2 ===== */
+
+/* ===== stage C3 ===== */
+/* Общие мелочи окон и чата, которые раньше жили в своих <style> и своих классах. */
+.k-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--k-text-3); }
+.mic-btn { position: relative; transition: box-shadow 80ms linear; }
+.mic-btn[data-state="listening"], .mic-btn[data-state="listening"]:hover {
+  background: var(--k-brand); color: var(--k-on-brand); border-color: transparent;
+  box-shadow: 0 0 0 calc(1px + var(--level, 0) * 2px) color-mix(in srgb, var(--k-brand) 40%, transparent);
+}
+.mic-btn[data-state="working"] { opacity: 0.6; cursor: progress; }
+.mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.voice-note {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 50; max-width: min(520px, 90vw);
+  padding: var(--k-space-2) var(--k-space-4); border-radius: var(--k-radius-sm); font: 400 var(--k-text-sm) / 1.35 var(--k-font-body);
+  background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-shadow-island);
+}
+.chat .voice-note { position: absolute; bottom: 76px; width: max-content; max-width: 86%; }
+.snap-chip { display: flex; align-items: center; gap: var(--k-space-2); margin: 0 var(--k-space-3) var(--k-space-1); padding: var(--k-space-1) var(--k-space-2); border-radius: var(--k-radius-sm);
+  background: var(--k-surface-2); box-shadow: inset 0 0 0 1px var(--k-line); font: 400 var(--k-text-sm) / 1.35 var(--k-font-body); }
+.snap-chip img { width: 44px; height: 32px; object-fit: cover; border-radius: var(--k-radius-xs); flex: none; }
+.snap-chip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snap-chip button { border: 0; background: transparent; color: var(--k-text-3); cursor: pointer; font: inherit; font-size: var(--k-text-md); padding: 0 var(--k-space-1); }
+.voice-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--k-space-1); flex: none; }
+.voice-keys { display: flex; align-items: center; gap: var(--k-space-2); }
+.voice-combo { min-width: 118px; font-variant-numeric: tabular-nums; }
+.voice-combo.capturing { box-shadow: inset 0 0 0 1.5px var(--k-brand); color: var(--k-brand-text); }
+.voice-combo.off { color: var(--k-text-3); }
+.voice-small[hidden] { display: none; }
+.voice-status { color: var(--k-danger-text); font: 400 var(--k-text-sm) / 1.35 var(--k-font-body); text-align: right; max-width: 260px; }
+.voice-status:empty { display: none; }
+/* ===== /stage C3 ===== */

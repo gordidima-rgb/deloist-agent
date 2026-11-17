@@ -469,44 +469,6 @@
     return config;
   }
 
-  function injectStyle() {
-    const style = document.createElement('style');
-    style.textContent = `
-      .mic-btn { position: relative; transition: box-shadow 80ms linear, background 160ms; }
-      .mic-btn.attach[data-state="idle"]:hover { border-color: var(--color-border-strong); color: var(--color-text-primary); }
-      .mic-btn.chat-send { background: transparent; color: var(--color-text-secondary); }
-      .mic-btn.chat-send:hover { background: var(--color-bg-surface-soft); }
-      .mic-btn[data-state="listening"], .mic-btn[data-state="listening"]:hover {
-        background: var(--color-accent); color: var(--color-on-accent); border-color: transparent;
-        box-shadow: 0 0 0 calc(2px + var(--level, 0) * 9px) color-mix(in srgb, var(--color-accent) 28%, transparent);
-      }
-      .mic-btn[data-state="working"] { opacity: 0.6; cursor: progress; }
-      .dock-mic { border-style: solid; }
-      .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-      .voice-note {
-        position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 50; max-width: min(520px, 90vw);
-        padding: 8px 14px; border-radius: 12px; font-size: 13px; line-height: 1.35;
-        background: var(--color-text-primary); color: var(--color-bg-surface); box-shadow: 0 6px 20px rgba(0,0,0,.18);
-      }
-      .chat .voice-note { position: absolute; bottom: 76px; width: max-content; max-width: 86%; }
-      .snap-chip { display: flex; align-items: center; gap: 8px; margin: 0 12px 6px; padding: 6px 8px; border-radius: 12px;
-        background: var(--color-bg-surface-soft); border: 1px solid var(--color-border-default); font-size: 13px; }
-      .snap-chip img { width: 44px; height: 32px; object-fit: cover; border-radius: 6px; flex: none; }
-      .snap-chip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .snap-chip button { border: none; background: transparent; color: var(--color-text-muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
-      .voice-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
-      .voice-keys { display: flex; align-items: center; gap: 6px; }
-      .voice-combo { min-width: 118px; height: 34px; padding: 0 12px; border-radius: var(--radius-md); font-variant-numeric: tabular-nums; }
-      .voice-combo.capturing { border-color: var(--color-brand-primary); color: var(--color-brand-text); }
-      .voice-combo.off { color: var(--color-text-muted); }
-      .voice-small { height: 34px; padding: 0 10px; border-radius: var(--radius-md); font-size: 13px; }
-      .voice-small[hidden] { display: none; }
-      .voice-status { color: var(--color-accent-text); font-size: 13px; text-align: right; max-width: 260px; }
-      .voice-status:empty { display: none; }
-    `;
-    document.head.append(style);
-  }
-
   function noteIn(parent) {
     let timer = 0;
     return (text, ms = 4500) => {
@@ -728,15 +690,15 @@
       keys.className = 'voice-keys';
       const combo = document.createElement('button');
       combo.type = 'button';
-      combo.className = 'k-btn k-btn--ghost voice-combo';
+      combo.className = 'k-btn k-btn--sm k-btn--ghost voice-combo';
       combo.title = tr('Щёлкни и нажми новое сочетание');
       const reset = document.createElement('button');
       reset.type = 'button';
-      reset.className = 'k-btn k-btn--ghost voice-small';
+      reset.className = 'k-btn k-btn--sm k-btn--ghost voice-small';
       reset.textContent = tr('Сбросить');
       const toggle = document.createElement('button');
       toggle.type = 'button';
-      toggle.className = 'k-btn k-btn--ghost voice-small';
+      toggle.className = 'k-btn k-btn--sm k-btn--ghost voice-small';
       keys.append(combo, reset, toggle);
       const status = document.createElement('div');
       status.className = 'voice-status';
@@ -1003,7 +965,6 @@
 
   const api = { PcmRecorder, RecorderStartError, transcribe, voiceButton, isVoiceSupported, insertText, loadConfig, pcm: { downsample, encodePcm16, concatPcm, rms, toBase64 } };
   window.DeloistVoice = api;
-  injectStyle();
   // Страница подсказки сама решает, что делать с записью.
   if (document.body?.dataset.voice !== 'manual') {
     if ($('chat-form') && $('chat-input')) setupDock();

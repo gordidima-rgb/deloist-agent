@@ -220,7 +220,12 @@ const escapeHtml = (s) =>
 const safeColor = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#7a8595');
 
 // Цвета аватаров. Только для них, не для интерфейса.
-const BOT_COLORS = window.CrewAvatar ? CrewAvatar.COLORS : ['#4f9ce6', '#8e6ac9', '#f2a93b', '#3fb8bd', '#d06ac0', '#4fbf8a'];
+// Цвета ботов — данные, но берём их из токенов кита --k-bot-*, а не пишем hex в коде.
+const KIT_BOT_NAMES = ['tangerine', 'mint', 'lemon', 'sky', 'violet', 'rose', 'coral', 'ice'];
+function botColors() {
+  const css = getComputedStyle(document.documentElement);
+  return KIT_BOT_NAMES.map((n) => css.getPropertyValue(`--k-bot-${n}`).trim()).filter(Boolean);
+}
 
 // Значки: рисунки лежат в ui/src/lib/icons.js, сюда приходят готовой строкой через DeloistUI.icon (kit.js грузится раньше app.js).
 const ic = (name, opts = {}) => DeloistUI.icon(name, { className: 'i', ...opts });
@@ -7656,7 +7661,7 @@ function freeSkin() {
 function prepareNewBot() {
   clearNewLook();
   const owned = [];
-  const picker = mountLookPicker($('#nb-look'), { name: '', color: BOT_COLORS[0], skin: freeSkin() }, { prefix: 'nb', owned, size: 96 });
+  const picker = mountLookPicker($('#nb-look'), { name: '', color: botColors()[0], skin: freeSkin() }, { prefix: 'nb', owned, size: 96 });
   newLook = { owned, pick: () => ({ skin: picker.skin }) };
   fillNewBotTeams();
 }
@@ -8110,7 +8115,7 @@ function renderJournal() {
             }</div>`
           : ''
       }`;
-    $('.jr-missed .ghost', el)?.addEventListener('click', () => runRoutine(e.routineId));
+    $('.jr-missed .k-btn', el)?.addEventListener('click', () => runRoutine(e.routineId));
     list.append(el);
   }
 }

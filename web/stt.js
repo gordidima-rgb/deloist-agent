@@ -145,7 +145,7 @@
     // Список моделей с кнопками «Скачать» живёт на подэкране «Модели распознавания»; здесь только строка-вход.
     const modelsHost = $('stt-models-host');
     const modelsRow = line(tr('Модель распознавания'), ' ');
-    const modelsOpen = el('button', 'ghost voice-small', tr('Выбрать'));
+    const modelsOpen = el('button', 'k-btn k-btn--sm k-btn--ghost voice-small', tr('Выбрать'));
     modelsOpen.type = 'button';
     modelsOpen.addEventListener('click', () => window.DeloistSettings?.openSub('stt-models'));
     modelsRow.append(modelsOpen);
@@ -173,7 +173,7 @@
     key.type = 'password';
     key.autocomplete = 'off';
     key.setAttribute('aria-label', tr('Ключ сервера'));
-    const saveServer = el('button', 'ghost voice-small', tr('Сохранить'));
+    const saveServer = el('button', 'k-btn k-btn--sm k-btn--ghost voice-small', tr('Сохранить'));
     saveServer.type = 'button';
     keyRow.append(key, saveServer);
     server.append(el('p', 'note', tr('Адрес до /audio/transcriptions, например http://127.0.0.1:8000/v1. Ключ хранится только на этом компьютере.')), urlRow, keyRow);
@@ -210,7 +210,7 @@
         text.append(el('div', 'prov-line-title', m.title), el('div', 'prov-line-sub', tr(m.note)));
         const meta = el('div', 'stt-meta', `${tr('{size} МБ', { size: m.sizeMb })} · ${m.license}`);
         text.append(meta);
-        const action = el('button', 'ghost voice-small');
+        const action = el('button', 'k-btn k-btn--sm k-btn--ghost voice-small');
         action.type = 'button';
         if (busy && job.model === m.id) {
           action.textContent = tr('Отменить');
