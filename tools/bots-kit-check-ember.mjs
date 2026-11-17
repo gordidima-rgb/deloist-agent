@@ -184,6 +184,8 @@ function iconFindings(file, text, added) {
     const tag = m[0];
     // Картинка, а не иконка (лого, график, кольцо): role="img".
     if (/role=["']img["']/.test(tag)) continue;
+    // Рисунок кита (кольцо, график), помеченный data-art, — не иконка.
+    if (/\sdata-art[\s>=]/.test(tag)) continue;
     const add = (level, message) => out.push({ file, line, level, rule: 'icon', where: 'Иконки', message, text: tag.slice(0, 160) });
     if (!has(tag, 'viewBox', '0 0 24 24')) add('error', 'нужна сетка viewBox="0 0 24 24"');
     if (!has(tag, 'fill', 'none')) add('error', 'нужен fill="none": иконки линейные');

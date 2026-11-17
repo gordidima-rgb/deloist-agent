@@ -33,12 +33,12 @@
   title={label || undefined}
   {...rest}
 >
-  <svg viewBox="0 0 {size} {size}" aria-hidden="true">
+  <svg viewBox="0 0 {size} {size}" aria-hidden="true" data-art>
     <defs>
       <linearGradient id="k-ring-lava" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#ffd25e" />
-        <stop offset="0.5" stop-color="#ff9a1f" />
-        <stop offset="1" stop-color="#ff5a12" />
+        <stop offset="0" style="stop-color: var(--k-lava-hi)" />
+        <stop offset="0.5" style="stop-color: var(--k-lava-mid)" />
+        <stop offset="1" style="stop-color: var(--k-lava-lo)" />
       </linearGradient>
     </defs>
     <circle class="k-ring__track" cx={size / 2} cy={size / 2} r={radius} pathLength="100" />

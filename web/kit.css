@@ -70,7 +70,10 @@
   --k-badge: #d8f25a;
   --k-on-badge: #1f2a05;
   --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.35), 0 6px 16px -6px rgba(255, 90, 0, 0.6);
-  --k-lava: linear-gradient(90deg, #ffd25e 0%, #ff9a1f 45%, #ff5a12 80%, #e8380b 100%);
+  --k-lava-hi: #ffd25e;
+  --k-lava-mid: #ff9a1f;
+  --k-lava-lo: #ff5a12;
+  --k-lava: linear-gradient(90deg, var(--k-lava-hi) 0%, var(--k-lava-mid) 45%, var(--k-lava-lo) 80%, #e8380b 100%);
   --k-ember: radial-gradient(circle at 35% 30%, #fff3d6 0 10%, #ffc06a 22%, #ff7a1a 55%, #c9370a 100%);
   --k-btn-fill: linear-gradient(180deg, #ff8f26 0%, #ff6a0d 52%, #e84a06 100%);
   --k-btn-fill-hover: linear-gradient(180deg, #ff9c36 0%, #ff7418 52%, #ef5309 100%);
