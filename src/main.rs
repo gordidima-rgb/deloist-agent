@@ -125,6 +125,7 @@ mod password_vault;
 mod slack;
 mod telegram;
 mod reminders;
+mod toast_reply;
 mod aumid;
 mod board;
 mod team;
@@ -352,6 +353,10 @@ fn run_server(root: &Path) -> Result<(), String> {
         let agent = publish(app.store.data_dir(), addr.port());
         user_chrome::start(app.clone(), agent.clone());
         let data_dir = app.store.data_dir().to_path_buf();
+        // Тосты с ответом — только на компьютере человека; у облачной копии рабочего стола нет.
+        if cloud.is_none() {
+            toast_reply::start(app.clone(), tokio::runtime::Handle::current());
+        }
         let mut guard = guard::Guard::new(addr.port(), boot.clone(), agent);
         if let Some(config) = cloud {
             // Облако: ссылки со входом в журнал не печатаем, вход только через шлюз.
@@ -434,6 +439,7 @@ fn run_desktop(root: &Path) -> Result<(), String> {
     app.dock.attach(origin.clone(), guard.clone());
     selection::attach(origin.clone(), guard.clone());
     hotkeys::start(app.clone(), runtime.handle().clone());
+    toast_reply::start(app.clone(), runtime.handle().clone());
 
     {
         let shutdown = shutdown.clone();

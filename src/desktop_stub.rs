@@ -11,3 +11,7 @@ pub(crate) fn open_in_browser(_url: &str) {}
 pub fn activate_running_window() -> bool {
     false
 }
+
+/// Класс окна нужен только сборке с окном; здесь его нет, но имя общее.
+#[cfg(windows)]
+pub(crate) const WINDOW_CLASS: &str = "DeloistAgentWindow";

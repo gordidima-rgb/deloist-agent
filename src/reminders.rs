@@ -320,8 +320,8 @@ fn show_toast(_title: &str, _body: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+pub(crate) fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
 #[cfg(test)]

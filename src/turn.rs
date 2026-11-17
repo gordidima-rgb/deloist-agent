@@ -273,6 +273,12 @@ impl Turns {
         self.asked.lock().unwrap().iter().find(|q| q.id == id).cloned()
     }
 
+    /// Тесты: положить вопрос без хода бота.
+    #[cfg(test)]
+    pub fn store_question_for_test(&self, asked: Asked) {
+        self.store_question(asked);
+    }
+
     /// Ход бота идёт в этом разговоре (личный чат или группа).
     pub fn set_conv(&self, bot_id: &str, conv: &str) {
         self.convs.lock().unwrap().insert(bot_id.to_string(), conv.to_string());
@@ -516,6 +522,19 @@ impl Turns {
 
     pub fn approval_tool(&self, id: &str) -> Option<String> {
         self.approvals.lock().unwrap().get(id).and_then(|a| a.payload["tool"].as_str().map(str::to_string))
+    }
+
+    /// Открытая карточка: бот и то, что про неё записано (инструмент, опасность, описание). Для уведомления Windows.
+    pub fn approval_info(&self, id: &str) -> Option<(String, Value)> {
+        self.approvals.lock().unwrap().get(id).map(|a| (a.bot_id.clone(), a.payload.clone()))
+    }
+
+    /// Тесты: открыть карточку без хода бота.
+    #[cfg(test)]
+    pub fn open_approval_for_test(&self, id: &str, bot_id: &str, payload: Value) -> oneshot::Receiver<Reply> {
+        let (tx, rx) = oneshot::channel();
+        self.approvals.lock().unwrap().insert(id.to_string(), Approval { bot_id: bot_id.to_string(), payload, tx });
+        rx
     }
 
     /// Человек убрал вопрос, не отвечая.
