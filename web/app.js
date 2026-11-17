@@ -7817,18 +7817,68 @@ function routineRow(r, rerender) {
   return el;
 }
 
+// Модель карточки рутины для RoutinesPane (кит «Угли»): строки и даты считает app.js, карточка только рисует.
+function routineCardModel(r) {
+  const bot = botById(r.botId);
+  const next = r.hook ? tr('вебхук') : r.enabled ? nextText(r.nextRun) : '';
+  const last = STATUS_LABELS[r.lastStatus];
+  return {
+    id: r.id,
+    title: r.title,
+    gist: String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    enabled: Boolean(r.enabled),
+    quiet: Boolean(r.quiet),
+    bot: { name: bot?.name || '' },
+    schedule: scheduleText(r),
+    next,
+    nextIcon: r.hook ? 'link' : 'clock',
+    nextTitle: r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next }),
+    last: r.lastRun ? whenText(r.lastRun) : '',
+    lastTitle: r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '',
+    lastBad: BAD_STATUSES.includes(r.lastStatus),
+  };
+}
+
+let routinesPane = null;
 function renderRoutines() {
-  const list = $('#routines-list');
-  list.innerHTML = '';
-  if (!ordinaryRoutines().length) {
-    list.innerHTML = `<p class="note">${tr('Пока ни одной. Добавь первую, и бот начнёт работать сам.')}</p>`;
-  }
   // Рутины поменялись здесь — вкладка панели бота показывает те же.
   const both = () => {
     renderRoutines();
     if (drawerShown() && S.tab === 'routines') renderDrawer();
   };
-  for (const r of ordinaryRoutines()) list.append(routineRow(r, both));
+  const patch = async (id, body, apply) => {
+    const r = S.routines.find((x) => x.id === id);
+    if (!r) return;
+    try {
+      const res = await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+      apply(r, res?.routine);
+    } catch (err) {
+      toast(err.message);
+    }
+    both();
+  };
+  const props = {
+    routines: ordinaryRoutines().map(routineCardModel),
+    onrun: (id) => runRoutine(id),
+    onquiet: (id, value) => patch(id, { quiet: value }, (r, saved) => { r.quiet = saved ? saved.quiet : value; }),
+    ontoggle: (id, value) => patch(id, { enabled: value }, (r) => { r.enabled = value; }),
+    ondelete: async (id) => {
+      try {
+        await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        S.routines = S.routines.filter((x) => x.id !== id);
+      } catch (err) {
+        toast(err.message);
+      }
+      both();
+    },
+    onnew: () => {
+      const form = $('#rt-new');
+      form.open = !form.open;
+      if (form.open) form.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    },
+  };
+  if (routinesPane) routinesPane.update(props);
+  else routinesPane = window.DeloistUI.mountRoutinesPane($('#routines-list'), props);
   syncRoutineTabs();
 }
 

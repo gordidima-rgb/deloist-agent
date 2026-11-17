@@ -4032,3 +4032,6 @@ body.side-collapsed .ibx-card-host { display: none; }
 
 /* Файл из вкладки «Файлы» несут в чат: чат обводится, отпустить можно в любом его месте. */
 #chat.file-ref-drop { box-shadow: inset 0 0 0 2px var(--k-brand); }
+
+/* Окно «Задачи и автоматизация»: форму новой рутины открывает кнопка «Новая рутина» в списке (RoutinesPane), своя строка-заголовок формы не нужна. */
+#rt-new > summary { display: none; }
