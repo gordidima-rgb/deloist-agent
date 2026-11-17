@@ -150,12 +150,12 @@
       actions.className = 'actions';
       const copy = document.createElement('button');
       copy.type = 'button';
-      copy.className = 'ghost';
+      copy.className = 'k-btn k-btn--ghost';
       copy.textContent = tr('Скопировать');
       copy.addEventListener('click', copyAndClose);
       const retry = document.createElement('button');
       retry.type = 'button';
-      retry.className = 'ghost';
+      retry.className = 'k-btn k-btn--ghost';
       retry.textContent = tr('Вставить ещё раз');
       retry.addEventListener('click', () => {
         if (busy || !sessionId) return;

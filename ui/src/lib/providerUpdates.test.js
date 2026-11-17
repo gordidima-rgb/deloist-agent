@@ -19,7 +19,7 @@ describe('provider update notifications', () => {
     window.DeloistUpdates.providers([provider, provider]);
     expect(document.querySelectorAll('.update-card')).toHaveLength(1);
     expect(window.DeloistProviders.update).not.toHaveBeenCalled();
-    document.querySelector('.update-card .primary').click();
+    document.querySelector('.update-card .k-btn--primary').click();
     expect(window.DeloistProviders.update).toHaveBeenCalledWith('gemini');
     window.DeloistUpdates.providers([provider]);
     expect(document.querySelectorAll('.update-card')).toHaveLength(0);

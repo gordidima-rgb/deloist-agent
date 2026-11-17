@@ -251,7 +251,7 @@
       const button = (icon, text, onClick) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'ghost result-btn';
+        b.className = 'k-btn k-btn--ghost result-btn';
         b.innerHTML = icon;
         const span = document.createElement('span');
         span.textContent = text;
@@ -275,7 +275,7 @@
       });
 
       const save = document.createElement('a');
-      save.className = 'ghost result-btn';
+      save.className = 'k-btn k-btn--ghost result-btn';
       save.href = fileUrl(ref, true);
       save.download = ref.name;
       save.innerHTML = DOWNLOAD_ICON;
@@ -301,7 +301,7 @@
         for (const bot of bots) {
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = 'ghost';
+          item.className = 'k-btn k-btn--ghost';
           item.textContent = bot.name;
           item.addEventListener('click', async () => {
             menu.remove();

@@ -8,13 +8,13 @@
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/kit.css" />
     <link rel="stylesheet" href="/ui/kit.css" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23025bff'/%3E%3Cpath d='M9 17l5 5 9-11' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23ff6a14'/%3E%3Cpath d='M9 17l5 5 9-11' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="app">
       <aside id="sidebar">
         <div class="side-head">
-          <div class="brand"><svg class="brand-mark" width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="brandMarkGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a85ff"/><stop offset="1" stop-color="#0d54f0"/></linearGradient></defs><path d="M56 26 V42 A14 14 0 0 1 42 56 H22 A14 14 0 0 1 8 42 V22 A14 14 0 0 1 22 8 H36" fill="none" stroke="url(#brandMarkGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 34 L28 43 L45 24" fill="none" stroke="url(#brandMarkGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 6 Q50 15 59 15 Q50 15 50 24 Q50 15 41 15 Q50 15 50 6 Z" fill="url(#brandMarkGrad)"/><path d="M60 4.5 Q60 8 63.5 8 Q60 8 60 11.5 Q60 8 56.5 8 Q60 8 60 4.5 Z" fill="url(#brandMarkGrad)"/></svg>Deloist</div>
+          <div class="brand"><span class="k-logo" aria-hidden="true"></span>Deloist</div>
           <div class="side-actions">
             <button class="icon-btn" id="btn-search-toggle" type="button" title="Поиск (Ctrl+K)" aria-label="Поиск" aria-expanded="false" aria-controls="sidebar-search"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="search"></svg></button>
             <button class="icon-btn" id="btn-new" title="Создать" aria-label="Создать" aria-haspopup="menu" aria-expanded="false" data-menu-trigger><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="plus"></svg></button>
@@ -39,31 +39,31 @@
             <button type="button" class="side-nav side-sub" data-catalog="agents">Агенты</button>
             <button type="button" class="side-nav side-sub" data-catalog="apps">Приложения</button>
           </div>
-          <button type="button" class="ghost side-link" id="btn-catalog" title="Каталог" aria-expanded="false" aria-controls="catalog-nav"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="apps-add"></svg>Каталог</button>
-          <button class="ghost side-link" id="btn-workflows" title="Рабочие процессы">
+          <button type="button" class="k-btn k-btn--ghost side-link" id="btn-catalog" title="Каталог" aria-expanded="false" aria-controls="catalog-nav"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="apps-add"></svg>Каталог</button>
+          <button class="k-btn k-btn--ghost side-link" id="btn-workflows" title="Рабочие процессы">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="workflow"></svg>
             Рабочие процессы
             <span class="badge" id="workflows-dot" hidden></span>
           </button>
-          <button class="ghost side-link" id="btn-routines" title="Задачи и автоматизация">
+          <button class="k-btn k-btn--ghost side-link" id="btn-routines" title="Задачи и автоматизация">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="clock"></svg>
             Задачи и автоматизация
             <span class="badge" id="routines-dot" hidden></span>
           </button>
-          <button class="ghost side-link" id="btn-report" title="Отчёт">
+          <button class="k-btn k-btn--ghost side-link" id="btn-report" title="Отчёт">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="chart-bars"></svg>
             Отчёт
           </button>
-          <button class="ghost side-link" id="btn-memory" title="Общая память">
+          <button class="k-btn k-btn--ghost side-link" id="btn-memory" title="Общая память">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="brain"></svg>
             Общая память
           </button>
-          <button class="ghost side-link" id="btn-usage" title="Использование токенов и лимиты">
+          <button class="k-btn k-btn--ghost side-link" id="btn-usage" title="Использование токенов и лимиты">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="chart-columns"></svg>
             Лимиты и расход
           </button>
           <div class="usage-strip"><div class="usage-rings" id="usage-rings" hidden></div><div id="instabox-ring" class="ibx-ring-host"></div></div>
-          <button type="button" class="ghost side-link side-menu-trigger" id="btn-side-menu" aria-expanded="false" aria-controls="side-menu" title="Настройки и подключения"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="sliders"></svg><span>Настройки и подключения</span><svg class="i side-menu-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true" data-icon="chevron-up"></svg></button>
+          <button type="button" class="k-btn k-btn--ghost side-link side-menu-trigger" id="btn-side-menu" aria-expanded="false" aria-controls="side-menu" title="Настройки и подключения"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="sliders"></svg><span>Настройки и подключения</span><svg class="i side-menu-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true" data-icon="chevron-up"></svg></button>
           <div class="side-menu" id="side-menu" hidden>
             <div class="side-menu-actions">
             <button class="icon-btn" id="btn-settings" title="Настройки" aria-label="Настройки">
@@ -164,7 +164,7 @@
           <div class="queue-head">
             <span class="queue-count" id="queue-count"></span>
             <span class="queue-note" id="queue-note" hidden>на паузе</span>
-            <button type="button" class="ghost" id="queue-resume" hidden>Продолжить</button>
+            <button type="button" class="k-btn k-btn--ghost" id="queue-resume" hidden>Продолжить</button>
           </div>
           <div class="queue-list" id="queue-list"></div>
         </div>
@@ -232,8 +232,8 @@
           </div>
         </details>
         <div class="modal-actions">
-          <button type="button" class="ghost" data-close>Отмена</button>
-          <button type="submit" class="primary">Создать</button>
+          <button type="button" class="k-btn k-btn--ghost" data-close>Отмена</button>
+          <button type="submit" class="k-btn k-btn--primary">Создать</button>
         </div>
       </form>
     </dialog>
@@ -250,9 +250,9 @@
           <div class="room-picture-row">
             <span class="room-picture-preview" id="room-picture-preview" aria-hidden="true"></span>
             <div class="room-picture-actions">
-              <button type="button" class="ghost" id="room-picture-upload">Загрузить картинку</button>
-              <button type="button" class="ghost" id="room-picture-draw" hidden>Нарисовать заново</button>
-              <button type="button" class="ghost" id="room-picture-clear" hidden>Убрать</button>
+              <button type="button" class="k-btn k-btn--ghost" id="room-picture-upload">Загрузить картинку</button>
+              <button type="button" class="k-btn k-btn--ghost" id="room-picture-draw" hidden>Нарисовать заново</button>
+              <button type="button" class="k-btn k-btn--ghost" id="room-picture-clear" hidden>Убрать</button>
             </div>
             <input type="file" id="room-picture-file" accept="image/png,image/jpeg,image/webp" hidden />
           </div>
@@ -281,10 +281,10 @@
         </label>
         <div id="room-resources"></div>
         <div class="modal-actions">
-          <button type="button" class="ghost" data-close>Отмена</button>
-          <button type="button" class="ghost" id="room-archive" hidden></button>
-          <button type="button" class="danger" id="room-delete" hidden>Удалить</button>
-          <button type="submit" class="primary">Сохранить</button>
+          <button type="button" class="k-btn k-btn--ghost" data-close>Отмена</button>
+          <button type="button" class="k-btn k-btn--ghost" id="room-archive" hidden></button>
+          <button type="button" class="k-btn k-btn--danger" id="room-delete" hidden>Удалить</button>
+          <button type="submit" class="k-btn k-btn--primary">Сохранить</button>
         </div>
       </form>
     </dialog>
@@ -343,7 +343,7 @@
                         <span class="k-row__label">Познакомиться быстрее</span>
                         <span class="k-row__sub">Расскажи о себе, и боты сразу будут знать, как с тобой работать</span>
                       </div>
-                      <div class="k-row__control"><button type="button" class="ghost" id="btn-know-me">Начать</button></div>
+                      <div class="k-row__control"><button type="button" class="k-btn k-btn--ghost" id="btn-know-me">Начать</button></div>
                     </div>
                     <div class="k-row">
                       <div class="k-row__text">
@@ -363,7 +363,7 @@
                         <span class="k-row__label">Запускать вместе с Windows</span>
                         <span class="k-row__sub">Deloist сразу сидит в трее</span>
                       </div>
-                      <span class="switch"><input type="checkbox" name="autostart" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" name="autostart" /><span></span></span>
                     </label>
                   </div>
                 </section>
@@ -377,7 +377,7 @@
                     <div class="field s-model" id="set-model"></div>
                     <div class="k-row s-own" id="own-models" hidden>
                       <div class="k-row__text"><span class="k-row__sub" id="own-models-text"></span></div>
-                      <div class="k-row__control"><button type="button" class="ghost" id="own-models-fix">Перевести на основную</button></div>
+                      <div class="k-row__control"><button type="button" class="k-btn k-btn--ghost" id="own-models-fix">Перевести на основную</button></div>
                     </div>
                     <!-- Скрытые поля хранят выбор из окна модели и старые значения: остальной код настроек читает их как раньше.
                          Ключи и адрес API живут в окне «Подключить свою ИИ»; пустые поля при сохранении ничего не стирают. -->
@@ -417,19 +417,19 @@
                     </div>
                     <div class="k-row" data-fb="api cli">
                       <div class="k-row__text"><span class="k-row__label">Модель запасной</span></div>
-                      <div class="k-row__control"><input name="fallbackModel" class="s-input" placeholder="gpt-4o-mini" aria-label="Модель запасной" /></div>
+                      <div class="k-row__control"><input name="fallbackModel" class="k-input s-input" placeholder="gpt-4o-mini" aria-label="Модель запасной" /></div>
                     </div>
                     <div class="k-row" data-fb="api">
                       <div class="k-row__text"><span class="k-row__label">Адрес API запасной</span><span class="k-row__sub">Пусто: как у основной</span></div>
-                      <div class="k-row__control"><input name="fallbackBaseUrl" class="s-input" placeholder="https://api.openai.com/v1" aria-label="Адрес API запасной" /></div>
+                      <div class="k-row__control"><input name="fallbackBaseUrl" class="k-input s-input" placeholder="https://api.openai.com/v1" aria-label="Адрес API запасной" /></div>
                     </div>
                     <div class="k-row" data-fb="api">
                       <div class="k-row__text"><span class="k-row__label">Ключ запасной</span></div>
-                      <div class="k-row__control"><input name="fallbackApiKey" type="password" class="s-input" placeholder="sk-…" aria-label="Ключ запасной" /></div>
+                      <div class="k-row__control"><input name="fallbackApiKey" type="password" class="k-input s-input" placeholder="sk-…" aria-label="Ключ запасной" /></div>
                     </div>
                     <div class="k-row" data-fb="cli">
                       <div class="k-row__text"><span class="k-row__label">Команда запуска запасной</span></div>
-                      <div class="k-row__control"><input name="fallbackCliCommand" class="s-input" placeholder="claude -p" aria-label="Команда запуска запасной" /></div>
+                      <div class="k-row__control"><input name="fallbackCliCommand" class="k-input s-input" placeholder="claude -p" aria-label="Команда запуска запасной" /></div>
                     </div>
                   </div>
                 </section>
@@ -451,30 +451,30 @@
                       <div class="k-section__body">
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Ключ из переменной окружения</span></div>
-                          <div class="k-row__control"><input name="apiKeyEnv" class="s-input" placeholder="OPENAI_API_KEY" aria-label="Ключ из переменной окружения" /></div>
+                          <div class="k-row__control"><input name="apiKeyEnv" class="k-input s-input" placeholder="OPENAI_API_KEY" aria-label="Ключ из переменной окружения" /></div>
                         </div>
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Температура</span></div>
-                          <div class="k-row__control"><input name="temperature" type="number" step="0.1" min="0" max="2" class="s-input s-input--num" aria-label="Температура" /></div>
+                          <div class="k-row__control"><input name="temperature" type="number" step="0.1" min="0" max="2" class="k-input s-input s-input--num" aria-label="Температура" /></div>
                         </div>
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Сообщений в истории</span></div>
-                          <div class="k-row__control"><input name="historyLimit" type="number" min="4" max="200" class="s-input s-input--num" aria-label="Сообщений в истории" /></div>
+                          <div class="k-row__control"><input name="historyLimit" type="number" min="4" max="200" class="k-input s-input s-input--num" aria-label="Сообщений в истории" /></div>
                         </div>
                         <label class="k-row">
                           <div class="k-row__text">
                             <span class="k-row__label">Модель видит картинки</span>
                             <span class="k-row__sub">Показывать ей снимки экрана, а не только писать их в файл</span>
                           </div>
-                          <span class="switch"><input type="checkbox" name="vision" /><span></span></span>
+                          <span class="k-switch-box"><input type="checkbox" name="vision" /><span></span></span>
                         </label>
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Команда запуска</span><span class="k-row__sub">Для способа «программа на компьютере», например claude -p</span></div>
-                          <div class="k-row__control"><input name="cliCommand" class="s-input" placeholder="claude -p" aria-label="Команда запуска" /></div>
+                          <div class="k-row__control"><input name="cliCommand" class="k-input s-input" placeholder="claude -p" aria-label="Команда запуска" /></div>
                         </div>
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Команда агента</span><span class="k-row__sub">Для внешнего агента ACP</span></div>
-                          <div class="k-row__control"><input name="acpCommand" class="s-input" placeholder="npx -y @agentclientprotocol/claude-agent-acp" aria-label="Команда агента" /></div>
+                          <div class="k-row__control"><input name="acpCommand" class="k-input s-input" placeholder="npx -y @agentclientprotocol/claude-agent-acp" aria-label="Команда агента" /></div>
                         </div>
                       </div>
                     </section>
@@ -487,7 +487,7 @@
                   <div class="k-section__body">
                     <label class="prov-line">
                       <div><div class="prov-line-title">Показывать док ботов</div><div class="prov-line-sub">Аватары ботов у края экрана: клик открывает чат, плюс заводит нового бота.</div></div>
-                      <span class="switch"><input type="checkbox" id="dock-enabled" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" id="dock-enabled" /><span></span></span>
                     </label>
                     <div class="dock-more" data-s-link="dock"></div>
                   </div>
@@ -566,14 +566,14 @@
                         <span class="k-row__label">Obscura</span>
                         <span class="k-row__sub update-meta" id="obscura-line"></span>
                       </div>
-                      <div class="k-row__control"><button type="button" class="ghost" id="obscura-action">Скачать</button></div>
+                      <div class="k-row__control"><button type="button" class="k-btn k-btn--ghost" id="obscura-action">Скачать</button></div>
                     </div>
                     <div class="k-row">
                       <div class="k-row__text">
                         <span class="k-row__label">Moli</span>
                         <span class="k-row__sub update-meta" id="moli-line"></span>
                       </div>
-                      <div class="k-row__control"><button type="button" class="ghost" id="moli-action">Скачать</button></div>
+                      <div class="k-row__control"><button type="button" class="k-btn k-btn--ghost" id="moli-action">Скачать</button></div>
                     </div>
                     <div data-s-link="engines"></div>
                     <div data-s-link="chrome"></div>
@@ -588,14 +588,14 @@
                         <span class="k-row__label">Не давать компьютеру засыпать <span data-hint="Работает, пока есть рутины. Крышку ноутбука это не отменяет: закрытый ноутбук уснёт."></span></span>
                         <span class="k-row__sub">Чтобы ночные рутины доработали</span>
                       </div>
-                      <span class="switch"><input type="checkbox" name="keepAwake" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" name="keepAwake" /><span></span></span>
                     </label>
                     <div class="k-row">
                       <div class="k-row__text">
                         <span class="k-row__label">Предел токенов в сутки для рутин</span>
                         <span class="k-row__sub">0 значит без предела</span>
                       </div>
-                      <div class="k-row__control"><input name="dailyTokenLimit" type="number" min="0" step="1000" class="s-input s-input--num" aria-label="Предел токенов в сутки для рутин" /></div>
+                      <div class="k-row__control"><input name="dailyTokenLimit" type="number" min="0" step="1000" class="k-input s-input s-input--num" aria-label="Предел токенов в сутки для рутин" /></div>
                     </div>
                   </div>
                 </section>
@@ -612,9 +612,9 @@
                         <span class="k-row__sub update-meta" id="upd-app-line"></span>
                       </div>
                       <div class="k-row__control">
-                        <button type="button" class="primary" id="upd-restart" hidden>Перезапустить</button>
-                        <button type="button" class="ghost" id="upd-check">Проверить</button>
-                        <button type="button" class="ghost" id="upd-whatsnew">Что нового</button>
+                        <button type="button" class="k-btn k-btn--primary" id="upd-restart" hidden>Перезапустить</button>
+                        <button type="button" class="k-btn k-btn--ghost" id="upd-check">Проверить</button>
+                        <button type="button" class="k-btn k-btn--ghost" id="upd-whatsnew">Что нового</button>
                       </div>
                     </div>
                     <div class="update-list" id="upd-tools"></div>
@@ -623,14 +623,14 @@
                         <span class="k-row__label">Искать новые версии сам</span>
                         <span class="k-row__sub">Раз в шесть часов. Если выключить, только по кнопке «Проверить»</span>
                       </div>
-                      <span class="switch"><input type="checkbox" name="checkUpdates" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" name="checkUpdates" /><span></span></span>
                     </label>
                     <label class="k-row">
                       <div class="k-row__text">
                         <span class="k-row__label">Обновлять автоматически</span>
                         <span class="k-row__sub">Новая версия скачивается в фоне, боты не прерываются. Запустится при следующем открытии или по кнопке «Перезапустить»</span>
                       </div>
-                      <span class="switch"><input type="checkbox" name="autoUpdate" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" name="autoUpdate" /><span></span></span>
                     </label>
                   </div>
                   <p class="note s-note" id="upd-settings-foot"></p>
@@ -643,7 +643,7 @@
                       <div class="k-section__body">
                         <div class="k-row">
                           <div class="k-row__text"><span class="k-row__label">Путь к Chrome или Edge</span></div>
-                          <div class="k-row__control"><input name="browserPath" class="s-input" placeholder="сам найду Chrome или Edge" aria-label="Путь к Chrome или Edge" /></div>
+                          <div class="k-row__control"><input name="browserPath" class="k-input s-input" placeholder="сам найду Chrome или Edge" aria-label="Путь к Chrome или Edge" /></div>
                         </div>
                         <p class="note s-note" id="settings-path"></p>
                       </div>
@@ -662,8 +662,8 @@
                         </label>
                         <p class="note" id="selfdev-status"></p>
                         <div class="modal-actions">
-                          <button type="button" class="ghost" id="selfdev-save">Сохранить папку</button>
-                          <button type="button" class="ghost" id="selfdev-preset">Создать бота «Разработчик Deloist»</button>
+                          <button type="button" class="k-btn k-btn--ghost" id="selfdev-save">Сохранить папку</button>
+                          <button type="button" class="k-btn k-btn--ghost" id="selfdev-preset">Создать бота «Разработчик Deloist»</button>
                         </div>
                         <div id="selfdev-bots" class="mcp-list"></div>
                         <div class="mcp-form">
@@ -678,7 +678,7 @@
                             </label>
                           </div>
                           <div class="modal-actions">
-                            <button type="button" class="ghost" id="selfdev-clone">Скачать исходники</button>
+                            <button type="button" class="k-btn k-btn--ghost" id="selfdev-clone">Скачать исходники</button>
                           </div>
                         </div>
                       </div>
@@ -711,15 +711,15 @@
                     </div>
                     <label class="prov-line">
                       <div><div class="prov-line-title">Скрывать, когда не используется</div><div class="prov-line-sub">Док уходит за край. Подведи указатель к краю, и он вернётся.</div></div>
-                      <span class="switch"><input type="checkbox" id="dock-autohide" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" id="dock-autohide" /><span></span></span>
                     </label>
                     <label class="prov-line">
                       <div><div class="prov-line-title">Показывать, чем заняты боты</div><div class="prov-line-sub">Пока бот работает, рядом с его аватаром видно, что он делает сейчас.</div></div>
-                      <span class="switch"><input type="checkbox" id="dock-activity" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" id="dock-activity" /><span></span></span>
                     </label>
                     <label class="prov-line">
                       <div><div class="prov-line-title">Показывать готовую работу</div><div class="prov-line-sub">Ответы ботов ненадолго появляются рядом с доком.</div></div>
-                      <span class="switch"><input type="checkbox" id="dock-results" /><span></span></span>
+                      <span class="k-switch-box"><input type="checkbox" id="dock-results" /><span></span></span>
                     </label>
                   </div>
                 </section>
@@ -744,7 +744,7 @@
                         <span class="k-row__label">Предлагать ускорение скриптом</span>
                         <span class="k-row__sub" id="optimizer-line"></span>
                       </div>
-                      <div class="k-row__control"><button type="button" class="ghost" id="optimizer-toggle">Выключить</button></div>
+                      <div class="k-row__control"><button type="button" class="k-btn k-btn--ghost" id="optimizer-toggle">Выключить</button></div>
                     </div>
                     <div id="scripts-list" class="mcp-list"></div>
                   </div>
@@ -777,7 +777,7 @@
                         <textarea id="skill-body" rows="4" placeholder="1. Смотри на объём и на динамику. 2. Сравнивай с прошлым кварталом…"></textarea>
                       </label>
                       <div class="modal-actions">
-                        <button type="button" class="ghost" id="skill-add">Добавить навык</button>
+                        <button type="button" class="k-btn k-btn--ghost" id="skill-add">Добавить навык</button>
                       </div>
                     </div>
                   </div>
@@ -820,12 +820,9 @@
                         <span>Аргументы через пробел</span>
                         <input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem C:\work" />
                       </label>
-                      <label class="quiet-check">
-                        <input type="checkbox" id="mcp-auto" />
-                        <span>Не спрашивать на каждый вызов</span>
-                      </label>
+                      <label class="k-check"><input class="k-check__input" type="checkbox" id="mcp-auto" /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Не спрашивать на каждый вызов</span></label>
                       <div class="modal-actions">
-                        <button type="button" class="ghost" id="mcp-add">Добавить сервер</button>
+                        <button type="button" class="k-btn k-btn--ghost" id="mcp-add">Добавить сервер</button>
                       </div>
                     </div>
                   </div>
@@ -847,7 +844,7 @@
                       </label>
                       <label class="field small">
                         <span>В день</span>
-                        <input name="imageDaily" type="number" min="0" step="1" />
+                        <input name="imageDaily" type="number" min="0" step="1" class="k-input" />
                       </label>
                     </div>
                     <label class="field">
@@ -864,8 +861,8 @@
                   <header class="k-section__head"><div class="k-section__text"><p class="k-section__desc">Боты, навыки, команды и рутины в одном JSON. Ключи, переписка и память в файл не попадают; рутины приезжают выключенными.</p></div></header>
                   <div class="k-section__body s-pad">
                     <div class="row">
-                      <button type="button" class="ghost" id="team-export">Скачать файл команды</button>
-                      <button type="button" class="ghost" id="team-import">Загрузить файл</button>
+                      <button type="button" class="k-btn k-btn--ghost" id="team-export">Скачать файл команды</button>
+                      <button type="button" class="k-btn k-btn--ghost" id="team-import">Загрузить файл</button>
                       <input type="file" id="team-file" accept="application/json,.json" hidden />
                     </div>
                     <p class="note" id="team-note"></p>
@@ -946,8 +943,8 @@
             </div>
             <footer class="settings-foot">
               <div class="settings-actions">
-                <button type="button" class="ghost" data-close>Отмена</button>
-                <button type="submit" class="primary">Сохранить</button>
+                <button type="button" class="k-btn k-btn--ghost" data-close>Отмена</button>
+                <button type="submit" class="k-btn k-btn--primary">Сохранить</button>
               </div>
             </footer>
           </div>
@@ -967,12 +964,12 @@
         </div>
         <div class="mem-doctor">
           <span class="note" id="sm-doctor"></span>
-          <button type="button" class="ghost" id="sm-doctor-run">Проверить сейчас</button>
+          <button type="button" class="k-btn k-btn--ghost" id="sm-doctor-run">Проверить сейчас</button>
         </div>
         <h4 class="subhead">Журнал</h4>
         <div id="sm-journal" class="mem-journal"></div>
         <div class="modal-actions">
-          <button type="button" class="ghost" data-close>Закрыть</button>
+          <button type="button" class="k-btn k-btn--ghost" data-close>Закрыть</button>
         </div>
       </div>
     </dialog>
@@ -981,7 +978,7 @@
       <div class="modal-inner">
         <div id="usage-screen"></div>
         <div class="modal-actions">
-          <button type="button" class="ghost" data-close>Закрыть</button>
+          <button type="button" class="k-btn k-btn--ghost" data-close>Закрыть</button>
         </div>
       </div>
     </dialog>
@@ -991,7 +988,7 @@
         <h3 tabindex="-1" autofocus>Отчёт</h3>
         <div id="report-host"></div>
         <div class="modal-actions">
-          <button type="button" class="ghost" id="report-close">Закрыть</button>
+          <button type="button" class="k-btn k-btn--ghost" id="report-close">Закрыть</button>
         </div>
       </div>
     </dialog>
@@ -1026,22 +1023,22 @@
               <div class="row" id="rt-every-box">
                 <label class="field small">
                   <span>Каждые, мин</span>
-                  <input name="everyMinutes" type="number" min="5" value="60" />
+                  <input name="everyMinutes" type="number" min="5" value="60" class="k-input" />
                 </label>
                 <label class="field small">
                   <span>Работать только с</span>
-                  <input name="windowFrom" type="time" />
+                  <input name="windowFrom" type="time" class="k-input" />
                 </label>
                 <label class="field small">
                   <span>до</span>
-                  <input name="windowTo" type="time" />
+                  <input name="windowTo" type="time" class="k-input" />
                 </label>
-                <button type="button" class="ghost" id="rt-night">Ночью</button>
+                <button type="button" class="k-btn k-btn--ghost" id="rt-night">Ночью</button>
               </div>
               <div class="row" id="rt-at-box" hidden>
                 <label class="field small">
                   <span>Во сколько</span>
-                  <input name="at" type="time" />
+                  <input name="at" type="time" class="k-input" />
                 </label>
               </div>
               <div class="field">
@@ -1064,20 +1061,14 @@
                 <span>Что делать</span>
                 <textarea name="prompt" rows="3" placeholder="Собери три темы дня и запиши их в файл digest.md"></textarea>
               </label>
-              <label class="quiet-check">
-                <input type="checkbox" name="quiet" checked />
-                <span>Писать, только если есть что сказать</span>
-              </label>
-              <label class="quiet-check">
-                <input type="checkbox" name="hook" id="rt-hook" />
-                <span>Запускать по вебхуку, а не по расписанию</span>
-              </label>
+              <label class="k-check"><input class="k-check__input" type="checkbox" name="quiet" checked /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Писать, только если есть что сказать</span></label>
+              <label class="k-check"><input class="k-check__input" type="checkbox" name="hook" id="rt-hook" /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Запускать по вебхуку, а не по расписанию</span></label>
               <label class="field" id="rt-hook-box" hidden>
                 <span>Адрес для вызова (нажми, чтобы скопировать)</span>
                 <input id="rt-hook-url" readonly />
               </label>
               <div class="modal-actions">
-                <button type="submit" class="primary">Добавить</button>
+                <button type="submit" class="k-btn k-btn--primary">Добавить</button>
               </div>
             </form>
           </div>
@@ -1092,7 +1083,7 @@
         <div id="rt-pane-habits" role="tabpanel" hidden></div>
         </div>
         <div class="modal-actions sheet-foot">
-          <a class="ghost" id="rt-ics" href="/api/routines.ics" download="deloist-routines.ics">Скачать для календаря (.ics)</a>
+          <a class="k-btn k-btn--ghost" id="rt-ics" href="/api/routines.ics" download="deloist-routines.ics">Скачать для календаря (.ics)</a>
           <span class="note">Файл для Google, Outlook или Apple Календаря: рутины появятся в нём повторяющимися событиями. Это снимок на сегодня, сам он не обновляется.</span>
         </div>
       </div>
@@ -1117,8 +1108,8 @@
         <p class="note">Есть аккаунт на GitHub? Можно <a href="https://github.com/gordidima-rgb/deloist-agent/issues" target="_blank" rel="noopener">написать там</a>.</p>
         <p class="fb-error" id="fb-error" role="alert" hidden></p>
         <div class="modal-actions">
-          <button type="button" class="ghost" data-close>Отмена</button>
-          <button type="submit" class="primary" id="fb-send">Отправить</button>
+          <button type="button" class="k-btn k-btn--ghost" data-close>Отмена</button>
+          <button type="submit" class="k-btn k-btn--primary" id="fb-send">Отправить</button>
         </div>
       </form>
     </dialog>
@@ -1132,19 +1123,19 @@
         <div class="account-topup" id="account-topup" hidden>
           <span>Пополнить</span>
           <div class="account-topup-sums">
-            <button type="button" class="ghost" data-topup="100">100 ₽</button>
-            <button type="button" class="ghost" data-topup="300">300 ₽</button>
-            <button type="button" class="ghost" data-topup="1000">1000 ₽</button>
+            <button type="button" class="k-btn k-btn--ghost" data-topup="100">100 ₽</button>
+            <button type="button" class="k-btn k-btn--ghost" data-topup="300">300 ₽</button>
+            <button type="button" class="k-btn k-btn--ghost" data-topup="1000">1000 ₽</button>
           </div>
           <p class="note">Оплата откроется в браузере на deloist.ru. После оплаты баланс обновится сам.</p>
         </div>
         <div id="account-rights" hidden></div>
         <div class="row">
-          <button type="button" class="ghost" id="account-shortcut">Ярлык на рабочий стол</button>
+          <button type="button" class="k-btn k-btn--ghost" id="account-shortcut">Ярлык на рабочий стол</button>
         </div>
         <div class="modal-actions">
-          <button type="button" class="ghost" id="account-logout">Выйти</button>
-          <button type="button" class="primary" data-close>Готово</button>
+          <button type="button" class="k-btn k-btn--ghost" id="account-logout">Выйти</button>
+          <button type="button" class="k-btn k-btn--primary" data-close>Готово</button>
         </div>
       </div>
     </dialog>

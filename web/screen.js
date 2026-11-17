@@ -38,23 +38,18 @@
 .screen-panel.is-max .sp-ibtn .ic-restore{display:block}
 .sp-head strong{font-family:var(--font-heading,inherit);font-size:var(--text-md,15px)}
 .sp-step{flex:1;min-width:0;color:var(--color-text-muted,#5f6878);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-btn{border:1px solid var(--color-border-default,#e5e7eb);background:var(--color-bg-surface-soft,#f8fafc);color:inherit;border-radius:9px;padding:5px 10px;cursor:pointer;font:inherit;white-space:nowrap}
-.sp-btn:hover{border-color:var(--color-border-strong,#cbd5e1)}
-.sp-btn:disabled{opacity:.5;cursor:default}
-.sp-btn.primary{background:var(--color-brand-fill,#025bff);border-color:var(--color-brand-fill,#025bff);color:var(--color-on-brand,#fff)}
-.sp-btn.rec{color:var(--color-accent-strong,#e0492c)}
-.sp-btn.rec.on{background:var(--color-accent-strong,#e0492c);border-color:var(--color-accent-strong,#e0492c);color:#fff}
 .sp-bar{display:flex;gap:6px;align-items:center}
 .sp-bar form{flex:1;display:flex}
+.k-btn.rec.on{background:var(--k-danger-fill);color:#fff}
 .sp-bar input,.sp-teach input,.sp-review input,.sp-review textarea{flex:1;min-width:0;border:1px solid var(--color-border-default,#e5e7eb);border-radius:9px;padding:6px 9px;font:inherit;background:var(--color-bg-surface,#fff);color:inherit}
 .sp-tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin}
 .sp-tab{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:8px;padding:3px 8px;border:1px solid var(--color-border-default,#e5e7eb);background:none;color:var(--color-text-secondary,#334155);font:inherit;cursor:pointer}
-.sp-tab.current{border-color:var(--color-brand-primary,#025bff);color:var(--color-brand-text,#025bff)}
-.sp-view{position:relative;flex:1;min-height:0;background:#0f172a;border-radius:10px;overflow:hidden;outline:none}
+.sp-tab.current{border-color:var(--k-brand);color:var(--k-brand-text)}
+.sp-view{position:relative;flex:1;min-height:0;background:var(--k-ink);border-radius:10px;overflow:hidden;outline:none}
 .sp-view img{width:100%;height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-drag:none}
 .sp-view.held{box-shadow:inset 0 0 0 3px var(--color-accent,#ff6a4d);cursor:crosshair}
-.sp-view:focus-visible{box-shadow:inset 0 0 0 3px var(--color-brand-primary,#025bff)}
-.sp-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#cbd5e1}
+.sp-view:focus-visible{box-shadow:inset 0 0 0 3px var(--k-brand)}
+.sp-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:var(--k-on-ink-2)}
 .sp-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .sp-row:has(> [data-note]:empty){display:none}
 .sp-note{color:var(--color-text-muted,#5f6878)}
@@ -62,25 +57,24 @@
 .sp-steps{display:flex;gap:8px;overflow-x:auto;max-height:150px;scrollbar-width:thin}
 .sp-steps:empty{display:none}
 .sp-stepcard{flex:0 0 150px;border:1px solid var(--color-border-default,#e5e7eb);border-radius:9px;padding:6px;font-size:var(--text-xs,12px)}
-.sp-stepcard img{width:100%;height:70px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px;background:#e2e8f0}
+.sp-stepcard img{width:100%;height:70px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px;background:var(--k-line)}
 .sp-stepcard.secret{border-color:var(--color-accent,#ff6a4d)}
 .sp-review{display:flex;flex-direction:column;gap:6px;max-height:45%;overflow:auto}
 .sp-review[hidden]{display:none}
 .sp-review textarea{min-height:140px;font-family:var(--font-mono,monospace);font-size:var(--text-xs,12px)}
-.sp-shell{border-radius:10px;background:#0b1020;color:#e2e8f0;display:flex;flex-direction:column;max-height:30%;min-height:90px}
+.sp-shell{border-radius:10px;background:var(--k-ink);color:var(--k-on-ink);display:flex;flex-direction:column;max-height:30%;min-height:90px}
 .sp-shell[hidden]{display:none}
-.sp-shell-head{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #1e293b;font-family:var(--font-mono,monospace);font-size:var(--text-xs,12px)}
+.sp-shell-head{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--k-ink-line);font-family:var(--font-mono,monospace);font-size:var(--text-xs,12px)}
 .sp-shell-head code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sp-shell pre{margin:0;padding:8px 10px;overflow:auto;flex:1;font-family:var(--font-mono,monospace);font-size:var(--text-xs,12px);white-space:pre-wrap;word-break:break-word}
 .sp-shell pre .err{color:#fca5a5}
-.sp-shell .sp-btn{background:#1e293b;border-color:#334155;color:#e2e8f0;padding:2px 8px}
 @media (max-width:760px){.screen-panel{top:56px;right:8px;width:min(92vw,480px);height:min(38vh,340px)}body.sp-max .screen-panel{left:8px;right:8px;top:56px;bottom:8px;height:auto}}
 
 /* Рядом с чатом: чат уступает место, панель его не перекрывает. */
 .sp-splitter{position:fixed;top:var(--k-space-3,12px);bottom:var(--k-space-3,12px);right:calc(var(--sp-w) + var(--k-space-3,12px));width:var(--k-space-3,12px);z-index:41;display:none;cursor:col-resize;touch-action:none;outline:none}
 .sp-splitter::before{content:"";position:absolute;inset:0 -6px}
 .sp-splitter::after{content:"";position:absolute;left:4px;top:50%;width:4px;height:48px;margin-top:-24px;border-radius:var(--k-radius-pill,999px);background:var(--k-line-strong,#d2d2d2);transition:background var(--k-dur-fast,140ms) var(--k-ease-out,ease),height var(--k-dur-fast,140ms) var(--k-ease-out,ease)}
-.sp-splitter:hover::after,.sp-splitter:focus-visible::after,body.sp-drag .sp-splitter::after{background:var(--k-brand,#025bff);height:72px;margin-top:-36px}
+.sp-splitter:hover::after,.sp-splitter:focus-visible::after,body.sp-drag .sp-splitter::after{background:var(--k-brand);height:72px;margin-top:-36px}
 .sp-splitter:focus-visible::after{box-shadow:var(--k-focus)}
 body.sp-drag{user-select:none;cursor:col-resize}
 @media (min-width:761px){body.sp-split.sp-open:not(.sp-drag) #chat{transition:margin-right var(--k-dur-base,220ms) var(--k-ease-out,ease)}}
@@ -551,7 +545,7 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
       <div class="sp-head">
         <strong>${esc(tr('Экран бота'))}</strong>
         <span class="sp-step" data-step></span>
-        <details class="sp-more"><summary class="sp-ibtn" aria-label="${esc(tr('Дополнительно'))}" title="${esc(tr('Дополнительно'))}">⋯</summary><div class="sp-more-menu"><button type="button" class="sp-btn" data-window title="${esc(tr('Вывести настоящее окно браузера: например, для капчи, которой нужно окно'))}">${esc(tr('Открыть настоящее окно браузера'))}</button></div></details>
+        <details class="sp-more"><summary class="sp-ibtn" aria-label="${esc(tr('Дополнительно'))}" title="${esc(tr('Дополнительно'))}">⋯</summary><div class="sp-more-menu"><button type="button" class="k-btn k-btn--ghost k-btn--sm" data-window title="${esc(tr('Вывести настоящее окно браузера: например, для капчи, которой нужно окно'))}">${esc(tr('Открыть настоящее окно браузера'))}</button></div></details>
         <button type="button" class="sp-ibtn sp-max-btn" data-max title="${esc(tr('Развернуть'))}" aria-label="${esc(tr('Развернуть'))}">
           ${DeloistUI.icon('expand', { className: 'ic-max' })}
           ${DeloistUI.icon('shrink', { className: 'ic-restore' })}
@@ -564,9 +558,9 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
         </button>
       </div>
       <div class="sp-bar">
-        <button type="button" class="sp-btn" data-nav="back" title="${esc(tr('Назад'))}">←</button>
-        <button type="button" class="sp-btn" data-nav="forward" title="${esc(tr('Вперёд'))}">→</button>
-        <button type="button" class="sp-btn" data-nav="reload" title="${esc(tr('Обновить'))}">⟳</button>
+        <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-nav="back" title="${esc(tr('Назад'))}">←</button>
+        <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-nav="forward" title="${esc(tr('Вперёд'))}">→</button>
+        <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-nav="reload" title="${esc(tr('Обновить'))}">⟳</button>
         <form data-address><input name="url" autocomplete="off" spellcheck="false" placeholder="${esc(tr('Адрес страницы'))}" aria-label="${esc(tr('Адрес страницы'))}"></form>
       </div>
       <div class="sp-tabs" data-tabs></div>
@@ -579,9 +573,9 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
         <span class="sp-note" data-note></span>
       </div>
       <div class="sp-teach">
-        <button type="button" class="sp-btn rec" data-rec title="${esc(tr('Научи бота: покажи задачу, а бот запишет её как навык'))}">● ${esc(tr('Запись'))}</button>
+        <button type="button" class="k-btn k-btn--ghost k-btn--sm rec" data-rec title="${esc(tr('Научи бота: покажи задачу, а бот запишет её как навык'))}">● ${esc(tr('Запись'))}</button>
         <input data-narration placeholder="${esc(tr('Пояснение к шагу (необязательно)'))}" aria-label="${esc(tr('Пояснение к шагу'))}">
-        <button type="button" class="sp-btn" data-addnote>${esc(tr('Добавить'))}</button>
+        <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-addnote>${esc(tr('Добавить'))}</button>
       </div>
       <div class="sp-steps" data-steps></div>
       <div class="sp-review" data-review hidden>
@@ -590,13 +584,13 @@ body.sp-min.sp-open .sp-edgepill{display:flex}
         <input data-desc aria-label="${esc(tr('Когда применять'))}" placeholder="${esc(tr('Когда применять'))}">
         <textarea data-body aria-label="${esc(tr('Шаги навыка'))}"></textarea>
         <div class="sp-row">
-          <button type="button" class="sp-btn primary" data-save>${esc(tr('Сохранить навык'))}</button>
-          <button type="button" class="sp-btn" data-try disabled>${esc(tr('Проверить навык'))}</button>
-          <button type="button" class="sp-btn" data-discard>${esc(tr('Не сохранять'))}</button>
+          <button type="button" class="k-btn k-btn--primary k-btn--sm" data-save>${esc(tr('Сохранить навык'))}</button>
+          <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-try disabled>${esc(tr('Проверить навык'))}</button>
+          <button type="button" class="k-btn k-btn--ghost k-btn--sm" data-discard>${esc(tr('Не сохранять'))}</button>
         </div>
       </div>
       <div class="sp-shell" data-shell hidden>
-        <div class="sp-shell-head"><code data-cmd></code><span data-code></span><button type="button" class="sp-btn" data-shellstop>${esc(tr('Стоп команды'))}</button></div>
+        <div class="sp-shell-head"><code data-cmd></code><span data-code></span><button type="button" class="k-btn k-btn--ghost k-btn--sm" data-shellstop>${esc(tr('Стоп команды'))}</button></div>
         <pre data-out></pre>
       </div>`;
     document.body.append(root);

@@ -2000,3 +2000,92 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
   .k-saved__tick path, .k-btn--icon.k-bell[aria-pressed="true"] .k-i svg { animation: none !important; }
   .k-choice__opt { transition: none; }
 }
+
+/* ===== stage C1 ===== */
+/* Старые экраны web/: знак бренда, нативные поля в одежде кита, переключатель и галочка на <input>. */
+
+/* Знак бренда: скруглённый квадрат с лавовым ободком и лавовой галочкой (как .logo в эталоне). */
+.k-logo {
+  --k-logo-size: 32px;
+  --k-logo-rim: 3px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--k-logo-size);
+  height: var(--k-logo-size);
+  border: var(--k-logo-rim) solid transparent;
+  border-radius: calc(var(--k-logo-size) * 0.31);
+  background: linear-gradient(var(--k-canvas), var(--k-canvas)) padding-box, linear-gradient(135deg, #ffb13d, #ff5a12 60%, #e0330a) border-box;
+}
+.k-logo::before {
+  content: "";
+  width: 66%;
+  height: 66%;
+  background: var(--k-lava);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 12.5 4 4L18.5 8' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 12.5 4 4L18.5 8' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.k-logo--lg { --k-logo-size: 56px; --k-logo-rim: 4px; }
+.k-logo--xs { --k-logo-size: 16px; --k-logo-rim: 2px; }
+.brand .k-logo { --k-logo-size: 26px; --k-logo-rim: 2.5px; }
+
+/* Список на нативном <select>: кнопка и меню рисует app.js (разметка .k-select как у Select.svelte), сам select прячется. */
+.k-select > select.k-select__native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.k-select[hidden] { display: none; }
+.k-select:has(> .s-select) { width: 240px; max-width: 100%; flex: none; }
+.k-select:has(> .dock-select) { width: 230px; max-width: 46%; flex: none; }
+.prov-line > .k-select { width: 240px; max-width: 46%; flex: none; }
+.k-select__input { cursor: pointer; text-align: left; }
+
+/* Время, число, дата: вид .k-input, значок выбора и выбранный день без синего. */
+.k-input[type="time"],
+.k-input[type="date"],
+.k-input[type="datetime-local"],
+.k-input[type="number"] { accent-color: var(--k-brand); font-variant-numeric: tabular-nums; }
+.k-input::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.7; filter: sepia(1) saturate(5) hue-rotate(335deg); }
+.k-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+.k-input::-webkit-inner-spin-button { opacity: 0.6; filter: sepia(1) saturate(5) hue-rotate(335deg); }
+
+/* Переключатель на <input type="checkbox"> со вкладкой-дорожкой: вид .k-switch. */
+.k-switch-box { position: relative; display: inline-block; width: 40px; height: 24px; flex: none; }
+.k-switch-box > input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.k-switch-box > span {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-text) 14%, transparent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: background var(--k-dur-ui) var(--k-ease-out), box-shadow var(--k-dur-ui) var(--k-ease-out);
+}
+.k-switch-box > span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--k-radius-pill);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--k-dur-ui) var(--k-ease-spring), background var(--k-dur-ui) var(--k-ease-out), box-shadow var(--k-dur-ui) var(--k-ease-out);
+}
+.k-switch-box > input:checked + span { background: linear-gradient(90deg, #e8500a, #ff8a1e); box-shadow: inset 0 0 0 1px rgba(255, 190, 120, 0.6), 0 0 3px rgba(255, 100, 10, 0.7); }
+.k-switch-box > input:checked + span::after { transform: translateX(16px); background: radial-gradient(circle at 50% 45%, #fffdf2 0 30%, #ffe8b0 100%); box-shadow: 0 0 3px rgba(255, 170, 50, 0.7); }
+.k-switch-box > input:focus-visible + span { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
+.k-switch-box > input:disabled { cursor: not-allowed; }
+.k-switch-box > input:disabled + span { opacity: 0.45; }
+
+/* Карточка «ждёт тебя» в чате: тонкая тёплая рамка, без свечения (светится только поле ввода и главная кнопка). */
+.k-approval { box-shadow: 0 0 0 1px color-mix(in srgb, var(--k-brand) 45%, var(--k-line)); }
+/* ===== /stage C1 ===== */

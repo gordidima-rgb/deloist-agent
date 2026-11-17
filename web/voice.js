@@ -728,15 +728,15 @@
       keys.className = 'voice-keys';
       const combo = document.createElement('button');
       combo.type = 'button';
-      combo.className = 'ghost voice-combo';
+      combo.className = 'k-btn k-btn--ghost voice-combo';
       combo.title = tr('Щёлкни и нажми новое сочетание');
       const reset = document.createElement('button');
       reset.type = 'button';
-      reset.className = 'ghost voice-small';
+      reset.className = 'k-btn k-btn--ghost voice-small';
       reset.textContent = tr('Сбросить');
       const toggle = document.createElement('button');
       toggle.type = 'button';
-      toggle.className = 'ghost voice-small';
+      toggle.className = 'k-btn k-btn--ghost voice-small';
       keys.append(combo, reset, toggle);
       const status = document.createElement('div');
       status.className = 'voice-status';

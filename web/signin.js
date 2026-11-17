@@ -13,7 +13,7 @@ window.DeloistSignin = (() => {
   const LEGAL = 'https://deloist.ru/legal';
 
   const ICONS = {
-    mark: '<svg width="56" height="56" viewBox="0 0 64 64" aria-hidden="true"><path d="M56 26 V42 A14 14 0 0 1 42 56 H22 A14 14 0 0 1 8 42 V22 A14 14 0 0 1 22 8 H36" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 34 L28 43 L45 24" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 6 Q50 15 59 15 Q50 15 50 24 Q50 15 41 15 Q50 15 50 6 Z" fill="currentColor"/></svg>',
+    mark: '<span class="k-logo k-logo--lg" aria-hidden="true"></span>',
     vk: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.9 17.5c-5.5 0-8.6-3.8-8.8-10h2.8c.1 4.6 2.1 6.5 3.7 6.9V7.5h2.6v3.9c1.6-.2 3.3-2 3.8-3.9h2.6c-.4 2.4-2.2 4.2-3.5 4.9 1.3.6 3.3 2.1 4.1 5.1h-2.9c-.6-1.9-2.1-3.4-4.1-3.6v3.6h-.3z"/></svg>',
     yandex: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.6 20.5h2.6V3.5h-3.8c-3.8 0-5.8 2-5.8 4.9 0 2.3 1.1 3.7 3.1 5.1L6.2 20.5h2.8l3.9-5.9-1.3-.9c-1.6-1.1-2.4-2-2.4-3.8 0-1.6 1.1-2.7 3.3-2.7h1.1v13.3z"/></svg>',
     lock: DeloistUI.icon('lock', { className: 'i' }),
@@ -34,12 +34,12 @@ window.DeloistSignin = (() => {
           <form id="signin-email-form" novalidate>
             <input id="signin-login" type="text" inputmode="email" autocomplete="email" spellcheck="false"
               placeholder="${tr('Почта или телефон')}" aria-label="${tr('Почта или телефон')}" />
-            <button type="submit" class="primary signin-wide" id="signin-send">${tr('Получить код')}</button>
+            <button type="submit" class="k-btn k-btn--primary signin-wide" id="signin-send">${tr('Получить код')}</button>
           </form>
           <div class="signin-or"><span>${tr('или войди через')}</span></div>
           <div class="signin-providers">
-            <button type="button" class="ghost" data-via="vk">${ICONS.vk}VK ID</button>
-            <button type="button" class="ghost" data-via="yandex">${ICONS.yandex}${tr('Яндекс')}</button>
+            <button type="button" class="k-btn k-btn--ghost" data-via="vk">${ICONS.vk}VK ID</button>
+            <button type="button" class="k-btn k-btn--ghost" data-via="yandex">${ICONS.yandex}${tr('Яндекс')}</button>
           </div>
         </section>
         <section data-step="code" hidden>
@@ -48,7 +48,7 @@ window.DeloistSignin = (() => {
           <form id="signin-code-form" novalidate>
             <input id="signin-code" class="signin-code" type="text" inputmode="numeric" autocomplete="one-time-code"
               maxlength="6" placeholder="000000" aria-label="${tr('Код из письма')}" />
-            <button type="submit" class="primary signin-wide" id="signin-verify">${tr('Войти')}</button>
+            <button type="submit" class="k-btn k-btn--primary signin-wide" id="signin-verify">${tr('Войти')}</button>
           </form>
           <div class="signin-links">
             <button type="button" class="signin-link" id="signin-resend"></button>
@@ -236,7 +236,7 @@ window.DeloistSignin = (() => {
           ${LANGS.map((l, i) => `<button type="button" class="lang-option" role="radio" data-i="${i}" lang="${l.code}">
             <span class="lang-tag">${l.tag}</span><span class="lang-name">${l.name}</span></button>`).join('')}
         </div>
-        <button type="button" class="primary signin-wide lang-go" id="lang-go"></button>
+        <button type="button" class="k-btn k-btn--primary signin-wide lang-go" id="lang-go"></button>
       </div>`;
     document.body.appendChild(box);
     const options = [...box.querySelectorAll('.lang-option')];

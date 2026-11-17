@@ -151,7 +151,7 @@ window.DeloistUpdates = (() => {
     if (card.action) {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'primary';
+      button.className = 'k-btn k-btn--primary';
       button.textContent = card.action;
       button.addEventListener('click', card.run);
       el.append(button);
@@ -255,7 +255,7 @@ window.DeloistUpdates = (() => {
       if (tool.state === 'available' || tool.state === 'error') {
         const update = document.createElement('button');
         update.type = 'button';
-        update.className = 'ghost';
+        update.className = 'k-btn k-btn--ghost';
         update.textContent = tr('Обновить');
         update.addEventListener('click', () => updateTool(tool.id));
         row.append(update);

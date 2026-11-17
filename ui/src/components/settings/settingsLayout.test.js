@@ -150,7 +150,7 @@ describe('settings window layout', () => {
     expect(doc.querySelector('#form-settings')).not.toBeNull();
     expect(doc.querySelector('#settings-nav')).not.toBeNull();
     expect(doc.querySelector('#settings-title')).not.toBeNull();
-    expect(doc.querySelector('#modal-settings footer .primary[type="submit"]')).not.toBeNull();
+    expect(doc.querySelector('#modal-settings footer .k-btn--primary[type="submit"]')).not.toBeNull();
     expect(doc.querySelector('#modal-settings footer [data-close]')).not.toBeNull();
     expect(doc.querySelector('#modal-settings .settings-close[data-close]')).not.toBeNull();
   });

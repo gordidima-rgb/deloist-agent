@@ -164,7 +164,7 @@ window.DeloistProviders = (() => {
   }
 
   function button(action, label, kind = 'ghost', disabled = false) {
-    return `<button type="button" class="${kind}" data-act="${action}"${disabled ? ' disabled' : ''}>${label}</button>`;
+    return `<button type="button" class="k-btn k-btn--${kind}" data-act="${action}"${disabled ? ' disabled' : ''}>${label}</button>`;
   }
 
   function isFreeModel(m) { return m?.free === true || /:free$/i.test(String(m?.id || '')); }
@@ -177,7 +177,7 @@ window.DeloistProviders = (() => {
     const rows = shown.map((m) => `
       <label class="prov-model">
         <span><b>${esc(m.name)}</b> <code>${esc(m.id)}</code>${isFreeModel(m) ? ` <span class="prov-badge" data-status="free">${tr('Бесплатно')}</span>` : ''}</span>
-        <span class="switch"><input type="checkbox" data-model="${esc(m.id)}"${hidden.has(m.id) ? '' : ' checked'} /><span></span></span>
+        <span class="k-switch-box"><input type="checkbox" data-model="${esc(m.id)}"${hidden.has(m.id) ? '' : ' checked'} /><span></span></span>
       </label>`).join('');
     const allVisible = visible === all.length;
     return `<section class="prov-section">
@@ -194,7 +194,7 @@ window.DeloistProviders = (() => {
     const defaultSub = p.isDefault ? tr('Новые боты работают через {name}.', { name }) : (ready ? tr('Новые боты будут работать через {name}.', { name }) : tr('Сначала подключи {name}.', { name }));
     return section(tr('Использование'),
       line(tr('По умолчанию для новых ботов'), defaultSub, p.isDefault ? `<span class="prov-done">${tr('Основной')}</span>` : button('default', tr('Сделать основным'), 'ghost', !ready))
-      + `<label class="prov-line"><div><div class="prov-line-title">${tr('Использовать {name}', { name })}</div><div class="prov-line-sub">${tr('Показывать в выборе модели у ботов')}</div></div><span class="switch"><input type="checkbox" data-act="enabled"${p.enabled ? ' checked' : ''} /><span></span></span></label>`);
+      + `<label class="prov-line"><div><div class="prov-line-title">${tr('Использовать {name}', { name })}</div><div class="prov-line-sub">${tr('Показывать в выборе модели у ботов')}</div></div><span class="k-switch-box"><input type="checkbox" data-act="enabled"${p.enabled ? ' checked' : ''} /><span></span></span></label>`);
   }
 
   function addressStatus(p) {
@@ -209,7 +209,7 @@ window.DeloistProviders = (() => {
     if (p.signingIn) {
       return `<div class="prov-free"><p class="prov-line-sub">${tr('Жду входа в браузере…')}</p>${button('free-cancel', tr('Отмена'))}</div>`;
     }
-    return `<div class="prov-free"><button type="button" class="primary" data-act="free-start">${tr('Начать бесплатно')}</button>`
+    return `<div class="prov-free"><button type="button" class="k-btn k-btn--primary" data-act="free-start">${tr('Начать бесплатно')}</button>`
       + `<p class="prov-line-sub">${tr('Откроется браузер: войдите в OpenRouter, ключ придёт сам. Бесплатные модели ограничены: до 20 запросов в минуту и 50 в день, пока нет пополнений; условия обработки запросов у каждой модели свои, секретное не отправляйте.')}</p></div>`;
   }
 
@@ -237,7 +237,7 @@ window.DeloistProviders = (() => {
     return section(tr('Подключение'), addressStatus(p) + free)
       + section(p.needsKey ? tr('Ключ и модель') : tr('Модель'),
         `${fields.join('')}<p class="prov-line-sub">${where}</p>
-         <div class="modal-actions">${p.custom ? button('remove', tr('Удалить')) : (p.hasKey ? button('forget', tr('Забыть ключ')) : '')}<button type="button" class="primary" data-act="key-save">${tr('Сохранить')}</button></div>`);
+         <div class="modal-actions">${p.custom ? button('remove', tr('Удалить')) : (p.hasKey ? button('forget', tr('Забыть ключ')) : '')}<button type="button" class="k-btn k-btn--primary" data-act="key-save">${tr('Сохранить')}</button></div>`);
   }
 
   // «Добавить своё»: Ollama, LM Studio, OpenAI-совместимый адрес или свой агент ACP.
@@ -269,7 +269,7 @@ window.DeloistProviders = (() => {
     const servers = (window.DeloistSettings?.modelServers || []).join('\n');
     return `<header class="prov-head"><span class="prov-icon" aria-hidden="true">+</span><div><div class="prov-title">${tr('Добавить своё')}</div><div class="prov-line-sub">${tr('Локальная модель, свой сервер или свой агент')}</div></div></header>
       <div class="prov-kinds">${kinds}</div>
-      ${section(tr(kind.title), `<div class="prov-form">${form}<div class="modal-actions"><button type="button" class="primary" data-act="add-create">${tr('Добавить')}</button></div></div>`)}
+      ${section(tr(kind.title), `<div class="prov-form">${form}<div class="modal-actions"><button type="button" class="k-btn k-btn--primary" data-act="add-create">${tr('Добавить')}</button></div></div>`)}
       ${section(tr('Другие адреса серверов моделей'), `<div class="prov-form"><label class="field"><span>${tr('По одному в строке. Их проверяет «Сканировать снова».')}</span><textarea id="add-servers" rows="3" placeholder="http://192.168.1.10:11434/v1">${esc(servers)}</textarea></label><div class="modal-actions">${button('servers-save', tr('Сохранить адреса'))}</div></div>`)}`;
   }
 
@@ -588,7 +588,7 @@ window.DeloistProviders = (() => {
 
   const LOCAL = new Set(['ollama', 'lmstudio']);
   const money = (kop) => ((Number(kop) || 0) / 100).toLocaleString(window.LOCALE, { style: 'currency', currency: 'RUB', minimumFractionDigits: 2 });
-  const DELOIST_MARK = '<svg class="usage-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="#025bff"/><path d="m7.5 12.5 3 3 6-7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const DELOIST_MARK = '<span class="k-logo k-logo--xs usage-mark" aria-hidden="true"></span>';
 
   let usageItems = [];
   let walletAt = 0;

@@ -3,6 +3,144 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// ---- Выпадающие списки кита: нативный <select> страницы одевается в разметку .k-select (как Select.svelte). ----
+// Нативный select остаётся источником значения: форма, .value, change и динамические <option> работают как раньше.
+(() => {
+  const valueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  const chevron = () => (window.DeloistUI?.icon ? window.DeloistUI.icon('chevron-down', { stroke: 2.5, className: 'k-select__chevron k-i' }) : '');
+  let counter = 0;
+  function dress(sel) {
+    if (sel.dataset.kitSelect || sel.multiple || sel.size > 1 || sel.closest('.k-select')) return;
+    sel.dataset.kitSelect = '1';
+    const uid = `ksa-${++counter}`;
+    const wrap = document.createElement('span');
+    wrap.className = 'k-select';
+    sel.before(wrap);
+    wrap.append(sel);
+    sel.classList.add('k-select__native');
+    sel.tabIndex = -1;
+    sel.setAttribute('aria-hidden', 'true');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'k-input k-select__input';
+    btn.setAttribute('role', 'combobox');
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-controls', uid);
+    const label = sel.getAttribute('aria-label') || sel.closest('label')?.querySelector('span')?.textContent || '';
+    if (label) btn.setAttribute('aria-label', label.trim());
+    const shown = document.createElement('span');
+    shown.className = 'k-select__value';
+    btn.append(shown);
+    wrap.append(btn);
+    wrap.insertAdjacentHTML('beforeend', chevron());
+    let menu = null;
+    let active = -1;
+    const opts = () => [...sel.options];
+    const refresh = () => {
+      const o = sel.options[sel.selectedIndex];
+      shown.textContent = o ? o.textContent : '';
+      shown.classList.toggle('is-placeholder', !o || !o.value);
+      btn.disabled = sel.disabled;
+      wrap.hidden = sel.hidden;
+      wrap.style.display = sel.style.display === 'none' ? 'none' : '';
+    };
+    const close = () => {
+      if (!menu) return;
+      menu.remove();
+      menu = null;
+      wrap.classList.remove('is-open', 'is-up');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.removeAttribute('aria-activedescendant');
+    };
+    const paintActive = () => {
+      if (!menu) return;
+      [...menu.children].forEach((li, i) => { li.dataset.active = String(i === active); });
+      menu.children[active]?.scrollIntoView?.({ block: 'nearest' });
+      if (active >= 0) btn.setAttribute('aria-activedescendant', `${uid}-${active}`);
+    };
+    const step = (from, d) => {
+      const list = opts();
+      for (let i = from; i >= 0 && i < list.length; i += d) if (!list[i].disabled) return i;
+      return -1;
+    };
+    const choose = (i) => {
+      const o = opts()[i];
+      if (!o || o.disabled) return;
+      close();
+      btn.focus({ preventScroll: true });
+      if (sel.selectedIndex === i) return;
+      sel.selectedIndex = i;
+      refresh();
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const open = () => {
+      if (sel.disabled || menu || !sel.options.length) return;
+      menu = document.createElement('ul');
+      menu.id = uid;
+      menu.className = 'k-select__menu';
+      menu.setAttribute('role', 'listbox');
+      opts().forEach((o, i) => {
+        const li = document.createElement('li');
+        li.id = `${uid}-${i}`;
+        li.className = 'k-select__opt';
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', String(i === sel.selectedIndex));
+        if (o.disabled) li.setAttribute('aria-disabled', 'true');
+        li.style.setProperty('--k-i', String(Math.min(i, 8)));
+        li.innerHTML = '<span class="k-select__label"></span><span class="k-select__check" aria-hidden="true"></span>';
+        li.firstChild.textContent = o.textContent;
+        li.addEventListener('pointerenter', () => { if (!o.disabled) { active = i; paintActive(); } });
+        li.addEventListener('pointerdown', (e) => e.preventDefault());
+        li.addEventListener('click', () => choose(i));
+        menu.append(li);
+      });
+      wrap.append(menu);
+      const rect = btn.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom;
+      wrap.classList.toggle('is-up', below < 280 && rect.top > below);
+      wrap.classList.add('is-open');
+      btn.setAttribute('aria-expanded', 'true');
+      active = sel.selectedIndex >= 0 ? sel.selectedIndex : step(0, 1);
+      paintActive();
+    };
+    btn.addEventListener('click', () => (menu ? close() : open()));
+    btn.addEventListener('keydown', (e) => {
+      const k = e.key;
+      if (!menu) {
+        if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(k)) { e.preventDefault(); open(); }
+        return;
+      }
+      if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (k === 'Tab') close();
+      else if (k === 'ArrowDown') { e.preventDefault(); const n = step(active + 1, 1); if (n >= 0) { active = n; paintActive(); } }
+      else if (k === 'ArrowUp') { e.preventDefault(); const n = step(active - 1, -1); if (n >= 0) { active = n; paintActive(); } }
+      else if (k === 'Home') { e.preventDefault(); active = step(0, 1); paintActive(); }
+      else if (k === 'End') { e.preventDefault(); active = step(opts().length - 1, -1); paintActive(); }
+      else if (k === 'Enter' || k === ' ') { e.preventDefault(); choose(active); }
+    });
+    document.addEventListener('pointerdown', (e) => { if (menu && !wrap.contains(e.target)) close(); }, true);
+    Object.defineProperty(sel, 'value', {
+      configurable: true,
+      get() { return valueDesc.get.call(this); },
+      set(v) { valueDesc.set.call(this, v); refresh(); },
+    });
+    sel.addEventListener('change', refresh);
+    new MutationObserver(() => { refresh(); if (menu) close(); }).observe(sel, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'disabled', 'style', 'label', 'selected'] });
+    refresh();
+  }
+  const dressAll = (root) => root.querySelectorAll?.('select:not([data-kit-select])').forEach(dress);
+  dressAll(document);
+  new MutationObserver((records) => {
+    for (const r of records) for (const n of r.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.matches('select')) dress(n); else dressAll(n);
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  window.DeloistKitSelect = { dress, dressAll };
+})();
+
 // Вторая панель разделённого окна: эта же страница во фрейме (theme.js ставит флаг по адресу ?pane=1).
 const PANE = window.DELOIST_PANE || null;
 
@@ -578,7 +716,7 @@ function paintSecretsBanner(unavailable) {
     text.textContent = tr('Ключи недоступны: сохранённые ключи не прочитались, поэтому новые не сохраняются. Файл цел. Если вернуть ключ не получится, можно начать с пустых.');
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'ghost';
+    button.className = 'k-btn k-btn--ghost';
     button.textContent = tr('Начать с пустыми ключами');
     button.addEventListener('click', async () => {
       if (!confirm(tr('Прежний файл ключей будет отложен в сторону (не удалён), а ключи начнутся заново. Продолжить?'))) return;
@@ -1195,7 +1333,7 @@ function madeCard(kind, args, result) {
     <div class="made-head">
       <span class="made-icon">${icon}</span>
       <span class="made-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-      <button type="button" class="ghost made-open">${tr('Открыть')}</button>
+      <button type="button" class="k-btn k-btn--ghost made-open">${tr('Открыть')}</button>
     </div>
     ${gist ? `<div class="rt-gist">${escapeHtml(gist)}</div>` : ''}
     ${chips ? `<div class="rt-chips">${chips}</div>` : ''}`;
@@ -1865,7 +2003,7 @@ function toastAction(message, label, onClick, ms = 12000) {
   el.textContent = message;
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'ghost';
+  button.className = 'k-btn k-btn--ghost';
   button.textContent = label;
   button.addEventListener('click', () => {
     el.hidden = true;
@@ -1958,7 +2096,7 @@ function memoryCard({ entryId, titles, fixed, profile }) {
   actions.className = 'card-actions';
   const undo = document.createElement('button');
   undo.type = 'button';
-  undo.className = 'ghost';
+  undo.className = 'k-btn k-btn--ghost';
   undo.textContent = tr('Отменить');
   actions.append(undo);
   card.append(title, actions);
@@ -1989,7 +2127,7 @@ function skillCard({ name, created }) {
   actions.className = 'card-actions';
   const undo = document.createElement('button');
   undo.type = 'button';
-  undo.className = 'ghost';
+  undo.className = 'k-btn k-btn--ghost';
   undo.textContent = tr('Отменить');
   actions.append(undo);
   card.append(title, actions);
@@ -2025,7 +2163,7 @@ function renderThread(messages) {
         <div class="empty-avatar" id="empty-avatar"></div>
         <h2>${escapeHtml(bot?.name || tr('Бот'))}</h2>
         <p>${escapeHtml(bot?.role || '')}</p>
-        ${demo ? `<p class="hint">${tr('Сейчас демо-режим: ответы идут по сценарию.')}</p><button type="button" class="ghost" data-open-settings>${tr('Подключить модель')}</button>` : `<p class="hint">${tr('Напиши задачу. Перед опасным действием бот сначала спросит тебя.')}</p>`}
+        ${demo ? `<p class="hint">${tr('Сейчас демо-режим: ответы идут по сценарию.')}</p><button type="button" class="k-btn k-btn--ghost" data-open-settings>${tr('Подключить модель')}</button>` : `<p class="hint">${tr('Напиши задачу. Перед опасным действием бот сначала спросит тебя.')}</p>`}
       </div>`;
     const avatar = bot && window.CrewAvatar ? CrewAvatar.mount($('#empty-avatar'), { size: 96, ...lookOf(bot) }) : null;
     if (avatar) S.avatars.set('empty', avatar);
@@ -4390,7 +4528,7 @@ async function loadRules() {
     const bot = botById(rule.botId)?.name || rule.botId;
     const kind = KIND_LABELS[rule.kind]?.();
     row.innerHTML = `<span class="rule-text"><b>${escapeHtml(bot)}</b> · ${escapeHtml(toolTitle(rule.tool))} · ${escapeHtml(placeLabel(rule.place))}${kind ? ` · <span class="kind-chip">${escapeHtml(kind)}</span>` : ''}</span>
-      <button type="button" class="ghost">${tr('Убрать')}</button>`;
+      <button type="button" class="k-btn k-btn--ghost">${tr('Убрать')}</button>`;
     $('button', row).addEventListener('click', async () => {
       try {
         await api(`/api/permissions/rules/${encodeURIComponent(rule.id)}`, { method: 'DELETE' });
@@ -4503,9 +4641,9 @@ function teamImportCard(request) {
     <p class="note team-access team-warn">⚠ ${tr('Персоны и навыки из файла станут указаниями для ботов. Если вы не запускали эту команду, нажмите «Отклонить».')}</p>
     <p class="note" data-pending></p>
     <div class="modal-actions">
-      <button type="button" class="ghost" data-reject-all>${tr('Отклонить все и не принимать заявки 1 час')}</button>
-      <button type="button" class="ghost" data-decline>${tr('Отклонить')}</button>
-      <button type="button" class="primary" data-accept>${tr('Добавить')}</button>
+      <button type="button" class="k-btn k-btn--ghost" data-reject-all>${tr('Отклонить все и не принимать заявки 1 час')}</button>
+      <button type="button" class="k-btn k-btn--ghost" data-decline>${tr('Отклонить')}</button>
+      <button type="button" class="k-btn k-btn--primary" data-accept>${tr('Добавить')}</button>
     </div>
   </form>`;
   document.body.appendChild(dlg);
@@ -4673,7 +4811,7 @@ let queueSignature = '';
 function queueButton(label, action, title = '') {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'ghost queue-act';
+  btn.className = 'k-btn k-btn--ghost queue-act';
   btn.textContent = label;
   if (title) btn.title = title;
   btn.addEventListener('click', action);
@@ -6060,7 +6198,7 @@ function renderDrawerRoutines(bot, body) {
     <p class="note">${mine.length
       ? tr('Что {name} делает сам по расписанию.', { name: escapeHtml(bot.name) })
       : tr('Рутин пока нет. Добавь здесь или скажи боту в чате, например: «каждое утро в 9 собирай новости».')}</p>
-    <button type="button" class="primary" id="drawer-rt-new">${tr('Новая рутина')}</button>`;
+    <button type="button" class="k-btn k-btn--primary" id="drawer-rt-new">${tr('Новая рутина')}</button>`;
   $('#drawer-rt-new', head).addEventListener('click', () => openRoutineFormFor(bot.id));
   body.append(head);
   if (!mine.length) return;
@@ -6128,7 +6266,7 @@ function memoryJournal(entries, onUndo) {
     if (e.undoable) {
       const undo = document.createElement('button');
       undo.type = 'button';
-      undo.className = 'ghost mem-undo';
+      undo.className = 'k-btn k-btn--ghost mem-undo';
       undo.textContent = tr('Отменить');
       undo.addEventListener('click', async () => {
         undo.disabled = true;
@@ -6187,8 +6325,8 @@ function factForm(fact, ctx) {
       <label class="field"><span>${tr('Про что (через запятую)')}</span><input name="entities" value="${escapeHtml((fact?.entities || []).join(', '))}"></label>
     </div>
     <div class="modal-actions">
-      <button type="button" class="ghost" data-cancel>${tr('Отмена')}</button>
-      <button type="submit" class="primary">${tr('Сохранить')}</button>
+      <button type="button" class="k-btn k-btn--ghost" data-cancel>${tr('Отмена')}</button>
+      <button type="submit" class="k-btn k-btn--primary">${tr('Сохранить')}</button>
     </div>`;
   $('[data-cancel]', form).addEventListener('click', () => {
     form.remove();
@@ -6260,7 +6398,7 @@ function factRow(fact, ctx) {
   const small = (label, fn) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'ghost';
+    b.className = 'k-btn k-btn--ghost';
     b.textContent = label;
     b.addEventListener('click', fn);
     return b;
@@ -6322,7 +6460,7 @@ function factList(facts, ctx) {
     : '';
   const add = document.createElement('button');
   add.type = 'button';
-  add.className = 'ghost';
+  add.className = 'k-btn k-btn--ghost';
   add.textContent = tr('Добавить факт');
   const slot = document.createElement('div');
   add.addEventListener('click', () => {
@@ -6445,7 +6583,7 @@ function renderSkills() {
       <span class="m-name">${escapeHtml(s.name)}</span>
       ${s.origin === 'learned' ? `<span class="m-learned">${escapeHtml(botById(s.botId) ? tr('выучил {name}', { name: botById(s.botId).name }) : tr('выучен ботом'))}</span>` : ''}
       <span class="m-cmd" title="${escapeHtml(s.description || '')}">${escapeHtml(s.description || '')}</span>
-      <div class="m-actions">${s.origin === 'learned' || (s.previous || []).length ? `<button type="button" class="ghost m-undo">${tr('Отменить правку')}</button>` : ''}<button class="icon-btn" data-del title="${tr('Удалить навык')}" aria-label="${tr('Удалить навык')}">${ICONS.close}</button></div>`;
+      <div class="m-actions">${s.origin === 'learned' || (s.previous || []).length ? `<button type="button" class="k-btn k-btn--ghost m-undo">${tr('Отменить правку')}</button>` : ''}<button class="icon-btn" data-del title="${tr('Удалить навык')}" aria-label="${tr('Удалить навык')}">${ICONS.close}</button></div>`;
     $('.m-undo', el)?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
@@ -6593,9 +6731,9 @@ function renderMcp() {
       <span class="m-cmd" title="${escapeHtml(address)}">${escapeHtml(address)}</span>
       ${s.login ? `<span class="m-login" data-testid="mcp-login-state" data-state="${s.login.state}">${s.login.state === 'connected' ? tr('Вход выполнен') : tr('Нужно войти')}</span>` : ''}
       <div class="m-actions">
-        ${s.login ? `<button type="button" class="ghost rt-run" data-login>${s.login.state === 'connected' ? tr('Войти заново') : tr('Войти')}</button>` : ''}
-        <button type="button" class="ghost rt-run" data-check>${tr('Проверить')}</button>
-        <label class="switch"><input type="checkbox" ${s.enabled ? 'checked' : ''}><span></span></label>
+        ${s.login ? `<button type="button" class="k-btn k-btn--ghost rt-run" data-login>${s.login.state === 'connected' ? tr('Войти заново') : tr('Войти')}</button>` : ''}
+        <button type="button" class="k-btn k-btn--ghost rt-run" data-check>${tr('Проверить')}</button>
+        <label class="k-switch-box"><input type="checkbox" ${s.enabled ? 'checked' : ''}><span></span></label>
         <button class="icon-btn" title="${tr('Удалить сервер')}" aria-label="${tr('Удалить сервер')}">${ICONS.close}</button>
       </div>`;
     $('[data-login]', el)?.addEventListener('click', () => startMcpLogin(s, el));
@@ -6613,7 +6751,7 @@ function renderMcp() {
         btn.textContent = tr('Проверить');
       }
     });
-    $('.switch input', el).addEventListener('change', async (e) => {
+    $('.k-switch-box input', el).addEventListener('change', async (e) => {
       try {
         await api(`/api/mcp/${s.id}`, { method: 'PATCH', body: { enabled: e.target.checked } });
         s.enabled = e.target.checked;
@@ -6665,7 +6803,7 @@ function showMcpClientForm(s, el, host) {
     <input class="input" name="id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Client ID" required>
     <input class="input" name="secret" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('Client secret (если есть)'))}" aria-label="Client secret">
     <input class="input" name="port" inputmode="numeric" autocomplete="off" placeholder="${escapeHtml(tr('Порт возврата (если сервер просит точный адрес)'))}" aria-label="${escapeHtml(tr('Порт возврата (если сервер просит точный адрес)'))}">
-    <button type="submit" class="ghost rt-run">${tr('Продолжить вход')}</button>`;
+    <button type="submit" class="k-btn k-btn--ghost rt-run">${tr('Продолжить вход')}</button>`;
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const data = new FormData(form);
@@ -7059,7 +7197,7 @@ function offerOwnModels() {
   el.textContent = ownModelsSentence(bots);
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'ghost';
+  button.className = 'k-btn k-btn--ghost';
   button.textContent = tr('Перевести на основную');
   button.addEventListener('click', () => {
     el.hidden = true;
@@ -7160,7 +7298,7 @@ function markPets() {
     box.innerHTML = S.bots
       .map((b) => {
         const blocked = full && !b.pet;
-        return `<label class="skill-check"${blocked ? ` title="${escapeHtml(limit)}"` : ''}><input type="checkbox" value="${escapeHtml(b.id)}"${b.pet ? ' checked' : ''}${blocked ? ' disabled' : ''}><span>${escapeHtml(b.name)}${b.role ? ` · ${escapeHtml(b.role)}` : ''}</span></label>`;
+        return `<label class="k-check skill-check"${blocked ? ` title="${escapeHtml(limit)}"` : ''}><input class="k-check__input" type="checkbox" value="${escapeHtml(b.id)}"${b.pet ? ' checked' : ''}${blocked ? ' disabled' : ''}><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">${escapeHtml(b.name)}${b.role ? ` · ${escapeHtml(b.role)}` : ''}</span></label>`;
       })
       .join('');
     $$('input', box).forEach((input) => {
@@ -7218,7 +7356,7 @@ function markDock() {
   list.innerHTML = S.bots
     .map(
       (b) =>
-        `<label class="prov-line"><div class="dock-bot"><div class="dock-bot-face" data-bot="${escapeHtml(b.id)}"></div><span class="dock-bot-name">${escapeHtml(b.name)}</span></div><span class="switch"><input type="checkbox" value="${escapeHtml(b.id)}"${b.dock !== false ? ' checked' : ''} /><span></span></span></label>`,
+        `<label class="prov-line"><div class="dock-bot"><div class="dock-bot-face" data-bot="${escapeHtml(b.id)}"></div><span class="dock-bot-name">${escapeHtml(b.name)}</span></div><span class="k-switch-box"><input type="checkbox" value="${escapeHtml(b.id)}"${b.dock !== false ? ' checked' : ''} /><span></span></span></label>`,
     )
     .join('');
   $$('.dock-bot-face', list).forEach((el) => {
@@ -7781,7 +7919,7 @@ function routineRow(r, rerender) {
     <div class="rt-actions">
       <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? 'bell' : 'bell-off')}</button>
       <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('play')}</button>
-      <label class="switch"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
+      <label class="k-switch-box"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
       <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
     </div>
     <div class="rt-chips">${chips}</div>`;
@@ -7795,7 +7933,7 @@ function routineRow(r, rerender) {
       toast(err.message);
     }
   });
-  $('.switch input', el).addEventListener('change', async (e) => {
+  $('.k-switch-box input', el).addEventListener('change', async (e) => {
     try {
       await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { enabled: e.target.checked } });
       r.enabled = e.target.checked;
@@ -7968,7 +8106,7 @@ function renderJournal() {
       ${
         missed.length
           ? `<div class="jr-missed"><b>${tr('Ждёт твоего решения:')}</b><ul>${missed.map((m) => `<li>${escapeHtml(m)}</li>`).join('')}</ul>${
-              canRerun ? `<button type="button" class="ghost">${tr('Запустить снова')}</button>` : ''
+              canRerun ? `<button type="button" class="k-btn k-btn--ghost">${tr('Запустить снова')}</button>` : ''
             }</div>`
           : ''
       }`;
@@ -8472,7 +8610,7 @@ function teamSectionHead(title, action) {
   if (action) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'ghost';
+    button.className = 'k-btn k-btn--ghost';
     button.textContent = action;
     button.addEventListener('click', openRoutines);
     head.append(button);
@@ -8529,7 +8667,7 @@ function renderTeam() {
     empty.textContent = tr('Создай первого бота: у него будет своя папка и своя память, а перед опасным действием он спросит тебя.');
     const create = document.createElement('button');
     create.type = 'button';
-    create.className = 'primary';
+    create.className = 'k-btn k-btn--primary';
     create.textContent = tr('Создать бота');
     create.addEventListener('click', () => openModal('modal-new'));
     parts.push(empty, create);
