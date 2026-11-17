@@ -31,6 +31,8 @@
           <kbd class="search-kbd" aria-hidden="true">Ctrl K</kbd>
         </label>
         <div id="bot-list" class="bot-list"></div>
+        <div id="remote-pcs" class="remote-pcs"></div>
+        <div id="instabox-card" class="ibx-card-host"></div>
         <div class="side-foot">
           <div class="side-subnav" id="catalog-nav" hidden>
             <button type="button" class="side-nav side-sub" data-catalog="skills">Навыки</button>
@@ -60,7 +62,7 @@
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="chart-columns"></svg>
             Лимиты и расход
           </button>
-          <div class="usage-rings" id="usage-rings" hidden></div>
+          <div class="usage-strip"><div class="usage-rings" id="usage-rings" hidden></div><div id="instabox-ring" class="ibx-ring-host"></div></div>
           <button type="button" class="ghost side-link side-menu-trigger" id="btn-side-menu" aria-expanded="false" aria-controls="side-menu" title="Настройки и подключения"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="sliders"></svg><span>Настройки и подключения</span><svg class="i side-menu-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true" data-icon="chevron-up"></svg></button>
           <div class="side-menu" id="side-menu" hidden>
             <div class="side-menu-actions">
@@ -91,6 +93,10 @@
           </div>
         </header>
         <div class="team-body" id="team-body"></div>
+      </main>
+
+      <main id="remote" hidden>
+        <div id="remote-root" class="remote-root"></div>
       </main>
 
       <main id="catalog" hidden>
@@ -511,6 +517,7 @@
                     <div data-s-link="discord"></div>
                     <div data-s-link="slack"></div>
                     <div data-s-link="vault"></div>
+                    <div data-s-link="devices"></div>
                     <div data-s-link="cloud"></div>
                   </div>
                 </section>
@@ -850,6 +857,8 @@
 
               <section class="settings-sub" id="sub-vault" data-sub="vault" data-parent="agents" data-title="Менеджер паролей" hidden></section>
 
+              <section class="settings-sub" id="sub-devices" data-sub="devices" data-parent="agents" data-title="Устройства" hidden></section>
+
               <section class="settings-sub" id="sub-rules" data-sub="rules" data-parent="browser" data-title="Правила разрешений" hidden>
                 <section class="k-section" id="set-rules">
                   <header class="k-section__head"><div class="k-section__text"><p class="k-section__desc">Что бот делает без вопроса, потому что ты нажал «Всегда разрешать здесь». Правило действует только для своего бота, инструмента и места. Оплату, отправку людям, удаление, публикацию и пароли обычное правило не открывает.</p></div></header>
@@ -1115,6 +1124,7 @@
       </div>
     </dialog>
 
+    <div id="pair-plaques"></div>
     <div id="updates" class="updates" aria-live="polite"></div>
     <div id="toast" class="toast" hidden></div>
     <script src="/avatar.js"></script>

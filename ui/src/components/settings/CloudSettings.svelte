@@ -427,12 +427,10 @@
   .cl-code-label {
     color: var(--k-text-3);
     font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
   .cl-origin {
     color: var(--k-text);
-    font: 500 var(--k-text-sm) / 1.4 var(--k-font-mono);
+    font: 600 var(--k-text-sm) / 1.4 var(--k-font-mono);
     word-break: break-all;
     user-select: text;
   }
@@ -462,7 +460,7 @@
   }
   .cl-step {
     position: relative;
-    padding-left: 28px;
+    padding-left: var(--k-space-6);
     color: var(--k-text-3);
     font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
   }

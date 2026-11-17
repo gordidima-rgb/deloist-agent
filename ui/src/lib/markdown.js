@@ -74,7 +74,14 @@ function fileAnchor(path, label) {
   return `<a href="#" class="md-file" data-file="${attr}" title="${attr}">${label}</a>`;
 }
 
+// Режим «чужой текст» (ответы ботов другого ПК): ссылки на файлы не оживают, а у каждой ссылки рядом виден настоящий адрес
+// и пометка источника: подпись ссылки текстом ответа может быть любой. Метку подставляет вызывающий (tr).
+let remote = null;
+
 function anchor(href, label) {
+  if (remote) {
+    return `<a href="${href}" target="_blank" rel="noreferrer noopener" class="md-remote-link">${label}</a><span class="md-remote-url"> (${href} — ${remote.mark})</span>`;
+  }
   const icon = linkIcon(href);
   return `<a href="${href}" target="_blank" rel="noreferrer"${icon ? ' class="has-ico"' : ''}>${icon}${label}</a>`;
 }
@@ -90,7 +97,7 @@ function inline(text) {
   s = s.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${code}</code>`));
   s = s.replace(/\[([^\]\n]+)\]\(((?:https?|tg):\/\/[^)\s]+)\)/gi, (_, label, href) => hold(anchor(href, label)));
   s = s.replace(/\[([^\]\n]+)\]\(((?:file:\/\/\/)?[A-Za-z]:[\\/][^)\n]*)\)/g, (whole, label, path) =>
-    workspaceRef(path) ? hold(fileAnchor(path, label)) : whole);
+    !remote && workspaceRef(path) ? hold(fileAnchor(path, label)) : whole);
   s = s.replace(BARE_URL, (url) => {
     const tail = /[.,;:!?)\]]+$/.exec(url)?.[0] || '';
     const bare = tail ? url.slice(0, -tail.length) : url;
@@ -179,7 +186,17 @@ function blocksOf(lines) {
   return out;
 }
 
-export function markdown(text) {
+// options.remote: { mark } включает режим чужого текста (см. anchor). По умолчанию разметка прежняя.
+export function markdown(text, options = {}) {
+  remote = options.remote ? { mark: escapeHtml(options.remote.mark || 'from another PC') } : null;
+  try {
+    return render(text);
+  } finally {
+    remote = null;
+  }
+}
+
+function render(text) {
   const blocks = [];
   let s = escapeHtml(String(text ?? ''));
   s = s.replace(/```[a-z]*\n([\s\S]*?)```/gi, (_, code) => {

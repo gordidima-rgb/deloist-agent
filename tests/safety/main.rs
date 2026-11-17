@@ -2,6 +2,9 @@
 mod common;
 
 mod security;
+#[cfg(deloist_private)]
+#[path = "../../private/tests/relay.rs"]
+mod relay;
 #[cfg(windows)]
 mod sandbox;
 mod team_safety;

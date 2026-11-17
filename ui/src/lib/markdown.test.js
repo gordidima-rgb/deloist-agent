@@ -116,4 +116,16 @@ describe('local workspace file links', () => {
     expect(html).not.toContain('<b>');
     expect(html).not.toMatch(/data-file="[^"]*"onmouseover/);
   });
+
+  it('in remote mode shows the real address with a source mark and never makes file anchors', () => {
+    const html = markdown('[safe](https://evil.example/x) и [файл](C:/Users/me/AppData/workspaces/bot/a.md)', { remote: { mark: 'from another PC' } });
+    expect(html).toContain('href="https://evil.example/x"');
+    expect(html).toContain('(https://evil.example/x');
+    expect(html).toContain('from another PC');
+    expect(html).not.toContain('data-file');
+    expect(html).not.toContain('md-file');
+    expect(markdown('<img src=x onerror=1> https://a.b/c', { remote: { mark: 'm' } })).not.toContain('<img');
+    // Обычный режим не изменился.
+    expect(markdown('[x](https://a.b/c)')).not.toContain('md-remote-url');
+  });
 });

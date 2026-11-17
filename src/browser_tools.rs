@@ -264,7 +264,19 @@ fn is_risky(name: &str) -> bool {
 const RISKY_LABEL_MAX: usize = 40;
 
 async fn ask(app: &Arc<App>, bot: &Bot, tool: &str, title: &str, detail: &str, scope: Scope, danger: bool) -> Result<(), String> {
-    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, human: None };
+    let mut remote = crate::grants::remote_ok(tool, &serde_json::Value::Null, Some(&scope), false, danger, std::path::Path::new(""));
+    // Действия на сайте с другого устройства: только там, где у бота нет сохранённого входа в менеджере паролей.
+    if remote == crate::grants::Remote::Actions {
+        let origin = scope.place.clone();
+        let stored = match crate::password_vault::logins_for(app, &origin).await {
+            Ok(list) => !list.is_empty(),
+            Err(_) => crate::password_vault::vault_origin_ok(&origin),
+        };
+        if stored {
+            remote = crate::grants::Remote::No;
+        }
+    }
+    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None };
     if request_confirmation(app, &bot.id, question).await {
         Ok(())
     } else {
@@ -1828,6 +1840,8 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
             scope: None,
             room: None,
             danger: false,
+            sensitive: false,
+            remote: crate::grants::Remote::No,
             human: None,
         },
     )
@@ -1895,6 +1909,8 @@ async fn capture_key(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value)
             scope: None,
             room: None,
             danger: false,
+            sensitive: false,
+            remote: crate::grants::Remote::No,
             human: None,
         },
     )

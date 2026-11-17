@@ -641,6 +641,10 @@ pub struct Confirmation<'a> {
     pub room: Option<&'a str>,
     /// Красная карточка: действие особенно опасно (например, eval в Chrome человека).
     pub danger: bool,
+    /// Карточка про ключи, секреты, доступ к файлам с ключами: с другого устройства (relay) её не одобрить, только на ПК.
+    pub sensitive: bool,
+    /// Карточку можно одобрить с другого устройства (relay). Решает `grants::remote_ok` при создании; по умолчанию нет.
+    pub remote: crate::grants::Remote,
     /// Человеческое описание, собранное программой (`describe`). `None` — карточка со своими словами.
     pub human: Option<crate::describe::Described>,
 }
@@ -650,8 +654,8 @@ pub async fn request_confirmation(app: &Arc<App>, bot_id: &str, question: Confir
     matches!(ask_human(app, bot_id, question).await, ApprovalResult::Allowed)
 }
 
-async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>) -> ApprovalResult {
-    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, human }).await
+async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote) -> ApprovalResult {
+    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human }).await
 }
 
 /// Действие разрешено правилом, которое живёт вне `Perms` (старые разрешения сайта у бота).
@@ -715,6 +719,8 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
         "grantable": grantable, "conversation": grantable && conv.is_some(), "always": always, "scope": scope_json,
         "conv": app.turns.conv_of(bot_id),
         "danger": question.danger,
+        "sensitive": question.sensitive,
+        "remote": question.remote.as_str(),
     });
     let mut payload = payload;
     if let Some(human) = &question.human {
@@ -2599,7 +2605,8 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
             None => tools::label(&call.name),
         };
         let scope = crate::grants::scope_for(app, bot, &call.name, &call.args);
-        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human).await {
+        let remote = crate::grants::remote_ok(&call.name, &call.args, scope.as_ref(), touch.is_some(), false, &app.store.workspace(&bot.id));
+        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote).await {
             ApprovalResult::Allowed => {}
             ApprovalResult::Denied => return ("denied".into(), "Человек не разрешил выполнение.".into()),
             ApprovalResult::Timeout => return ("timeout".into(), "Человек не разрешил выполнение.".into()),

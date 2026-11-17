@@ -287,6 +287,8 @@ pub struct Settings {
     pub autostart: bool,
     /// Не давать компьютеру засыпать, пока есть включённые рутины.
     pub keep_awake: bool,
+    /// Режим сервера: автозапуск без окна и запрет сна, пока программа работает. Меняется только отдельным адресом.
+    pub server_mode: bool,
     /// Записи журнала старше этого человек уже видел.
     pub journal_seen_at: i64,
     /// Бот сам сохраняет навыки: `auto` — сразу, с отменой; `ask` — через карточку; `off` — нет.
@@ -348,6 +350,7 @@ impl Default for Settings {
             daily_token_limit: 1_000_000,
             autostart: false,
             keep_awake: false,
+            server_mode: false,
             journal_seen_at: 0,
             skill_learning: "auto".into(),
             last_seen_version: String::new(),
@@ -1727,6 +1730,9 @@ impl Store {
             }
             if let Some(v) = patch.get("keepAwake").filter(|v| !v.is_null()) {
                 s.keep_awake = truthy(v);
+            }
+            if let Some(v) = patch.get("serverMode").filter(|v| !v.is_null()) {
+                s.server_mode = truthy(v);
             }
             if let Some(x) = number(patch.get("journalSeenAt")) {
                 s.journal_seen_at = x as i64;

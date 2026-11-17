@@ -158,7 +158,7 @@ pub const LEVEL_EVERY: Duration = Duration::from_millis(50);
 /// События только для окон человека: программа с ключом их не получает.
 /// Заявки командной строки на добавление команды (`team_import_*`): номер и состав карточки видит только окно.
 pub fn window_only(event: &Value) -> bool {
-    matches!(event.get("type").and_then(Value::as_str), Some("voice_state" | "team_import_request" | "team_import_closed"))
+    matches!(event.get("type").and_then(Value::as_str), Some("voice_state" | "team_import_request" | "team_import_closed" | "device_pair_request" | "devices_changed" | "remote_event"))
 }
 
 /// Пропустить ли ещё одно событие: смена шага — всегда, уровень того же шага — не чаще `LEVEL_EVERY`.
@@ -315,6 +315,8 @@ mod tests {
         assert!(window_only(&json!({ "type": "voice_state", "state": "recording" })));
         assert!(!window_only(&json!({ "type": "voice_hotkey" })));
         assert!(window_only(&json!({ "type": "team_import_request" })) && window_only(&json!({ "type": "team_import_closed" })));
+        assert!(window_only(&json!({ "type": "device_pair_request", "req": "r" })) && window_only(&json!({ "type": "remote_event", "pc": "p" })), "плашка знакомства и события чужого ПК только окну");
+        assert!(window_only(&json!({ "type": "devices_changed" })), "смена списка устройств только окну");
     }
 
     #[test]

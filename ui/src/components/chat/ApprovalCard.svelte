@@ -35,7 +35,7 @@
     {:else}
       {#each actions as action (action.answer)}
         <Button
-          variant={action.answer === firstAnswer ? (danger ? 'attention' : 'primary') : action.answer === 'deny' ? 'ghost' : 'secondary'}
+          variant={action.answer === 'deny' ? 'ghost' : action.answer === firstAnswer ? (danger ? 'attention' : 'primary') : 'secondary'}
           size="sm"
           disabled={busy}
           data-answer={action.answer}

@@ -41,7 +41,7 @@ describe('settings window layout', () => {
 
   it('opens fifteen sub-screens inside the form, each with a parent section and a title', () => {
     const subs = [...doc.querySelectorAll('#form-settings .settings-sub')];
-    expect(subs.map((sub) => sub.dataset.sub).sort()).toEqual(['chrome', 'cloud', 'discord', 'dock', 'engines', 'images', 'mcp', 'rules', 'scripts', 'skills', 'slack', 'stt-models', 'team', 'telegram', 'vault']);
+    expect(subs.map((sub) => sub.dataset.sub).sort()).toEqual(['chrome', 'cloud', 'devices', 'discord', 'dock', 'engines', 'images', 'mcp', 'rules', 'scripts', 'skills', 'slack', 'stt-models', 'team', 'telegram', 'vault']);
     for (const sub of subs) {
       expect(sub.hidden, sub.dataset.sub).toBe(true);
       expect(SECTIONS, sub.dataset.sub).toContain(sub.dataset.parent);
@@ -52,7 +52,7 @@ describe('settings window layout', () => {
 
   it('has a link row for every sub-screen opened from a section', () => {
     const links = [...doc.querySelectorAll('[data-s-link]')].map((node) => node.dataset.sLink);
-    for (const id of ['dock', 'skills', 'mcp', 'images', 'team', 'telegram', 'discord', 'slack', 'vault', 'cloud', 'rules', 'engines', 'chrome']) expect(links).toContain(id);
+    for (const id of ['dock', 'skills', 'mcp', 'images', 'team', 'telegram', 'discord', 'slack', 'vault', 'devices', 'cloud', 'rules', 'engines', 'chrome']) expect(links).toContain(id);
   });
 
   it('wires the Discord sub-screen through the mount helper and the link map', () => {

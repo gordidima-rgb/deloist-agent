@@ -314,6 +314,11 @@ impl Guard {
         if self.agent.is_empty() || !peer.is_loopback() || !loopback_host {
             return false;
         }
+        // Облако: прокси Instabox ходит на контейнер с 127.0.0.1 и Host 127.0.0.1:<порт> и для запросов
+        // из интернета. Такой запрос несёт заголовки прокси, и ключ программы по нему не действует.
+        if self.cloud.is_some() && ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip"].iter().any(|name| headers.contains_key(*name)) {
+            return false;
+        }
         headers
             .get(header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
@@ -493,7 +498,7 @@ fn verdict(guard: &Guard, peer: std::net::IpAddr, method: &Method, path: &str, q
 
 /// Пути, закрытые в облаке (`norm` уже в нижнем регистре, без повторных слэшей).
 pub(crate) fn cloud_closed(norm: &str) -> bool {
-    const PREFIXES: [&str; 17] = [
+    const PREFIXES: [&str; 18] = [
         "/api/vault",              // менеджеры паролей через op и bw
         "/api/selfdev",            // самодоработка: git и cargo
         "/api/browser/obscura",    // чужой движок, скачивание и запуск
@@ -511,6 +516,7 @@ pub(crate) fn cloud_closed(norm: &str) -> bool {
         "/api/voice/local",
         "/api/import/hermes",      // читает домашнюю папку
         "/api/know-me",            // читает домашнюю папку
+        "/api/cloud/instabox",     // управление облаком идёт с ПК, не изнутри него
     ];
     if PREFIXES.iter().any(|p| norm == *p || norm.starts_with(&format!("{p}/"))) {
         return true;
@@ -548,6 +554,12 @@ fn human_only(path: &str) -> bool {
     path.starts_with("/api/approvals/")
         || path.starts_with("/api/questions/")
         || path.starts_with("/api/permissions")
+        // Доверенные устройства: пропуск телефона и второго ПК, список и отзыв решает только человек.
+        || path.starts_with("/api/devices")
+        // Режим сервера включает автозапуск и запрет сна: решает только человек.
+        || path.starts_with("/api/server-mode")
+        // Боты других ПК аккаунта: знакомство, чтение, сообщения и одобрения на чужом ПК — только окно.
+        || path.starts_with("/api/remote/")
         // Правка выделенного вставляет текст в окно человека, сочетания клавиш — его настройка,
         // распознавание речи тратит его баланс: скрипту бота сюда нельзя.
         || path.starts_with("/api/selection/")
@@ -606,6 +618,9 @@ fn human_only(path: &str) -> bool {
         // Менеджер паролей: подключение и разблокировка хранилища — решение человека. Пароли и коды
         // по этим адресам не отдаются вообще; ключ программы сюда не должен достать ни входа, ни токена.
         || path.starts_with("/api/vault")
+        // Облако на Instabox: вход в аккаунт, создание и удаление машины, пропуск шлюза. Ключ Instabox и
+        // ключи облака лежат в секретах; ключу программы сюда нельзя ни читать состояние, ни открывать облако.
+        || path.starts_with("/api/cloud/instabox")
         // Начать с пустыми ключами откладывает файл секретов в сторону: решает только человек.
         || path.starts_with("/api/secrets")
         // Проверка напоминания шлёт сообщение человеку прямо сейчас: это решает человек в окне.
@@ -1075,6 +1090,24 @@ mod tests {
         let mut h = headers(host);
         h.insert(header::AUTHORIZATION, "Bearer agent".parse().unwrap());
         h
+    }
+
+    #[test]
+    fn cloud_refuses_the_agent_key_on_requests_that_carry_proxy_headers() {
+        let key = signing_key();
+        let cloud = cloud_guard(&key);
+        let plain = Guard::new(8899, "boot".into(), "agent".into());
+        // Instabox ходит на контейнер с loopback и Host 127.0.0.1:<порт>, добавляя заголовки прокси.
+        for name in ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip"] {
+            let mut h = agent_headers("127.0.0.1:8899");
+            h.insert(name, "203.0.113.9".parse().unwrap());
+            let r = verdict(&cloud, peer([127, 0, 0, 1]), &Method::GET, "/api/state", None, &h).expect(name);
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{name}");
+            // На ПК (не облако) локальные инструменты за своим прокси не ломаются.
+            assert!(verdict(&plain, peer([127, 0, 0, 1]), &Method::GET, "/api/state", None, &h).is_none(), "{name} на ПК");
+        }
+        // Без заголовков прокси из того же loopback ключ работает.
+        assert!(verdict(&cloud, peer([127, 0, 0, 1]), &Method::GET, "/api/state", None, &agent_headers("127.0.0.1:8899")).is_none());
     }
 
     #[test]

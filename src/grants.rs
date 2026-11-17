@@ -413,6 +413,74 @@ pub fn log_entry(bot_id: &str, bot_name: &str, scope: &Scope, how: &str, by_id: 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_approval_is_default_deny() {
+        let ws = std::path::Path::new("C:/data/workspaces/bot1");
+        let scope = |tool: &str, place: &str, kind: &str| Scope::new(tool, place, kind, "run", "x");
+        let no = Value::Null;
+        let cmd = |c: &str| json!({ "command": c });
+        let ok = |tool: &str, args: &Value, s: Option<&Scope>| remote_ok(tool, args, s, false, false, ws);
+        assert_eq!(ok("web_fetch", &no, None), Remote::Safe);
+        assert_eq!(ok("browser_nav", &no, None), Remote::Safe);
+        assert_eq!(ok("browser_site", &no, None), Remote::Actions);
+        assert_eq!(ok("update_bot", &no, Some(&scope("update_bot", "*", ""))), Remote::No);
+        assert_eq!(ok("", &no, None), Remote::No);
+        let s = scope("run_command", "echo", "");
+        // Только чтение — для любого устройства.
+        for good in ["echo hi", "dir notes", "type notes/a.txt", "findstr /i abc notes/a.txt", "git status", "git log --oneline", "ls", "cat a.txt", "where git"] {
+            assert_eq!(ok("run_command", &cmd(good), Some(&s)), Remote::Safe, "{good}");
+        }
+        // Другие программы — только с переключателем.
+        for other in ["git commit -m x", "node app.js", "npm install", "git push"] {
+            assert_eq!(ok("run_command", &cmd(other), Some(&s)), Remote::Actions, "{other}");
+        }
+        // Перенаправление, цепочки, подстановки, кавычки, выход наверх, чужие пути — никогда.
+        for bad in [
+            "echo hi > a.txt", "type a.txt | more", "echo a & echo b", "echo a; echo b", "echo a^b", "echo \"x\"", "type ../a.txt", "type ~/a.txt",
+            "type C:\\Windows\\win.ini", "type C:/Windows/win.ini", "type /etc/passwd", "curl https://x.y", "echo $HOME", "echo %PATH%", "echo hi\nwhoami", "",
+        ] {
+            assert_eq!(ok("run_command", &cmd(bad), Some(&s)), Remote::No, "{bad:?}");
+        }
+        for kind in ["delete", "secure", "pay", "publish", "send", "login", "unknown"] {
+            assert_eq!(ok("run_command", &cmd("echo hi"), Some(&scope("run_command", "echo", kind))), Remote::No, "{kind}");
+        }
+        assert_eq!(remote_ok("run_command", &cmd("echo hi"), Some(&s), true, false, ws), Remote::No);
+        assert_eq!(remote_ok("run_command", &cmd("echo hi"), Some(&s), false, true, ws), Remote::No);
+        assert_eq!(ok("run_command", &cmd("echo hi"), Some(&s.clone().once_only())), Remote::No, "нельзя запомнить — нельзя и с устройства");
+        // mcp без объявленного readOnlyHint закрыт.
+        assert_eq!(ok("mcp__files__read", &no, Some(&scope("mcp__files__read", "files", ""))), Remote::No);
+    }
+
+    #[test]
+    fn remote_write_rejects_executables_escapes_and_links() {
+        // Не `%TEMP%`: из папки с меткой Low он недоступен на запись, поэтому рядом со сборкой.
+        let dir = std::env::current_dir().unwrap().join("target").join(format!("deloist-remote-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ws = dir.join("ws");
+        std::fs::create_dir_all(ws.join("sub")).unwrap();
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+        let w = |raw: &str| write_allowed(raw, &ws);
+        assert!(w("notes.txt") && w("sub/a.md") && w("new/dir/a.json"));
+        for ext in EXECUTABLE_EXT {
+            assert!(!w(&format!("x.{ext}")), "{ext}");
+            assert!(!w(&format!("x.{}", ext.to_uppercase())), "{ext} в верхнем регистре");
+        }
+        assert!(!w("a.txt.bat") && !w("a.bat.") && !w("a.bat ") && !w("a.txt:evil.bat") && !w("a.txt:stream"));
+        assert!(!w("../outside/a.txt") && !w(""));
+        assert!(!w(&dir.join("outside").join("a.txt").display().to_string()), "вне рабочей папки");
+        assert!(w(&ws.join("sub").join("ok.txt").display().to_string()));
+        // Ссылка внутри рабочей папки на папку снаружи (junction на Windows, symlink в других системах).
+        let link = ws.join("link");
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(dir.join("outside")).output().map(|o| o.status.success()).unwrap_or(false);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(dir.join("outside"), &link).is_ok();
+        if made {
+            assert!(!w("link/a.txt"), "ссылка уводит наружу");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn scope(tool: &str, place: &str, kind: &str) -> Scope {
@@ -619,6 +687,154 @@ mod tests {
         let s = Scope::new("browser_site", "seller.ozon.ru", "", "click", "Экспорт");
         assert_eq!(log_text("Рен", &s, "rule"), "Рен нажал „Экспорт“ на seller.ozon.ru — разрешено правилом „всегда здесь“");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Одобрение с другого устройства (телефон, второй ПК)
+// ---------------------------------------------------------------------------
+
+/// Кому можно одобрить карточку с другого устройства. Считается один раз при создании карточки.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Remote {
+    /// Только на самом ПК.
+    #[default]
+    No,
+    /// Любому доверенному устройству.
+    Safe,
+    /// Только устройству с включённым переключателем «Разрешать действия в рабочей папке».
+    Actions,
+}
+
+impl Remote {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Remote::No => "no",
+            Remote::Safe => "safe",
+            Remote::Actions => "actions",
+        }
+    }
+}
+
+/// Расширения, запись которых не уходит на устройство никогда: запускаются сами или открывают запуск.
+const EXECUTABLE_EXT: &[&str] = &[
+    "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "py", "pyw", "exe", "com", "scr", "lnk", "dll", "msi", "msp", "jar", "sh", "bash", "reg", "hta", "cpl", "url",
+];
+/// Только чтение: эти программы с устройства можно запускать без переключателя.
+const READ_ONLY_PROGRAMS: &[&str] = &["dir", "type", "findstr", "where", "ls", "cat", "echo"];
+const GIT_READ_ONLY: &[&str] = &["status", "log", "diff", "show"];
+
+/// Символы и слова, которыми команда выходит из «простой»: перенаправление, цепочки, подстановки, выход наверх.
+fn command_tokens_ok(command: &str) -> bool {
+    !command.trim().is_empty()
+        && !command.chars().any(|c| matches!(c, '>' | '<' | '|' | '&' | ';' | '^' | '"' | '~' | '\\' | '`' | '$' | '%' | '(' | ')' | '{' | '}' | '*' | '?' | '!') || c.is_control())
+        && !command.contains("..")
+}
+
+fn read_only_command(command: &str) -> bool {
+    let mut words = command.split_whitespace();
+    let first = words.next().unwrap_or_default().to_lowercase();
+    if first == "git" {
+        return words.next().is_some_and(|sub| GIT_READ_ONLY.contains(&sub.to_lowercase().as_str()));
+    }
+    READ_ONLY_PROGRAMS.contains(&first.as_str())
+}
+
+/// Настоящий путь без ссылок: самая длинная существующая часть канонизируется, остальное достраивается как есть.
+fn canonical(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut rest = Vec::new();
+    let mut current = path.to_path_buf();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(&current) {
+            let mut out = real;
+            for part in rest.iter().rev() {
+                out.push(part);
+            }
+            return Some(out);
+        }
+        rest.push(current.file_name()?.to_os_string());
+        current = current.parent()?.to_path_buf();
+    }
+}
+
+fn executable_name(name: &str) -> bool {
+    let name = name.trim_end_matches(['.', ' ']).to_lowercase();
+    name.contains(':') || name.rsplit_once('.').is_some_and(|(_, ext)| EXECUTABLE_EXT.contains(&ext.trim()))
+}
+
+/// Запись `raw` с устройства: путь настоящий и внутри настоящей рабочей папки, имя не исполняемого вида.
+fn write_allowed(raw: &str, workspace: &std::path::Path) -> bool {
+    if raw.trim().is_empty() || raw.contains("..") {
+        return false;
+    }
+    let path = std::path::Path::new(raw);
+    let target = if path.is_absolute() { path.to_path_buf() } else { workspace.join(path) };
+    let Some(name) = target.file_name().map(|n| n.to_string_lossy().into_owned()) else { return false };
+    if executable_name(&name) {
+        return false;
+    }
+    let (Some(real), Some(root)) = (canonical(&target), canonical(workspace)) else { return false };
+    inside_workspace(&crate::reach::display(&real), &root)
+}
+
+/// Что можно одобрить с другого устройства. По умолчанию ничего: открыто только названное здесь.
+/// Ответы `always` и `conversation` и переключатель устройства проверяются отдельно (`relay_ops`).
+pub fn remote_ok(tool: &str, args: &Value, scope: Option<&Scope>, sensitive: bool, danger: bool, workspace: &std::path::Path) -> Remote {
+    if sensitive || danger {
+        return Remote::No;
+    }
+    // Только обычные действия: удаление, пароли, платежи, выпуск, отправка людям и незнакомый вид остаются на ПК.
+    if scope.is_some_and(|s| !s.kind.is_empty()) {
+        return Remote::No;
+    }
+    let grantable = scope.is_some_and(|s| s.grantable);
+    match tool {
+        "web_fetch" | "web_search" | "remember" | "share_file" | "browser_nav" | "browser_page" => Remote::Safe,
+        "browser_site" | "browser_mouse" | "browser_keyboard" => Remote::Actions,
+        "write_file" if grantable && write_allowed(arg(args, "path"), workspace) => Remote::Safe,
+        "run_command" if grantable && command_tokens_ok(arg(args, "command")) && command_inside(arg(args, "command"), workspace) => {
+            if read_only_command(arg(args, "command")) {
+                Remote::Safe
+            } else {
+                Remote::Actions
+            }
+        }
+        _ if tool.starts_with("mcp__") && grantable && crate::mcp::is_read_only(tool) => Remote::Safe,
+        _ => Remote::No,
+    }
+}
+
+fn norm_path(text: &str) -> String {
+    text.trim_matches(|c| c == '"' || c == '\'').replace('\\', "/").to_lowercase().trim_end_matches('/').to_string()
+}
+
+/// `path` (строка) лежит внутри `workspace`. Обе стороны берутся как есть, без обращения к диску.
+fn inside_workspace(path: &str, workspace: &std::path::Path) -> bool {
+    let (path, root) = (norm_path(path), norm_path(&crate::reach::display(workspace)));
+    !root.is_empty() && !path.split('/').any(|p| p == "..") && (path == root || path.starts_with(&format!("{root}/")))
+}
+
+/// Все похожие на путь слова команды лежат в рабочей папке бота: абсолютные пути внутри неё, относительные без `..`.
+fn command_inside(command: &str, workspace: &std::path::Path) -> bool {
+    if command.trim().is_empty() {
+        return false;
+    }
+    command.split_whitespace().all(|word| {
+        let word = word.trim_matches(|c| c == '"' || c == '\'');
+        // Ключи программ в стиле Windows: `/s`, `/i`.
+        if word.starts_with('/') && word.len() <= 3 && word[1..].chars().all(|c| c.is_ascii_alphanumeric()) {
+            return true;
+        }
+        if word.split(['/', '\\']).any(|p| p == "..") || word.starts_with('~') {
+            return false;
+        }
+        let drive = word.len() >= 2 && word.as_bytes()[1] == b':';
+        let absolute = word.starts_with('/') || word.starts_with('\\') || drive;
+        if absolute {
+            return inside_workspace(word, workspace);
+        }
+        // `https://…` и подобное: двоеточие вне диска — это не локальный путь.
+        !word.contains(':')
+    })
 }
 
 // ---------------------------------------------------------------------------

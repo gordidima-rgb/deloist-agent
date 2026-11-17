@@ -500,6 +500,8 @@ async fn ask_contact(app: &Arc<App>, owner: &Owner, op: Value) {
         room,
         scope: None,
         danger: false,
+        sensitive: false,
+        remote: crate::grants::Remote::No,
         human: None,
     };
     if !crate::turn::request_confirmation(app, &bot.id, question).await {

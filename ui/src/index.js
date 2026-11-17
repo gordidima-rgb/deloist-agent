@@ -31,6 +31,10 @@ import DiscordSettings from './components/settings/DiscordSettings.svelte';
 import SlackSettings from './components/settings/SlackSettings.svelte';
 import CloudSettings from './components/settings/CloudSettings.svelte';
 import VaultSettings from './components/settings/VaultSettings.svelte';
+import PairPlaques from './components/devices/PairPlaques.svelte';
+import DevicesSettings from './components/devices/DevicesSettings.svelte';
+import RemotePcs from './components/remote/RemotePcs.svelte';
+import RemoteChat from './components/remote/RemoteChat.svelte';
 import DrawerHead from './components/drawer/DrawerHead.svelte';
 import DrawerProfile from './components/drawer/DrawerProfile.svelte';
 import DrawerMemory from './components/drawer/DrawerMemory.svelte';
@@ -38,6 +42,9 @@ import DrawerGoals from './components/drawer/DrawerGoals.svelte';
 import DrawerFiles from './components/drawer/DrawerFiles.svelte';
 import BotList from './components/sidebar/BotList.svelte';
 import NeedsBoard from './components/sidebar/NeedsBoard.svelte';
+import InstaboxCard from './components/sidebar/InstaboxCard.svelte';
+import InstaboxRing from './components/sidebar/InstaboxRing.svelte';
+import { instaboxFeed } from './lib/instabox.js';
 import UsageScreen from './components/usage/UsageScreen.svelte';
 import RemindersTab from './components/routines/RemindersTab.svelte';
 import TodosTab from './components/routines/TodosTab.svelte';
@@ -140,6 +147,11 @@ window.DeloistUI = {
   // Экран «Облако»: машина Instabox для ботов.
   mountCloudSettings: (target, props) => mountComponent(CloudSettings, target, props),
   mountVaultSettings: (target, props) => mountComponent(VaultSettings, target, props),
+  // Устройства и другие ПК: плашка допуска нового устройства, экран «Устройства», разделы чужих ПК в боковой панели и чат с их ботом.
+  mountPairPlaques: (target, props) => mountComponent(PairPlaques, target, props),
+  mountDevicesSettings: (target, props) => mountComponent(DevicesSettings, target, props),
+  mountRemotePcs: (target, props) => mountComponent(RemotePcs, target, props),
+  mountRemoteChat: (target, props) => mountComponent(RemoteChat, target, props),
   // Шапка панели бота (вкладки и «Закрыть»); содержимое вкладок рисует web/app.js.
   mountDrawerHead: (target, props) => mountComponent(DrawerHead, target, props),
   // Вкладка «Профиль» ящика бота: разделы кита; внешность и модель монтирует app.js.
@@ -152,6 +164,10 @@ window.DeloistUI = {
   mountBotList: (target, props) => mountComponent(BotList, target, props),
   // Доска под «Нужен ты»: что ждёт тебя, что в работе, что ждёт в очереди и что не прочитано.
   mountNeedsBoard: (target, props) => mountComponent(NeedsBoard, target, props),
+  // Бесплатный сервер Instabox: карточка над нижним меню и кружок в ряду лимитов.
+  mountInstaboxCard: (target, props) => mountComponent(InstaboxCard, target, props),
+  mountInstaboxRing: (target, props) => mountComponent(InstaboxRing, target, props),
+  instaboxFeed,
   // Окно «Использование и лимиты»: расход токенов, лимиты ботов, модели и подписки.
   mountUsageScreen: (target, props) => mountComponent(UsageScreen, target, props),
   // Окно «Рутины»: вкладки «Напоминания», «Задачи» и «Привычки».

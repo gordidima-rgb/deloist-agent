@@ -6298,6 +6298,7 @@ function loadSubscreen(subId) {
   if (subId === 'discord') mountDiscordSettings();
   if (subId === 'slack') mountSlackSettings();
   if (subId === 'vault') mountVaultSettings();
+  if (subId === 'devices') mountDevicesSettings();
   if (subId === 'cloud') mountCloudSettings();
 }
 
@@ -6358,7 +6359,32 @@ function mountVaultSettings() {
   else vaultView = window.DeloistUI.mountVaultSettings(host, props);
 }
 
+// Экран «Устройства»: допущенные телефоны, связь с сайтом и другие ПК аккаунта.
+let devicesView = null;
+function mountDevicesSettings() {
+  const host = $('#sub-devices');
+  if (!host || !window.DeloistUI?.mountDevicesSettings) return;
+  if (!devicesView) devicesView = window.DeloistUI.mountDevicesSettings(host, { api });
+}
+
 window.DeloistSettings = { openSub: openSettingsSub, closeSub: closeSettingsSub };
+
+// «Бесплатный сервер» Instabox: карточка в левой панели и кружок в ряду лимитов открывают экран «Облако».
+function openCloudSettings() {
+  openSettings('agents');
+  openSettingsSub('cloud');
+}
+
+function mountInstabox() {
+  const ui = window.DeloistUI;
+  if (!ui?.mountInstaboxCard) return;
+  const props = { api, onopen: openCloudSettings };
+  ui.mountInstaboxCard($('#instabox-card'), props);
+  ui.mountInstaboxRing($('#instabox-ring'), props);
+  // Вернулись с экрана «Облако»: могли подключить или удалить машину.
+  $('#modal-settings')?.addEventListener('close', () => ui.instaboxFeed(api).refresh(true));
+}
+mountInstabox();
 
 // Строки-ссылки (Svelte) и «?» с подсказкой: места заданы в index.html атрибутами data-s-link и data-hint.
 const SETTINGS_LINKS = {
@@ -6373,6 +6399,7 @@ const SETTINGS_LINKS = {
   slack: { label: tr('Slack'), sub: tr('Писать боту из личных сообщений Slack') },
   cloud: { label: tr('Облако'), sub: tr('Боты в облаке, даже когда компьютер выключен') },
   vault: { label: tr('Менеджер паролей'), sub: tr('Bitwarden и 1Password: бот входит на сайты сам') },
+  devices: { label: tr('Устройства'), sub: tr('Телефон, второй ПК и боты других ваших ПК') },
   rules: { label: tr('Правила разрешений'), sub: tr('Что бот делает без вопроса') },
   engines: { label: tr('Chrome, Obscura и Moli'), sub: tr('Чем отличаются и что показали замеры') },
   chrome: { label: tr('Мой основной Chrome'), sub: tr('Для опытных: боты работают в твоём браузере') },
@@ -7491,6 +7518,7 @@ function dropTeamAvatars() {
 
 function leaveTeam() {
   leaveCatalog();
+  leaveRemote();
   leaveWorkflows();
   if (!teamOpen()) return;
   dropTeamAvatars();
@@ -7515,7 +7543,67 @@ function clearChatView() {
   S.avatars.get('head')?.destroy();
   S.avatars.delete('head');
   $('#chat').hidden = true;
+  closeRemoteView();
   $('#sidebar').classList.remove('open');
+}
+
+// ---------------------------------------------------------------------------
+// Боты других ПК аккаунта: разделы в боковой панели и чат с удалённым ботом (Svelte, ui/src/components/remote)
+// ---------------------------------------------------------------------------
+
+let remoteChatView = null;
+let remotePcsView = null;
+S.remote = null;
+
+function remotePcsProps() {
+  return { api, current: S.remote, onopen: showRemote };
+}
+
+function mountRemote() {
+  const plaques = $('#pair-plaques');
+  if (plaques && window.DeloistUI?.mountPairPlaques) window.DeloistUI.mountPairPlaques(plaques, { api });
+  const host = $('#remote-pcs');
+  if (host && window.DeloistUI?.mountRemotePcs) remotePcsView = window.DeloistUI.mountRemotePcs(host, remotePcsProps());
+}
+
+function closeRemoteView() {
+  if ($('#remote').hidden) return;
+  remoteChatView?.destroy();
+  remoteChatView = null;
+  $('#remote-root').textContent = '';
+  $('#remote').hidden = true;
+  S.remote = null;
+  remotePcsView?.update(remotePcsProps());
+}
+
+// Закрыть чат удалённого бота и вернуть обычный чат на место.
+function leaveRemote() {
+  if ($('#remote').hidden) return;
+  closeRemoteView();
+  $('#chat').hidden = false;
+}
+
+function showRemote(pc, bot) {
+  if (!window.DeloistUI?.mountRemoteChat) return;
+  clearChatView();
+  hideCatalog();
+  if (teamOpen()) {
+    dropTeamAvatars();
+    $('#team').hidden = true;
+  }
+  remoteChatView?.destroy();
+  $('#remote-root').textContent = '';
+  S.remote = { pc: pc.id, bot };
+  $('#remote').hidden = false;
+  remoteChatView = window.DeloistUI.mountRemoteChat($('#remote-root'), {
+    api,
+    pc: { id: pc.id, name: pc.name, online: pc.online },
+    bot,
+    onmenu: () => $('#sidebar').classList.toggle('open'),
+  });
+  $('#sidebar').classList.remove('open');
+  remotePcsView?.update(remotePcsProps());
+  renderSidebar();
 }
 
 function showTeam() {
@@ -8923,6 +9011,7 @@ async function boot() {
     toast(tr('Сервер не отвечает: {error}', { error: err.message }), 8000);
   }
   connectEvents();
+  if (!PANE) mountRemote();
   Split.init();
   // Остальное — дело самого окна: вторая панель не обновляет программу и не показывает «Что нового» второй раз.
   if (PANE) {

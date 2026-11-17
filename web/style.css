@@ -383,10 +383,13 @@ a.ghost { text-decoration: none; }
 
 /* ------------------------------------------------------------------ чат */
 
-#chat, #team, #catalog, #workflows { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-#chat[hidden], #team[hidden], #catalog[hidden], #workflows[hidden] { display: none; }
+#chat, #team, #catalog, #remote, #workflows { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#chat[hidden], #team[hidden], #catalog[hidden], #remote[hidden], #workflows[hidden] { display: none; }
 #workflows { background: var(--k-canvas, var(--color-bg-surface)); }
 .workflows-body { flex: 1; min-height: 0; }
+.remote-root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.remote-pcs:empty { display: none; }
+.remote-pcs { flex: none; max-height: 40%; overflow-y: auto; }
 /* Catalog: the Svelte page brings its own header; this bar only carries the menu on narrow windows. */
 #catalog { background: var(--k-canvas, var(--color-bg-surface)); }
 #catalog .catalog-head { display: none; }
@@ -3286,7 +3289,7 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 
 /* ---- рамка и остров ---- */
 html, body { background: var(--color-bg-canvas); }
-#chat, #team, #catalog, #workflows, .drawer {
+#chat, #team, #catalog, #remote, #workflows, .drawer {
   --k-canvas: var(--island);
   background: var(--island);
   border: 1px solid var(--color-border-default);
@@ -3294,10 +3297,10 @@ html, body { background: var(--color-bg-canvas); }
   box-shadow: var(--arc-island-shadow);
   overflow: hidden;
 }
-#chat, #team, #catalog, #workflows { margin: 8px; }
+#chat, #team, #catalog, #remote, #workflows { margin: 8px; }
 .drawer { top: 8px; right: 8px; bottom: 8px; border-radius: 18px; }
 @media (min-width: 821px) {
-  #chat, #team, #catalog, #workflows { margin-left: 0; }
+  #chat, #team, #catalog, #remote, #workflows { margin-left: 0; }
   body.drawer-open #chat { margin-right: calc(min(430px, 40vw) + 16px); }
   .drawer { box-shadow: var(--arc-island-shadow); }
 }
@@ -3536,18 +3539,18 @@ body.split-on .split-pane:not([hidden]) {
   min-height: 0;
 }
 body.split-on #sidebar { grid-column: 1; grid-row: 1; }
-body.split-on #chat, body.split-on #team, body.split-on #catalog, body.split-on #workflows { grid-column: -2 / -1; grid-row: 1; }
+body.split-on #chat, body.split-on #team, body.split-on #catalog, body.split-on #remote, body.split-on #workflows { grid-column: -2 / -1; grid-row: 1; }
 
 body { --split-pad: 16px; }
 @media (max-width: 820px) { body { --split-pad: 24px; } }
 
 body.split-row { --split-size: clamp(320px, calc((100% - var(--split-pad)) * var(--split-ratio, 0.5)), calc(100% - var(--split-pad) - 320px)); }
 body.split-row .split-pane { justify-self: end; width: var(--split-size); margin: 8px 8px 8px 0; }
-body.split-row #chat, body.split-row #team, body.split-row #catalog, body.split-row #workflows { margin-right: calc(var(--split-size) + 16px); }
+body.split-row #chat, body.split-row #team, body.split-row #catalog, body.split-row #remote, body.split-row #workflows { margin-right: calc(var(--split-size) + 16px); }
 
 body.split-col { --split-size: clamp(240px, calc((100vh - 24px) * var(--split-ratio, 0.5)), calc(100vh - 24px - 240px)); }
 body.split-col .split-pane { align-self: end; height: var(--split-size); margin: 0 8px 8px 0; }
-body.split-col #chat, body.split-col #team, body.split-col #catalog, body.split-col #workflows { margin-bottom: calc(var(--split-size) + 16px); }
+body.split-col #chat, body.split-col #team, body.split-col #catalog, body.split-col #remote, body.split-col #workflows { margin-bottom: calc(var(--split-size) + 16px); }
 @media (max-width: 820px) { body.split-col .split-pane { margin-left: 8px; } }
 
 /* Боковая панель профиля занимает правый край окна: второй чат на это время прячется. */
@@ -3944,6 +3947,38 @@ span.tm-main { cursor: inherit; }
 .made-open { flex: none; height: 28px; padding: 0 12px; font-size: var(--k-text-xs); }
 .made-card .rt-gist { color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .made-card .rt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Бесплатный сервер Instabox: карточка над нижним меню и кружок в ряду лимитов. */
+.ibx-card-host:empty { display: none; }
+.ibx-card { position: relative; margin: 0 8px 4px; padding: 12px; border: 1px solid var(--color-border-default); border-radius: var(--k-radius-sm); background: var(--color-bg-surface-soft); display: flex; flex-direction: column; gap: 6px; }
+.ibx-head { display: flex; align-items: center; gap: 8px; padding-right: 24px; font-size: var(--text-sm); color: var(--color-text-primary); }
+.ibx-head img { width: 20px; height: 20px; border-radius: var(--k-radius-xs); }
+.ibx-card p { margin: 0; font-size: 12px; line-height: 1.35; color: var(--color-text-muted); }
+.ibx-card .ibx-btn { width: 100%; justify-content: center; margin-top: 2px; }
+.ibx-x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--color-text-muted); cursor: pointer; transition: background var(--arc-t), color var(--arc-t); }
+.ibx-x:hover { background: var(--arc-hover); color: var(--color-text-primary); }
+.ibx-x svg { width: 12px; height: 12px; }
+.usage-strip { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 6px 2px; }
+.usage-strip > .usage-rings { display: contents; }
+.usage-strip > .usage-rings[hidden] { display: none; }
+.ibx-ring-host { display: contents; }
+.ibx-ring img { width: 16px; height: 16px; border-radius: var(--k-radius-xs); }
+.ibx-circle { position: absolute; inset: 2px; border-radius: 50%; border: 2.6px solid var(--color-border-default); box-sizing: border-box; }
+.ibx-ring.ibx-off .ibx-circle { border: 1.5px dashed var(--color-text-muted); opacity: .7; }
+.ibx-ring.ibx-off:hover .ibx-circle { opacity: 1; }
+.ibx-ring[data-ibx="running"] .ibx-circle { border-color: var(--k-brand); }
+.ibx-ring[data-ibx="cooldown"] .ibx-circle, .ibx-ring[data-ibx="busy"] .ibx-circle { border-color: var(--k-text-2); }
+.ibx-ring[data-ibx="offline"] .ibx-circle { border-color: var(--k-attention); }
+.ibx-dot { position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); box-shadow: 0 0 0 2px var(--color-bg-surface); }
+.ibx-ring[data-ibx="running"] .ibx-dot { background: var(--k-brand); }
+.ibx-ring[data-ibx="cooldown"] .ibx-dot, .ibx-ring[data-ibx="busy"] .ibx-dot { background: var(--k-text-2); }
+.ibx-ring[data-ibx="offline"] .ibx-dot { background: var(--k-attention); }
+body.side-collapsed .usage-strip { flex-direction: column; align-items: center; padding: 6px 0 0; }
+body.side-collapsed .ibx-card-host { display: none; }
+@media (max-height: 760px) { .ibx-card-host { display: none; } }
+.usage-strip:not(:has(.usage-item)) { display: none; }
+.ibx-head img, .ibx-ring img { box-shadow: 0 0 0 1px var(--color-border-default); }
+.ibx-ring[data-ibx="sleeping"] .ibx-circle { border-color: var(--color-text-muted); opacity: .55; }
+.ibx-card .ibx-btn { border: 1px solid var(--color-border-default); }
 
 /* ==================================================================== Ширина панели бота
    Левый край панели тянется (--drawer-w из app.js), «Развернуть» кладёт её поверх чата до

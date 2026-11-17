@@ -840,6 +840,7 @@ pub async fn tool_defs(app: &Arc<App>) -> Vec<Value> {
             let Some(name) = tool["name"].as_str() else { continue };
             let description = crate::tools::clamp(tool["description"].as_str().unwrap_or_default(), MAX_DESCRIPTION);
             let schema = tool.get("inputSchema").cloned().unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
+            note_read_only(&tool_name(&cfg, name), tool["annotations"]["readOnlyHint"] == true);
             out.push(json!({
                 "type": "function",
                 "function": {
@@ -851,6 +852,28 @@ pub async fn tool_defs(app: &Arc<App>) -> Vec<Value> {
         }
     }
     out
+}
+
+/// Инструменты, которые сервер объявил только читающими (`annotations.readOnlyHint = true`). Нужно для
+/// решения «можно ли одобрить с другого устройства»: без объявления нельзя.
+static READ_ONLY: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+
+fn read_only_set() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    READ_ONLY.get_or_init(Default::default)
+}
+
+fn note_read_only(full: &str, read_only: bool) {
+    let mut set = read_only_set().lock().unwrap();
+    if read_only {
+        set.insert(full.to_string());
+    } else {
+        set.remove(full);
+    }
+}
+
+/// Сервер объявил инструмент только читающим (по последнему списку инструментов).
+pub fn is_read_only(full: &str) -> bool {
+    read_only_set().lock().unwrap().contains(full)
 }
 
 /// Вызвать инструмент MCP-сервера по полному имени.

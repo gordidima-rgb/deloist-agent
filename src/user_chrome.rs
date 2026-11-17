@@ -991,6 +991,8 @@ pub async fn gate_site(app: &Arc<App>, bot: &Bot, relay: &BotRelay, url: &str) -
         scope: Some(site_scope(&origin)),
         room: None,
         danger: false,
+        sensitive: false,
+        remote: crate::grants::Remote::No,
         human: None,
     };
     if crate::turn::request_confirmation(app, &bot.id, question).await {

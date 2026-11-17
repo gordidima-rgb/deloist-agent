@@ -41,6 +41,11 @@ pub fn over_limit(app: &App) -> bool {
 
 /// Запустить рутину. `unattended` значит, что человека рядом нет и решать за него нельзя.
 pub async fn run_routine(app: &Arc<App>, routine: &Routine, unattended: bool) -> Result<(), crate::turn::StartError> {
+    run_routine_as(app, routine, unattended, "routine").await
+}
+
+/// Тот же запуск, но с другой пометкой источника в журнале (например «device:iPhone», когда рутину запустили с устройства).
+pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str) -> Result<(), crate::turn::StartError> {
     let mut text = format!("[рутина] {}\n{}", routine.title, routine.prompt);
     let mut run = None;
     let mut goal_floor = String::new();
@@ -64,7 +69,7 @@ pub async fn run_routine(app: &Arc<App>, routine: &Routine, unattended: bool) ->
         }
     }
     let opts = TurnOptions {
-        source: Some("routine".into()),
+        source: Some(source.to_string()),
         depth: 0,
         unattended,
         routine: Some(RoutineRef { id: routine.id.clone(), title: routine.title.clone() }),

@@ -9,6 +9,12 @@ mod account;
 #[cfg(not(deloist_private))]
 #[path = "account_stub.rs"]
 mod account;
+#[cfg(deloist_private)]
+#[path = "../private/src/relay.rs"]
+mod relay;
+#[cfg(not(deloist_private))]
+#[path = "relay_stub.rs"]
+mod relay;
 mod agents_md;
 mod agent_client;
 mod browser;
@@ -17,6 +23,7 @@ mod catalog;
 mod changelog;
 mod capture;
 mod cloud;
+mod instabox;
 mod cdp;
 mod compact;
 mod connectors;
@@ -181,12 +188,15 @@ pub struct App {
     pub catalog: catalog::Installs,
     /// Подключения из каталога: секреты, входы OAuth, последние ошибки.
     pub connectors: connectors::Connectors,
+    /// Облако на машине Instabox: вход, создание, состояние (только из окна).
+    pub instabox: instabox::Hub,
     /// Мост в Telegram: свой бот человека и привязанный чат.
     pub telegram: telegram::Telegram,
     /// Нерешённые карточки «Подключу специалиста».
     pub offers: offers::Offers,
     /// Мост в Discord: свой бот человека и привязанная личная переписка.
     pub discord: discord::Discord,
+    pub relay: relay::Relay,
     /// Мост в Slack: своё приложение человека и привязанная личная переписка.
     pub slack: slack::Slack,
     /// Менеджер паролей: ключ сессии Bitwarden только в памяти.
@@ -266,7 +276,7 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     let data = store.data_dir().to_path_buf();
     let turns = turn::Turns::open(store.data_dir());
     let queues = queue::Queues::open(store.data_dir().to_path_buf(), turns.sender()).await;
-    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default(), workflows: workflows::Workflows::open(&data) });
+    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , instabox: instabox::Hub::default(), relay: relay::Relay::default(), slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default(), workflows: workflows::Workflows::open(&data) });
     // До первого хода: отметки задач у новой версии начинаются с этой минуты.
     extract::init(&app).await;
     scheduler::start(app.clone());
@@ -274,6 +284,11 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     update::start(app.clone());
     telegram::start(app.clone());
     discord::start(app.clone());
+    relay::start(app.clone());
+    // Режим сервера после перезагрузки или обновления: сон снова под запретом, связь с сайтом уже запущена выше без окна.
+    if app.store.settings().server_mode && system::server_mode_supported() {
+        system::sleep_lock().set(true);
+    }
     slack::start(app.clone());
     password_vault::start(app.clone());
     team_tasks::resume(&app);

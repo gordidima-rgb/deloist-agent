@@ -1905,6 +1905,200 @@ async fn needs(State(app): Shared) -> Response {
     ok(json!({ "items": items, "count": items.len(), "working": working, "waiting": waiting }))
 }
 
+/// Режим сервера (старый ноутбук как всегда включённый сервер): автозапуск без окна и запрет сна. Только человек.
+fn server_mode_json(app: &App) -> Value {
+    let enabled = app.store.settings().server_mode;
+    json!({ "supported": crate::system::server_mode_supported(), "enabled": enabled, "awake": enabled && crate::system::sleep_lock().held() })
+}
+
+async fn server_mode_get(State(app): Shared) -> Response {
+    ok(server_mode_json(&app))
+}
+
+async fn server_mode_put(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
+        return fail(StatusCode::BAD_REQUEST, "нужно enabled: true или false");
+    };
+    if enabled && !crate::system::server_mode_supported() {
+        return fail(StatusCode::BAD_REQUEST, "режим сервера сделан только для Windows");
+    }
+    // Сначала система: если Windows отказала, настройка не должна врать.
+    // Запись автозапуска остаётся, пока включён «Запускать с Windows».
+    if enabled || !crate::system::run_entry_wanted(app.store.settings().autostart, false) {
+        if let Err(message) = crate::system::set_autostart(enabled) {
+            return fail(StatusCode::INTERNAL_SERVER_ERROR, &message);
+        }
+    }
+    if let Err(e) = app.store.update_settings(&json!({ "serverMode": enabled })).await {
+        return io_fail(e);
+    }
+    crate::system::sleep_lock().set(enabled);
+    app.turns.emit(json!({ "type": "state_changed" }));
+    ok(server_mode_json(&app))
+}
+
+/// Доверенные устройства (телефон, второй ПК): список, отзыв и решение по плашке знакомства. Только человек.
+async fn devices_list(State(app): Shared) -> Response {
+    ok(app.relay.list(&app))
+}
+
+async fn devices_revoke(State(app): Shared, Path(id): Path<String>) -> Response {
+    match app.relay.revoke(&app, &id) {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err((status, message)) => fail(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message),
+    }
+}
+
+async fn devices_actions(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
+        return fail(StatusCode::BAD_REQUEST, "нужно enabled: true или false");
+    };
+    match app.relay.set_actions(&app, &id, enabled, body.get("confirm").and_then(Value::as_str)) {
+        Ok(()) => ok(json!({ "ok": true, "enabled": enabled })),
+        Err((status, message)) => fail(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message),
+    }
+}
+
+async fn devices_pair(State(app): Shared, Path(req): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(allow) = body.get("allow").and_then(Value::as_bool) else {
+        return fail(StatusCode::BAD_REQUEST, "нужно allow: true или false");
+    };
+    match app.relay.decide(&app, &req, allow, body.get("code").and_then(Value::as_str)) {
+        Ok(data) => ok(data),
+        Err((status, message)) => fail(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message),
+    }
+}
+
+/// Боты других ПК аккаунта (`/api/remote/*`). Только окно: ключ программы сюда не ходит (`guard::human_only`).
+/// Всё, что приходит с другого ПК, — данные для показа; здесь оно лишь пересылается окну как есть.
+fn remote_fail((status, code, message): (u16, String, String)) -> Response {
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
+    (status, no_store(), Json(json!({ "error": message, "code": code }))).into_response()
+}
+
+async fn remote_op(app: &Arc<App>, pc: &str, op: &str, args: Value) -> Response {
+    match app.relay.remote_call(app, pc, op, args).await {
+        Ok(data) => ok(data),
+        Err(failure) => remote_fail(failure),
+    }
+}
+
+async fn remote_pcs(State(app): Shared) -> Response {
+    ok(app.relay.remote_pcs(&app))
+}
+
+async fn remote_pair_start(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(pc) = body.get("pc").and_then(Value::as_str) else {
+        return fail(StatusCode::BAD_REQUEST, "нужен pc: id другого ПК");
+    };
+    match app.relay.remote_pair_start(&app, pc).await {
+        Ok(data) => ok(data),
+        Err(failure) => remote_fail(failure),
+    }
+}
+
+async fn remote_pair_ack(State(app): Shared, Path(req): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(code) = body.get("code").and_then(Value::as_str) else {
+        return fail(StatusCode::BAD_REQUEST, "нужен code: код с плашки другого ПК");
+    };
+    match app.relay.remote_pair_ack(&app, &req, code) {
+        Ok(data) => ok(data),
+        Err(failure) => remote_fail(failure),
+    }
+}
+
+async fn remote_forget(State(app): Shared, Path(pc): Path<String>) -> Response {
+    match app.relay.remote_forget(&app, &pc) {
+        Ok(()) => ok(json!({ "ok": true })),
+        Err(failure) => remote_fail(failure),
+    }
+}
+
+async fn remote_state(State(app): Shared, Path(pc): Path<String>) -> Response {
+    remote_op(&app, &pc, "state", json!({})).await
+}
+
+async fn remote_needs(State(app): Shared, Path(pc): Path<String>) -> Response {
+    remote_op(&app, &pc, "needs", json!({})).await
+}
+
+async fn remote_routines(State(app): Shared, Path(pc): Path<String>) -> Response {
+    remote_op(&app, &pc, "routines", json!({})).await
+}
+
+async fn remote_routine_run(State(app): Shared, Path((pc, id)): Path<(String, String)>) -> Response {
+    remote_op(&app, &pc, "routine_run", json!({ "id": id })).await
+}
+
+async fn remote_limits(State(app): Shared, Path(pc): Path<String>) -> Response {
+    remote_op(&app, &pc, "limits", json!({})).await
+}
+
+async fn remote_thread(State(app): Shared, Path((pc, bot)): Path<(String, String)>, Query(query): Query<std::collections::HashMap<String, String>>) -> Response {
+    let limit = query.get("limit").and_then(|v| v.parse::<u64>().ok()).unwrap_or(100).clamp(1, 200);
+    remote_op(&app, &pc, "thread", json!({ "bot": bot, "limit": limit })).await
+}
+
+async fn remote_send(State(app): Shared, Path((pc, bot)): Path<(String, String)>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let text = body.get("text").and_then(Value::as_str).unwrap_or_default().trim().to_string();
+    if text.is_empty() || text.chars().count() > 8_000 {
+        return fail(StatusCode::BAD_REQUEST, "text: от 1 до 8000 символов");
+    }
+    remote_op(&app, &pc, "send", json!({ "bot": bot, "text": text })).await
+}
+
+async fn remote_stop(State(app): Shared, Path((pc, bot)): Path<(String, String)>) -> Response {
+    remote_op(&app, &pc, "stop", json!({ "bot": bot })).await
+}
+
+async fn remote_approval(State(app): Shared, Path((pc, card)): Path<(String, String)>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(answer) = body.get("answer").and_then(Value::as_str).filter(|a| matches!(*a, "once" | "conversation" | "always" | "deny")) else {
+        return fail(StatusCode::BAD_REQUEST, "answer: once, conversation, always или deny");
+    };
+    remote_op(&app, &pc, "approve", json!({ "card": card, "answer": answer })).await
+}
+
+async fn remote_question(State(app): Shared, Path((pc, question)): Path<(String, String)>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let text = body.get("answer").or_else(|| body.get("text")).and_then(Value::as_str).unwrap_or_default();
+    let mut args = json!({ "question": question, "text": text });
+    if body.get("values").is_some_and(Value::is_object) {
+        args["values"] = body["values"].clone();
+    }
+    remote_op(&app, &pc, "answer", args).await
+}
+
 /// Правила «всегда здесь» (и старые разрешения сайтов у ботов) и разрешения разговоров.
 async fn permissions(State(app): Shared) -> Response {
     let mut rules: Vec<Value> = app.turns.perms.rules().into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect();
@@ -1965,10 +2159,14 @@ async fn bot_activity(State(app): Shared, Path(id): Path<String>) -> Response {
 // ---------------------------------------------------------------------------
 
 async fn put_settings(State(app): Shared, body: axum::body::Bytes) -> Response {
-    let body = match parse_body(&body) {
+    let mut body = match parse_body(&body) {
         Ok(v) => v,
         Err(r) => return r,
     };
+    // Режим сервера меняет автозапуск и сон: у него свой адрес, общей правкой настроек он не включается.
+    if let Some(map) = body.as_object_mut() {
+        map.remove("serverMode");
+    }
     if let Err(r) = check_base_url(&body, &app.store.settings().driver) {
         return r;
     }
@@ -1989,7 +2187,8 @@ async fn put_settings(State(app): Shared, body: axum::body::Bytes) -> Response {
     // Сначала система: если Windows отказала, настройка не должна врать.
     if let Some(on) = body.get("autostart").and_then(Value::as_bool) {
         if on != app.store.settings().autostart {
-            if let Err(message) = crate::system::set_autostart(on) {
+            // Запись автозапуска держит и режим сервера: выключить «Запускать с Windows» её не уберёт.
+            if let Err(message) = crate::system::set_autostart(crate::system::run_entry_wanted(on, app.store.settings().server_mode)) {
                 return fail(StatusCode::INTERNAL_SERVER_ERROR, &message);
             }
         }
@@ -3051,6 +3250,112 @@ async fn secrets_reset_unavailable(State(app): Shared) -> Response {
     ok(json!({ "moved": main || connectors }))
 }
 
+// --- Облако на бесплатной машине Instabox (только из окна: guard::human_only) ---------------
+// Ключ Instabox, закрытый ключ шлюза и CREW_SECRETS_KEY лежат в секретах и в ответы не попадают.
+
+fn instabox_ctx(app: &Arc<App>) -> crate::instabox::Ctx {
+    crate::instabox::Ctx::new(Arc::new(crate::instabox::SecretsStore(app.clone())))
+}
+
+fn instabox_fail(f: crate::instabox::Fail) -> Response {
+    let (status, code) = match (f.status, f.code.as_str()) {
+        (401, _) => (StatusCode::CONFLICT, "signin_required"),
+        (0, _) | (500.., _) => (StatusCode::BAD_GATEWAY, "unreachable"),
+        (s, _) => (StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY), "failed"),
+    };
+    let code = if f.code == "local" || f.code == "unreachable" { code } else { f.code.as_str() };
+    (status, no_store(), Json(json!({ "error": f.text(), "code": code, "retryAfterSeconds": f.retry_after }))).into_response()
+}
+
+fn instabox_job_fail(f: crate::instabox::JobFail) -> Response {
+    fail(StatusCode::from_u16(f.status).unwrap_or(StatusCode::CONFLICT), f.message)
+}
+
+async fn instabox_signin_start(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    match app.instabox.signin_start(instabox_ctx(&app)).await {
+        Ok(view) => {
+            if body.get("open").and_then(Value::as_bool).unwrap_or(true) {
+                if let Some(link) = view.get("verificationUriComplete").and_then(Value::as_str) {
+                    crate::desktop::open_in_browser(link);
+                }
+            }
+            ok(view)
+        }
+        Err(f) => instabox_fail(f),
+    }
+}
+
+async fn instabox_signin_status(State(app): Shared) -> Response {
+    ok(app.instabox.signin_status(&instabox_ctx(&app)))
+}
+
+async fn instabox_status(State(app): Shared) -> Response {
+    ok(app.instabox.status(&instabox_ctx(&app)).await)
+}
+
+async fn instabox_provision(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    match app.instabox.provision(instabox_ctx(&app), body.get("name").and_then(Value::as_str), body.get("tag").and_then(Value::as_str)) {
+        Ok(v) => (StatusCode::ACCEPTED, no_store(), Json(v)).into_response(),
+        Err(f) => instabox_job_fail(f),
+    }
+}
+
+async fn instabox_open(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    match app.instabox.open(instabox_ctx(&app)).await {
+        Ok(mut v) => {
+            let should_open = body.get("open").and_then(Value::as_bool).unwrap_or(true);
+            if should_open {
+                if let Some(url) = v.get("url").and_then(Value::as_str) {
+                    crate::desktop::open_in_browser(url);
+                }
+            }
+            // Ссылка одноразовая, живёт 30 с и нужна только окну, если оно открывает её само.
+            if should_open && v.get("url").is_some() {
+                v["opened"] = json!(true);
+            }
+            ok(v)
+        }
+        Err(f) => instabox_fail(f),
+    }
+}
+
+async fn instabox_update(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    match app.instabox.update(instabox_ctx(&app), body.get("tag").and_then(Value::as_str)) {
+        Ok(v) => (StatusCode::ACCEPTED, no_store(), Json(v)).into_response(),
+        Err(f) => instabox_job_fail(f),
+    }
+}
+
+async fn instabox_delete(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    if body.get("confirm").and_then(Value::as_bool) != Some(true) {
+        return fail(StatusCode::BAD_REQUEST, "удаление нужно подтвердить: confirm=true");
+    }
+    match app.instabox.delete(instabox_ctx(&app), body.get("forgetAccount").and_then(Value::as_bool).unwrap_or(false)) {
+        Ok(v) => (StatusCode::ACCEPTED, no_store(), Json(v)).into_response(),
+        Err(f) => instabox_job_fail(f),
+    }
+}
+
 async fn connector_remove(State(app): Shared, Path(id): Path<String>) -> Response {
     connector_result(crate::connectors::remove(&app, &id).await)
 }
@@ -3599,6 +3904,25 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/approvals/{id}", post(approval))
         .route("/api/questions/{id}", post(question).merge(delete(dismiss_question)))
         .route("/api/needs", get(needs))
+        .route("/api/server-mode", get(server_mode_get).put(server_mode_put))
+        .route("/api/devices", get(devices_list))
+        .route("/api/devices/{id}", delete(devices_revoke))
+        .route("/api/devices/pair/{req}", post(devices_pair))
+        .route("/api/devices/{id}/actions", post(devices_actions))
+        .route("/api/remote/pcs", get(remote_pcs))
+        .route("/api/remote/pair/start", post(remote_pair_start))
+        .route("/api/remote/pair/{req}/ack", post(remote_pair_ack))
+        .route("/api/remote/{pc}", delete(remote_forget))
+        .route("/api/remote/{pc}/state", get(remote_state))
+        .route("/api/remote/{pc}/needs", get(remote_needs))
+        .route("/api/remote/{pc}/routines", get(remote_routines))
+        .route("/api/remote/{pc}/routines/{id}/run", post(remote_routine_run))
+        .route("/api/remote/{pc}/limits", get(remote_limits))
+        .route("/api/remote/{pc}/bots/{bot}/thread", get(remote_thread))
+        .route("/api/remote/{pc}/bots/{bot}/messages", post(remote_send))
+        .route("/api/remote/{pc}/bots/{bot}/stop", post(remote_stop))
+        .route("/api/remote/{pc}/approvals/{card}", post(remote_approval))
+        .route("/api/remote/{pc}/questions/{question}", post(remote_question))
         .route("/api/permissions", get(permissions))
         .route("/api/permissions/rules/{id}", delete(remove_rule))
         .route("/api/permissions/grants", get(list_grants))
@@ -3668,6 +3992,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/catalog/{id}/connect", post(catalog_connect))
         .route("/api/catalog/{id}/update", post(catalog_update))
         .route("/api/secrets/reset-unavailable", post(secrets_reset_unavailable))
+        .route("/api/cloud/instabox/signin/start", post(instabox_signin_start))
+        .route("/api/cloud/instabox/signin/status", get(instabox_signin_status))
+        .route("/api/cloud/instabox/status", get(instabox_status))
+        .route("/api/cloud/instabox/provision", post(instabox_provision))
+        .route("/api/cloud/instabox/open", post(instabox_open))
+        .route("/api/cloud/instabox/update", post(instabox_update))
+        .route("/api/cloud/instabox/delete", post(instabox_delete))
         .route("/api/connectors", get(connectors_list))
         .route("/api/connectors/install", post(connector_install))
         .route("/api/connectors/{id}", delete(connector_remove))

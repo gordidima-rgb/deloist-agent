@@ -1437,6 +1437,11 @@ impl Providers {
         let mut out = Vec::new();
         // Gemini (Antigravity): квота Google по каждому аккаунту с входом Google. Ключ API квоты не даёт.
         let accounts = self.ag_accounts(app);
+        // Адреса значков берём из реестра (он на диске и в памяти, 6 часов): телефон рисует их через <img>.
+        let registry = tokio::time::timeout(Duration::from_secs(3), self.registry(app)).await.ok().and_then(Result::ok);
+        let icon_url = |id: &str| -> Value {
+            registry.as_ref().and_then(|r| r["agents"].as_array()).and_then(|a| a.iter().find(|a| a["id"] == id)).map(|a| a["icon"].clone()).unwrap_or(Value::Null)
+        };
         let several = accounts.iter().filter(|(_, a)| a["connected"] == true).count() > 1;
         for (index, (aid, account)) in accounts.iter().enumerate() {
             if account["connected"] != true {
@@ -1448,7 +1453,7 @@ impl Providers {
                 Some(email) => format!("Gemini · {email}"),
                 None => "Gemini".to_string(),
             };
-            out.push(json!({ "id": id, "name": name, "limits": limits, "limitsStatus": status, "at": at, "icon": true }));
+            out.push(json!({ "id": id, "name": name, "limits": limits, "limitsStatus": status, "at": at, "icon": true, "iconUrl": icon_url(&id) }));
         }
         for (id, entry) in &saved {
             if id == antigravity::ID {
@@ -1481,7 +1486,7 @@ impl Providers {
             let name = FEATURED.iter().find(|(f, _)| *f == id.as_str()).map(|(_, n)| n.to_string())
                 .or_else(|| entry["name"].as_str().map(str::to_string))
                 .unwrap_or_else(|| id.clone());
-            out.push(json!({ "id": id, "name": name, "limits": limits, "at": entry["limitsAt"], "icon": true }));
+            out.push(json!({ "id": id, "name": name, "limits": limits, "at": entry["limitsAt"], "icon": true, "iconUrl": icon_url(id) }));
         }
         json!({ "providers": out })
     }

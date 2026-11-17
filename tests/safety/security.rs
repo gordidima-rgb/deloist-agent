@@ -2442,6 +2442,8 @@ async fn cloud_mode_closes_every_route_that_starts_a_process_or_touches_the_desk
         ("POST", "/api/bots/x/pet-place"),
         ("GET", "/api/import/hermes"),
         ("GET", "/api/know-me/sources"),
+        ("GET", "/api/cloud/instabox/status"),
+        ("POST", "/api/cloud/instabox/open"),
     ];
     for (method, path) in closed {
         let body = if method == "GET" || method == "DELETE" { None } else { Some(json!({})) };
@@ -3649,4 +3651,226 @@ async fn a_dropped_approve_request_does_not_leave_the_import_stuck() {
     }
     assert_eq!(status["status"], "approved", "заявка застряла: {status}");
     assert_eq!(crew.ok("GET", "/api/state", None).await["bots"].as_array().unwrap().len(), before + 1, "бот создан не один раз");
+}
+
+/// Доверенные устройства (телефон, второй ПК): список, отзыв и решение по плашке знакомства — только окно.
+/// Ключ программы из `runtime.json`, который может прочитать скрипт бота, сюда не ходит.
+#[tokio::test]
+async fn device_routes_are_closed_to_the_program_key() {
+    let crew = Crew::start("device-routes-human-only").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let call = |method: reqwest::Method, path: &'static str, body: Option<Value>| {
+        let (client, base, token) = (crew.client.clone(), crew.base.clone(), token.clone());
+        async move {
+            let mut request = client.request(method, format!("{base}{path}")).bearer_auth(token);
+            if let Some(body) = body {
+                request = request.json(&body);
+            }
+            request.send().await.unwrap().status().as_u16()
+        }
+    };
+    for (status, what) in [
+        (call(reqwest::Method::GET, "/api/devices", None).await, "список"),
+        (call(reqwest::Method::DELETE, "/api/devices/0123456789abcdef0123456789abcdef", None).await, "отзыв"),
+        (call(reqwest::Method::POST, "/api/devices/pair/req1", Some(json!({ "allow": true }))).await, "пропуск"),
+        (call(reqwest::Method::POST, "/api/devices/pair/req1", Some(json!({ "allow": false }))).await, "отказ"),
+        (call(reqwest::Method::POST, "/api/devices/0123456789abcdef0123456789abcdef/actions", Some(json!({ "enabled": true, "confirm": "x" }))).await, "переключатель действий"),
+    ] {
+        assert_eq!(status, 403, "ключ программы дошёл до адреса устройств: {what}");
+    }
+    // Окну человека адреса доступны (без связи с сервером список пуст).
+    let list = crew.ok("GET", "/api/devices", None).await;
+    assert_eq!(list["devices"], json!([]), "{list}");
+}
+
+/// Режим сервера включает автозапуск и запрет сна: ключ программы из `runtime.json` не может ни прочитать его,
+/// ни включить, ни обойти правкой общих настроек (`serverMode`, `autostart`). Окно включает и выключает.
+#[tokio::test]
+async fn server_mode_and_autostart_are_closed_to_the_program_key() {
+    let crew = Crew::start("server-mode-human-only").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let call = |method: reqwest::Method, path: &'static str, body: Value| {
+        let (client, base, token) = (crew.client.clone(), crew.base.clone(), token.clone());
+        async move { client.request(method, format!("{base}{path}")).bearer_auth(token).json(&body).send().await.unwrap().status().as_u16() }
+    };
+    for (status, what) in [
+        (call(reqwest::Method::GET, "/api/server-mode", json!({})).await, "чтение"),
+        (call(reqwest::Method::PUT, "/api/server-mode", json!({ "enabled": true })).await, "включение"),
+        (call(reqwest::Method::PUT, "/api/settings", json!({ "serverMode": true })).await, "serverMode общей правкой"),
+        (call(reqwest::Method::PUT, "/api/settings", json!({ "autostart": true })).await, "автозапуск общей правкой"),
+        (call(reqwest::Method::PATCH, "/api/settings", json!({ "autostart": true })).await, "автозапуск PATCH"),
+    ] {
+        assert_eq!(status, 403, "ключ программы дошёл до режима сервера: {what}");
+    }
+    let state = crew.ok("GET", "/api/server-mode", None).await;
+    assert_eq!(state["enabled"], false, "{state}");
+    // Общая правка настроек из окна режим сервера не включает: у него свой адрес.
+    crew.ok("PUT", "/api/settings", Some(json!({ "serverMode": true }))).await;
+    assert_eq!(crew.ok("GET", "/api/server-mode", None).await["enabled"], false);
+    if cfg!(windows) {
+        let on = crew.ok("PUT", "/api/server-mode", Some(json!({ "enabled": true }))).await;
+        assert_eq!((on["enabled"].clone(), on["awake"].clone()), (json!(true), json!(true)), "{on}");
+        // Обычный автозапуск выключен, но режим сервера держит запись: отключение первого не гасит второй.
+        let off = crew.ok("PUT", "/api/server-mode", Some(json!({ "enabled": false }))).await;
+        assert_eq!((off["enabled"].clone(), off["awake"].clone()), (json!(false), json!(false)), "{off}");
+    }
+}
+
+/// Боты других ПК аккаунта (`/api/remote/*`): знакомство, чтение, сообщения и одобрения на чужом ПК — только окно.
+/// Ключ программы из `runtime.json` сюда не ходит, а окну без связи отвечает «нет связи», а не пустотой.
+#[tokio::test]
+async fn remote_routes_are_closed_to_the_program_key() {
+    let crew = Crew::start("remote-routes-human-only").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let pc = "0123456789abcdef0123456789abcdef";
+    let routes: Vec<(reqwest::Method, String, Option<Value>)> = vec![
+        (reqwest::Method::GET, "/api/remote/pcs".into(), None),
+        (reqwest::Method::POST, "/api/remote/pair/start".into(), Some(json!({ "pc": pc }))),
+        (reqwest::Method::POST, "/api/remote/pair/req1/ack".into(), Some(json!({ "code": "123456" }))),
+        (reqwest::Method::DELETE, format!("/api/remote/{pc}"), None),
+        (reqwest::Method::GET, format!("/api/remote/{pc}/state"), None),
+        (reqwest::Method::GET, format!("/api/remote/{pc}/needs"), None),
+        (reqwest::Method::GET, format!("/api/remote/{pc}/routines"), None),
+        (reqwest::Method::POST, format!("/api/remote/{pc}/routines/r1/run"), Some(json!({}))),
+        (reqwest::Method::GET, format!("/api/remote/{pc}/limits"), None),
+        (reqwest::Method::GET, format!("/api/remote/{pc}/bots/b1/thread"), None),
+        (reqwest::Method::POST, format!("/api/remote/{pc}/bots/b1/messages"), Some(json!({ "text": "привет" }))),
+        (reqwest::Method::POST, format!("/api/remote/{pc}/bots/b1/stop"), Some(json!({}))),
+        (reqwest::Method::POST, format!("/api/remote/{pc}/approvals/ap1"), Some(json!({ "answer": "once" }))),
+        (reqwest::Method::POST, format!("/api/remote/{pc}/questions/q1"), Some(json!({ "answer": "да" }))),
+    ];
+    for (method, path, body) in &routes {
+        let mut request = crew.client.request(method.clone(), format!("{}{path}", crew.base)).bearer_auth(&token);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        assert_eq!(request.send().await.unwrap().status().as_u16(), 403, "ключ программы дошёл до {method} {path}");
+    }
+    // Окну человека адреса доступны: без подключённых ПК список пуст, а операция над чужим ПК — «не подключён».
+    let list = crew.ok("GET", "/api/remote/pcs", None).await;
+    assert_eq!(list["pcs"], json!([]), "{list}");
+    let (status, body) = crew.send("GET", &format!("/api/remote/{pc}/state"), None).await;
+    assert!(status == 404 || status == 503, "{status} {body}");
+}
+
+/// Плашка знакомства (имя, код, геометка устройства) и события чужого ПК идут только окну человека:
+/// ключ программы в потоке `/api/events` их не видит. Настоящее реле в публичной сборке заглушено,
+/// поэтому проверяем сам список `voice::window_only`, по которому поток отсеивает события.
+#[test]
+fn the_event_stream_keeps_device_pairing_and_remote_events_for_the_window() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/voice.rs")).unwrap();
+    let start = source.find("pub fn window_only").expect("window_only");
+    let body = &source[start..source[start..].find("\n}\n").map(|i| start + i).unwrap()];
+    for kind in ["device_pair_request", "devices_changed", "remote_event"] {
+        assert!(body.contains(&format!("\"{kind}\"")), "{kind} не в списке событий только для окна");
+    }
+    let server = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/server.rs")).unwrap();
+    assert!(server.contains("!window && crate::voice::window_only(&event)"), "поток событий перестал отсеивать события окна");
+}
+
+// --- Облако на Instabox: только человек из окна ---------------------------------------------
+
+/// Поддельный Instabox: вход одобряется сразу. Ключ в ответе — тот, что не должен нигде всплыть.
+async fn fake_instabox() -> String {
+    use axum::routing::post as post_route;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let link = base.clone();
+    let app = Router::new()
+        .route(
+            "/v1/auth/agent",
+            post_route(move || {
+                let link = link.clone();
+                async move {
+                    axum::Json(json!({ "claimToken": "ibg_claimclaimclaimclaim", "userCode": "ABCD-2345", "verificationUri": format!("{link}/claim"), "verificationUriComplete": format!("{link}/claim?code=ABCD-2345"), "interval": 1, "expiresIn": 600 }))
+                }
+            }),
+        )
+        .route("/v1/auth/agent/token", post_route(|| async { axum::Json(json!({ "key": "ibk_abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrs", "apiKey": {}, "userId": 1, "login": "tester" })) }));
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    base
+}
+
+const INSTABOX_ROUTES: [(&str, &str); 8] = [
+    ("POST", "/api/cloud/instabox/signin/start"),
+    ("GET", "/api/cloud/instabox/signin/status"),
+    ("GET", "/api/cloud/instabox/status"),
+    ("POST", "/api/cloud/instabox/provision"),
+    ("POST", "/api/cloud/instabox/open"),
+    ("POST", "/api/cloud/instabox/update"),
+    ("POST", "/api/cloud/instabox/delete"),
+    ("GET", "/api/cloud/instabox/status/"),
+];
+
+#[tokio::test]
+async fn the_program_key_cannot_touch_the_instabox_cloud() {
+    let base = fake_instabox().await;
+    let crew = Crew::start_with_env("sec-instabox-key", &[("DELOIST_INSTABOX_BASE_URL", base.as_str())]).await;
+    // Человек входит в окне: ключ Instabox ложится в секреты.
+    let started = crew.ok("POST", "/api/cloud/instabox/signin/start", Some(json!({ "open": false }))).await;
+    assert_eq!(started["userCode"], "ABCD-2345");
+    let mut status = Value::Null;
+    for _ in 0..40 {
+        status = crew.ok("GET", "/api/cloud/instabox/signin/status", None).await;
+        if status["phase"] == "approved" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert_eq!(status["phase"], "approved", "{status}");
+    let state = crew.ok("GET", "/api/cloud/instabox/status", None).await;
+    assert_eq!(state["signedIn"], json!(true));
+    for text in [started.to_string(), status.to_string(), state.to_string()] {
+        assert!(!text.contains("ibk_") && !text.contains("ibg_"), "секрет в ответе окну: {text}");
+    }
+    // Ключ программы (скрипт бота) не может ни читать, ни действовать, и ничего не узнаёт о ключе.
+    for (method, path) in INSTABOX_ROUTES {
+        let method = reqwest::Method::from_bytes(method.as_bytes()).unwrap();
+        let body = (method != reqwest::Method::GET).then(|| json!({ "confirm": true }));
+        let (code, answer) = agent_call(&crew, method, path, body).await;
+        assert_eq!(code, 403, "ключ программы дошёл до {path}");
+        assert!(!answer.to_string().contains("ibk_"));
+    }
+    // Ни в журнале, ни в файлах данных открытого ключа нет (на Windows — DPAPI, на Linux — своё шифрование).
+    let mut files = vec![crew.data_dir.clone()];
+    while let Some(dir) = files.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                assert!(!bytes.windows(4).any(|w| w == b"ibk_"), "ключ Instabox лежит открытым в {}", path.display());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_instabox_cloud_needs_a_window_and_a_confirmed_delete() {
+    let crew = Crew::start("sec-instabox-window").await;
+    // Не вошёл: действия отвечают понятной ошибкой, а не падают.
+    let (code, answer) = crew.send("POST", "/api/cloud/instabox/provision", Some(json!({}))).await;
+    assert_eq!(code, 409, "{answer}");
+    let (code, _) = crew.send("POST", "/api/cloud/instabox/provision", Some(json!({ "name": "a;b" }))).await;
+    assert_eq!(code, 400, "имя машины проверяется по белому списку");
+    let (code, _) = crew.send("POST", "/api/cloud/instabox/update", Some(json!({ "tag": "$(id)" }))).await;
+    assert_eq!(code, 400, "тег образа проверяется по белому списку");
+    let (code, _) = crew.send("POST", "/api/cloud/instabox/delete", Some(json!({}))).await;
+    assert_eq!(code, 400, "удаление без confirm не принимается");
+    let (code, _) = crew.send("POST", "/api/cloud/instabox/open", None).await;
+    assert_eq!(code, 409, "облака ещё нет");
+}
+
+/// Облачный контейнер не управляет облаком: даже с настоящей сессией шлюза все адреса закрыты.
+#[tokio::test]
+async fn instabox_routes_are_closed_inside_the_cloud_even_with_a_session() {
+    let cloud = CloudCrew::start("cloud-instabox-closed").await;
+    for (method, path) in INSTABOX_ROUTES {
+        let body = (method != "GET").then(|| json!({ "confirm": true }));
+        let (code, _) = cloud.crew.send(method, path, body).await;
+        assert_eq!(code, 403, "{method} {path} открыт в облаке");
+    }
 }
