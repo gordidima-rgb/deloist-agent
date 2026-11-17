@@ -168,11 +168,11 @@
     </div>
   {:else if flat}
     <p class="quiet">{tr('Найдено: {count}', { count: shown.length })}</p>
-    <ul class="k-lrows">
+    <div class="grid">
       {#each shown.slice(0, limit) as item (item.id)}
         <CatalogCard {item} onopen={(id) => (openId = id)} />
       {/each}
-    </ul>
+    </div>
     {#if shown.length > limit}
       <div class="more"><button type="button" class="k-btn" onclick={() => (limit += PAGE)}>{tr('Показать ещё')}</button></div>
     {/if}
@@ -187,11 +187,11 @@
             </button>
           {/if}
         </div>
-        <ul class="k-lrows">
+        <div class="grid">
           {#each section.items.slice(0, SECTION) as item (item.id)}
             <CatalogCard {item} onopen={(id) => (openId = id)} />
           {/each}
-        </ul>
+        </div>
       </section>
     {/each}
   {/if}
@@ -265,6 +265,11 @@
     margin: 0;
     font: 800 var(--k-text-lg, 18px) / 1.2 var(--k-font-display, inherit);
   }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--k-space-3, 12px);
+  }
   .more {
     display: flex;
     justify-content: center;
@@ -280,7 +285,7 @@
     align-items: center;
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-12, 48px) var(--k-space-4, 16px);
-    border: 1px dashed var(--k-line-strong);
+    border: 1px dashed var(--k-line-strong, #ccc);
     border-radius: var(--k-radius-lg, 26px);
     color: var(--k-text-2, inherit);
     text-align: center;
