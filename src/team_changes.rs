@@ -328,6 +328,9 @@ async fn apply_bot_change(app: &Arc<App>, c: &BotChange) -> Result<String, Strin
     let room = match &c.remove_from {
         Some(r) => {
             let room = app.store.room(&r.id).ok_or_else(|| format!("команды «{}» больше нет", r.name))?;
+            if target.orchestrator {
+                return Err(format!("«{}» ведёт команду «{}»: оркестратора из команды не убирают", target.name, room.name));
+            }
             if !room.bot_ids.contains(&c.target_id) || !room.bot_ids.contains(&c.host_id) {
                 return Err(format!("«{}» уже не состоит в команде «{}» вместе с «{}»", target.name, room.name, c.host_name));
             }

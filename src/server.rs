@@ -1054,6 +1054,12 @@ pub async fn drop_bot(app: &Arc<App>, id: &str) -> std::io::Result<bool> {
 }
 
 async fn remove_bot(State(app): Shared, Path(id): Path<String>) -> Response {
+    // Оркестратор держит свою команду: пока команда жива, его не убрать (сначала удалить команду или перестроить её).
+    if app.store.bot(&id).is_some_and(|b| b.orchestrator) {
+        if let Some(room) = app.store.rooms().into_iter().find(|r| r.bot_ids.contains(&id)) {
+            return fail(StatusCode::CONFLICT, &format!("Оркестратор ведёт команду «{}»: сначала удали команду", room.name));
+        }
+    }
     match drop_bot(&app, &id).await {
         Ok(true) => ok(json!({ "ok": true })),
         Ok(false) => fail(StatusCode::NOT_FOUND, "бот не найден"),
@@ -2895,6 +2901,15 @@ async fn add_room(State(app): Shared, body: axum::body::Bytes) -> Response {
     if let Err(r) = check_color(&body) {
         return r;
     }
+    if body.get("withOrchestrator").is_some_and(|v| v.as_bool() == Some(true)) {
+        return match app.store.add_orchestrator_room(&body).await {
+            Ok((room, bot)) => {
+                app.turns.emit(json!({ "type": "state_changed" }));
+                created(json!({ "room": room, "bot": bot }))
+            }
+            Err(e) => io_fail(e),
+        };
+    }
     match app.store.add_room(&body).await {
         Ok(room) => {
             // Окно и док узнают о новой команде сразу, а не после перезагрузки.
@@ -2956,6 +2971,12 @@ async fn patch_room(State(app): Shared, Path(id): Path<String>, body: axum::body
             Err(message) => return fail(StatusCode::BAD_REQUEST, &message),
         }
     }
+    // Оркестратора из его команды не вынимаем: без него «Перестроить команду» некому вести.
+    if let (Some(orch), Some(ids)) = (app.store.room_orchestrator(&id), body.get("botIds").and_then(Value::as_array)) {
+        if !ids.iter().any(|v| v.as_str() == Some(orch.id.as_str())) {
+            return fail(StatusCode::CONFLICT, "Оркестратор ведёт эту команду: его нельзя убрать из состава");
+        }
+    }
     let before = app.store.room(&id).map(|r| r.bot_ids).unwrap_or_default();
     match app.store.update_room(&id, &body).await {
         Ok(Some(room)) => {
@@ -2992,6 +3013,19 @@ async fn remove_room(State(app): Shared, Path(id): Path<String>) -> Response {
             ok(json!({ "ok": true }))
         }
         Ok(false) => fail(StatusCode::NOT_FOUND, "команда не найдена"),
+        Err(e) => io_fail(e),
+    }
+}
+
+/// «Перестроить команду»: расспрос оркестратора заново. Решает человек в окне (`guard::human_only`).
+async fn rebuild_room(State(app): Shared, Path(id): Path<String>) -> Response {
+    let _ = crate::rooms::stop(&app, &id);
+    match app.store.rebuild_room(&id).await {
+        Ok(Some((room, bot))) => {
+            app.turns.emit(json!({ "type": "state_changed" }));
+            ok(json!({ "room": room, "bot": bot }))
+        }
+        Ok(None) => fail(StatusCode::NOT_FOUND, "команда не найдена"),
         Err(e) => io_fail(e),
     }
 }
@@ -4006,6 +4040,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/bots/{id}/attach", post(attach).layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         .route("/api/rooms/{id}/attach", post(room_attach).layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         .route("/api/rooms/{id}/stop", post(room_stop))
+        .route("/api/rooms/{id}/rebuild", post(rebuild_room))
         .route("/api/rooms/{id}/reassign", post(room_reassign))
         .route("/api/mcp", post(add_mcp))
         .route("/api/mcp/{id}", axum::routing::patch(patch_mcp).delete(remove_mcp))

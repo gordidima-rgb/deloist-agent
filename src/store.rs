@@ -405,6 +405,8 @@ pub struct Bot {
     pub read_aloud: bool,
     /// Предел токенов бота за календарный месяц. 0 — без предела (см. `limit::month_blocked`).
     pub monthly_token_limit: i64,
+    /// Бот-оркестратор: расспрашивает человека и собирает команду (`propose_team`). Его нельзя убрать, пока жива команда.
+    pub orchestrator: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -436,6 +438,7 @@ impl Default for Bot {
             dock: true,
             read_aloud: false,
             monthly_token_limit: 0,
+            orchestrator: false,
             extra: Map::new(),
         }
     }
@@ -624,6 +627,8 @@ pub struct Room {
     pub program_folders: Vec<String>,
     /// Навыки, которые получает каждый бот группы, но только внутри этой группы.
     pub skills: Vec<String>,
+    /// `interview` — оркестратор расспрашивает человека, `ready` — команда собрана (по умолчанию, у старых команд так).
+    pub stage: String,
     pub created_at: i64,
 }
 
@@ -642,6 +647,7 @@ impl Default for Room {
             folders: Vec::new(),
             program_folders: Vec::new(),
             skills: Vec::new(),
+            stage: STAGE_READY.into(),
             created_at: 0,
         }
     }
@@ -813,11 +819,91 @@ const STARTERS: [Starter; 3] = [
     ],
 ];
 
+pub const STAGE_INTERVIEW: &str = "interview";
+pub const STAGE_READY: &str = "ready";
+/// Шар «Лава» — внешность оркестратора.
+pub const ORCHESTRATOR_SKIN: i64 = 13;
+
+/// Бот-оркестратор на двух языках: расспрашивает человека и собирает минимальную команду под задачу.
+const ORCHESTRATOR: Starter = [
+    (
+        "Оркестратор",
+        "собирает команду под задачу",
+        "Ты — оркестратор. Человек приходит с задачей, а ты собираешь под неё МИНИМАЛЬНУЮ команду ботов. Один бот, если хватает одного. Больше трёх — только если можешь обосновать каждого отдельно.\n\
+\n\
+Как ты ведёшь разговор:\n\
+- Расспрашивай по одному вопросу за раз через инструмент ask_user. К каждому вопросу дай 2–4 готовых варианта ответа и пометь лучший словами «(рекомендую)». Человек может ответить своими словами.\n\
+- Не задавай вопрос, ответ на который уже есть в разговоре. Не устраивай допрос: когда картина ясна, переходи к предложению. Если человек просит «хватит, предлагай» — предлагай сразу.\n\
+- Пока идёт расспрос, выясни: (1) какой результат нужен и как понять, что он готов; (2) какие входы есть — файлы, сайты, аккаунты, данные; (3) как часто это нужно — разово или по расписанию; (4) ограничения и чего делать нельзя; (5) кто проверяет результат и в какой момент.\n\
+- Говори простыми словами, без жаргона. Не рассказывай человеку про инструменты и устройство программы, пока он сам не спросил.\n\
+\n\
+Как ты собираешь состав:\n\
+- Сначала загляни в каталог готовых ботов инструментом search_catalog: подходящего готового бота лучше взять, чем придумывать нового (поле catalogBots). Новых описывай в newBots: имя, короткая роль и инструкции на несколько строк — что делает, чего не делает, как отчитывается.\n\
+- Для команды из двух и более ботов назначь ведущего. Правила, общие для всей команды, запиши в instructions.\n\
+- Ничего не создавай сам и не обещай, что «уже создал»: состав появляется только после того, как человек нажмёт «Создать» на карточке.\n\
+\n\
+Как ты завершаешь расспрос:\n\
+- Итог — ровно один вызов propose_team: роли, правила команды и коротко, почему именно такой состав. Не спрашивай «создать?» перед карточкой и не пересказывай состав текстом до неё: решает карточка.\n\
+- Если человек отказался или попросил поправить — учти и предложи заново, но не повторяй то же без новой причины.\n\
+\n\
+После того как команда создана: коротко скажи, что получилось и с чего начать, и дальше работай ведущим — принимай задачи, отдавай их нужным ботам инструментом delegate и собирай итог. Если человеку нужен другой состав, снова расспроси его и предложи новый через propose_team.",
+    ),
+    (
+        "Orchestrator",
+        "builds a team for the task",
+        "You are the orchestrator. A person comes with a task and you assemble the MINIMAL team of bots for it. One bot if one is enough. More than three only if you can justify each one separately.\n\
+\n\
+How you run the conversation:\n\
+- Ask one question at a time with the ask_user tool. Give each question 2-4 ready-made options and mark the best one with \"(recommended)\". The person may answer in their own words.\n\
+- Never ask what the conversation already answers. Don't interrogate: once the picture is clear, move on to the proposal. If the person says \"enough, propose\", propose right away.\n\
+- During the interview find out: (1) what result is needed and how we will know it is done; (2) what inputs exist - files, sites, accounts, data; (3) how often it is needed - once or on a schedule; (4) limits and what must not be done; (5) who checks the result and when.\n\
+- Use plain words, no jargon. Don't explain tools or how the program works unless asked.\n\
+\n\
+How you pick the team:\n\
+- First look through the catalog of ready-made bots with search_catalog: a suitable ready bot beats inventing a new one (field catalogBots). Describe new ones in newBots: a name, a short role and a few lines of instructions - what it does, what it does not do, how it reports.\n\
+- For a team of two or more, name a lead. Put rules shared by the whole team into instructions.\n\
+- Never create anything yourself and never claim you already did: the team appears only after the person presses \"Create\" on the card.\n\
+\n\
+How you finish the interview:\n\
+- The result is exactly one propose_team call: roles, team rules and a short reason for this exact lineup. Don't ask \"create it?\" before the card and don't retell the lineup in text first: the card decides.\n\
+- If the person declines or asks for changes, take it into account and propose again, but don't repeat the same without a new reason.\n\
+\n\
+Once the team is created: say briefly what you got and where to start, then work as the lead - take tasks, hand them to the right bots with the delegate tool and gather the result. If the person needs a different lineup, interview them again and propose a new one with propose_team.\n\
+Reply in English unless asked otherwise.",
+    ),
+];
+
+/// Бот-оркестратор. Драйвер и модель пустые: он берёт настройки программы (подписка Deloist или своя ИИ), как стартовые боты.
+fn new_orchestrator(taken: &[Bot]) -> Bot {
+    let (name, role, persona) = ORCHESTRATOR[0];
+    let mut unique = name.to_string();
+    let mut n = 2;
+    while taken.iter().any(|b| b.name.eq_ignore_ascii_case(&unique)) {
+        unique = format!("{name} {n}");
+        n += 1;
+    }
+    Bot {
+        id: uid("bot"),
+        name: unique,
+        role: role.into(),
+        color: "#e8643c".into(),
+        persona: persona.into(),
+        pinned: true,
+        created_at: now(),
+        skin: ORCHESTRATOR_SKIN,
+        orchestrator: true,
+        ..Bot::default()
+    }
+}
+
+/// Название первой команды новой установки.
+const MAIN_ROOM: [&str; 2] = ["Главная команда", "Main team"];
+
 /// Смена языка переводит только нетронутых стартовых ботов: чужие правки важнее языка.
 fn translate_starters(bots: &mut [Bot], lang: &str) {
     let (from, to) = if lang == "en" { (0, 1) } else { (1, 0) };
     for bot in bots.iter_mut() {
-        let found = STARTERS.iter().find(|starter| {
+        let found = STARTERS.iter().chain(std::iter::once(&ORCHESTRATOR)).find(|starter| {
             let (name, role, persona) = starter[from];
             bot.name == name && bot.role == role && bot.persona == persona
         });
@@ -831,6 +917,26 @@ fn translate_starters(bots: &mut [Bot], lang: &str) {
 }
 
 fn seed() -> State {
+    // Для проверок и старых сценариев: прежний набор стартовых ботов вместо оркестратора.
+    if std::env::var("CREW_LEGACY_STARTERS").is_ok_and(|v| v == "1") {
+        return seed_starters();
+    }
+    let at = now();
+    let bot = new_orchestrator(&[]);
+    let room = Room {
+        id: uid("room"),
+        name: MAIN_ROOM[0].into(),
+        bot_ids: vec![bot.id.clone()],
+        lead: bot.id.clone(),
+        stage: STAGE_INTERVIEW.into(),
+        created_at: at,
+        ..Room::default()
+    };
+    State { version: 1, created_at: at, settings: Settings::default(), bots: vec![bot], routines: Vec::new(), skills: Vec::new(), rooms: vec![room], mcp: Vec::new() }
+}
+
+/// Прежняя новая установка: три стартовых бота без команды.
+fn seed_starters() -> State {
     let at = now();
     let colors = ["#4f9ce6", "#8e6ac9", "#f2a93b"];
     State {
@@ -1619,6 +1725,11 @@ impl Store {
             let mut state = self.state.lock().unwrap();
             if let Some(lang) = patch.get("uiLang").and_then(Value::as_str).filter(|l| *l == "ru" || *l == "en") {
                 translate_starters(&mut state.bots, lang);
+                // Первую команду переименовываем, пока человек её не трогал.
+                let (from, to) = if lang == "en" { (0, 1) } else { (1, 0) };
+                for room in state.rooms.iter_mut().filter(|r| r.name == MAIN_ROOM[from]) {
+                    room.name = MAIN_ROOM[to].into();
+                }
             }
             let s = &mut state.settings;
             if let Some(v) = patch.get("driver").filter(|v| !v.is_null()) {
@@ -1954,6 +2065,7 @@ impl Store {
             dock: true,
             read_aloud: false,
             monthly_token_limit: 0,
+            orchestrator: false,
             extra,
         };
         let bot = {
@@ -3028,11 +3140,94 @@ impl Store {
             folders: Vec::new(),
             program_folders: Vec::new(),
             skills: Vec::new(),
+            stage: STAGE_READY.into(),
             created_at: now(),
         };
         self.state.lock().unwrap().rooms.push(room.clone());
         self.persist().await?;
         Ok(room)
+    }
+
+    /// Новая команда с оркестратором во главе: расспрос идёт в ней (`stage = interview`).
+    pub async fn add_orchestrator_room(&self, input: &Value) -> std::io::Result<(Room, Bot)> {
+        let bot = {
+            let mut state = self.state.lock().unwrap();
+            let bot = new_orchestrator(&state.bots);
+            state.bots.push(bot.clone());
+            bot
+        };
+        tokio::fs::create_dir_all(self.workspace(&bot.id)).await?;
+        let room = Room {
+            id: uid("room"),
+            name: take_chars(&text_or(input, "name", "Новая группа"), 40),
+            color: text_or(input, "color", "#7a8595"),
+            instructions: text_or(input, "instructions", ""),
+            bot_ids: vec![bot.id.clone()],
+            lead: bot.id.clone(),
+            stage: STAGE_INTERVIEW.into(),
+            created_at: now(),
+            ..Room::default()
+        };
+        self.state.lock().unwrap().rooms.push(room.clone());
+        self.persist().await?;
+        Ok((room, bot))
+    }
+
+    /// Оркестратор команды, если он в ней есть.
+    pub fn room_orchestrator(&self, room_id: &str) -> Option<Bot> {
+        let state = self.state.lock().unwrap();
+        let room = state.rooms.iter().find(|r| r.id == room_id)?;
+        room.bot_ids.iter().find_map(|id| state.bots.iter().find(|b| &b.id == id && b.orchestrator)).cloned()
+    }
+
+    /// Команда, в которой этот оркестратор собирает состав: сначала та, где идёт расспрос.
+    pub fn orchestrator_room(&self, bot_id: &str) -> Option<Room> {
+        let state = self.state.lock().unwrap();
+        let mut mine = state.rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| id == bot_id));
+        let first = mine.clone().find(|r| r.stage == STAGE_INTERVIEW);
+        first.or_else(|| mine.next()).cloned()
+    }
+
+    pub async fn set_room_stage(&self, id: &str, stage: &str) -> std::io::Result<Option<Room>> {
+        let room = {
+            let mut state = self.state.lock().unwrap();
+            let Some(room) = state.rooms.iter_mut().find(|r| r.id == id) else {
+                return Ok(None);
+            };
+            room.stage = if stage == STAGE_INTERVIEW { STAGE_INTERVIEW.into() } else { STAGE_READY.into() };
+            room.clone()
+        };
+        self.persist().await?;
+        Ok(Some(room))
+    }
+
+    /// «Перестроить команду»: расспрос заново, ведущий — оркестратор (у старой команды без него он появляется).
+    pub async fn rebuild_room(&self, id: &str) -> std::io::Result<Option<(Room, Bot)>> {
+        let created = {
+            let mut state = self.state.lock().unwrap();
+            let Some(pos) = state.rooms.iter().position(|r| r.id == id) else {
+                return Ok(None);
+            };
+            let existing = state.rooms[pos].bot_ids.iter().find_map(|b| state.bots.iter().find(|x| &x.id == b && x.orchestrator)).cloned();
+            let (bot, fresh) = match existing {
+                Some(bot) => (bot, false),
+                None => {
+                    let bot = new_orchestrator(&state.bots);
+                    state.bots.push(bot.clone());
+                    state.rooms[pos].bot_ids.push(bot.id.clone());
+                    (bot, true)
+                }
+            };
+            let room = &mut state.rooms[pos];
+            room.lead = bot.id.clone();
+            room.stage = STAGE_INTERVIEW.into();
+            (room.clone(), bot, fresh)
+        };
+        if created.2 {
+            tokio::fs::create_dir_all(self.workspace(&created.1.id)).await?;
+        }
+        self.persist().await?;
+        Ok(Some((created.0, created.1)))
     }
 
     pub async fn update_room(&self, id: &str, patch: &Value) -> std::io::Result<Option<Room>> {

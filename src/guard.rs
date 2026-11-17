@@ -598,6 +598,8 @@ fn human_only(path: &str) -> bool {
         || path.starts_with("/api/import/hermes")
         // Передача задачи в группе запускает ход бота так же, как сообщение человека.
         || (path.starts_with("/api/rooms/") && path.ends_with("/reassign"))
+        // «Перестроить команду» возвращает расспрос оркестратора и может добавить его в команду: решает человек.
+        || (path.starts_with("/api/rooms/") && path.trim_end_matches('/').ends_with("/rebuild"))
         // Согласие на специалиста запускает ход и передаёт работу: решает человек.
         || (path.starts_with("/api/bots/") && path.contains("/offers/"))
         // Заявка командной строки на добавление команды из файла: ключ программы её подаёт, читает статус

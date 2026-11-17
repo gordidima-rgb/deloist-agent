@@ -169,6 +169,8 @@ impl Crew {
             .env("HOST", "127.0.0.1")
             .env("CREW_DATA_DIR", &data_dir)
             .env("CREW_BOOT_TOKEN", BOOT)
+            // Тесты ждут прежних стартовых ботов; новая установка с оркестратором включается через `("CREW_LEGACY_STARTERS", "0")`.
+            .env("CREW_LEGACY_STARTERS", "1")
             .env("CREW_SECRETS_KEY_FILE", key_file_for(&data_dir))
             .envs(env.iter().copied())
             .stdout(Stdio::null())

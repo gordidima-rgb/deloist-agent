@@ -87,3 +87,71 @@ async fn the_window_is_told_when_a_team_is_created_changed_or_deleted() {
     crew.ok("DELETE", &format!("/api/rooms/{room}"), None).await;
     crew.wait_event("команда удалена", |e| e["type"] == "state_changed").await;
 }
+
+#[tokio::test]
+async fn a_team_with_an_orchestrator_starts_in_interview_and_keeps_its_leader() {
+    let crew = Crew::start("team-orchestrator-room").await;
+    crew.listen().await;
+    crew.clear_events();
+    let (status, made) = crew.send("POST", "/api/rooms", Some(json!({ "name": "Главная", "withOrchestrator": true }))).await;
+    assert_eq!(status, 201, "{made}");
+    assert_eq!(made["room"]["stage"], "interview");
+    assert_eq!(made["room"]["botIds"].as_array().unwrap().len(), 1);
+    assert_eq!(made["bot"]["orchestrator"], true);
+    assert_eq!(made["bot"]["name"], "Оркестратор");
+    assert!(made["bot"]["persona"].as_str().unwrap().contains("propose_team"));
+    crew.wait_event("окно узнало", |e| e["type"] == "state_changed").await;
+    let room = made["room"]["id"].as_str().unwrap().to_string();
+    let orch = made["bot"]["id"].as_str().unwrap().to_string();
+
+    // Без флага поведение прежнее: stage ready, оркестратора нет.
+    let plain = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Обычная" }))).await;
+    assert_eq!(plain["room"]["stage"], "ready");
+    assert!(plain.get("bot").is_none());
+
+    // Оркестратора нельзя убрать, пока команда жива.
+    let (status, body) = crew.send("DELETE", &format!("/api/bots/{orch}"), None).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("Оркестратор"));
+    let (status, _) = crew.send("PATCH", &format!("/api/rooms/{room}"), Some(json!({ "botIds": [] }))).await;
+    assert_eq!(status, 409);
+    // Удалили команду — бота снова можно удалить.
+    crew.ok("DELETE", &format!("/api/rooms/{room}"), None).await;
+    let (status, _) = crew.send("DELETE", &format!("/api/bots/{orch}"), None).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn rebuild_brings_an_orchestrator_into_an_old_team() {
+    let crew = Crew::start("team-rebuild-old").await;
+    let (bot, room) = room_with_bot(&crew).await;
+    let (status, res) = crew.send("POST", &format!("/api/rooms/{room}/rebuild"), None).await;
+    assert_eq!(status, 200, "{res}");
+    assert_eq!(res["room"]["stage"], "interview");
+    assert_eq!(res["bot"]["orchestrator"], true);
+    assert_eq!(res["room"]["lead"], res["bot"]["id"]);
+    assert!(res["room"]["botIds"].as_array().unwrap().contains(&json!(bot)), "старый участник остался");
+    let (status, _) = crew.send("POST", "/api/rooms/room_нет/rebuild", None).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn a_fresh_install_starts_with_one_team_and_an_orchestrator() {
+    let crew = Crew::start_with_env("team-fresh-install", &[("CREW_LEGACY_STARTERS", "0")]).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bots = state["bots"].as_array().unwrap();
+    let rooms = state["rooms"].as_array().unwrap();
+    assert_eq!(bots.len(), 1, "{bots:?}");
+    assert_eq!(bots[0]["orchestrator"], true);
+    assert_eq!(bots[0]["skin"], 13);
+    assert_eq!(bots[0]["driver"], "", "драйвер и модель берутся из настроек, как у прежних стартовых ботов");
+    assert_eq!(rooms.len(), 1);
+    assert_eq!(rooms[0]["name"], "Главная команда");
+    assert_eq!(rooms[0]["stage"], "interview");
+    assert_eq!(rooms[0]["lead"], bots[0]["id"]);
+    // Смена языка переводит и бота, и команду.
+    crew.ok("PUT", "/api/settings", Some(json!({ "uiLang": "en" }))).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["bots"][0]["name"], "Orchestrator");
+    assert_eq!(state["rooms"][0]["name"], "Main team");
+}

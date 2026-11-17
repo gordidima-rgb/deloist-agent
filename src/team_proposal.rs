@@ -82,6 +82,8 @@ pub struct TeamPlan {
     pub host_name: String,
     pub host_driver: String,
     pub host_model: String,
+    /// Карточку предложил оркестратор: состав идёт в его команду, а она переходит в `ready`.
+    pub host_orchestrator: bool,
     pub host_extra: Vec<(String, String)>,
 }
 
@@ -272,7 +274,10 @@ pub async fn plan_from(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<TeamPl
         return Err("нечего предлагать: нужны newBots, catalogBots или addBots".into());
     }
 
+    // Оркестратор собирает состав в своей команде, а не в новой: что бы ни написал агент в room.
+    let own_room = if bot.orchestrator { app.store.orchestrator_room(&bot.id) } else { None };
     let room = match args.get("room") {
+        _ if own_room.is_some() => own_room.map(|r| RoomPlan { id: r.id, name: r.name, is_new: false }),
         None | Some(Value::Null) => None,
         Some(Value::String(name)) if name.trim().is_empty() => None,
         Some(Value::String(name)) if name.trim().to_lowercase().starts_with("new:") => {
@@ -337,7 +342,7 @@ pub async fn plan_from(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<TeamPl
         .iter()
         .filter_map(|k| bot.extra.get(*k).and_then(Value::as_str).map(|v| (k.to_string(), v.to_string())))
         .collect();
-    Ok(TeamPlan { new_bots, catalog_bots, add_bots, room, lead, access, access_key, host_name: bot.name.clone(), host_driver: bot.driver.clone(), host_model: bot.model.clone(), host_extra })
+    Ok(TeamPlan { new_bots, catalog_bots, add_bots, room, lead, access, access_key, host_name: bot.name.clone(), host_driver: bot.driver.clone(), host_model: bot.model.clone(), host_extra, host_orchestrator: bot.orchestrator })
 }
 
 /// Инструмент `propose_team`: карточка человеку и ожидание решения.
@@ -519,6 +524,9 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
                 patch["lead"] = json!(lead);
             }
             app.store.update_room(&room_plan.id, &patch).await.map_err(|e| fail(&made, e.to_string()))?;
+            if plan.host_orchestrator {
+                app.store.set_room_stage(&room_plan.id, crate::store::STAGE_READY).await.map_err(|e| fail(&made, e.to_string()))?;
+            }
             room_text = format!(" Команда «{}» обновлена.", room_plan.name);
         }
     }
@@ -605,6 +613,7 @@ mod tests {
             host_driver: "api".into(),
             host_model: "m".into(),
             host_extra: vec![],
+            host_orchestrator: false,
         }
     }
 

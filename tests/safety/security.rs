@@ -3889,3 +3889,32 @@ async fn instabox_routes_are_closed_inside_the_cloud_even_with_a_session() {
         assert_eq!(code, 403, "{method} {path} открыт в облаке");
     }
 }
+
+#[tokio::test]
+async fn the_program_key_cannot_rebuild_a_team_or_make_one_with_an_orchestrator() {
+    let crew = Crew::start("security-rebuild").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    let room = crew
+        .ok("POST", "/api/rooms", Some(json!({ "name": "Совет", "botIds": [bot], "lead": bot })))
+        .await["room"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let token = agent_token(&crew);
+    let rebuild = reqwest::Client::new().post(format!("{}/api/rooms/{room}/rebuild", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(rebuild.status().as_u16(), 403, "ключ программы перестроил команду");
+    let make = reqwest::Client::new()
+        .post(format!("{}/api/rooms", crew.base))
+        .bearer_auth(&token)
+        .json(&json!({ "name": "Хитрая", "withOrchestrator": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(make.status().as_u16(), 403, "ключ программы завёл оркестратора");
+    // Отказ ничего не изменил, а окно перестраивать может.
+    let after = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(after["rooms"].as_array().unwrap().len(), 1);
+    assert_eq!(after["rooms"][0]["stage"], "ready");
+    crew.ok("POST", &format!("/api/rooms/{room}/rebuild"), None).await;
+}

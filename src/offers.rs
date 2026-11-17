@@ -174,6 +174,7 @@ mod tests {
             host_driver: "api".into(),
             host_model: "m".into(),
             host_extra: vec![],
+            host_orchestrator: false,
         };
         let first = Offer { team: Some(plan), ..offer("lead", "offer_team") };
         let mut waiter = offers.open_decision("offer_team");

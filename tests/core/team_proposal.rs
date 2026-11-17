@@ -671,3 +671,57 @@ async fn routine_card_without_free_mode_has_no_warning_and_bad_requests_get_no_c
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == host.as_str()).await;
     assert!(routines_of(&crew).await.iter().all(|r| r["title"] != "Раз в час"), "отказ создал рутину");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_orchestrator_card_fills_its_own_team_and_ends_the_interview() {
+    let (crew, _host, _base) = setup("team-orchestrator").await;
+    crew.listen().await;
+    let made = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Главная", "withOrchestrator": true, "botIds": [] }))).await;
+    let room = made["room"]["id"].as_str().unwrap().to_string();
+    let orch = made["bot"]["id"].as_str().unwrap().to_string();
+    assert_eq!(made["room"]["stage"], "interview");
+    assert_eq!(made["room"]["lead"], orch.as_str());
+    assert_eq!(made["bot"]["orchestrator"], true);
+    assert_eq!(made["bot"]["skin"], 13);
+
+    // Агент просит «новую команду», но состав идёт в команду оркестратора.
+    crew.say(&orch, &format!("PROPOSE {}", json!({ "newBots": [{ "name": "Автор", "role": "пишет", "instructions": "Пиши." }], "room": { "new": "Чужая" } }))).await;
+    let event = crew.wait_event("карточка", |e| e["type"] == "team_proposal" && e["botId"] == orch.as_str()).await;
+    assert_eq!(event["proposal"]["room"]["isNew"], false, "{event}");
+    assert_eq!(event["proposal"]["room"]["id"], room.as_str());
+    crew.clear_events();
+    let id = event["proposal"]["id"].as_str().unwrap().to_string();
+    let (status, reply) = crew.send("POST", &format!("/api/bots/{orch}/offers/{id}/accept"), None).await;
+    assert_eq!(status, 200, "{reply}");
+    crew.wait_event("команда обновилась", |e| e["type"] == "state_changed").await;
+    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == orch.as_str()).await;
+
+    let state = crew.ok("GET", "/api/state", None).await;
+    let rooms = state["rooms"].as_array().unwrap();
+    assert_eq!(rooms.len(), 1, "лишняя команда: {rooms:?}");
+    assert_eq!(rooms[0]["stage"], "ready");
+    let author = bot_named(state["bots"].as_array().unwrap(), "Автор").unwrap()["id"].clone();
+    assert!(rooms[0]["botIds"].as_array().unwrap().contains(&author), "{rooms:?}");
+    assert!(rooms[0]["botIds"].as_array().unwrap().contains(&json!(orch)), "оркестратор остался в команде");
+    assert_eq!(rooms[0]["lead"], orch.as_str(), "ведущий не менялся");
+
+    // «Перестроить»: расспрос заново, следующая карточка снова идёт в ту же команду.
+    let (status, again) = crew.send("POST", &format!("/api/rooms/{room}/rebuild"), None).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["room"]["stage"], "interview");
+    assert_eq!(again["bot"]["id"], orch.as_str());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_bots_card_still_builds_a_new_team() {
+    let (crew, host, _base) = setup("team-plain-still").await;
+    crew.listen().await;
+    crew.say(&host, &format!("PROPOSE {}", json!({ "newBots": [{ "name": "Один", "role": "р", "instructions": "i" }], "room": { "new": "Новая" } }))).await;
+    let event = crew.wait_event("карточка", |e| e["type"] == "team_proposal").await;
+    assert_eq!(event["proposal"]["room"]["isNew"], true);
+    let id = event["proposal"]["id"].as_str().unwrap().to_string();
+    let (status, _) = crew.send("POST", &format!("/api/bots/{host}/offers/{id}/accept"), None).await;
+    assert_eq!(status, 200);
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["rooms"][0]["stage"], "ready");
+}
