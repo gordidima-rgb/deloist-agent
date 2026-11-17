@@ -3167,7 +3167,40 @@ window.DeloistTeam?.init({
 // События
 // ---------------------------------------------------------------------------
 
+// Шаги идущего хода приходят только событиями, а в тред сервер пишет их в конце хода.
+// Поэтому держим их по боту, чтобы, вернувшись в его чат, снова показать «Ход работы» целиком.
+const turnReplay = new Map();
+
+function keepForReplay(ev) {
+  if (!ev.botId || ev.roomId) return;
+  if (ev.type === 'turn_start') {
+    turnReplay.set(ev.botId, []);
+    return;
+  }
+  if (ev.type === 'turn_end') {
+    turnReplay.delete(ev.botId);
+    return;
+  }
+  const kept = turnReplay.get(ev.botId);
+  if (!kept) return;
+  // Готовое сообщение уже лежит в треде: его дельты повторять не нужно.
+  if (ev.type === 'message' && ev.message?.role !== 'user') {
+    turnReplay.set(ev.botId, kept.filter((e) => e.type !== 'text_delta'));
+    return;
+  }
+  if (ev.type === 'tool_update' || ev.type === 'activity' || ev.type === 'text_delta') kept.push(ev);
+}
+
+function replayTurn(id) {
+  for (const ev of turnReplay.get(id) || []) {
+    if (ev.type === 'tool_update') updateTool(ev);
+    else if (ev.type === 'activity') showActivity(ev);
+    else appendDelta(ev);
+  }
+}
+
 function handleEvent(ev) {
+  keepForReplay(ev);
   // Экран бота (screen.js) слушает те же события.
   window.dispatchEvent(new CustomEvent('deloist:event', { detail: ev }));
   window.DeloistTeam?.onEvent(ev);
@@ -4601,6 +4634,11 @@ async function selectBot(id) {
     if (S.currentId !== id || inRoom()) return;
     S.threads.set(id, messages);
     renderThread(messages);
+    // Сразу, без ожидания: иначе событие, пришедшее за это время, показалось бы дважды.
+    if (S.busy.has(id)) {
+      appendTyping();
+      replayTurn(id);
+    }
   } catch (err) {
     if (S.currentId !== id || inRoom()) return;
     if (!cached?.length) {
@@ -4618,7 +4656,6 @@ async function selectBot(id) {
   refreshGrantsLine();
   loadOptimizerOffers(id);
 
-  if (S.busy.has(id)) appendTyping();
   setSendState();
   renderSessionStats();
   loadSessionStats(id);
