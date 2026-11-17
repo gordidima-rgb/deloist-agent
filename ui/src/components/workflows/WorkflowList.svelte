@@ -213,7 +213,7 @@
     display: grid;
     flex: 1;
     min-width: 0;
-    gap: 3px;
+    gap: var(--k-space-1);
   }
   .wfl-text b {
     overflow: hidden;
@@ -233,7 +233,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 1px 7px;
+    padding: 1px var(--k-space-2);
     border-radius: var(--k-radius-xs);
     background: var(--k-surface-2);
     color: var(--k-text-2);

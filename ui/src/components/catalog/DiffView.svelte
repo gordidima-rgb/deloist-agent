@@ -44,7 +44,7 @@
     max-height: 280px;
     overflow: auto;
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface-2, #f0f0f0);
+    background: var(--k-surface-2);
     font: 400 var(--k-text-xs, 12px) / 1.5 var(--k-font-mono, monospace);
   }
   .cat-row {
@@ -57,11 +57,11 @@
     overflow-wrap: anywhere;
   }
   .cat-row.add {
-    background: var(--k-brand-tint, #e7efff);
+    background: var(--k-brand-tint);
   }
   .cat-row.del {
-    background: var(--k-attention-tint, #ffe8e2);
-    color: var(--k-attention-text, #b4321b);
+    background: var(--k-attention-tint);
+    color: var(--k-attention-text);
   }
   .legend {
     display: flex;
@@ -71,9 +71,9 @@
     color: var(--k-text-3, inherit);
   }
   .legend .del {
-    color: var(--k-attention-text, #b4321b);
+    color: var(--k-attention-text);
   }
   .legend .add {
-    color: var(--k-brand-text, #0250e0);
+    color: var(--k-brand-text);
   }
 </style>

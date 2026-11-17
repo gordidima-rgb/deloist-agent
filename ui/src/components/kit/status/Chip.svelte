@@ -3,6 +3,7 @@
   // Ссылка (href) не переключается сама; кнопка переключает selected.
   let {
     selected = $bindable(false),
+    ref = $bindable(null),
     color = '',
     href = '',
     class: className = '',
@@ -23,7 +24,7 @@
     {@render children?.()}
   </a>
 {:else}
-  <button type="button" class="k-chip {className}" aria-pressed={selected} onclick={press} {...rest}>
+  <button bind:this={ref} type="button" class="k-chip {className}" aria-pressed={selected} onclick={press} {...rest}>
     {#if color}<span class="k-dot" style:background={color} aria-hidden="true"></span>{/if}
     {@render children?.()}
   </button>

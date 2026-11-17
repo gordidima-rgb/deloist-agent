@@ -8,6 +8,7 @@
     variant = 'ghost',
     size = 'md',
     disabled = false,
+    ref = $bindable(null),
     class: className = '',
     onclick,
     ...rest
@@ -27,6 +28,7 @@
 </script>
 
 <button
+  bind:this={ref}
   type="button"
   class="k-btn k-btn--icon {variantClass} {className}"
   class:k-btn--sm={size === 'sm'}

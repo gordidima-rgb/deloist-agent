@@ -23,7 +23,7 @@
     border-radius: var(--k-radius-md);
     background: var(--k-brand-tint);
     color: var(--k-brand-text);
-    font: 500 var(--k-text-xs) / 1.35 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1.35 var(--k-font-body);
     animation: wflh-in var(--k-dur-appear) var(--k-ease-spring) both;
   }
   @keyframes wflh-in {

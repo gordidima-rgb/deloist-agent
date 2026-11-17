@@ -310,7 +310,7 @@ import { Icon, Button, IconButton, Select } from '../kit';
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: rgba(0, 0, 0, 0.18);
+    background: color-mix(in oklab, var(--k-ink) 18%, transparent);
   }
   .cat-drawer {
     position: fixed;
@@ -324,9 +324,9 @@ import { Icon, Button, IconButton, Select } from '../kit';
     width: min(440px, 100vw);
     padding: var(--k-space-4, 16px) var(--k-space-6, 24px) var(--k-space-8, 32px);
     overflow-y: auto;
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
     color: var(--k-text, inherit);
-    box-shadow: var(--k-shadow-3, -8px 0 32px rgba(0, 0, 0, 0.2));
+    box-shadow: var(--k-shadow-3);
     font-family: var(--k-font-body, inherit);
     animation: slide var(--k-dur-base, 220ms) var(--k-ease-out, ease-out);
   }
@@ -356,8 +356,8 @@ import { Icon, Button, IconButton, Select } from '../kit';
     width: 56px;
     height: 56px;
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-surface-2, #f0f0f0);
-    font-size: 28px;
+    background: var(--k-surface-2);
+    font-size: var(--k-text-2xl);
   }
   h2 {
     margin: 0;
@@ -379,13 +379,13 @@ import { Icon, Button, IconButton, Select } from '../kit';
   .tier {
     padding: 1px 6px;
     border-radius: var(--k-radius-pill, 999px);
-    background: var(--k-surface-2, #f0f0f0);
+    background: var(--k-surface-2);
     color: var(--k-text-2, inherit);
     font-weight: 600;
   }
   .tier.verified {
-    background: var(--k-brand-tint, #e7efff);
-    color: var(--k-brand-text, #0250e0);
+    background: var(--k-brand-tint);
+    color: var(--k-brand-text);
   }
   .desc {
     margin: 0;
@@ -423,7 +423,7 @@ import { Icon, Button, IconButton, Select } from '../kit';
     margin: 8px 0 0;
     padding: var(--k-space-2, 8px) var(--k-space-3, 12px);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface-2, #f0f0f0);
+    background: var(--k-surface-2);
     white-space: pre-wrap;
     font: 400 var(--k-text-xs, 12px) / 1.5 var(--k-font-mono, monospace);
   }
@@ -434,14 +434,14 @@ import { Icon, Button, IconButton, Select } from '../kit';
   }
   .license a {
     font-size: var(--k-text-sm, 13px);
-    color: var(--k-brand-text, #0250e0);
+    color: var(--k-brand-text);
   }
   .act {
     display: flex;
     flex-direction: column;
     gap: var(--k-space-3, 12px);
     padding-top: var(--k-space-4, 16px);
-    border-top: 1px solid var(--k-line, #e8e8e8);
+    border-top: 1px solid var(--k-line);
   }
   .bots {
     display: flex;
@@ -476,7 +476,7 @@ import { Icon, Button, IconButton, Select } from '../kit';
     gap: 8px;
     padding: var(--k-space-2, 8px) var(--k-space-3, 12px);
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-brand-tint, #e7efff);
+    background: var(--k-brand-tint);
     font-size: var(--k-text-sm, 13px);
   }
   .cabinet {
@@ -493,7 +493,7 @@ import { Icon, Button, IconButton, Select } from '../kit';
   .remove {
     padding: var(--k-space-3, 12px);
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-attention-tint, #ffe8e2);
+    background: var(--k-attention-tint);
   }
   .remove p {
     margin: 0 0 8px;

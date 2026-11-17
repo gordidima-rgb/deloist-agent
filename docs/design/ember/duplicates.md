@@ -9,52 +9,53 @@
 Этап C2 (17.11): ✓ — файл переведён на `Button` / `IconButton` / `ListRow` / `Menu`, ◐ — переведена часть (остались строки-карточки, дорожка-полоса отчёта, микрофон и отправка у Stage, `AddMenu` — поиск с группами, а не меню).
 
 Этап C3 (17.11): ✓ `web/messengers.js` (фишка и сегменты), `web/turn-card.js` (Стоп), `web/snap.html`, `web/dock.html` (кнопки чата и заметки), `web/voice.js` (свой `<style>` убран в блок C3 `web/kit.css`), `web/user-chrome.js`, `web/stt.js`; алиасы `.primary/.ghost/.danger` из `web/kit.css` удалены (нигде не используются). ◐ `web/app.js` (кнопки уже `k-btn`; остались `.icon-btn`, `.day-btn`, `.look-btn`, `.seg`), `web/index.html` и `web/style.css` — предупреждения 272 → 20, самодельные кнопки-классы остались.
+Этап C4 (17.11): ✓ C4 — Svelte-файл без своих кнопок по проверке кита (каталог, выбор модели, Stage, отчёт, KnowMe, доска «Нужен ты», использование). Остались: BotList (sb-toggle), HabitsTab (hb-ico), ToolOptions и WfNode/WorkflowList (внутри холста), SettingsHint (стиль в web/style.css).
 
 Заменить на: `Button` / `IconButton` (`.k-btn`, варианты primary/secondary/ghost/danger/danger-solid)
 
 - `ui/src/components/ChatModelPopover.svelte` — 1: 68 ✓ C2
 - `ui/src/components/KnowMe.svelte` — 13: 144, 167, 168, 180, 181, 188, 195, 200, 201, 207, 229, 230, … ✓ C2
-- `ui/src/components/MentionPopover.svelte` — 1: 99 ◐ C2 (часть)
-- `ui/src/components/ModelPicker.svelte` — 11: 169, 178, 198, 205, 227, 246, 258, 450, 463, 467, 471 ◐ C2 (часть)
-- `ui/src/components/NewBotModel.svelte` — 3: 49, 55, 60
+- `ui/src/components/MentionPopover.svelte` — 1: 99 ✓ C4
+- `ui/src/components/ModelPicker.svelte` — 11: 169, 178, 198, 205, 227, 246, 258, 450, 463, 467, 471 ✓ C4
+- `ui/src/components/NewBotModel.svelte` — 3: 49, 55, 60 ✓ C4
 - `ui/src/components/ScreenControl.svelte` — 3: 16, 17, 18 ✓ C2
 - `ui/src/components/SignInCard.svelte` — 6: 27, 30, 31, 59, 69, 73 ✓ C2
 - `ui/src/components/UpdatePlaque.svelte` — 1: 25 ✓ C2
 - `ui/src/components/VoiceChat.svelte` — 3: 43, 44, 66 ✓ C2
 - `ui/src/components/WhatsNew.svelte` — 2: 196, 212 ✓ C2
-- `ui/src/components/catalog/CatalogCard.svelte` — 1: 16
+- `ui/src/components/catalog/CatalogCard.svelte` — 1: 16 ✓ C4
 - `ui/src/components/catalog/CatalogDrawer.svelte` — 2: 471, 505 ✓ C2
-- `ui/src/components/chat/ChatDates.svelte` — 1: 133
+- `ui/src/components/chat/ChatDates.svelte` — 1: 133 ✓ C4
 - `ui/src/components/drawer/DrawerFiles.svelte` — 2: 81, 84 ✓ C2
 - `ui/src/components/drawer/DrawerProfile.svelte` — 4: 385, 395, 410, 420 ✓ C2
 - `ui/src/components/drawer/FileViewer.svelte` — 5: 197, 198, 287, 296, 297 ✓ C2
-- `ui/src/components/orchestrator/Stage.svelte` — 5: 427, 458, 482, 493, 496 ◐ C2 (часть)
+- `ui/src/components/orchestrator/Stage.svelte` — 5: 427, 458, 482, 493, 496 ✓ C4
 - `ui/src/components/providers/ProviderList.svelte` — 1: 32 ✓ C2
 - `ui/src/components/remote/RemoteChat.svelte` — 1: 192 ✓ C2
-- `ui/src/components/remote/RemotePcs.svelte` — 1: 118
-- `ui/src/components/report/Report.svelte` — 4: 113, 117, 146, 179 ◐ C2 (часть)
+- `ui/src/components/remote/RemotePcs.svelte` — 1: 118 ✓ C4
+- `ui/src/components/report/Report.svelte` — 4: 113, 117, 146, 179 ✓ C4
 - `ui/src/components/rooms/RoomResources.svelte` — 1: 55 ✓ C2
-- `ui/src/components/rooms/TeamScreen.svelte` — 3: 221, 225, 229
-- `ui/src/components/routines/ChannelChips.svelte` — 1: 18
-- `ui/src/components/routines/Composer.svelte` — 1: 182
+- `ui/src/components/rooms/TeamScreen.svelte` — 3: 221, 225, 229 ✓ C4
+- `ui/src/components/routines/ChannelChips.svelte` — 1: 18 ✓ C4
+- `ui/src/components/routines/Composer.svelte` — 1: 182 ✓ C4
 - `ui/src/components/routines/HabitsTab.svelte` — 3: 228, 247, 275 ◐ C2 (часть)
-- `ui/src/components/routines/RemindersTab.svelte` — 1: 248 ◐ C2 (часть)
-- `ui/src/components/routines/TodosTab.svelte` — 5: 397, 432, 442, 458, 532 ◐ C2 (часть)
+- `ui/src/components/routines/RemindersTab.svelte` — 1: 248 ✓ C4
+- `ui/src/components/routines/TodosTab.svelte` — 5: 397, 432, 442, 458, 532 ✓ C4
 - `ui/src/components/settings/SettingsHint.svelte` — 1: 9
 - `ui/src/components/sidebar/BotList.svelte` — 4: 339, 424, 437, 438
-- `ui/src/components/sidebar/InstaboxCard.svelte` — 1: 25
-- `ui/src/components/sidebar/NeedsBoard.svelte` — 1: 17
-- `ui/src/components/usage/UsageScreen.svelte` — 6: 149, 151, 162, 279, 334, 340
-- `ui/src/components/workflows/BotPicker.svelte` — 7: 39, 71, 89, 92, 95, 125, 141
-- `ui/src/components/workflows/ContextMenu.svelte` — 1: 46 ◐ C2 (часть)
-- `ui/src/components/workflows/HistoryPopover.svelte` — 5: 72, 79, 88, 98, 102 ◐ C2 (часть)
-- `ui/src/components/workflows/LinkHint.svelte` — 1: 28
+- `ui/src/components/sidebar/InstaboxCard.svelte` — 1: 25 ✓ C4
+- `ui/src/components/sidebar/NeedsBoard.svelte` — 1: 17 ✓ C4
+- `ui/src/components/usage/UsageScreen.svelte` — 6: 149, 151, 162, 279, 334, 340 ✓ C4
+- `ui/src/components/workflows/BotPicker.svelte` — 7: 39, 71, 89, 92, 95, 125, 141 ✓ C4
+- `ui/src/components/workflows/ContextMenu.svelte` — 1: 46 ✓ C4
+- `ui/src/components/workflows/HistoryPopover.svelte` — 5: 72, 79, 88, 98, 102 ✓ C4
+- `ui/src/components/workflows/LinkHint.svelte` — 1: 28 ✓ C4
 - `ui/src/components/workflows/ToolOptions.svelte` — 11: 42, 48, 55, 63, 67, 73, 179, 195, 200, 204, 208
-- `ui/src/components/workflows/TriggerFields.svelte` — 7: 58, 74, 84, 187, 208, 224, 244
-- `ui/src/components/workflows/WfEdge.svelte` — 3: 33, 104, 121
+- `ui/src/components/workflows/TriggerFields.svelte` — 7: 58, 74, 84, 187, 208, 224, 244 ✓ C4
+- `ui/src/components/workflows/WfEdge.svelte` — 3: 33, 104, 121 ✓ C4
 - `ui/src/components/workflows/WfNode.svelte` — 32: 100, 133, 134, 138, 144, 153, 162, 170, 182, 183, 189, 201, …
-- `ui/src/components/workflows/WfNote.svelte` — 3: 126, 136, 139
-- `ui/src/components/workflows/WorkflowCanvas.svelte` — 25: 770, 771, 777, 807, 810, 813, 816, 826, 835, 836, 837, 838, …
+- `ui/src/components/workflows/WfNote.svelte` — 3: 126, 136, 139 ✓ C4
+- `ui/src/components/workflows/WorkflowCanvas.svelte` — 25: 770, 771, 777, 807, 810, 813, 816, 826, 835, 836, 837, 838, … ✓ C4
 - `ui/src/components/workflows/WorkflowList.svelte` — 7: 43, 47, 63, 328, 344, 348, 351
 - `ui/src/components/workflows/WorkflowsScreen.svelte` — 10: 362, 400, 401, 425, 429, 479, 488, 528, 544, 547
 - `web/app.js` — 33: 722, 1194, 2024, 3162, 3164, 3168, 3169, 3235, 3236, 3335, 3336, 3363, …
@@ -150,7 +151,7 @@ web/style.css:1255  .field input:focus, .field textarea:focus, .field select:foc
 
 Заменить на: `Checkbox` / `RadioGroup` / `Switch`
 
-- `ui/src/components/KnowMe.svelte` — 2: 159, 223
+- `ui/src/components/KnowMe.svelte` — 2: 159, 223 ✓ C4
 - `ui/src/components/ModelPicker.svelte` — 3: 586, 594, 598
 - `ui/src/components/catalog/CatalogDrawer.svelte` — 3: 230, 248, 275
 - `ui/src/components/drawer/DrawerGoals.svelte` — 1: 127
@@ -277,13 +278,13 @@ web/style.css:1240  .field { display: flex; flex-direction: column; gap: 6px; mi
 
 Заменить на: `Chip` (фильтр) или `Badge` (метка, счётчик, статус)
 
-- `ui/src/components/NewBotModel.svelte` — 4: 100, 115, 118, 122
+- `ui/src/components/NewBotModel.svelte` — 4: 100, 115, 118, 122 ✓ C4
 - `ui/src/components/catalog/YourSkills.svelte` — 1: 124
 - `ui/src/components/chat/ChatDates.svelte` — 10: 171, 180, 183, 194, 197, 200, 203, 215, 219, 230
 - `ui/src/components/routines/ChannelChips.svelte` — 1: 29
 - `ui/src/components/routines/Composer.svelte` — 9: 259, 265, 276, 279, 282, 285, 297, 301, 312
 - `ui/src/components/routines/TodosTab.svelte` — 3: 860, 867, 871
-- `ui/src/components/sidebar/NeedsBoard.svelte` — 1: 36
+- `ui/src/components/sidebar/NeedsBoard.svelte` — 1: 36 ✓ C4
 - `ui/src/components/workflows/HistoryPopover.svelte` — 4: 192, 201, 206, 211
 - `ui/src/components/workflows/KindChips.svelte` — 6: 29, 47, 51, 54, 61, 74
 - `ui/src/components/workflows/WorkflowCanvas.svelte` — 8: 1112, 1126, 1130, 1135, 1139, 1144, 1505, 1508

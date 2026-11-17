@@ -89,7 +89,7 @@
     grid-template-columns: 92px 1fr;
     align-items: center;
     gap: 8px;
-    font: 500 12px/1.3 var(--k-font-body);
+    font: 600 var(--k-text-xs)/1.3 var(--k-font-body);
     color: var(--k-text-2);
   }
   .wf-sched__pair {
@@ -99,7 +99,7 @@
   }
   .wf-sched__hint {
     margin: 0;
-    font: 400 11px/1.3 var(--k-font-body);
+    font: 400 var(--k-text-micro)/1.3 var(--k-font-body);
     color: var(--k-text-3);
   }
   @keyframes wf-fold {

@@ -40,8 +40,8 @@
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-4, 16px);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface-2, #f0f0f0);
-    color: var(--k-text, #121212);
+    background: var(--k-surface-2);
+    color: var(--k-text);
   }
   .sic-title {
     margin: 0;
@@ -49,7 +49,7 @@
   }
   .sic-text {
     margin: 0;
-    color: var(--k-text-2, #4a4a4a);
+    color: var(--k-text-2);
     font: 400 var(--k-text-sm, 13px) / 1.5 var(--k-font-body, system-ui);
   }
   .sic-actions {

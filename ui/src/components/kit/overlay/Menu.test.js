@@ -66,4 +66,41 @@ describe('Menu', () => {
     expect(menu.classList.contains('k-menu--float')).toBe(true);
     expect(menu.classList.contains('is-placed')).toBe(true);
   });
+
+  describe('search and groups', () => {
+    const grouped = [
+      { id: 'g1', kind: 'group', label: 'Входы' },
+      { id: 'in', label: 'Сообщение', sub: 'старт', keywords: 'message' },
+      { id: 'g2', kind: 'group', label: 'Шаги' },
+      { id: 'st', label: 'Вопрос боту', sub: 'ответ' },
+    ];
+
+    it('draws group titles and the second line', () => {
+      render({ items: grouped, search: 'Искать' });
+      expect([...host.querySelectorAll('.k-menu__group')].map((g) => g.textContent)).toEqual(['Входы', 'Шаги']);
+      expect(host.querySelector('.k-menu__two small').textContent).toBe('старт');
+    });
+
+    it('filters by label, sub and keywords, drops empty groups', () => {
+      render({ items: grouped, search: 'Искать', empty: 'Пусто' });
+      const input = host.querySelector('.k-menu__search input');
+      input.value = 'message';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      expect(host.querySelectorAll('.k-menu__item').length).toBe(1);
+      expect([...host.querySelectorAll('.k-menu__group')].map((g) => g.textContent)).toEqual(['Входы']);
+      input.value = 'zzz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      expect(host.querySelector('.k-menu__empty').textContent).toBe('Пусто');
+    });
+
+    it('Enter in the search picks the first visible item', () => {
+      const onpick = vi.fn();
+      render({ items: grouped, search: 'Искать', onpick });
+      const input = host.querySelector('.k-menu__search input');
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(onpick).toHaveBeenCalledWith('in');
+    });
+  });
 });

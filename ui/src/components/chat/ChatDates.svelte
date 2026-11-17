@@ -8,7 +8,7 @@
   import { api as defaultApi } from '../../lib/api.js';
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
 
-import { Icon } from '../kit';
+  import { IconButton } from '../kit';
   let { input = null, chipsHost = null, api = defaultApi, debounce = 200 } = $props();
 
   let value = $state('');
@@ -130,18 +130,16 @@ import { Icon } from '../kit';
   {#each chips as chip (chip.kind)}
     <span class="cd-chip cd-chip--{chip.kind}" data-kind={chip.kind}>
       <span class="cd-chip-text">{chip.text}</span>
-      <button type="button" class="cd-chip-x" aria-label={chipLabel(chip)} title={chipLabel(chip)} onclick={() => remove(chip.kind)}>
-        <Icon name="close" size={10} stroke={3} />
-      </button>
+      <IconButton name="close" size="sm" label={chipLabel(chip)} class="cd-chip-x" onclick={() => remove(chip.kind)} />
     </span>
   {/each}
 </div>
 
 <style>
   .cd-back {
-    --cd-date: var(--k-brand-tint, #e7efff);
-    --cd-time: var(--k-ai-tint, #eeebff);
-    --cd-repeat: color-mix(in srgb, var(--k-bot-mint, #3ddc97) 26%, var(--k-surface, #fff));
+    --cd-date: var(--k-brand-tint);
+    --cd-time: var(--k-ai-tint);
+    --cd-repeat: color-mix(in srgb, var(--k-bot-mint) 26%, var(--k-surface));
     position: absolute;
     inset: 0;
     box-sizing: border-box;
@@ -154,7 +152,7 @@ import { Icon } from '../kit';
     z-index: 0;
   }
   .cd-mark {
-    border-radius: 5px;
+    border-radius: var(--k-radius-xs);
     color: transparent;
     background: var(--cd-bg);
     box-shadow: 0 0 0 2px var(--cd-bg);
@@ -169,9 +167,9 @@ import { Icon } from '../kit';
     --cd-bg: var(--cd-repeat);
   }
   .cd-chips {
-    --cd-date: var(--k-brand-tint, #e7efff);
-    --cd-time: var(--k-ai-tint, #eeebff);
-    --cd-repeat: color-mix(in srgb, var(--k-bot-mint, #3ddc97) 26%, var(--k-surface, #fff));
+    --cd-date: var(--k-brand-tint);
+    --cd-time: var(--k-ai-tint);
+    --cd-repeat: color-mix(in srgb, var(--k-bot-mint) 26%, var(--k-surface));
     display: flex;
     flex-wrap: wrap;
     gap: var(--k-space-2, 8px);
@@ -184,10 +182,10 @@ import { Icon } from '../kit';
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    padding: 3px 4px 3px 10px;
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-3);
     border-radius: var(--k-radius-pill, 999px);
     background: var(--cd-bg);
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 600 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
     animation: cd-in 140ms var(--k-ease-out, ease) both;
   }
@@ -199,26 +197,6 @@ import { Icon } from '../kit';
   }
   .cd-chip--repeat {
     --cd-bg: var(--cd-repeat);
-  }
-  .cd-chip-x {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--k-radius-pill, 999px);
-    background: transparent;
-    color: var(--k-text-2, #5c5f66);
-    cursor: pointer;
-  }
-  .cd-chip-x:hover {
-    background: color-mix(in srgb, var(--k-text, #262931) 12%, transparent);
-    color: var(--k-text, #262931);
-  }
-  .cd-chip-x:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
   }
   @keyframes cd-in {
     from {

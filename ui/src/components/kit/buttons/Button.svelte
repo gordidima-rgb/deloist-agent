@@ -10,6 +10,7 @@
     loading = false,
     disabled = false,
     type = 'button',
+    ref = $bindable(null),
     class: className = '',
     onclick,
     children,
@@ -34,6 +35,7 @@
 </script>
 
 <button
+  bind:this={ref}
   {type}
   class="k-btn {variantClass} {className}"
   class:k-btn--sm={size === 'sm'}

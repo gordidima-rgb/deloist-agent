@@ -4,6 +4,7 @@
   // остальные открывает «Ещё» — тот же ModelPicker, что и в профиле бота. Выбор отдаёт { driver, model }.
   import { tr } from '../lib/i18n.js';
   import { buildGroups, toValue, isCurrent, iconSvg } from '../lib/modelPicker.js';
+  import { Chip } from './kit';
   import ModelPicker from './ModelPicker.svelte';
 
   let { providers = [], plan = null, settings = {}, value = { driver: '', model: '' }, onselect, onconnect } = $props();
@@ -12,7 +13,7 @@
   const MAX_CHIPS = 7;
 
   let moreOpen = $state(false);
-  let moreBtn = $state();
+  let moreBtn = $state(null);
 
   const groups = $derived(buildGroups({ providers, plan, settings, value }));
 
@@ -46,20 +47,20 @@
 <div class="nbm">
   <span class="nbm-label" id="nbm-label">{tr('Модель')}</span>
   <div class="nbm-list" role="radiogroup" aria-labelledby="nbm-label">
-    <button type="button" class="nbm-chip" class:on={!value.driver} role="radio" aria-checked={!value.driver} onclick={pickDefault}>
+    <Chip class="nbm-chip" bind:selected={() => !value.driver, () => {}} role="radio" aria-checked={!value.driver} onclick={pickDefault}>
       {tr('как в настройках')}
-    </button>
+    </Chip>
     {#each chips as { g, m } (g.id + '/' + m.id)}
       {@const on = isCurrent(g, m, value)}
       {@const svg = iconSvg(g)}
-      <button type="button" class="nbm-chip" class:on role="radio" aria-checked={on} title={g.name} onclick={() => pick(g, m)}>
+      <Chip class="nbm-chip" bind:selected={() => on, () => {}} role="radio" aria-checked={on} title={g.name} onclick={() => pick(g, m)}>
         {#if svg}<span class="nbm-logo" aria-hidden="true">{@html svg}</span>{/if}
         <span class="nbm-name">{nameOf(g, m)}</span>
-      </button>
+      </Chip>
     {/each}
-    <button type="button" class="nbm-chip nbm-more" bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={moreOpen} onclick={() => (moreOpen = !moreOpen)}>
+    <Chip class="nbm-more" bind:ref={moreBtn} bind:selected={() => false, () => {}} aria-haspopup="dialog" aria-expanded={moreOpen} onclick={() => (moreOpen = !moreOpen)}>
       {hidden > 0 ? tr('Ещё · {n}', { n: hidden }) : tr('Ещё…')}
-    </button>
+    </Chip>
   </div>
   {#if moreOpen}
     <ModelPicker
@@ -97,34 +98,6 @@
     flex-wrap: wrap;
     gap: var(--k-space-2);
   }
-  .nbm-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    min-height: 32px;
-    padding: 0 var(--k-space-3);
-    border: 1px solid var(--k-line-strong);
-    border-radius: var(--k-radius-pill);
-    background: var(--k-surface);
-    color: var(--k-text-2);
-    font: 500 var(--k-text-sm) / 1.2 var(--k-font-body);
-    cursor: pointer;
-    transition: background var(--k-dur-fast) var(--k-ease-out), border-color var(--k-dur-fast) var(--k-ease-out);
-  }
-  .nbm-chip:hover {
-    background: var(--k-surface-2);
-  }
-  .nbm-chip:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
-  }
-  .nbm-chip.on {
-    border-color: var(--k-brand);
-    background: var(--k-brand-tint);
-    color: var(--k-brand-text);
-    font-weight: 600;
-  }
   .nbm-name {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -141,7 +114,7 @@
     width: 100%;
     height: 100%;
   }
-  .nbm-more {
+  :global(.nbm-more) {
     color: var(--k-text-3);
     border-style: dashed;
   }

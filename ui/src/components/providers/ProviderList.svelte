@@ -85,7 +85,7 @@ import { ListItem, Button } from '../kit';
   }
   .prov-logo :global(svg),
   .prov-logo img { width: 18px; height: 18px; display: block; }
-  .prov-logo--plus { color: var(--k-text-2); font-size: var(--k-text-lg); font-weight: 500; }
+  .prov-logo--plus { color: var(--k-text-2); font-size: var(--k-text-lg); font-weight: 600; }
   /* Панель слева на --k-surface-2: наведение темнее, выбранная строка поднимается на --k-surface. */
   /* Логотип стоит рядом с кнопкой строки, а не внутри: растягиваем её нажимаемую область на всю строку. */
   .prov-ul :global(.k-list-item__main)::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }

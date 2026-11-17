@@ -385,7 +385,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '.
   .rm-test {
     margin-top: 4px;
     color: var(--k-text-2);
-    font: 500 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
+    font: 600 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
   }
   .rm-bad {
     color: var(--k-danger-text);

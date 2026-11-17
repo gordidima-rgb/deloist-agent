@@ -1,7 +1,7 @@
 <script>
   // Карточка над нижним меню: предлагает бесплатный сервер, пока Instabox не подключён.
   import { onMount } from 'svelte';
-import { Button, Icon } from '../kit';
+  import { Button, IconButton } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { instaboxFeed, cardVisible, readDismissed, writeDismissed } from '../../lib/instabox.js';
 
@@ -21,9 +21,7 @@ import { Button, Icon } from '../kit';
 
 {#if visible}
   <section class="ibx-card" aria-label={tr('Бесплатный сервер')}>
-    <button type="button" class="ibx-x" aria-label={tr('Скрыть')} title={tr('Скрыть')} onclick={close}>
-      <Icon name="close" size={12} />
-    </button>
+    <IconButton name="close" size="sm" label={tr('Скрыть')} class="ibx-x" onclick={close} />
     <div class="ibx-head">
       <img src="/icons/apps/instabox.svg" alt="" />
       <b>{tr('Бесплатный сервер')}</b>

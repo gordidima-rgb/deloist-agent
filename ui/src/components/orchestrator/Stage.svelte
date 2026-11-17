@@ -5,7 +5,7 @@
   import { untrack, onMount, tick } from 'svelte';
   import { tr } from '../../lib/i18n.js';
   import { markdown } from '../../lib/markdown.js';
-import { Icon, Button } from '../kit';
+  import { Icon, Button, IconButton } from '../kit';
   import { lookForPhase, phaseOf, bubbleOf } from './model.js';
 
   let {
@@ -47,7 +47,7 @@ import { Icon, Button } from '../kit';
   let orbWrap;
   let root;
   let streamEl;
-  let micBtn;
+  let micBtn = $state(null);
   let liveKey = '';
   let liveId = '';
   let mic = null;
@@ -490,12 +490,8 @@ import { Icon, Button } from '../kit';
         placeholder={tr('Напиши ответ или скажи голосом')}
         aria-label={tr('Ответ оркестратору')}
       ></textarea>
-      <button type="button" class="orch-mic" bind:this={micBtn} hidden={!micAvailable} data-state={micState} aria-label={tr('Сказать голосом')} title={tr('Сказать голосом')}>
-        <Icon name="mic" size={20} />
-      </button>
-      <button type="submit" class="orch-send" disabled={!draft.trim()} aria-label={tr('Отправить')} title={tr('Отправить')}>
-        <Icon name="send" size={20} />
-      </button>
+      <IconButton bind:ref={micBtn} name="mic" label={tr('Сказать голосом')} class="orch-mic" hidden={!micAvailable} data-state={micState} />
+      <IconButton name="send" variant="primary" type="submit" label={tr('Отправить')} class="orch-send" disabled={!draft.trim()} />
     </form>
   </div>
 </section>
@@ -639,8 +635,6 @@ import { Icon, Button } from '../kit';
     align-items: flex-start;
     transition: opacity var(--k-dur-exit) var(--k-ease-in);
   }
-  .orch-mic:focus-visible,
-  .orch-send:focus-visible,
   .orch-input:focus-visible {
     outline: none;
     box-shadow: var(--k-focus);
@@ -670,43 +664,18 @@ import { Icon, Button } from '../kit';
     resize: none;
     box-sizing: border-box;
   }
-  .orch-mic,
-  .orch-send {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    border: 0;
-    border-radius: var(--k-radius-pill);
-    cursor: pointer;
-    transition: background var(--k-dur-fast) var(--k-ease-out), color var(--k-dur-fast) var(--k-ease-out);
+  :global(.orch-mic[hidden]) {
+    display: none;
   }
-  .orch-mic {
-    background: var(--k-surface-2);
-    color: var(--k-text-2);
-  }
-  .orch-mic[data-state='listening'] {
+  :global(.orch-mic[data-state='listening']) {
     background: var(--k-attention);
     color: var(--k-on-brand);
   }
-  .orch-mic[data-state='working'],
-  .orch-mic[data-state='downloading'],
-  .orch-mic[data-state='loading'] {
+  :global(.orch-mic[data-state='working']),
+  :global(.orch-mic[data-state='downloading']),
+  :global(.orch-mic[data-state='loading']) {
     background: var(--k-ai-tint);
     color: var(--k-ai);
-  }
-  .orch-send {
-    background: var(--k-brand);
-    color: var(--k-on-brand);
-  }
-  .orch-send:hover:not(:disabled) {
-    background: var(--k-brand-hover);
-  }
-  .orch-send:disabled {
-    background: var(--k-surface-3);
-    color: var(--k-text-3);
-    cursor: default;
   }
   .orch-stream[hidden],
   .orch-foot[hidden] {

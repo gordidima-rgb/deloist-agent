@@ -348,7 +348,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon, ListRow }
     border-radius: var(--k-radius-sm, 12px);
     background: var(--k-danger-tint);
     color: var(--k-danger-text);
-    font: 500 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
+    font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .hb-bar {
     display: flex;
@@ -429,7 +429,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon, ListRow }
     border-radius: var(--k-radius-sm, 12px);
     background: var(--k-surface);
     color: var(--k-text);
-    font: 500 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
+    font: 600 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
   }
   .hb-time:focus-visible {
     outline: none;
@@ -465,7 +465,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon, ListRow }
     color: var(--k-text-3);
     font: 700 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, system-ui);
     letter-spacing: 0.06em;
-    text-transform: uppercase;
+    
   }
   .hb-tpl-mark {
     color: var(--k-text-3);

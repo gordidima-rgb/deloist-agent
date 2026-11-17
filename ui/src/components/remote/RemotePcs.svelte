@@ -3,7 +3,7 @@
   // Заголовок — имя ПК (точка «в сети» или «не в сети»), внутри боты этого ПК. Пока ПК не в сети, раздел серый.
   // Всё, что пришло с другого ПК, — только текст; цвет проходит проверку; id — только через enc().
   import { onMount } from 'svelte';
-import { ListItem, Icon } from '../kit';
+  import { ListItem, Icon, Button, Badge } from '../kit';
   import RemoteOrb from './RemoteOrb.svelte';
   import { tr } from '../../lib/i18n.js';
   import { enc } from '../../lib/remote.js';
@@ -114,12 +114,12 @@ import { ListItem, Icon } from '../kit';
     {#each pcs as pc (pc.id)}
       {@const open = !closed[pc.id]}
       <section class="rp-pc" class:is-off={!pc.online} data-pc={pc.id}>
-        <button type="button" class="rp-head" aria-expanded={open} onclick={() => setOpen(pc.id, !open)}>
+        <Button variant="ghost" size="sm" class="rp-head" aria-expanded={open} onclick={() => setOpen(pc.id, !open)}>
           <Icon name="chevron-right" size={14} class="rp-chev{open ? ' is-open' : ''}" />
           <span class="rp-name">{pc.name || tr('ПК')}</span>
-          {#if totalNeeds(pc)}<span class="rp-need" title={tr('Нужен ты')}>{totalNeeds(pc)}</span>{/if}
+          {#if totalNeeds(pc)}<Badge tone="attention" count={totalNeeds(pc)} label={tr('Нужен ты')} />{/if}
           <span class="rp-state"><span class="rp-dot" class:is-on={pc.online} aria-hidden="true"></span>{pc.online ? tr('в сети') : tr('не в сети')}</span>
-        </button>
+        </Button>
         {#if open}
           <ul class="k-list rp-list" role="list">
             {#each botsOf(pc) as bot (bot.id)}
@@ -149,23 +149,16 @@ import { ListItem, Icon } from '../kit';
 
 <style>
   .rp { display: flex; flex-direction: column; gap: 2px; padding: 2px 8px 8px; border-top: 1px solid var(--k-line); }
-  .rp-head {
-    display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 0 var(--k-space-2);
-    border: 0; border-radius: var(--k-radius-sm); background: transparent; color: var(--k-text-2); cursor: pointer;
-    font: 600 var(--k-text-xs, 12px) / 1.2 var(--k-font-body, inherit); text-align: left;
-    transition: background 0.15s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .rp-head:hover { background: var(--arc-hover); color: var(--k-text); }
+  :global(.rp-head) { width: 100%; justify-content: flex-start; gap: 6px; }
   :global(.rp-chev) { flex: none; transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1); }
   :global(.rp-chev.is-open) { transform: rotate(90deg); }
-  .rp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rp-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rp-state { display: inline-flex; align-items: center; gap: var(--k-space-1); font-weight: 600; color: var(--k-text-3); }
   .rp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--k-text-3); }
   .rp-dot.is-on { background: var(--k-brand); }
-  .rp-need { min-width: 18px; padding: 0 var(--k-space-1); border-radius: var(--k-radius-pill); background: var(--k-attention); color: var(--k-on-brand); font-size: 11px; line-height: 18px; text-align: center; }
   .rp-pc.is-off .rp-name, .rp-pc.is-off :global(.k-list-item__main) { opacity: 0.55; }
   .rp-pc.is-off :global(.k-list-item__main) { cursor: default; }
   .rp-list { margin: 0; padding: 0; list-style: none; }
   .rp-empty { padding: 6px 12px; font: 400 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, inherit); color: var(--k-text-3); list-style: none; }
-  @media (prefers-reduced-motion: reduce) { :global(.rp-chev), .rp-head { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { :global(.rp-chev) { transition: none; } }
 </style>

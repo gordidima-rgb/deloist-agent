@@ -472,7 +472,7 @@
     background: var(--k-surface);
     color: var(--k-text);
     box-shadow: var(--k-shadow-2), inset 0 0 0 1px var(--k-line-strong);
-    font: 500 var(--k-text-sm) / 1.35 var(--k-font-body);
+    font: 600 var(--k-text-sm) / 1.35 var(--k-font-body);
   }
   .wfs-conflict span {
     flex: 1 1 240px;

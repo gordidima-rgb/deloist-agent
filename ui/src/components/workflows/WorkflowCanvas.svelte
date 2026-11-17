@@ -1006,7 +1006,7 @@
     cursor: crosshair;
   }
   .wf-canvas :global(.svelte-flow__minimap) {
-    margin: 0 14px 14px 0;
+    margin: 0 var(--k-space-4) var(--k-space-4) 0;
     border-radius: var(--k-radius-md);
     border: 1px solid var(--k-line);
     box-shadow: var(--k-shadow-2);
@@ -1081,10 +1081,10 @@
   .wf-runchip {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--k-space-2);
     height: 26px;
     margin: 0 var(--k-space-0);
-    padding: 0 10px;
+    padding: 0 var(--k-space-3);
     border-radius: var(--k-radius-sm);
     background: var(--k-surface-2);
     font: 700 var(--k-text-xs) / 1 var(--k-font-body);
@@ -1105,7 +1105,7 @@
     color: var(--k-on-brand);
   }
   .wf-runchip__sec {
-    font-weight: 500;
+    font-weight: 600;
     opacity: 0.8;
     font-variant-numeric: tabular-nums;
   }
@@ -1114,7 +1114,7 @@
     height: 7px;
     border-radius: 50%;
     background: var(--k-ember);
-    box-shadow: 0 0 6px 1px color-mix(in oklab, var(--k-brand) 80%, transparent);
+    box-shadow: 0 0 3px 1px color-mix(in oklab, var(--k-brand) 80%, transparent);
     animation: wf-blink 1.2s ease-in-out infinite;
   }
   .wf-bar--zoom {
@@ -1143,7 +1143,7 @@
     width: 46px;
   }
   .wf-tool__t {
-    font: 800 20px / 1 var(--k-font-display);
+    font: 800 var(--k-text-xl) / 1 var(--k-font-display);
   }
   .wf-sep {
     width: 1px;
@@ -1202,10 +1202,10 @@
     outline: none;
     background: transparent;
     color: var(--k-text);
-    font: 500 var(--k-text-md) / 1 var(--k-font-body);
+    font: 600 var(--k-text-md) / 1 var(--k-font-body);
   }
   .wf-search__n {
-    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     white-space: nowrap;
   }
   .wf-empty {
@@ -1215,7 +1215,7 @@
     align-content: center;
     justify-items: center;
     gap: var(--k-space-2);
-    padding: 0 var(--k-space-6) 90px;
+    padding: 0 var(--k-space-6) calc(var(--k-space-12) + var(--k-space-8) + var(--k-space-1) * 2.5);
     text-align: center;
     pointer-events: none;
     animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
@@ -1285,7 +1285,7 @@
     color: var(--k-text);
   }
   .wf-bar__hint {
-    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wf-viewing {

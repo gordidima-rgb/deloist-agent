@@ -33,14 +33,14 @@
   .wf-art {
     display: block;
     overflow: visible;
-    filter: drop-shadow(0 2px 2.5px rgba(0, 0, 0, 0.28));
+    filter: drop-shadow(0 2px 2.5px color-mix(in oklab, var(--k-ink) 28%, transparent));
     transition:
       transform 360ms var(--k-ease-spring, cubic-bezier(0.34, 1.36, 0.5, 1)),
       filter 220ms var(--k-ease-out, ease);
   }
   :global(.wf-tool:hover) .wf-art {
     transform: translateY(-3px) scale(1.08);
-    filter: drop-shadow(0 6px 5px rgba(0, 0, 0, 0.3));
+    filter: drop-shadow(0 6px 5px color-mix(in oklab, var(--k-ink) 30%, transparent));
   }
   /* Выбранный инструмент: карандаш выдвигается вверх, как будто его взяли в руку. */
   :global(.wf-tool.on) .wf-art--pencil {

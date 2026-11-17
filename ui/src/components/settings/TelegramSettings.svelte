@@ -321,7 +321,7 @@ import { Section, Field, TextInput, Select, Button } from '../kit';
     color: var(--k-text-3);
     font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
     letter-spacing: 0.06em;
-    text-transform: uppercase;
+    
   }
   .tg-code {
     color: var(--k-text);

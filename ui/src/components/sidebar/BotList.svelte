@@ -389,7 +389,7 @@ import { ListItem, Icon, Badge } from '../kit';
   :global(.sb-chev.is-open) { transform: rotate(90deg); }
   .sb-count {
     margin-left: auto;
-    padding: 1px 7px;
+    padding: 1px var(--k-space-2);
     border-radius: var(--k-radius-pill);
     background: var(--k-surface-2);
     color: var(--k-text-2);

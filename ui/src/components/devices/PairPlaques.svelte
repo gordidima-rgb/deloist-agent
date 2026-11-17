@@ -184,8 +184,8 @@ import { Button } from '../kit';
   h3.plaque__title { margin: 0; font: 600 var(--k-text-md, 15px) / 1.35 var(--k-font-body, inherit); overflow-wrap: anywhere; }
   .plaque__meta, .plaque__text { margin: 0; font: 400 var(--k-text-xs, 12px) / 1.45 var(--k-font-body, inherit); color: var(--k-text-3); overflow-wrap: anywhere; }
   .plaque__field { display: flex; flex-direction: column; gap: 4px; font: 600 var(--k-text-sm, 13px) / 1.3 var(--k-font-body, inherit); color: var(--k-text-2); }
-  .plaque__code { font: 600 20px / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.12em; text-align: center; }
-  .plaque__ack { font: 600 32px / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.18em; text-align: center; padding: var(--k-space-2, 8px); background: var(--k-surface-2); border-radius: var(--k-radius-md, 12px); user-select: all; }
+  .plaque__code { font: 600 var(--k-text-xl) / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.12em; text-align: center; }
+  .plaque__ack { font: 600 var(--k-text-3xl) / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.18em; text-align: center; padding: var(--k-space-2, 8px); background: var(--k-surface-2); border-radius: var(--k-radius-md, 12px); user-select: all; }
   .plaque__error { margin: 0; font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, inherit); color: var(--k-attention-text); }
   .plaque__actions { display: flex; gap: var(--k-space-2, 8px); justify-content: flex-end; }
 </style>

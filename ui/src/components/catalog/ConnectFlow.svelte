@@ -213,13 +213,13 @@
     min-width: 0;
   }
   .cat-link {
-    color: var(--k-brand-text, #0250e0);
+    color: var(--k-brand-text);
   }
   .cat-note {
     margin: 0;
     padding: var(--k-space-2, 8px) var(--k-space-3, 12px);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface-2, #f0f0f0);
+    background: var(--k-surface-2);
     color: var(--k-text-2, inherit);
     font-size: var(--k-text-sm, 13px);
   }
@@ -228,7 +228,7 @@
   }
   .done ul {
     margin: 6px 0 0;
-    padding-left: 18px;
+    padding-left: var(--k-space-5);
     font-size: var(--k-text-sm, 13px);
   }
 </style>

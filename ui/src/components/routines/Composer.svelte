@@ -9,7 +9,7 @@
   import { splitByMarks, hasKind, removeKind, dateLabel } from '../../lib/composer.js';
   import MentionPopover from '../MentionPopover.svelte';
 
-import { Icon } from '../kit';
+  import { IconButton } from '../kit';
   let {
     value = $bindable(''),
     placeholder = '',
@@ -179,9 +179,7 @@ import { Icon } from '../kit';
     {#each chips as chip (chip.kind)}
       <span class="cmp-chip cmp-chip--{chip.kind}" data-kind={chip.kind}>
         <span class="cmp-chip-text">{chip.text}</span>
-        <button type="button" class="cmp-chip-x" aria-label={chipLabel(chip)} title={chipLabel(chip)} onclick={() => remove(chip.kind)}>
-          <Icon name="close" size={10} stroke={3} />
-        </button>
+        <IconButton name="close" size="sm" label={chipLabel(chip)} class="cmp-chip-x" onclick={() => remove(chip.kind)} />
       </span>
     {/each}
   </div>
@@ -214,7 +212,7 @@ import { Icon } from '../kit';
   .cmp-input {
     box-sizing: border-box;
     margin: 0;
-    padding: 10px 14px;
+    padding: var(--k-space-3) var(--k-space-4);
     border: 0;
     font: 400 var(--k-text-md, 15px) / 1.45 var(--k-font-body, system-ui);
     letter-spacing: normal;
@@ -242,7 +240,7 @@ import { Icon } from '../kit';
     color: var(--k-text-3);
   }
   .cmp-mark {
-    border-radius: 5px;
+    border-radius: var(--k-radius-xs);
     color: transparent;
     box-shadow: 0 0 0 2px var(--cmp-bg);
     background: var(--cmp-bg);
@@ -266,7 +264,7 @@ import { Icon } from '../kit';
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    padding: 3px 4px 3px 10px;
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-3);
     border-radius: var(--k-radius-pill, 999px);
     background: var(--cmp-bg);
     color: var(--k-text);
@@ -281,26 +279,6 @@ import { Icon } from '../kit';
   }
   .cmp-chip--repeat {
     --cmp-bg: var(--cmp-repeat);
-  }
-  .cmp-chip-x {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--k-radius-pill, 999px);
-    background: transparent;
-    color: var(--k-text-2);
-    cursor: pointer;
-  }
-  .cmp-chip-x:hover {
-    background: color-mix(in srgb, var(--k-text) 12%, transparent);
-    color: var(--k-text);
-  }
-  .cmp-chip-x:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
   }
   @keyframes cmp-in {
     from {

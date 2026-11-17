@@ -326,7 +326,7 @@ import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
   .note.is-error { color: var(--k-attention-text); }
   .ask { display: flex; flex-direction: column; gap: var(--k-space-2, 8px); padding: var(--k-space-3, 12px); border-radius: var(--k-radius-md, 12px); background: var(--k-surface-2); animation: ask-in 0.3s cubic-bezier(0.34, 1.36, 0.64, 1); }
   .ask .hint { padding: 0; }
-  .code { font: 600 28px / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.18em; text-align: center; user-select: all; }
+  .code { font: 600 var(--k-text-2xl) / 1.2 var(--k-font-mono, monospace); letter-spacing: 0.18em; text-align: center; user-select: all; }
   @keyframes ask-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .ask { animation: none; } .dot { transition: none; } }
 </style>

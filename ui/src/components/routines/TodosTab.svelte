@@ -51,7 +51,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
   let files = $state([]); // File, которые уйдут к новой задаче
   let dateInput = $state();
   let fileInput = $state();
-  let micButton = $state();
+  let micButton = $state(null);
   const MAX_FILE = 10 * 1024 * 1024; // как у вложений чата (attach::MAX_BYTES)
   const MAX_FILES = 10;
 
@@ -455,9 +455,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
         <Button size="sm" variant="ghost" onclick={() => fileInput?.click()} aria-label={tr('Приложить файл')}>{tr('Файл')}</Button>
         <input bind:this={fileInput} class="td-hidden-input" type="file" multiple tabindex="-1" aria-hidden="true" onchange={(e) => { addFiles([...e.currentTarget.files]); e.currentTarget.value = ''; }} />
         {#if voiceReady}
-          <button type="button" bind:this={micButton} class="td-mic" aria-label={tr('Сказать голосом')} title={tr('Сказать голосом')}>
-            <Icon name="mic" size={16} stroke={1.8} />
-          </button>
+          <IconButton bind:ref={micButton} name="mic" size="sm" label={tr('Сказать голосом')} class="td-mic" />
         {/if}
       </div>
       <Button variant="primary" size="sm" loading={busy} disabled={!text.trim()} onclick={() => composer?.submit()}>{tr('Добавить')}</Button>
@@ -596,33 +594,13 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     opacity: 0;
     pointer-events: none;
   }
-  .td-mic {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--k-radius-pill, 999px);
-    background: transparent;
-    color: var(--k-text-2);
-    cursor: pointer;
-  }
-  .td-mic:hover {
-    background: color-mix(in srgb, var(--k-text) 10%, transparent);
-    color: var(--k-text);
-  }
-  .td-mic:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus);
-  }
-  .td-mic:global([data-state='listening']) {
+  :global(.td-mic[data-state='listening']) {
     background: var(--k-attention);
-    color: #fff;
+    color: var(--k-on-brand);
   }
-  .td-mic:global([data-state='working']),
-  .td-mic:global([data-state='downloading']),
-  .td-mic:global([data-state='loading']) {
+  :global(.td-mic[data-state='working']),
+  :global(.td-mic[data-state='downloading']),
+  :global(.td-mic[data-state='loading']) {
     opacity: 0.6;
   }
   .td-sub,
@@ -648,7 +626,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     padding-left: var(--k-space-3, 12px);
   }
   .td-file {
-    padding: 3px 4px 3px 10px;
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-3);
     border-radius: var(--k-radius-pill, 999px);
     background: var(--k-surface);
     border: 1px solid var(--k-line);
@@ -664,7 +642,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
   .td-sub-input {
     flex: 1;
     min-width: 0;
-    padding: 6px 10px;
+    padding: var(--k-space-2) var(--k-space-3);
     border: 1px solid var(--k-line-strong);
     border-radius: var(--k-radius-sm, 12px);
     background: var(--k-surface);
@@ -804,7 +782,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     border-radius: var(--k-radius-pill, 999px);
     background: var(--k-surface-2);
     color: var(--k-text-2);
-    font: 500 var(--k-text-xs, 12px) / 1.5 var(--k-font-body, system-ui);
+    font: 600 var(--k-text-xs, 12px) / 1.5 var(--k-font-body, system-ui);
   }
   .td-chip--late {
     background: var(--k-danger-tint);

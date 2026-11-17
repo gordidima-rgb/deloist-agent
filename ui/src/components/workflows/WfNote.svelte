@@ -56,12 +56,12 @@
     min-width: 150px;
     min-height: 110px;
     box-sizing: border-box;
-    padding: 14px 16px;
-    border-radius: 18px;
+    padding: var(--k-space-4) var(--k-space-4);
+    border-radius: var(--k-radius-md);
     background: color-mix(in oklab, var(--tone) 34%, var(--k-surface));
     box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.08),
-      0 14px 26px -16px rgba(0, 0, 0, 0.35);
+      0 1px 2px color-mix(in oklab, var(--k-ink) 8%, transparent),
+      0 14px 26px -16px color-mix(in oklab, var(--k-ink) 35%, transparent);
     transition:
       box-shadow 220ms var(--k-ease-out, ease),
       background 220ms var(--k-ease-out, ease);
@@ -69,12 +69,12 @@
   .wfa--note.is-selected {
     box-shadow:
       0 0 0 2px var(--k-brand),
-      0 18px 30px -16px rgba(0, 0, 0, 0.4);
+      0 18px 30px -16px color-mix(in oklab, var(--k-ink) 40%, transparent);
   }
   .wfa--text {
     min-width: 120px;
     padding: 4px 6px;
-    border-radius: 10px;
+    border-radius: var(--k-radius-sm);
   }
   .wfa--text.is-selected {
     outline: 2px dashed var(--k-brand);
@@ -95,7 +95,7 @@
     background: transparent;
     resize: none;
     color: var(--k-text);
-    font: 500 14px/1.5 var(--k-font-body);
+    font: 600 var(--k-text-md)/1.5 var(--k-font-body);
   }
   .wfa--note .wfa-area {
     color: color-mix(in oklab, var(--k-text) 92%, var(--tone));
@@ -103,7 +103,7 @@
   .wfa--text .wfa-area {
     field-sizing: content;
     min-height: 1.5em;
-    font: 800 20px/1.3 var(--k-font-display);
+    font: 800 var(--k-text-xl)/1.3 var(--k-font-display);
     letter-spacing: -0.01em;
   }
   .wfa-area::placeholder {
@@ -116,7 +116,7 @@
     display: flex;
     gap: 6px;
     padding: 6px 8px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
     box-shadow: var(--k-shadow-2);

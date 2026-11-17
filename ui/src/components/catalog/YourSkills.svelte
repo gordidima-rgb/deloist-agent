@@ -62,7 +62,7 @@
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-4, 16px);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface-2, #f0f0f0);
+    background: var(--k-surface-2);
   }
   .head {
     display: flex;
@@ -94,7 +94,7 @@
     padding: var(--k-space-2, 8px) var(--k-space-3, 12px);
     border: 0;
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
     color: var(--k-text, inherit);
     font: inherit;
     text-align: left;

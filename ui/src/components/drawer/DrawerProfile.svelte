@@ -440,7 +440,7 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
     min-height: 220px;
     max-height: 480px;
     padding: var(--k-space-4);
-    font-size: 15px;
+    font-size: var(--k-text-md);
     line-height: 1.55;
     overflow-y: auto;
     overflow-wrap: anywhere;

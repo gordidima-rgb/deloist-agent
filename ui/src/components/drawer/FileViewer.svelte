@@ -305,7 +305,7 @@ import { Button, Spinner, Tabs } from '../kit';
   .fv-text :global(.shj-syn-num), .fv-text :global(.shj-syn-bool) { color: var(--k-attention-text); }
   .fv-text :global(.shj-syn-cmnt) { color: var(--k-text-3); font-style: italic; }
   .fv-text :global(.shj-syn-type), .fv-text :global(.shj-syn-class) { color: var(--k-brand-text); }
-  .fv-text :global(.shj-syn-func) { color: var(--k-ai); font-weight: 500; }
+  .fv-text :global(.shj-syn-func) { color: var(--k-ai); font-weight: 600; }
   .fv-text :global(.shj-syn-oper) { color: var(--k-text-2); }
   .fv-text :global(.shj-syn-deleted), .fv-text :global(.shj-syn-err) { color: var(--k-attention-text); text-decoration: line-through; }
   .fv-code.wrap .fv-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
@@ -314,7 +314,7 @@ import { Button, Spinner, Tabs } from '../kit';
   .fv-md :global(h2) { font-size: var(--k-text-lg, 1.2em); margin: 1em 0 0.5em; }
   .fv-md :global(h3) { font-size: var(--k-text-md, 1.05em); margin: 0.9em 0 0.4em; }
   .fv-md :global(pre) { overflow: auto; padding: var(--k-space-3); border-radius: var(--k-radius-sm); background: var(--k-surface-2); font: 400 var(--k-text-xs) / 1.5 var(--k-font-mono); }
-  .fv-md :global(code) { padding: 1px 5px; border-radius: var(--k-radius-xs); background: var(--k-surface-2); color: var(--k-text); font-family: var(--k-font-mono); font-size: 0.92em; }
+  .fv-md :global(code) { padding: 1px var(--k-space-1); border-radius: var(--k-radius-xs); background: var(--k-surface-2); color: var(--k-text); font-family: var(--k-font-mono); font-size: 0.92em; }
   .fv-md :global(pre code) { padding: 0; background: none; }
   .fv-md :global(p) { margin: 0 0 0.7em; }
   .fv-md :global(ul), .fv-md :global(ol) { margin: 0 0 0.7em; padding-left: 1.4em; }

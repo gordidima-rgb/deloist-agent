@@ -365,11 +365,11 @@ import { Icon, LimitRing } from './kit';
   }
   .dock-menu__title {
     padding: 8px 12px 6px;
-    font: 800 14px/1.3 var(--k-font-display);
+    font: 800 var(--k-text-md)/1.3 var(--k-font-display);
     color: var(--k-on-ink);
   }
   .dock-menu__sub {
-    margin: 2px 0 4px 18px;
+    margin: 2px 0 var(--k-space-1) var(--k-space-5);
     padding-left: 8px;
     border-left: 1px solid var(--k-ink-line);
     max-height: 240px;

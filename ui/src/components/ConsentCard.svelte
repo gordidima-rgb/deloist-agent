@@ -98,39 +98,39 @@ import { Modal, Checkbox, Button } from './kit';
     flex-direction: column;
     gap: var(--k-space-1, 4px);
     padding: var(--k-space-3, 12px);
-    border: 1px solid var(--k-line, #e4e4e4);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-md, 14px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
   }
   .cst-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: var(--k-space-1, 4px) var(--k-space-3, 12px);
-    padding-left: 28px;
+    padding-left: var(--k-space-6);
   }
   .cst-note {
     flex-basis: 100%;
     margin: 0;
-    color: var(--k-text-2, #4a4a4a);
+    color: var(--k-text-2);
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .cst-link {
-    color: var(--k-brand, #025bff);
+    color: var(--k-brand);
     font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .cst-version {
-    color: var(--k-text-3, #7a7a7a);
+    color: var(--k-text-3);
     font: 400 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
   }
   .cst-hint {
     margin: var(--k-space-3, 12px) 0 0;
-    color: var(--k-text-2, #4a4a4a);
+    color: var(--k-text-2);
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .cst-error {
     margin: var(--k-space-2, 8px) 0 0;
-    color: var(--k-danger, #d92d20);
+    color: var(--k-danger);
     font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
 </style>

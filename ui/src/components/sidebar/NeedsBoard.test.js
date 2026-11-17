@@ -32,7 +32,7 @@ describe('NeedsBoard', () => {
   it('reports the section and the item on click', () => {
     const onpick = vi.fn();
     render({ sections: [{ key: 'unread', title: 'Непрочитанные', items: [{ id: 'x', where: 'Гамма' }] }], onpick });
-    host.querySelector('.nb-item').click();
+    host.querySelector('.nb-item .k-lrow__t--btn').click();
     expect(onpick).toHaveBeenCalledWith('unread', { id: 'x', where: 'Гамма' });
   });
 });

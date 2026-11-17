@@ -136,7 +136,7 @@ import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
         <div class="rp-chart" role="group" aria-label={tr('Последние недели: удачные и неудачные ответы')}>
           {#each data.weeks as w, i (w.start)}
             {@const total = w.ok + w.failed}
-            <button type="button" class="rp-col" class:rp-cur={i === data.weeks.length - 1} title={barTitle(w)} aria-label={barTitle(w)} disabled={loading} onclick={() => go(w.start)}>
+            <Button variant="ghost" class="rp-col{i === data.weeks.length - 1 ? ' rp-cur' : ''}" title={barTitle(w)} aria-label={barTitle(w)} disabled={loading} onclick={() => go(w.start)}>
               <span class="rp-bar">
                 {#if total}
                   <span class="rp-seg rp-fail" style:height="{(w.failed / maxTotal) * 100}%"></span>
@@ -146,7 +146,7 @@ import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
                 {/if}
               </span>
               <span class="rp-day">{shortDay(w.start, locale)}</span>
-            </button>
+            </Button>
           {/each}
         </div>
         <div class="rp-legend" aria-hidden="true">
@@ -169,10 +169,10 @@ import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
                 </div>
                 <span class="rp-pct rp-tone-{btone}">{Math.round(bot.okPercent)}%</span>
                 {#if fails.length}
-                  <button type="button" class="rp-more" aria-expanded={!!open[bot.id]} aria-controls="rp-f-{bot.id}" onclick={() => toggle(bot.id)}>
+                  <Button variant="ghost" size="sm" class="rp-more" aria-expanded={!!open[bot.id]} aria-controls="rp-f-{bot.id}" onclick={() => toggle(bot.id)}>
                     {tr('Ошибки: {n}', { n: fails.length })}
                     <Icon name="chevron-down" size={14} class={['rp-chev', open[bot.id] && 'rp-turn']} />
-                  </button>
+                  </Button>
                 {/if}
               </div>
               {#if fails.length && open[bot.id]}
@@ -196,45 +196,45 @@ import { Button, EmptyState, Skeleton, Icon, IconButton } from '../kit';
   .rp-nav-group { display: flex; align-items: center; gap: var(--k-space-2, 8px); }
   .rp-range { font: 700 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, inherit); min-width: 9ch; text-align: center; }
   .rp-col:focus-visible, .rp-more:focus-visible { outline: none; box-shadow: var(--k-focus); }
-  .rp-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font: 600 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, inherit); }
-  .rp-error { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font-size: var(--k-text-sm, 13px); }
+  .rp-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint); color: var(--k-attention-text); font: 600 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, inherit); }
+  .rp-error { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint); color: var(--k-attention-text); font-size: var(--k-text-sm, 13px); }
   .rp-skel { display: grid; gap: var(--k-space-3, 12px); }
   .rp-body { display: flex; flex-direction: column; gap: var(--k-space-2, 8px); transition: opacity 0.15s; }
   .rp-dim { opacity: 0.55; }
   .rp-headline { margin: var(--k-space-2, 8px) 0 0; font: 800 var(--k-text-xl, 22px) / 1.2 var(--k-font-display, inherit); text-wrap: balance; }
-  .rp-sub { margin: 0; color: var(--k-text-3, #8d8f94); font-size: var(--k-text-sm, 13px); }
-  .rp-tone-rough { color: var(--k-attention-text, #b4321b); }
-  .rp-chart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--k-space-2, 8px); margin-top: var(--k-space-3, 12px); padding: var(--k-space-4, 16px) var(--k-space-4, 16px) var(--k-space-2, 8px); border-radius: var(--k-radius-md, 18px); background: var(--k-surface-2, #f1f0ec); }
-  .rp-col { display: flex; flex-direction: column; align-items: center; gap: var(--k-space-1, 4px); padding: 0; border: 0; border-radius: var(--k-radius-xs, 6px); background: transparent; color: var(--k-text-3, #8d8f94); cursor: pointer; font: inherit; }
+  .rp-sub { margin: 0; color: var(--k-text-3); font-size: var(--k-text-sm, 13px); }
+  .rp-tone-rough { color: var(--k-attention-text); }
+  .rp-chart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--k-space-2, 8px); margin-top: var(--k-space-3, 12px); padding: var(--k-space-4, 16px) var(--k-space-4, 16px) var(--k-space-2, 8px); border-radius: var(--k-radius-md, 18px); background: var(--k-surface-2); }
+  :global(.rp-col) { display: flex; flex-direction: column; align-items: center; gap: var(--k-space-1); height: auto; padding: 0; }
   .rp-bar { display: flex; flex-direction: column; justify-content: flex-end; width: 100%; max-width: 36px; height: 88px; }
   .rp-seg { display: block; width: 100%; min-height: 3px; }
   .rp-seg:first-child { border-radius: var(--k-radius-xs, 6px) var(--k-radius-xs, 6px) 0 0; }
   .rp-seg:last-child { border-radius: 0 0 var(--k-radius-xs, 6px) var(--k-radius-xs, 6px); }
   .rp-seg:only-child { border-radius: var(--k-radius-xs, 6px); }
-  .rp-ok { background: var(--k-brand, #025bff); }
-  .rp-fail { background: var(--k-attention, #ff5a3c); }
-  .rp-col:not(.rp-cur) .rp-bar { opacity: 0.45; }
-  .rp-col:hover:not(:disabled) .rp-bar { opacity: 1; }
-  .rp-none { display: block; width: 100%; height: 3px; border-radius: 2px; background: var(--k-line-strong, #cfcdc7); }
+  .rp-ok { background: var(--k-brand); }
+  .rp-fail { background: var(--k-attention); }
+  :global(.rp-col:not(.rp-cur) .rp-bar) { opacity: 0.45; }
+  :global(.rp-col:hover:not(:disabled) .rp-bar) { opacity: 1; }
+  .rp-none { display: block; width: 100%; height: 3px; border-radius: var(--k-radius-xs); background: var(--k-line-strong); }
   .rp-day { font: 600 var(--k-text-micro, 11px) / 1.2 var(--k-font-body, inherit); white-space: nowrap; }
-  .rp-cur .rp-day { color: var(--k-text, inherit); }
-  .rp-legend { display: flex; gap: var(--k-space-4, 16px); color: var(--k-text-3, #8d8f94); font-size: var(--k-text-xs, 12px); }
+  :global(.rp-cur .rp-day) { color: var(--k-text); }
+  .rp-legend { display: flex; gap: var(--k-space-4, 16px); color: var(--k-text-3); font-size: var(--k-text-xs, 12px); }
   .rp-legend span { display: inline-flex; align-items: center; gap: 6px; }
   .rp-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .rp-h3 { margin: var(--k-space-4, 16px) 0 0; font: 800 var(--k-text-lg, 18px) / 1.25 var(--k-font-display, inherit); }
   .rp-bots { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--k-space-2, 8px); }
-  .rp-bot { border-radius: var(--k-radius-sm, 12px); background: var(--k-surface-2, #f1f0ec); }
+  .rp-bot { border-radius: var(--k-radius-sm, 12px); background: var(--k-surface-2); }
   .rp-row { display: flex; align-items: center; gap: var(--k-space-3, 12px); padding: var(--k-space-3, 12px) var(--k-space-4, 16px); flex-wrap: wrap; }
   .rp-who { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .rp-name { font: 700 var(--k-text-md, 15px) / 1.25 var(--k-font-body, inherit); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .rp-meta { color: var(--k-text-3, #8d8f94); font-size: var(--k-text-xs, 12px); }
+  .rp-meta { color: var(--k-text-3); font-size: var(--k-text-xs, 12px); }
   .rp-pct { font: 800 var(--k-text-lg, 18px) / 1 var(--k-font-display, inherit); font-variant-numeric: tabular-nums; }
-  .rp-more { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 0; border-radius: var(--k-radius-pill, 999px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font: 700 var(--k-text-xs, 12px) / 1 var(--k-font-body, inherit); cursor: pointer; }
+  :global(.rp-more) { background: var(--k-attention-tint); color: var(--k-attention-text); }
   :global(.rp-chev) { transition: transform 0.15s; }
   :global(.rp-turn) { transform: rotate(180deg); }
   .rp-fails { list-style: none; margin: 0; padding: 0 var(--k-space-4, 16px) var(--k-space-3, 12px); display: flex; flex-direction: column; gap: var(--k-space-2, 8px); }
   .rp-fails li { display: flex; gap: var(--k-space-3, 12px); align-items: baseline; font-size: var(--k-text-sm, 13px); }
-  .rp-time { flex: none; color: var(--k-text-3, #8d8f94); font-size: var(--k-text-xs, 12px); font-variant-numeric: tabular-nums; }
+  .rp-time { flex: none; color: var(--k-text-3); font-size: var(--k-text-xs, 12px); font-variant-numeric: tabular-nums; }
   .rp-prev { min-width: 0; overflow-wrap: anywhere; color: var(--k-text-2, inherit); }
   @media (max-width: 480px) {
     .rp-chart { padding-inline: var(--k-space-2, 8px); gap: var(--k-space-1, 4px); }

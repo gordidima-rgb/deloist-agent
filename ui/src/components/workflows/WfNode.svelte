@@ -257,7 +257,7 @@
     color: var(--k-text);
     box-shadow:
       0 0 0 1px var(--k-line-strong),
-      0 16px 34px -18px rgba(40, 15, 0, 0.45);
+      0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
     transition:
       box-shadow var(--k-dur-ui) var(--k-ease-out),
       opacity var(--k-dur-base) var(--k-ease-out);
@@ -267,7 +267,7 @@
     box-shadow:
       0 0 0 1.5px var(--k-brand),
       0 0 26px -6px color-mix(in oklab, var(--k-brand) 70%, transparent),
-      0 16px 34px -18px rgba(40, 15, 0, 0.45);
+      0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
   }
   .wfn.is-hit {
     box-shadow:
@@ -296,7 +296,7 @@
     box-shadow:
       0 0 0 1.5px var(--k-brand),
       0 0 26px -6px color-mix(in oklab, var(--k-brand) 70%, transparent),
-      0 16px 34px -18px rgba(40, 15, 0, 0.45);
+      0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
     animation:
       wfn-in var(--k-dur-appear) var(--k-ease-spring) both,
       wfn-glow 1.8s ease-in-out infinite;
@@ -304,7 +304,7 @@
   .wfn[data-status='failed'] {
     box-shadow:
       0 0 0 1.5px var(--k-danger),
-      0 16px 34px -18px rgba(40, 15, 0, 0.45);
+      0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
   }
   .wfn[data-status='skipped'] {
     opacity: 0.5;
@@ -427,7 +427,7 @@
     transform: none;
   }
   .wfn-branch {
-    padding: 2px 9px;
+    padding: 2px var(--k-space-2);
     border-radius: var(--k-radius-pill);
     background: var(--k-brand-tint);
     color: var(--k-brand-text);
@@ -452,11 +452,11 @@
     color: var(--k-text-3);
   }
   .wfn-reused {
-    padding: 1px 7px;
+    padding: 1px var(--k-space-2);
     border-radius: var(--k-radius-pill);
     background: var(--k-surface-3);
     color: var(--k-text-3);
-    font: 500 var(--k-text-micro) / 1.5 var(--k-font-body);
+    font: 600 var(--k-text-micro) / 1.5 var(--k-font-body);
     white-space: nowrap;
   }
   .wfn-pager {
@@ -544,7 +544,7 @@
     display: grid;
     flex: 1;
     min-width: 0;
-    gap: 3px;
+    gap: var(--k-space-1);
   }
   .wfn-file__meta b {
     overflow: hidden;
@@ -611,7 +611,7 @@
     color: var(--k-brand-text);
   }
   .wfn-sec {
-    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-3);
     font-variant-numeric: tabular-nums;
   }
@@ -729,13 +729,13 @@
       box-shadow:
         0 0 0 1.5px var(--k-brand),
         0 0 14px -6px color-mix(in oklab, var(--k-brand) 60%, transparent),
-        0 16px 34px -18px rgba(40, 15, 0, 0.45);
+        0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
     }
     50% {
       box-shadow:
         0 0 0 2px var(--k-brand),
         0 0 34px -4px color-mix(in oklab, var(--k-brand) 80%, transparent),
-        0 16px 34px -18px rgba(40, 15, 0, 0.45);
+        0 16px 34px -18px color-mix(in oklab, var(--k-ink) 45%, transparent);
     }
   }
   @media (prefers-reduced-motion: reduce) {

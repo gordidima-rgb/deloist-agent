@@ -154,12 +154,9 @@ import { Checkbox, Button, IconButton, TextInput } from './kit';
       {/if}
       <ul class="km-sources">
         {#each sources as s}
-          <li>
-            <label>
-              <input type="checkbox" checked={selected.has(s.id)} disabled={!s.found} onchange={() => toggle(s.id)} />
-              <span>{s.name}</span>
-              <span class="km-count">{s.found ? s.count : tr('скоро')}</span>
-            </label>
+          <li class="km-source">
+            <Checkbox checked={selected.has(s.id)} disabled={!s.found} label={s.name} onchange={() => toggle(s.id)} />
+            <span class="km-count">{s.found ? s.count : tr('скоро')}</span>
           </li>
         {/each}
       </ul>
@@ -211,20 +208,21 @@ import { Checkbox, Button, IconButton, TextInput } from './kit';
 </div>
 
 <style>
-  .km-wrap { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; background: rgba(0,0,0,.45); padding: var(--k-space-4, 16px); }
-  .km-card { width: min(560px, 100%); max-height: 80vh; overflow: auto; border-radius: var(--k-radius-lg, 26px); background: var(--k-surface, #fff); color: var(--k-text, #121212); box-shadow: var(--k-shadow-3, 0 28px 70px -12px rgba(0,0,0,.22)); padding: var(--k-space-5, 20px); display: flex; flex-direction: column; gap: var(--k-space-3, 12px); }
+  .km-wrap { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; background: color-mix(in oklab, var(--k-ink) 60%, transparent); padding: var(--k-space-4, 16px); }
+  .km-card { width: min(560px, 100%); max-height: 80vh; overflow: auto; border-radius: var(--k-radius-lg, 26px); background: var(--k-surface); color: var(--k-text); box-shadow: var(--k-shadow-3); padding: var(--k-space-5, 20px); display: flex; flex-direction: column; gap: var(--k-space-3, 12px); }
   .km-title { margin: 0; font: 800 var(--k-text-xl, 22px)/var(--k-leading-tight,1.2) var(--k-font-display, system-ui); }
-  .km-note { margin: 0; color: var(--k-text-3, #6e6e6e); font: 400 var(--k-text-sm,13px)/1.4 var(--k-font-body,system-ui); }
+  .km-note { margin: 0; color: var(--k-text-3); font: 400 var(--k-text-sm,13px)/1.4 var(--k-font-body,system-ui); }
   .km-error { color: var(--k-attention-text); margin: 0; }
-  .km-hermes { display: flex; flex-direction: column; gap: var(--k-space-2,8px); padding: var(--k-space-3,12px); border: 1px solid var(--k-line,#e8e8e8); border-radius: var(--k-radius-md,18px); }
+  .km-hermes { display: flex; flex-direction: column; gap: var(--k-space-2,8px); padding: var(--k-space-3,12px); border: 1px solid var(--k-line); border-radius: var(--k-radius-md,18px); }
   .km-hermes-title { margin: 0; font: 700 var(--k-text-md,15px)/var(--k-leading-tight,1.2) var(--k-font-body,system-ui); }
   .km-hermes-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--k-space-1,4px); }
   /* Скрытый input флажка абсолютный: без опоры он уезжает за край окна. */
   .km-hermes-list :global(.k-check) { position: relative; }
   .km-hermes-actions { display: flex; justify-content: flex-end; }
   .km-sources, .km-topics { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--k-space-2,8px); }
-  .km-sources li label { display: flex; align-items: center; gap: 8px; }
-  .km-count { margin-left: auto; color: var(--k-text-3,#6e6e6e); font-size: 12px; }
+  .km-source { display: flex; align-items: center; gap: var(--k-space-2); }
+  .km-source :global(.k-check) { position: relative; flex: 1; }
+  .km-count { margin-left: auto; color: var(--k-text-3); font-size: var(--k-text-xs); }
   .km-actions { display: flex; gap: 8px; justify-content: flex-end; }
   .km-agent { display: flex; align-items: center; gap: 8px; }
 </style>

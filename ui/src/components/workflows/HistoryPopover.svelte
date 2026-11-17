@@ -119,7 +119,7 @@
     max-height: min(480px, calc(100% - 90px));
     display: flex;
     flex-direction: column;
-    border-radius: 20px;
+    border-radius: var(--k-radius-inset);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
     box-shadow: var(--k-shadow-3);
@@ -130,20 +130,20 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px 8px;
+    padding: var(--k-space-4) var(--k-space-4) var(--k-space-2);
   }
   .wf-hp__head b {
-    font: 800 15px/1.2 var(--k-font-display);
+    font: 800 var(--k-text-md)/1.2 var(--k-font-display);
   }
   .wf-hp__list {
     display: grid;
     gap: 2px;
-    padding: 0 8px 10px;
+    padding: 0 var(--k-space-2) var(--k-space-3);
     overflow-y: auto;
   }
   .wf-hp__msg {
-    margin: 8px 10px;
-    font: 400 13px/1.4 var(--k-font-body);
+    margin: var(--k-space-2) var(--k-space-3);
+    font: 400 var(--k-text-sm)/1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wf-hp__msg.is-err {
@@ -154,11 +154,11 @@
   }
   .wf-hp__chip {
     min-width: 66px;
-    padding: 3px 9px;
-    border-radius: 999px;
+    padding: var(--k-space-1) var(--k-space-2);
+    border-radius: var(--k-radius-pill);
     background: var(--k-surface-3);
     color: var(--k-text-2);
-    font: 700 11.5px/1.3 var(--k-font-body);
+    font: 700 var(--k-text-micro)/1.3 var(--k-font-body);
     text-align: center;
   }
   .wf-hp__chip[data-status='done'] {
@@ -176,7 +176,7 @@
     color: var(--k-brand-text);
   }
   .wf-hp__sec {
-    font: 400 12px/1.2 var(--k-font-body);
+    font: 400 var(--k-text-xs)/1.2 var(--k-font-body);
     color: var(--k-text-3);
     font-variant-numeric: tabular-nums;
   }

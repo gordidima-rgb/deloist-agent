@@ -133,14 +133,14 @@ import { Button, Checkbox } from './kit';
   }
   .acr-line {
     margin: 0;
-    color: var(--k-text-2, #4a4a4a);
+    color: var(--k-text-2);
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .acr-strong {
-    color: var(--k-text, #121212);
+    color: var(--k-text);
   }
   .acr-link {
-    color: var(--k-brand, #025bff);
+    color: var(--k-brand);
     font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .acr-confirm {
@@ -148,15 +148,15 @@ import { Button, Checkbox } from './kit';
     flex-direction: column;
     gap: var(--k-space-2, 8px);
     padding: var(--k-space-3, 12px);
-    border: 1px solid var(--k-line-strong, #d2d2d2);
+    border: 1px solid var(--k-line-strong);
     border-radius: var(--k-radius-md, 14px);
   }
   .acr :global(.acr-danger) {
-    color: var(--k-danger, #d92d20);
+    color: var(--k-danger);
   }
   .acr-error {
     margin: 0;
-    color: var(--k-danger, #d92d20);
+    color: var(--k-danger);
     font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
 </style>

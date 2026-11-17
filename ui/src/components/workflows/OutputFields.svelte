@@ -53,18 +53,18 @@
 <style>
   .wfo-note {
     margin: 0;
-    font: 400 12.5px/1.4 var(--k-font-body);
+    font: 400 var(--k-text-xs)/1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfo-place {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 8px 10px;
-    border-radius: 12px;
+    padding: var(--k-space-2) var(--k-space-3);
+    border-radius: var(--k-radius-sm);
     background: var(--k-surface-2);
     color: var(--k-text-2);
-    font: 500 12.5px/1.4 var(--k-font-body);
+    font: 600 var(--k-text-xs)/1.4 var(--k-font-body);
     transition: background 200ms var(--k-ease-out, ease);
   }
   .wfo-place.is-bad {
@@ -74,7 +74,7 @@
   .wfo-trail {
     display: flex;
     flex-wrap: wrap;
-    gap: 3px 6px;
+    gap: var(--k-space-1) var(--k-space-2);
     min-width: 0;
     overflow-wrap: anywhere;
   }

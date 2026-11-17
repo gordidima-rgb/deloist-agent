@@ -34,7 +34,7 @@
     stroke: color-mix(in oklab, var(--k-brand) 78%, var(--k-brand-hover));
     stroke-width: 2.5;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--k-brand) 55%, transparent));
+    filter: drop-shadow(0 0 3px color-mix(in oklab, var(--k-brand) 55%, transparent));
     transition:
       stroke var(--k-dur-base) var(--k-ease-out),
       stroke-width var(--k-dur-micro) var(--k-ease-out),
@@ -60,7 +60,7 @@
     stroke-width: 2.8;
     stroke-linecap: round;
     stroke-dasharray: 0.4 6;
-    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--k-brand) 90%, transparent));
+    filter: drop-shadow(0 0 3px color-mix(in oklab, var(--k-brand) 90%, transparent));
     pointer-events: none;
     animation: wfe-run 0.9s linear infinite;
   }
@@ -73,11 +73,11 @@
     }
   }
   :global(.wfe-branch) {
-    padding: 2px 9px;
+    padding: 2px var(--k-space-2);
     border-radius: var(--k-radius-pill);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
-    font: 700 11px / 1.5 var(--k-font-body);
+    font: 700 var(--k-text-micro) / 1.5 var(--k-font-body);
     color: var(--k-text-2);
   }
   :global(.wfe-branch--yes) {

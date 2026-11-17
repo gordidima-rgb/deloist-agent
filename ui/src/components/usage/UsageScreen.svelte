@@ -2,6 +2,7 @@
   // Экран «Использование и лимиты»: расход токенов по месяцам, по ботам и моделям, «за кулисами»,
   // последние ответы и лимиты подписок. Данные: GET /api/usage?month=YYYY-MM и /api/providers/limits.
   import { tr } from '../../lib/i18n.js';
+  import { Button, IconButton } from '../kit';
   import { api as defaultApi, lang } from '../../lib/api.js';
   import {
     monthKey, shiftMonth, monthLabel, fmtTokens, fmtPct, fmtSeconds, pct, paceForecast,
@@ -146,9 +147,9 @@
   <header class="us-head">
     <h2 class="us-title">{tr('Использование и лимиты')}</h2>
     <div class="us-months" role="group" aria-label={tr('Месяц')}>
-      <button type="button" class="us-nav" aria-label={tr('Предыдущий месяц')} onclick={() => (month = shiftMonth(month, -1))}>‹</button>
+      <IconButton name="chevron-left" size="sm" class="us-nav" label={tr('Предыдущий месяц')} onclick={() => (month = shiftMonth(month, -1))} />
       <span class="us-month" aria-live="polite">{monthLabel(month, locale)}</span>
-      <button type="button" class="us-nav" aria-label={tr('Следующий месяц')} disabled={!canNext} onclick={() => (month = shiftMonth(month, 1))}>›</button>
+      <IconButton name="chevron-right" size="sm" class="us-nav" label={tr('Следующий месяц')} disabled={!canNext} onclick={() => (month = shiftMonth(month, 1))} />
     </div>
   </header>
 
@@ -159,7 +160,7 @@
   {#if failed}
     <div class="us-card us-state" role="alert">
       <p>{tr('Не удалось загрузить расход.')}</p>
-      <button type="button" class="us-btn" onclick={() => load(month)}>{tr('Повторить')}</button>
+      <Button variant="primary" size="sm" onclick={() => load(month)}>{tr('Повторить')}</Button>
     </div>
   {:else if !data}
     <div class="us-card us-state" aria-busy="true">{tr('Загружаю…')}</div>
@@ -276,7 +277,7 @@
                 <tr class:us-failed={r.outcome && r.outcome !== 'ok'}>
                   <td class="us-prev">
                     {#if onOpen && r.threadId}
-                      <button type="button" class="us-link" onclick={() => onOpen(r)}><b>{r.botName}</b> {r.preview}</button>
+                      <Button variant="ghost" size="sm" class="us-link" onclick={() => onOpen(r)}><b>{r.botName}</b> {r.preview}</Button>
                     {:else}
                       <b>{r.botName}</b> {r.preview}
                     {/if}
@@ -309,7 +310,7 @@
             {#each s.rows as l (l.label)}
               <div class="us-subrow">
                 <div class="us-rowhead"><span>{l.label}</span><span class="us-val" class:us-warn={l.left < 15}>{tr('осталось {p}', { p: fmtPct(l.left) })}</span></div>
-                <div class="us-bar" aria-hidden="true"><i style:width={`${Math.max(0, Math.min(100, l.left))}%`} style:background={l.left < 15 ? 'var(--k-attention, #ff5a3c)' : 'var(--k-brand, #025bff)'}></i></div>
+                <div class="us-bar" aria-hidden="true"><i style:width={`${Math.max(0, Math.min(100, l.left))}%`} style:background={l.left < 15 ? 'var(--k-attention)' : 'var(--k-brand)'}></i></div>
                 {#if l.resets}<p class="us-sub">{tr('сброс {t}', { t: l.resets })}</p>{/if}
               </div>
             {:else}
@@ -323,75 +324,69 @@
 </div>
 
 <style>
-  .us-root { display: grid; gap: var(--k-space-3, 12px); color: var(--k-text, #262931); font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui); min-width: 0; }
+  .us-root { display: grid; gap: var(--k-space-3, 12px); color: var(--k-text); font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui); min-width: 0; }
   .us-head { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3, 12px); flex-wrap: wrap; }
   .us-title { margin: 0; font: 800 var(--k-text-xl, 22px) / 1.2 var(--k-font-display, inherit); letter-spacing: -0.01em; }
-  .us-months { display: flex; align-items: center; gap: var(--k-space-1, 4px); background: var(--k-surface-2, #f1f0ec); border-radius: var(--k-radius-pill, 999px); padding: 3px; }
+  .us-months { display: flex; align-items: center; gap: var(--k-space-1, 4px); background: var(--k-surface-2); border-radius: var(--k-radius-pill, 999px); padding: var(--k-space-1); }
   .us-month { min-width: 128px; text-align: center; font-weight: 600; }
-  .us-nav { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 18px; cursor: pointer; }
-  .us-nav:hover:not(:disabled) { background: var(--k-surface-3, #e7e5e0); }
-  .us-nav:disabled { opacity: 0.3; cursor: default; }
-  .us-nav:focus-visible, .us-btn:focus-visible, .us-link:focus-visible { outline: 0; box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28)); }
-  .us-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint, #ffe8e2); color: var(--k-attention-text, #b4321b); font-weight: 600; }
-  .us-card { background: var(--k-surface-2, #f1f0ec); border-radius: var(--k-radius-lg, 26px); padding: var(--k-space-4, 16px) var(--k-space-5, 20px); min-width: 0; }
+  .us-demo { margin: 0; padding: var(--k-space-2, 8px) var(--k-space-3, 12px); border-radius: var(--k-radius-sm, 12px); background: var(--k-attention-tint); color: var(--k-attention-text); font-weight: 600; }
+  .us-card { background: var(--k-surface-2); border-radius: var(--k-radius-lg, 26px); padding: var(--k-space-4, 16px) var(--k-space-5, 20px); min-width: 0; }
   .us-fade { opacity: 0.55; transition: opacity 0.15s; }
-  .us-state { text-align: center; color: var(--k-text-2, #5c5f66); display: grid; gap: var(--k-space-2, 8px); justify-items: center; }
+  .us-state { text-align: center; color: var(--k-text-2); display: grid; gap: var(--k-space-2, 8px); justify-items: center; }
   .us-state p { margin: 0; }
-  .us-btn { height: 32px; padding: 0 var(--k-space-4, 16px); border: 0; border-radius: var(--k-radius-pill, 999px); background: var(--k-brand, #025bff); color: var(--k-on-brand, #fff); font-weight: 600; cursor: pointer; }
   .us-h { margin: 0 0 var(--k-space-3, 12px); font: 700 var(--k-text-md, 15px) / 1.2 var(--k-font-display, inherit); }
-  .us-note { margin: 0 0 var(--k-space-2, 8px); color: var(--k-text-2, #5c5f66); }
+  .us-note { margin: 0 0 var(--k-space-2, 8px); color: var(--k-text-2); }
   .us-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--k-space-4, 16px); flex-wrap: wrap; }
   .us-big { display: grid; }
   .us-num { font: 800 var(--k-text-3xl, 36px) / 1 var(--k-font-display, inherit); letter-spacing: -0.02em; }
-  .us-cap { color: var(--k-text-2, #5c5f66); }
+  .us-cap { color: var(--k-text-2); }
   .us-kpi { display: flex; gap: var(--k-space-6, 24px); }
   .us-kpi div { display: grid; }
   .us-kpi b { font: 700 var(--k-text-lg, 18px) / 1.2 var(--k-font-display, inherit); }
-  .us-kpi span { color: var(--k-text-2, #5c5f66); font-size: var(--k-text-xs, 12px); }
+  .us-kpi span { color: var(--k-text-2); font-size: var(--k-text-xs, 12px); }
 
   .us-chart { display: flex; align-items: flex-end; gap: 2px; height: 150px; }
   .us-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
-  .us-stack { display: flex; flex-direction: column-reverse; min-height: 0; border-radius: 3px 3px 0 0; overflow: hidden; }
+  .us-stack { display: flex; flex-direction: column-reverse; min-height: 0; border-radius: var(--k-radius-xs) 3px 0 0; overflow: hidden; }
   .us-stack i { display: block; min-height: 1px; }
-  .us-tick { height: 14px; font-size: 10px; color: var(--k-text-3, #8d8f94); text-align: center; overflow: visible; white-space: nowrap; }
+  .us-tick { height: 14px; font-size: 10px; color: var(--k-text-3); text-align: center; overflow: visible; white-space: nowrap; }
   .us-legend { list-style: none; margin: var(--k-space-3, 12px) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--k-space-1, 4px) var(--k-space-4, 16px); }
   .us-legend li, .us-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-  .us-legend i, .us-name i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .us-legend i, .us-name i { width: 10px; height: 10px; border-radius: var(--k-radius-xs); flex: none; }
 
   .us-row { padding: var(--k-space-2, 8px) 0; }
-  .us-row + .us-row { border-top: 1px solid var(--k-line, #e0ded9); }
+  .us-row + .us-row { border-top: 1px solid var(--k-line); }
   .us-rowhead { display: flex; justify-content: space-between; gap: var(--k-space-3, 12px); align-items: baseline; }
   .us-name { font-weight: 600; }
-  .us-name small { margin-left: 6px; font-weight: 400; color: var(--k-text-3, #8d8f94); }
-  .us-val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--k-text-2, #5c5f66); }
-  .us-bar { height: 8px; margin-top: 6px; border-radius: 4px; background: var(--k-surface-3, #e7e5e0); overflow: hidden; }
-  .us-bar i { display: block; height: 100%; border-radius: 4px; min-width: 2px; }
-  .us-bar i.us-over { background: var(--k-attention, #ff5a3c) !important; }
-  .us-sub { margin: 4px 0 0; color: var(--k-text-2, #5c5f66); font-size: var(--k-text-xs, 12px); }
-  .us-warn { color: var(--k-attention-text, #b4321b); }
+  .us-name small { margin-left: 6px; font-weight: 400; color: var(--k-text-3); }
+  .us-val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--k-text-2); }
+  .us-bar { height: 8px; margin-top: var(--k-space-2); border-radius: var(--k-radius-xs); background: var(--k-surface-3); overflow: hidden; }
+  .us-bar i { display: block; height: 100%; border-radius: var(--k-radius-xs); min-width: 2px; }
+  .us-bar i.us-over { background: var(--k-attention) !important; }
+  .us-sub { margin: 4px 0 0; color: var(--k-text-2); font-size: var(--k-text-xs, 12px); }
+  .us-warn { color: var(--k-attention-text); }
 
-  .us-split { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px; background: var(--k-surface-3, #e7e5e0); }
+  .us-split { display: flex; height: 14px; border-radius: var(--k-radius-xs); overflow: hidden; gap: 2px; background: var(--k-surface-3); }
   .us-split i { display: block; min-width: 3px; }
   .us-list { list-style: none; margin: var(--k-space-3, 12px) 0 0; padding: 0; display: grid; gap: var(--k-space-2, 8px); }
   .us-list li { display: flex; justify-content: space-between; gap: var(--k-space-3, 12px); align-items: baseline; flex-wrap: wrap; }
 
   .us-scroll { overflow-x: auto; }
   .us-table { width: 100%; border-collapse: collapse; min-width: 560px; }
-  .us-table th { text-align: left; font-weight: 600; font-size: var(--k-text-xs, 12px); color: var(--k-text-3, #8d8f94); padding: 4px 8px 6px 0; }
-  .us-table td { padding: 7px 8px 7px 0; border-top: 1px solid var(--k-line, #e0ded9); vertical-align: top; }
+  .us-table th { text-align: left; font-weight: 600; font-size: var(--k-text-xs, 12px); color: var(--k-text-3); padding: 4px 8px 6px 0; }
+  .us-table td { padding: var(--k-space-2) var(--k-space-2) var(--k-space-2) 0; border-top: 1px solid var(--k-line); vertical-align: top; }
   .us-table .us-r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .us-prev { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
-  .us-link { all: unset; display: block; cursor: pointer; border-radius: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--k-text, #262931); }
-  .us-link:hover { color: var(--k-brand-text, #0250e0); }
-  .us-failed td:first-child { color: var(--k-attention-text, #b4321b); }
+  :global(.us-link) { display: block; max-width: 100%; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .us-failed td:first-child { color: var(--k-attention-text); }
 
   .us-subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--k-space-3, 12px); }
-  .us-sub-card { background: var(--k-surface, #fff); border-radius: var(--k-radius-md, 18px); padding: var(--k-space-3, 12px) var(--k-space-4, 16px); display: grid; gap: var(--k-space-2, 8px); align-content: start; }
+  .us-sub-card { background: var(--k-surface); border-radius: var(--k-radius-md, 18px); padding: var(--k-space-3, 12px) var(--k-space-4, 16px); display: grid; gap: var(--k-space-2, 8px); align-content: start; }
   .us-subrow .us-bar { margin-top: 4px; }
 
   @media (max-width: 520px) {
     .us-card { padding: var(--k-space-3, 12px); }
-    .us-num { font-size: 30px; }
+    .us-num { font-size: var(--k-text-2xl); }
     .us-chart { height: 120px; }
   }
   @media (prefers-reduced-motion: reduce) {

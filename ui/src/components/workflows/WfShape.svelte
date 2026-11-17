@@ -81,7 +81,7 @@
     resize: none;
     text-align: center;
     color: var(--k-text);
-    font: 600 14px/1.35 var(--k-font-body);
+    font: 600 var(--k-text-md)/1.35 var(--k-font-body);
     display: block;
     field-sizing: content;
     max-height: 64%;

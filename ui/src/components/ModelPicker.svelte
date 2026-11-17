@@ -7,7 +7,7 @@
   import { tick, onMount } from 'svelte';
   import { tr } from '../lib/i18n.js';
   import { buildGroups, filterGroups, toValue, isCurrent, labelOf, iconSvg, splitModels } from '../lib/modelPicker.js';
-import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
+  import { Tooltip, Badge, TextInput, Icon, Button, IconButton } from './kit';
 
   let {
     providers = [],
@@ -40,7 +40,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
   let active = $state('');
   let expanded = $state({});
   let pos = $state({ left: 0, top: 0, bottom: 0, width: 440, height: 400, down: true });
-  let trigger = $state();
+  let trigger = $state(null);
   let pop = $state();
   let root = $state();
 
@@ -163,16 +163,16 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
 
 {#snippet modelRow(g, m)}
   {@const on = isCurrent(g, m, value)}
-  <button type="button" class="mp-item" class:sel={on} role="menuitemradio" aria-checked={on} onclick={() => pick(g, m)}>
+  <Button variant="ghost" class="mp-item{on ? ' sel' : ''}" role="menuitemradio" aria-checked={on} onclick={() => pick(g, m)}>
     {@render logo(g)}
     <span class="mp-name">{m.typed ? tr('Использовать «{name}»', { name: m.name }) : m.name}</span>
     {#if m.badge}<Badge tone="neutral" text={badgeText(m.badge)} />{/if}
     {@render check()}
-  </button>
+  </Button>
 {/snippet}
 
 <div class="mp" bind:this={root} {onkeydown} role="presentation">
-  <button type="button" class="mp-row" class:bare class:no-label={hideLabel} bind:this={trigger} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? hide() : show())}>
+  <Button variant="ghost" class="mp-row{bare ? ' bare' : ''}{hideLabel ? ' no-label' : ''}" bind:ref={trigger} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? hide() : show())}>
     <span class="mp-label" class:sr-only={hideLabel}>{heading}</span>
     <span class="mp-value">
       {#if current.group}
@@ -181,7 +181,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
       <span class="mp-text" class:muted={!value.driver}>{current.text}</span>
     </span>
     <Icon name="chevron-down" size={null} class={['mp-chev', open && 'up']} />
-  </button>
+  </Button>
 
   {#if open}
     <div class="mp-pop" class:up={!pos.down} bind:this={pop} role="dialog" aria-label={tr('Выбор модели')} style:left="{pos.left}px" style:top={pos.down ? `${pos.top}px` : null} style:bottom={pos.down ? null : `${pos.bottom}px`} style:width="{pos.width}px" style:max-height="{pos.height}px">
@@ -192,16 +192,14 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
           {/if}
           {#each groups as g (g.id)}
             <Tooltip text={g.name} placement="right">
-              <button type="button" class="mp-rail-btn" class:on={!global && active === g.id} aria-label={g.name} aria-pressed={!global && active === g.id} onclick={() => { active = g.id; query = ''; }}>
-                {@render logo(g)}
-              </button>
+              <IconButton label={g.name} title={null} class="mp-rail-btn{!global && active === g.id ? ' on' : ''}" aria-pressed={!global && active === g.id} onclick={() => { active = g.id; query = ''; }}>
+                {#snippet icon()}{@render logo(g)}{/snippet}
+              </IconButton>
             </Tooltip>
           {/each}
           <span class="mp-rail-gap"></span>
           <Tooltip text={tr('Подключить ИИ')} placement="right">
-            <button type="button" class="mp-rail-btn mp-add" aria-label={tr('Подключить ИИ')} onclick={addProvider}>
-              <Icon name="plus" size={null} />
-            </button>
+            <IconButton name="plus" label={tr('Подключить ИИ')} title={null} class="mp-rail-btn mp-add" onclick={addProvider} />
           </Tooltip>
         </div>
       </div>
@@ -221,11 +219,11 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
             <p class="mp-hint" role="status">{tr('Загрузка')}</p>
           {:else}
           {#if showDefault}
-            <button type="button" class="mp-item" class:sel={!value.driver} role="menuitemradio" aria-checked={!value.driver} onclick={pickDefault}>
+            <Button variant="ghost" class="mp-item{!value.driver ? ' sel' : ''}" role="menuitemradio" aria-checked={!value.driver} onclick={pickDefault}>
               <span class="mp-logo mp-default" aria-hidden="true"><Icon name="sliders" size={null} /></span>
               <span class="mp-name">{defaultLabel || tr('как в настройках')}</span>
               {@render check()}
-            </button>
+            </Button>
           {/if}
           {#each shown as g (g.id)}
             {@const parts = splitModels(g)}
@@ -240,10 +238,10 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
               {@render modelRow(g, m)}
             {/each}
             {#if parts.more.length}
-              <button type="button" class="mp-more" aria-expanded={more} onclick={() => (expanded = { ...expanded, [g.id]: !more })}>
+              <Button variant="ghost" size="sm" class="mp-more" aria-expanded={more} onclick={() => (expanded = { ...expanded, [g.id]: !more })}>
                 <Icon name="chevron-right" size={null} class={['mp-more-chev', more && 'down']} />
                 <span>{tr('Ещё модели · {n}', { n: parts.more.length })}</span>
-              </button>
+              </Button>
               {#if more}
                 {#each parts.more as m (m.id)}
                   {@render modelRow(g, m)}
@@ -272,7 +270,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     position: relative;
     min-width: 0;
   }
-  .mp-row {
+  .mp :global(.mp-row) {
     display: flex;
     align-items: center;
     gap: var(--k-space-3);
@@ -289,7 +287,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     cursor: pointer;
     transition: background var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-row.bare {
+  .mp :global(.mp-row.bare) {
     display: none;
   }
   .mp-footer {
@@ -297,13 +295,13 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     padding: var(--k-space-3);
     border-top: 1px solid var(--k-line);
   }
-  .mp-row:hover {
+  .mp :global(.mp-row):hover {
     background: var(--k-surface-2);
   }
-  .mp-row:focus-visible,
-  .mp-rail-btn:focus-visible,
-  .mp-item:focus-visible,
-  .mp-more:focus-visible {
+  .mp :global(.mp-row):focus-visible,
+  .mp :global(.mp-rail-btn):focus-visible,
+  .mp :global(.mp-item):focus-visible,
+  .mp :global(.mp-more):focus-visible {
     outline: none;
     box-shadow: var(--k-focus);
   }
@@ -320,7 +318,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     clip: rect(0 0 0 0);
     white-space: nowrap;
   }
-  .mp-row.no-label .mp-value {
+  .mp :global(.mp-row.no-label .mp-value ){
     justify-content: flex-start;
   }
   .mp-value {
@@ -338,7 +336,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     white-space: nowrap;
   }
   .mp-text.muted {
-    font-weight: 500;
+    font-weight: 600;
     color: var(--k-text-2);
   }
   .mp-logo {
@@ -406,7 +404,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     box-sizing: border-box;
     display: flex;
     margin: var(--k-space-2) 0 var(--k-space-2) var(--k-space-2);
-    border-radius: 22px;
+    border-radius: var(--k-radius-lg);
     background: var(--k-canvas);
     box-shadow: inset 0 0 0 1px var(--k-line);
   }
@@ -441,7 +439,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
   .mp-rail-dot.off {
     opacity: 0;
   }
-  .mp-rail-btn {
+  .mp :global(.mp-rail-btn) {
     position: relative;
     width: 32px;
     height: 32px;
@@ -454,19 +452,19 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     cursor: pointer;
     transition: background var(--k-dur-fast) var(--k-ease-out), color var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-rail-btn :global(svg) {
+  .mp :global(.mp-rail-btn) :global(svg) {
     width: 18px;
     height: 18px;
   }
-  .mp-rail-btn:hover {
+  .mp :global(.mp-rail-btn):hover {
     background: var(--k-surface-2);
     color: var(--k-text);
   }
-  .mp-rail-btn.on {
+  .mp :global(.mp-rail-btn.on) {
     background: transparent;
     color: var(--k-text);
   }
-  .mp-add {
+  .mp :global(.mp-add) {
     color: var(--k-text-3);
   }
   .mp-main {
@@ -522,7 +520,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     box-sizing: border-box;
     height: 32px;
     min-height: 0;
-    padding: 0 32px 0 14px;
+    padding: 0 var(--k-space-8) 0 var(--k-space-4);
     border-radius: var(--k-radius-pill);
     font-size: var(--k-text-sm);
   }
@@ -552,8 +550,8 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     font-size: var(--k-text-xs);
     color: var(--k-text-3);
   }
-  .mp-item,
-  .mp-more {
+  .mp :global(.mp-item),
+  .mp :global(.mp-more) {
     display: flex;
     align-items: center;
     gap: var(--k-space-3);
@@ -570,11 +568,11 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     cursor: pointer;
     transition: background var(--k-dur-fast) var(--k-ease-out);
   }
-  .mp-item:hover,
-  .mp-more:hover {
+  .mp :global(.mp-item):hover,
+  .mp :global(.mp-more):hover {
     background: var(--k-surface-2);
   }
-  .mp-item.sel {
+  .mp :global(.mp-item.sel) {
     font-weight: 600;
   }
   .mp-check {
@@ -589,18 +587,18 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     width: 16px;
     height: 16px;
   }
-  .mp-item.sel .mp-check {
+  .mp :global(.mp-item.sel .mp-check ){
     color: var(--k-text);
   }
   .mp-default {
     color: var(--k-text-3);
   }
-  .mp-item .mp-logo {
+  .mp :global(.mp-item .mp-logo ){
     width: 18px;
     height: 18px;
   }
-  .mp-item .mp-logo :global(svg),
-  .mp-item .mp-logo img {
+  .mp :global(.mp-item .mp-logo svg),
+  .mp :global(.mp-item .mp-logo img ){
     width: 18px;
     height: 18px;
   }
@@ -611,7 +609,7 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mp-more {
+  .mp :global(.mp-more) {
     min-height: 34px;
     color: var(--k-text-3);
     font-size: var(--k-text-xs);
@@ -638,10 +636,10 @@ import { Tooltip, Badge, TextInput, Icon, Button } from './kit';
     .mp-rail-dot,
     :global(.mp-chev),
     :global(.mp-more-chev),
-    .mp-row,
-    .mp-rail-btn,
-    .mp-item,
-    .mp-more {
+    .mp :global(.mp-row),
+    .mp :global(.mp-rail-btn),
+    .mp :global(.mp-item),
+    .mp :global(.mp-more) {
       transition: none;
     }
   }

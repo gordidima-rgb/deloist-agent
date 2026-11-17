@@ -86,8 +86,8 @@
 
 <style>
   .wf-to {
-    padding: 7px;
-    border-radius: 20px;
+    padding: var(--k-space-2);
+    border-radius: var(--k-radius-inset);
     border: 1px solid var(--k-line);
     background: color-mix(in oklab, var(--k-surface) 94%, transparent);
     backdrop-filter: blur(14px);
@@ -98,11 +98,11 @@
   .wf-to__row {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--k-space-1);
   }
   .wf-to__row--notes {
-    gap: 9px;
-    padding: 5px 8px;
+    gap: var(--k-space-2);
+    padding: var(--k-space-1) var(--k-space-2);
   }
   .wf-to__col {
     position: relative;
@@ -112,9 +112,9 @@
     align-items: center;
     gap: 4px;
     height: 38px;
-    padding: 0 8px 0 10px;
+    padding: 0 var(--k-space-2) 0 var(--k-space-3);
     border: 0;
-    border-radius: 13px;
+    border-radius: var(--k-radius-md);
     background: transparent;
     color: var(--k-text-2);
     cursor: pointer;
@@ -145,9 +145,9 @@
     left: -2px;
     bottom: calc(100% + 12px);
     display: flex;
-    gap: 9px;
-    padding: 9px 11px;
-    border-radius: 16px;
+    gap: var(--k-space-2);
+    padding: var(--k-space-2) 11px;
+    border-radius: var(--k-radius-md);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
     box-shadow: var(--k-shadow-3);
@@ -183,7 +183,7 @@
     height: 38px;
     padding: 0;
     border: 0;
-    border-radius: 12px;
+    border-radius: var(--k-radius-sm);
     background: transparent;
     color: var(--k-text-2);
     cursor: pointer;
@@ -216,7 +216,7 @@
   .wf-to__sep {
     width: 1px;
     height: 22px;
-    margin: 0 5px;
+    margin: 0 var(--k-space-1);
     background: var(--k-line);
   }
   @keyframes wf-to-in {

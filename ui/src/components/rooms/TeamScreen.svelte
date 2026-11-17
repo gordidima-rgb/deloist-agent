@@ -157,11 +157,11 @@ import { Tabs, Button, Icon } from '../kit';
     place-items: center;
     width: 72px;
     height: 72px;
-    border-radius: 26px;
+    border-radius: var(--k-radius-lg);
     overflow: hidden;
     background: var(--k-surface-2);
     color: var(--team-color, var(--k-text-2));
-    font-size: 34px;
+    font-size: var(--k-text-3xl);
     line-height: 1;
     margin-bottom: -8px;
   }
@@ -209,7 +209,7 @@ import { Tabs, Button, Icon } from '../kit';
     max-width: 100%;
     padding: 12px;
     border: 1px solid var(--k-line);
-    border-radius: 20px;
+    border-radius: var(--k-radius-inset);
     background: var(--k-surface);
     color: var(--k-text);
     font: inherit;
@@ -241,7 +241,7 @@ import { Tabs, Button, Icon } from '../kit';
     place-items: center;
     width: 40px;
     height: 40px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     background: var(--k-ink);
     color: var(--k-on-ink);
   }
@@ -264,7 +264,7 @@ import { Tabs, Button, Icon } from '../kit';
   }
   .ts-sub {
     color: var(--k-text-3);
-    font-size: 12px;
+    font-size: var(--k-text-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -274,13 +274,13 @@ import { Tabs, Button, Icon } from '../kit';
     align-items: center;
     gap: 6px;
     margin-top: 2px;
-    font-size: 12px;
+    font-size: var(--k-text-xs);
     color: var(--k-text-2);
   }
   .ts-dot {
     width: 8px;
     height: 8px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     background: var(--k-line-strong);
   }
   .ts-state.is-busy .ts-dot {
@@ -299,10 +299,10 @@ import { Tabs, Button, Icon } from '../kit';
     top: -9px;
     right: 14px;
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     background: var(--k-ink);
     color: var(--k-on-ink);
-    font-size: 11px;
+    font-size: var(--k-text-micro);
     font-weight: 600;
   }
   .ts-empty {
@@ -365,7 +365,7 @@ import { Tabs, Button, Icon } from '../kit';
     gap: 12px;
     padding: 16px;
     border: 1px solid var(--k-line);
-    border-radius: 20px;
+    border-radius: var(--k-radius-inset);
     background: var(--k-surface);
   }
   .ts-about-row {
@@ -377,7 +377,7 @@ import { Tabs, Button, Icon } from '../kit';
     flex: none;
     width: 112px;
     color: var(--k-text-3);
-    font-size: 12px;
+    font-size: var(--k-text-xs);
   }
   .ts-about-text {
     min-width: 0;
