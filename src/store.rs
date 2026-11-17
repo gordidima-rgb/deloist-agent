@@ -493,8 +493,15 @@ pub struct Routine {
     /// Когда началась первая неудачная попытка этой серии: через сутки от неё рутина сдаётся.
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub retry_since: i64,
+    /// Что делать с пропущенными запусками: "last" — выполнить последний, "skip" — пропустить.
+    #[serde(default = "default_catch_up")]
+    pub catch_up: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn default_catch_up() -> String {
+    "last".to_string()
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -545,6 +552,7 @@ impl Default for Routine {
             last_status: None,
             retry_attempt: 0,
             retry_since: 0,
+            catch_up: "last".to_string(),
             extra: Map::new(),
         }
     }
@@ -2667,6 +2675,7 @@ impl Store {
             every_minutes: minutes(input.get("everyMinutes")),
             enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
             quiet: input.get("quiet").map_or(true, truthy),
+            catch_up: text_or(input, "catchUp", "last"),
             created_at: now(),
             ..Routine::default()
         };
@@ -2722,6 +2731,9 @@ impl Store {
             }
             if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) {
                 r.approval_floor = as_string(v);
+            }
+            if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
+                r.catch_up = as_string(v);
             }
             if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
                 r.every_minutes = minutes(patch.get("everyMinutes"));

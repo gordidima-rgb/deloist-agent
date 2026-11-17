@@ -1663,7 +1663,7 @@ async fn an_unattended_turn_does_not_wait_for_a_held_screen_forever() {
     let (status, data) = env.crew.send("POST", "/api/routines", Some(body)).await;
     assert_eq!(status, 201, "{data}");
     let id = data["routine"]["id"].as_str().unwrap().to_string();
-    env.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": 1 }))).await;
+    env.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
     let update = env.crew.wait_event("шаг рутины", |e| e["type"] == "tool_update" && e["botId"] == env.bot.as_str()).await;
     assert_eq!(update["status"], "ok", "{update}");
     assert!(env.crew.find_event(|e| e["type"] == "screen_control" && e["held"] == false).is_some(), "удержание не снято по сроку");

@@ -649,7 +649,7 @@ async fn a_paused_queue_does_not_hold_back_a_routine() {
         )
         .await;
     let routine = created["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "nextRun": 1 }))).await;
+    crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "nextRun": common::due_now() }))).await;
 
     let event = crew.wait_event("запуск рутины", |e| e["type"] == "journal").await;
     assert_eq!(event["entry"]["title"], "Проверка", "{event}");

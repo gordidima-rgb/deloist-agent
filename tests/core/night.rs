@@ -138,7 +138,7 @@ async fn scheduled_run_lands_in_the_journal_with_tokens() {
     let (crew, fake, bot) = setup("night-run", &[("CREW_TEST_TICK_MS", "100")]).await;
     *fake.usage.lock().unwrap() = Some((1_000, 200));
     let id = add_routine(&crew, &bot, json!({})).await;
-    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": 1 }))).await;
+    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
 
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
     let entry = &event["entry"];
@@ -225,7 +225,7 @@ async fn the_daily_limit_stops_routines_but_not_a_person() {
     // Расписание больше не запускает: пропуск виден в журнале.
     crew.clear_events();
     fake.requests.lock().unwrap().clear();
-    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": 1 }))).await;
+    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
     let event = crew.wait_event("пропуск", |e| e["type"] == "journal").await;
     assert_eq!(event["entry"]["status"], "limit");
     assert_eq!(event["entry"]["tokens"], 0);
@@ -247,7 +247,7 @@ async fn a_night_routine_out_of_its_window_is_skipped_not_replayed() {
     let from = format!("{hour:02}:00");
     let to = format!("{:02}:00", (hour + 1) % 24);
     let id = add_routine(&crew, &bot, json!({ "windowFrom": from, "windowTo": to })).await;
-    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": 1 }))).await;
+    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
 
     let event = crew.wait_event("пропуск", |e| e["type"] == "journal").await;
     assert_eq!(event["entry"]["status"], "skipped", "{event}");
@@ -506,6 +506,44 @@ async fn an_old_state_file_without_quiet_reads_as_quiet() {
     let second = Crew::start_at(dir, &[]).await;
     let state = second.ok("GET", "/api/state", None).await;
     assert_eq!(state["routines"][0]["quiet"], true, "старый файл считается тихим: {state}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn catch_up_last_runs_once_and_logs_missed() {
+    let (crew, fake, bot) = setup("night-catchup-last", &[("CREW_TEST_TICK_MS", "100")]).await;
+    let id = add_routine(&crew, &bot, json!({ "catchUp": "last" })).await;
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 3 * 3600 * 1000;
+    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": now_ms }))).await;
+
+    // Ждём либо пропуск, либо запуск. Сначала придёт запись «Пропущено …».
+    let mut seen_missed = false;
+    for _ in 0..50 {
+        crew.wait_event("журнал", |e| e["type"] == "journal").await;
+        let log = journal(&crew).await;
+        if let Some(entries) = log["entries"].as_array() {
+            if entries.iter().any(|e| e["text"].as_str().unwrap_or("").contains("Пропущено")) {
+                seen_missed = true;
+                break;
+            }
+        }
+    }
+    assert!(seen_missed, "должна быть запись «Пропущено»");
+    crew.wait_event("ход", |e| e["type"] == "turn_end").await;
+    // Рутина запустилась: модель вызвана.
+    assert!(!fake.requests.lock().unwrap().is_empty(), "рутина должна запуститься");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn catch_up_skip_does_not_run() {
+    let (crew, fake, bot) = setup("night-catchup-skip", &[("CREW_TEST_TICK_MS", "100")]).await;
+    let id = add_routine(&crew, &bot, json!({ "catchUp": "skip" })).await;
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 3 * 3600 * 1000;
+    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": now_ms }))).await;
+
+    let event = crew.wait_event("пропуск", |e| e["type"] == "journal").await;
+    assert_eq!(event["entry"]["status"], "skipped", "{event}");
+    assert!(event["entry"]["text"].as_str().unwrap_or("").contains("Пропущено"), "{event}");
+    assert!(fake.requests.lock().unwrap().is_empty(), "рутина не должна запускаться");
 }
 
 fn chrono_hour() -> u32 {

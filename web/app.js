@@ -9327,6 +9327,7 @@ function bindRoutineForm() {
       at: atMode ? f.at.value : '',
       windowFrom: atMode ? '' : f.windowFrom.value,
       windowTo: atMode ? '' : f.windowTo.value,
+      catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
       quiet: f.quiet.checked,
       hook: $('#rt-hook').checked,
     };
