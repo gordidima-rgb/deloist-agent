@@ -2024,6 +2024,8 @@
     'Напиши задачу — ответит ведущий. Позови другого через @имя.': 'Write a task and the lead will answer. Call someone else with @name.',
     'Новая команда': 'New team',
     'Соберу сам': "I'll build it myself",
+    'Пропустить': 'Skip',
+    'Правила команды': 'Team rules',
     'Оркестратор': 'Orchestrator',
     'Думает…': 'Thinking…',
     'Печатает…': 'Typing…',

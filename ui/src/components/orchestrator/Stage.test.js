@@ -244,3 +244,126 @@ describe('Stage ready', () => {
     expect(feel).toHaveBeenLastCalledWith('proud', 3600);
   });
 });
+
+describe('Stage assembly', () => {
+  const bots = [
+    { id: 'b1', name: 'Редактор', role: 'сжимает новости', persona: 'Ты редактор.\nПишешь коротко.\nБез воды.\nЭту строку не покажем.', skin: 3 },
+    { id: 'b2', name: 'Скаут', role: 'ищет источники', persona: 'Ты скаут.', skin: 5 },
+  ];
+  let joys;
+  const mountLive = (props) => {
+    host = document.createElement('div');
+    document.body.append(host);
+    joys = [];
+    const handle = mountComponent(Stage, host, {
+      bot: { id: 'o1', name: 'O', skin: 13 },
+      stage: 'interview',
+      mountOrb: orbFactory(),
+      mountBotOrb: (el, { bot }) => ({ feel: (m) => joys.push(`${bot.id}:${m}`), destroy: () => {} }),
+      voice: {},
+      ...props,
+    });
+    flushSync();
+    instance = { destroy: handle.destroy };
+    return handle;
+  };
+  const hiddenIds = () => [...host.querySelectorAll('.orch-bot')].map((b) => b.classList.contains('is-hidden'));
+  const texts = () => [...host.querySelectorAll('.orch-bot-text')].map((p) => p.textContent);
+
+  beforeEach(() => vi.useFakeTimers());
+
+  it('reveals new orbs one by one, types the persona (3 lines max), then the rules, then leaves', async () => {
+    window.CrewAvatarStates = { stageMood: (p) => `m-${p}` };
+    const onleave = vi.fn();
+    const handle = mountLive({ onleave });
+    handle.update({ stage: 'ready', newBots: bots, rules: 'Правило 1\nПравило 2' });
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    flushSync();
+    expect(hiddenIds()).toEqual([false, true]);
+    expect(feel).toHaveBeenLastCalledWith('m-typing', 3600);
+    await vi.advanceTimersByTimeAsync(1500);
+    flushSync();
+    expect(texts()[0].length).toBeGreaterThan(0);
+    expect(texts()[0].length).toBeLessThan('Ты редактор.\nПишешь коротко.\nБез воды.'.length);
+    await vi.advanceTimersByTimeAsync(2500);
+    flushSync();
+    expect(hiddenIds()).toEqual([false, false]);
+    expect(texts()[0]).toBe('Ты редактор.\nПишешь коротко.\nБез воды.');
+    expect(joys).toEqual(['b1:joy', 'b2:joy']);
+    await vi.advanceTimersByTimeAsync(2000);
+    flushSync();
+    expect(texts().at(-1)).toBe('Правило 1\nПравило 2');
+    expect(feel).toHaveBeenLastCalledWith('m-done', 3600);
+    expect(onleave).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(onleave).toHaveBeenCalledTimes(1);
+  });
+
+  it('«Пропустить» shows the final state at once', async () => {
+    const handle = mountLive({ onleave: () => {} });
+    handle.update({ stage: 'ready', newBots: bots, rules: 'Правило' });
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    host.querySelector('.orch-skip').click();
+    flushSync();
+    expect(hiddenIds()).toEqual([false, false]);
+    expect(texts()[1]).toBe('Ты скаут.');
+    expect(texts().at(-1)).toBe('Правило');
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(host.querySelector('.orch-skip')).toBeNull();
+  });
+
+  it('reduced motion: final state with no typing, then leaves', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = () => ({ matches: true });
+    try {
+      const onleave = vi.fn();
+      const handle = mountLive({ onleave });
+      handle.update({ stage: 'ready', newBots: bots, rules: 'Правило' });
+      flushSync();
+      expect(hiddenIds()).toEqual([false, false]);
+      expect(texts()[0]).toBe('Ты редактор.\nПишешь коротко.\nБез воды.');
+      expect(joys).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(onleave).toHaveBeenCalledTimes(1);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('plays only the bots it is given (rebuild passes only the new ones)', async () => {
+    const handle = mountLive({ onleave: () => {} });
+    handle.update({ stage: 'ready', newBots: [bots[1]], rules: '' });
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(hiddenIds()).toEqual([false]);
+    expect(host.querySelector('.orch-rules')).toBeNull();
+  });
+
+  it('no new bots: no assembly, straight to the corner', async () => {
+    const onleave = vi.fn();
+    const handle = mountLive({ onleave });
+    handle.update({ stage: 'ready', newBots: [] });
+    flushSync();
+    expect(host.querySelector('.orch-assembly')).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(onleave).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Stage answered question', () => {
+  it('collapses the card after an answer', () => {
+    render();
+    const card = document.createElement('div');
+    card.className = 'card question';
+    card.innerHTML = '<button data-choice="A">A</button><button data-dismiss>Пропустить</button>';
+    api.addCard(card);
+    flushSync();
+    host.querySelector('[data-choice]').click();
+    flushSync();
+    expect(host.querySelector('.orch-cardbox').classList.contains('is-answered')).toBe(true);
+    expect(host.querySelector('.orch-cardbox .orch-enough')).toBeNull();
+  });
+});

@@ -13,6 +13,9 @@
     stage = 'interview',
     history = [],
     mountOrb = null,
+    mountBotOrb = null,
+    newBots = [],
+    rules = '',
     voice = null,
     onsend,
     onleave,
@@ -37,6 +40,8 @@
   let leaveTransform = $state('');
   let orb = $state.raw(null);
   let micAvailable = $state(true);
+  // Сборка команды: { bots: [{ id, name, role, skin, color, full, typed, shown }], rules, rulesTyped, done, playing }
+  let assembly = $state(null);
 
   let orbHost;
   let orbWrap;
@@ -49,10 +54,10 @@
   // Тексты, которые человек уже видит в своих пузырях: эхо того же сообщения с сервера не рисуем второй раз.
   const echoes = [];
 
-  const openCards = $derived(items.filter((i) => i.kind === 'card').length);
-  const questionOpen = $derived(items.some((i) => i.kind === 'card' && i.sub === 'question'));
+  const openCards = $derived(items.filter((i) => i.kind === 'card' && !i.answered).length);
+  const questionOpen = $derived(items.some((i) => i.kind === 'card' && i.sub === 'question' && !i.answered));
   const proposalOpen = $derived(items.some((i) => i.kind === 'card' && i.sub === 'proposal'));
-  const phase = $derived(phaseOf({ stage, hearing: micState === 'listening', openCards, streaming, busy }));
+  const phase = $derived(assembly && !assembly.done ? 'typing' : phaseOf({ stage, hearing: micState === 'listening', openCards, streaming, busy }));
   const waiting = $derived(stage === 'interview' && busy && !questionOpen && !proposalOpen);
   const started = $derived(items.some((i) => i.kind === 'user'));
 
@@ -189,12 +194,13 @@
   }
 
   // Ответ в карточке вопроса виден в ленте справа, как реплика человека.
-  function echoAnswer(e) {
+  function echoAnswer(e, card) {
     const choice = e.target?.closest?.('[data-choice]');
     if (choice) {
       const text = choice.dataset.choice || choice.textContent.trim();
       pushBubble('user', text);
       echoes.push(text);
+      if (card) card.answered = true;
       return;
     }
     const sendBtn = e.target?.closest?.('[data-send]');
@@ -203,6 +209,7 @@
       if (val) {
         pushBubble('user', val);
         echoes.push(val);
+        if (card) card.answered = true;
       }
     }
   }
@@ -245,8 +252,131 @@
     setTimeout(() => onleave?.(), 520);
   }
 
+  // ---- сборка команды ----
+
+  const botEls = new Map();
+  const botOrbs = new Map();
+  const waiters = new Set();
+  let skipped = false;
+  let gone = false;
+
+  const sleep = (ms) =>
+    new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+    });
+
+  // Первые строки текста: не больше нескольких строк и разумной длины.
+  const head = (text, lines, width) =>
+    String(text ?? '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, lines)
+      .map((l) => (l.length > width ? l.slice(0, width - 1) + '…' : l))
+      .join('\n');
+
+  const defaultBotOrb = (host, { size, bot }) =>
+    typeof window !== 'undefined' && window.CrewAvatar
+      ? window.CrewAvatar.mount(host, { size, skin: bot.skin ?? 0, color: bot.color, name: bot.name || '' })
+      : null;
+
+  const attachBot = (bot) => (el) => {
+    botEls.set(bot.id, el);
+    const orb = (mountBotOrb ?? defaultBotOrb)(el.querySelector('.orch-bot-orb'), { size: 84, bot });
+    if (orb) botOrbs.set(bot.id, orb);
+    return () => {
+      botOrbs.get(bot.id)?.destroy?.();
+      botOrbs.delete(bot.id);
+      botEls.delete(bot.id);
+    };
+  };
+
+  function fly(id) {
+    const el = botEls.get(id);
+    const from = orbWrap?.getBoundingClientRect();
+    const to = el?.getBoundingClientRect();
+    if (!el?.animate || !from || !to || !from.width) return;
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    el.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px) scale(0.3)`, opacity: 0 },
+        { transform: 'none', opacity: 1 },
+      ],
+      { duration: 700, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    );
+  }
+
+  // Печатная машинка: за totalMs выводит text через set(); пропуск обрывает печать.
+  async function typeOut(text, totalMs, set) {
+    const step = Math.min(80, Math.max(20, totalMs / Math.max(1, text.length)));
+    const per = Math.max(1, Math.ceil((text.length * step) / totalMs));
+    for (let i = per; i < text.length && !skipped; i += per) {
+      set(text.slice(0, i));
+      await sleep(step);
+    }
+    set(text);
+  }
+
+  function showFinal() {
+    if (!assembly) return;
+    for (const b of assembly.bots) {
+      b.shown = true;
+      b.typed = b.full;
+    }
+    assembly.rulesTyped = assembly.rules;
+  }
+
+  function skip() {
+    skipped = true;
+    showFinal();
+    for (const wake of [...waiters]) wake();
+  }
+
+  async function playAssembly(list, teamRules) {
+    assembly = {
+      bots: list.map((b) => ({ ...b, full: head(b.persona, 3, 150), typed: '', shown: false, attach: null })),
+      rules: head(teamRules, 4, 150),
+      rulesTyped: '',
+      done: false,
+      playing: true,
+    };
+    for (const b of assembly.bots) b.attach = attachBot(b);
+    if (reduced()) {
+      showFinal();
+    } else {
+      for (const b of assembly.bots) {
+        if (skipped) break;
+        b.shown = true;
+        await tick();
+        fly(b.id);
+        botOrbs.get(b.id)?.feel?.('joy', 3600);
+        await sleep(700);
+        await typeOut(b.full, 2500, (t) => { b.typed = t; });
+      }
+      if (assembly.rules && !skipped) await typeOut(assembly.rules, 1800, (t) => { assembly.rulesTyped = t; });
+      showFinal();
+    }
+    assembly.playing = false;
+    assembly.done = true;
+    await sleep(reduced() ? 1500 : 1000);
+    if (gone) return;
+    startLeave();
+  }
+
   $effect(() => {
-    if (stage === 'ready') untrack(startLeave);
+    if (stage !== 'ready') return;
+    untrack(() => {
+      if (assembly || leaving) return;
+      if (newBots?.length) playAssembly(newBots, rules);
+      else startLeave();
+    });
   });
 
   // Лента едет вниз за новым текстом.
@@ -276,6 +406,8 @@
     }
     onready?.({ event, addCard, send });
     return () => {
+      for (const wake of [...waiters]) wake();
+      gone = true;
       mic?.cancel?.();
       orb?.destroy?.();
     };
@@ -287,14 +419,40 @@
     <div class="orch-orb-host" bind:this={orbHost} data-phase={phase}></div>
   </div>
 
-  <div class="orch-stream" bind:this={streamEl} aria-live="polite">
+  {#if assembly}
+    <div class="orch-assembly" aria-live="polite">
+      {#if assembly.playing}
+        <button type="button" class="orch-skip" onclick={skip}>{tr('Пропустить')}</button>
+      {/if}
+      <div class="orch-bots">
+        {#each assembly.bots as b (b.id)}
+          <div class="orch-bot" class:is-hidden={!b.shown} {@attach b.attach}>
+            <div class="orch-bot-orb"></div>
+            <div class="orch-bot-card">
+              <b class="orch-bot-name">{b.name}</b>
+              {#if b.role}<span class="orch-bot-role">{b.role}</span>{/if}
+              <pre class="orch-bot-text">{b.typed}</pre>
+            </div>
+          </div>
+        {/each}
+      </div>
+      {#if assembly.rules}
+        <div class="orch-rules" class:is-hidden={!assembly.rulesTyped}>
+          <b>{tr('Правила команды')}</b>
+          <pre class="orch-bot-text">{assembly.rulesTyped}</pre>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <div class="orch-stream" hidden={Boolean(assembly)} bind:this={streamEl} aria-live="polite">
     {#each items as it (it.id)}
       {#if it.kind === 'card'}
         <div class="orch-row">
-          <div class="orch-cardbox" class:is-proposal={it.sub === 'proposal'}>
+          <div class="orch-cardbox" class:is-proposal={it.sub === 'proposal'} class:is-answered={it.answered}>
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="orch-card" {@attach it.attach} onclick={echoAnswer}></div>
-            {#if it.sub === 'question'}
+            <div class="orch-card" {@attach it.attach} onclick={(e) => echoAnswer(e, it)}></div>
+            {#if it.sub === 'question' && !it.answered}
               <button type="button" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</button>
             {/if}
           </div>
@@ -317,7 +475,7 @@
     {/if}
   </div>
 
-  <div class="orch-foot">
+  <div class="orch-foot" hidden={Boolean(assembly)}>
     {#if started && !questionOpen && !proposalOpen && stage === 'interview'}
       <button type="button" class="orch-enough" onclick={enough}>{tr('Хватит, предлагай')}</button>
     {/if}
@@ -563,9 +721,106 @@
     color: var(--k-text-3);
     cursor: default;
   }
+  .orch-stream[hidden],
+  .orch-foot[hidden] {
+    display: none;
+  }
+  .orch-row:has(.is-answered) {
+    display: none;
+  }
+  .orch-assembly {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--k-space-4);
+    width: 100%;
+    max-width: 920px;
+    margin: 0 auto;
+    transform-origin: top left;
+    transition: opacity var(--k-dur-exit) var(--k-ease-in), transform var(--k-dur-morph) var(--k-ease-morph);
+  }
+  .orch-skip {
+    align-self: flex-end;
+    padding: var(--k-space-1) var(--k-space-3);
+    border: 1px solid var(--k-line-strong);
+    border-radius: var(--k-radius-pill);
+    background: var(--k-surface);
+    color: var(--k-text);
+    font: inherit;
+    font-size: var(--k-text-sm);
+    cursor: pointer;
+  }
+  .orch-skip:focus-visible {
+    outline: none;
+    box-shadow: var(--k-focus);
+  }
+  .orch-bots {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--k-space-4);
+    width: 100%;
+  }
+  .orch-bot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--k-space-2);
+    width: 260px;
+  }
+  .orch-bot.is-hidden,
+  .orch-rules.is-hidden {
+    visibility: hidden;
+  }
+  .orch-bot-orb {
+    position: relative;
+    width: 84px;
+    height: 84px;
+  }
+  .orch-bot-card,
+  .orch-rules {
+    display: flex;
+    flex-direction: column;
+    gap: var(--k-space-1);
+    width: 100%;
+    padding: var(--k-space-3) var(--k-space-4);
+    border-radius: var(--k-radius-lg);
+    background: var(--k-surface);
+    box-shadow: var(--k-shadow-1);
+    box-sizing: border-box;
+  }
+  .orch-rules {
+    max-width: 720px;
+  }
+  .orch-bot-name {
+    font-family: var(--k-font-display);
+    font-size: var(--k-text-md);
+  }
+  .orch-bot-role {
+    color: var(--k-text-2);
+    font-size: var(--k-text-sm);
+  }
+  .orch-bot-text {
+    margin: 0;
+    min-height: 3.6em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+    font-size: var(--k-text-sm);
+    line-height: var(--k-leading-body);
+    color: var(--k-text-2);
+  }
   .is-leaving .orch-stream,
   .is-leaving .orch-foot {
     opacity: 0;
+  }
+  .is-leaving .orch-assembly {
+    opacity: 0;
+    transform: scale(0.2);
   }
   @keyframes orch-in {
     from {
@@ -590,6 +845,7 @@
     }
     .orch-orb,
     .orch-stream,
+    .orch-assembly,
     .orch-foot {
       transition: none;
     }

@@ -2191,7 +2191,8 @@ async function stageSend(botId, text, opts = {}) {
 async function openOrchStage(room, bot) {
   closeOrchStage();
   const host = $('#orch-stage');
-  const entry = { roomId: room.id, botId: bot.id, view: null, api: null, watch: null };
+  // Кто уже был в команде: всё, что добавится к моменту «готово», сцена покажет сборкой.
+  const entry = { roomId: room.id, botId: bot.id, view: null, api: null, watch: null, known: new Set(room.botIds || []), readied: false };
   orchStage = entry;
   $('#chat').classList.add('orch-on');
   host.hidden = false;
@@ -2216,6 +2217,7 @@ async function openOrchStage(room, bot) {
       if (avatar) S.avatars.set(`side:${bot.id}:stage`, avatar);
       return avatar;
     },
+    mountBotOrb: (el, { size, bot: fresh }) => (window.CrewAvatar ? CrewAvatar.mount(el, { size, ...lookOf(fresh), skin: fresh.skin ?? 0 }) : null),
     onsend: (text, opts) => stageSend(bot.id, text, opts),
     onready: (stageApi) => { entry.api = stageApi; },
     onleave: () => {
@@ -2244,7 +2246,16 @@ function syncOrchStage() {
     const room = currentRoom();
     const bot = interviewBot(room);
     if (orchStage && orchStage.roomId === room?.id) {
-      if (!bot) orchStage.view?.update({ stage: 'ready' });
+      if (!bot && !orchStage.readied) {
+        orchStage.readied = true;
+        const { known } = orchStage;
+        const fresh = (room.botIds || [])
+          .filter((id) => !known.has(id) && id !== room.lead)
+          .map((id) => botById(id))
+          .filter(Boolean)
+          .map((b) => ({ id: b.id, name: b.name, role: b.role || '', persona: b.persona || '', skin: b.skin ?? 0, color: safeColor(b.color) }));
+        orchStage.view?.update({ stage: 'ready', newBots: fresh, rules: room.instructions || '' });
+      }
     } else if (bot && !orchStage) {
       selectRoom(room.id);
     }
