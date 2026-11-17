@@ -1,8 +1,22 @@
 //! Пиксельная графика значка Deloist: скруглённый квадрат цвета бренда с галочкой.
-//! Один источник истины для значка окна/трея (src/desktop.rs) и для встраиваемого в exe .ico (examples/make_icon.rs).
+//! Значок окна и трея (src/desktop.rs). Публичный .ico делает examples/make_icon.rs, официальный — private/tools/make_app_icon.py.
 
-/// Возвращает RGBA-пиксели значка размером size×size.
+/// Возвращает RGBA-пиксели значка размером size×size. Официальная сборка берёт готовый рисунок
+/// (шар Лавы, `private/assets/icon-{32,64}.rgba`, делает `private/tools/make_app_icon.py`).
 pub fn icon_rgba(size: u32) -> Vec<u8> {
+    #[cfg(deloist_private)]
+    {
+        match size {
+            32 => return include_bytes!("../private/assets/icon-32.rgba").to_vec(),
+            64 => return include_bytes!("../private/assets/icon-64.rgba").to_vec(),
+            _ => {}
+        }
+    }
+    drawn_rgba(size)
+}
+
+/// Значок публичной сборки: скруглённый квадрат цвета бренда с галочкой.
+fn drawn_rgba(size: u32) -> Vec<u8> {
     let s = size as f32;
     let radius = s * 9.0 / 32.0;
     // Галочка из знака Deloist: на маленьком значке контур и искры не читаются.

@@ -179,9 +179,12 @@ fn build_import_libs(defs: &Path, out_dir: &Path) {
 /// где лежит дерево ресурсов RT_ICON + RT_GROUP_ICON (id 1), и отдаём его линкеру.
 /// RVA в записях данных — релокации ADDR32NB на символ секции.
 fn build_icon_obj(manifest: &Path, out_dir: &Path) {
-    let ico_path = manifest.join("assets").join("deloist.ico");
+    // Официальная сборка берёт значок из private/assets (рисунок владельца), публичная — общий.
+    let private_ico = manifest.join("private").join("assets").join("deloist.ico");
+    println!("cargo:rerun-if-changed={}", private_ico.display());
+    let ico_path = if private_ico.is_file() { private_ico } else { manifest.join("assets").join("deloist.ico") };
     println!("cargo:rerun-if-changed={}", ico_path.display());
-    let ico = std::fs::read(&ico_path).expect("assets/deloist.ico");
+    let ico = std::fs::read(&ico_path).expect("deloist.ico");
     assert!(ico.len() >= 6, "ico header");
     let n = u16::from_le_bytes([ico[4], ico[5]]) as usize;
     assert!(n > 0, "ico has no images");
