@@ -3505,15 +3505,28 @@ function beforeAfterBlock(title, edit, long) {
 function botChangeCard(ev, proposal) {
   const target = escapeHtml(proposal.target?.name || '');
   const parts = [];
+  // propose_rule: бот предлагает правило себе — показываем одну строку, а инструкцию целиком прячем под раскрытие.
+  const rule = proposal.rule;
+  if (rule) {
+    if (rule.add) parts.push(`<p class="team-routine-title"><b>${escapeHtml(rule.add)}</b></p>`);
+    if (rule.remove) parts.push(`<p class="note">${tr('Убрать правило: «{rule}»', { rule: escapeHtml(rule.remove) })}</p>`);
+    parts.push(`<p class="note">${tr('Попадёт в инструкцию бота, раздел «Правила от человека», и будет в каждом ходе.')}</p>`);
+    if (proposal.instructions) {
+      parts.push(`<details class="team-full"><summary>${tr('Инструкция целиком')}</summary><pre class="team-full-text">${escapeHtml(proposal.instructions.after || '')}</pre></details>`);
+    }
+  }
   if (proposal.role) parts.push(beforeAfterBlock(tr('Роль'), proposal.role, false));
-  if (proposal.instructions) parts.push(beforeAfterBlock(tr('Инструкции'), proposal.instructions, true));
+  if (proposal.instructions && !rule) parts.push(beforeAfterBlock(tr('Инструкции'), proposal.instructions, true));
   if (proposal.removeFrom) {
     const lead = proposal.removeFrom.newLead
       ? ` ${tr('Ведущим станет {name}.', { name: escapeHtml(proposal.removeFrom.newLead) })}`
       : '';
     parts.push(`<p class="note team-warn">${tr('Уберу из команды «{room}»', { room: escapeHtml(proposal.removeFrom.name) })}.${lead}</p>`);
   }
-  mountProposalCard(ev, proposal, `<div class="card-title">${tr('Предлагаю изменить: {name}', { name: target })}</div>
+  const title = rule
+    ? (rule.add ? tr('Предлагаю себе правило') : tr('Предлагаю убрать своё правило'))
+    : tr('Предлагаю изменить: {name}', { name: target });
+  mountProposalCard(ev, proposal, `<div class="card-title">${title}</div>
     ${parts.join('')}
     <p class="note">${tr('Режим подтверждений, сайты, модель, папки и лимиты не меняются.')}</p>
     <div class="card-actions">

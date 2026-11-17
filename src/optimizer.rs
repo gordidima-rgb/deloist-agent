@@ -31,7 +31,7 @@ const START_DELAY_MS: i64 = 3 * 60_000;
 const EXAMPLE_CHARS: usize = 160;
 
 /// Инструменты, где решает сам ИИ или человек: их повторы не механика.
-const IGNORED: [&str; 12] = ["ask_user", "remember", "recall", "read_skill", "delegate", "offer_specialist", "propose_team", "propose_bot_change", "propose_routine", "search_catalog", "write_file", "run_command"];
+const IGNORED: [&str; 13] = ["ask_user", "remember", "recall", "read_skill", "delegate", "offer_specialist", "propose_team", "propose_bot_change", "propose_routine", "propose_rule", "search_catalog", "write_file", "run_command"];
 
 static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static STARTED_AT: AtomicI64 = AtomicI64::new(0);

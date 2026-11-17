@@ -197,7 +197,7 @@ mod browser_wait_tests {
     #[test]
     fn the_bridge_offers_the_team_change_tools_and_lets_them_through() {
         let list = browser_tools();
-        for name in ["propose_bot_change", "propose_routine"] {
+        for name in ["propose_bot_change", "propose_routine", "propose_rule"] {
             let tool = list.as_array().unwrap().iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("в мосте нет {name}"));
             assert!(tool["inputSchema"]["properties"].is_object(), "{tool}");
             assert!(crate::tools::is_bridge_tool(name), "{name} не пропускается мостом");
