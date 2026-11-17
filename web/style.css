@@ -482,6 +482,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: var(--color
   background: transparent;
   line-height: 1.6;
 }
+.msg.bot .bubble:empty::before { display: none; }
 .msg.bot .bubble::before {
   content: "";
   position: absolute;
@@ -714,7 +715,7 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
 }
 .msg-card.approval-host { width: min(640px, 100%); }
 .card pre { margin-bottom: 12px; max-height: 220px; }
-.card .team-warn { color: #d98a00; font-weight: 600; }
+.card .team-warn { color: var(--k-brand-text); font-weight: 600; }
 .card p.team-warn { margin-top: 2px; }
 .card .team-full { margin-top: 6px; }
 .card .team-full > summary { cursor: pointer; font-size: var(--text-sm); color: var(--color-text-muted); }
@@ -796,11 +797,11 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
 .tc-stop[hidden] { display: none; }
 .tc-stop:hover { background: var(--k-surface-2); color: var(--k-text); }
 .tc-stop:focus-visible { outline: none; box-shadow: var(--k-focus); }
-.turn-card[data-state="error"] { border-color: var(--k-attention); }
-.turn-card[data-state="error"] .tc-line { color: var(--k-attention-text); font-weight: 600; }
+.turn-card[data-state="error"] { border-color: var(--k-danger); }
+.turn-card[data-state="error"] .tc-line { color: var(--k-danger-text); font-weight: 600; }
 /* Пока есть карточка, текущий шаг и секунды говорит она; у группы шагов остаётся только список. */
 .turn-card ~ .work-group.is-live .work-pix, .turn-card ~ .work-group.is-live .work-now { display: none; }
-.turn-stats .ts-fail { color: var(--k-attention-text); font-weight: 600; }
+.turn-stats .ts-fail { color: var(--k-danger-text); font-weight: 600; }
 .t-dur { flex: none; margin-left: auto; font-size: var(--k-text-xs); color: var(--k-text-3); font-variant-numeric: tabular-nums; }
 .t-dur + .t-status { margin-left: 8px; }
 @keyframes tc-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -1442,7 +1443,7 @@ body.side-collapsed .update-plaque-host { display: none; }
   z-index: 90;
 }
 
-.only-mobile { display: none; }
+.only-mobile, .k-btn.only-mobile { display: none; }
 
 /* Значок темы показывает, куда переключит. */
 [data-theme="dark"] .only-light, :root:not([data-theme="dark"]) .only-dark { display: none; }
@@ -1572,7 +1573,7 @@ body.side-collapsed .update-plaque-host { display: none; }
   }
   /* Тень только у открытой панели: у спрятанной она просвечивала с края окна. */
   #sidebar.open { transform: translateX(0); box-shadow: var(--shadow-modal); }
-  .only-mobile { display: inline-grid; }
+  .only-mobile, .k-btn.only-mobile { display: inline-grid; }
   #catalog .catalog-head { display: flex; }
   .msg.user { max-width: 92%; }
   /* MCP-сервер: имя и кнопки в строку, команда уходит под них и обрезается. */
@@ -1912,9 +1913,9 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 .msg-badge svg { width: 16px; height: 16px; }
 .msg-abbr { font-size: 10.5px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
 .msg-dot { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--color-bg-canvas); box-sizing: content-box; background: #9aa0a6; }
-.msg-chip[data-status="signed_in"] .msg-dot { background: #22b45a; }
-.msg-chip[data-status="signed_out"] .msg-dot { background: #e5484d; }
-.msg-chip[data-status="signed_out"] .msg-badge { border-color: #e5484d; }
+.msg-chip[data-status="signed_in"] .msg-dot { background: var(--k-brand); }
+.msg-chip[data-status="signed_out"] .msg-dot { background: var(--k-danger); }
+.msg-chip[data-status="signed_out"] .msg-badge { border-color: var(--k-danger); }
 .msg-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .msg-pop {
   position: fixed; z-index: 60; width: 340px; max-width: calc(100vw - 16px); padding: 12px 14px; border: 1px solid var(--color-border-default); border-radius: 14px;
@@ -1924,8 +1925,8 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 .msg-pop[hidden] { display: none; }
 .msg-title { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .msg-status { margin: 4px 0 8px 38px; font-size: 12.5px; color: var(--color-text-muted); }
-.msg-status.signed_in { color: #1f9d55; }
-.msg-status.signed_out { color: #e5484d; font-weight: 600; }
+.msg-status.signed_in { color: var(--k-brand-text); }
+.msg-status.signed_out { color: var(--k-danger-text); font-weight: 600; }
 .msg-open { margin: 0 0 8px 38px; padding: 5px 10px; border: 1px solid var(--color-border-default); border-radius: 999px; background: var(--color-bg-surface-soft); color: var(--color-text-primary); font: inherit; font-size: 12.5px; cursor: pointer; }
 .msg-open:hover { border-color: var(--color-accent); }
 .msg-rules { display: grid; gap: 6px; }
@@ -1934,8 +1935,8 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 .msg-seg { padding: 3px 9px; border: 0; border-radius: 999px; background: none; color: var(--color-text-muted); font: inherit; font-size: 11.5px; cursor: pointer; transition: background 160ms, color 160ms; }
 .msg-seg:hover { color: var(--color-text-primary); }
 .msg-seg.on { background: var(--color-bg-surface); color: var(--color-text-primary); font-weight: 600; box-shadow: 0 0 0 1px var(--color-border-default); }
-.msg-seg.on.msg-deny { background: #e5484d; color: #fff; box-shadow: none; }
-.msg-seg.on.msg-allow { background: #22b45a; color: #fff; box-shadow: none; }
+.msg-seg.on.msg-deny { background: var(--k-danger); color: var(--k-on-brand); box-shadow: none; }
+.msg-seg.on.msg-allow { background: var(--k-brand); color: var(--k-on-brand); box-shadow: none; }
 .msg-seg:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .msg-pop { animation: none; } .msg-seg { transition: none; } }
 
@@ -1948,7 +1949,7 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 /* Закрытая задача участника: одна тонкая строка в ленте ведущего. */
 /* Отчёт подчинённого: шар слева, как у автора сообщения; итог, файлы и переход в его чат. */
 .task-line { display: flex; align-items: flex-start; gap: var(--k-space-3); padding: var(--k-space-2) 0; color: var(--k-text-2); font-size: var(--k-text-sm); }
-.task-line--failed .task-line-head { color: var(--k-attention-text); }
+.task-line--failed .task-line-head { color: var(--k-danger-text); }
 .task-line-avatar { position: relative; flex: none; width: 28px; height: 28px; border-radius: var(--k-radius-pill); display: grid; place-items: center; color: var(--k-surface); font-size: var(--k-text-xs); font-weight: 600; }
 .task-line-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: var(--k-space-1); }
 .task-line-head { color: var(--k-text); font-weight: 600; }
@@ -2076,7 +2077,7 @@ a.attach-chip:hover { border-color: var(--color-border-strong); }
 .attach-icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; color: var(--color-text-muted); }
 .attach-icon svg.i { width: 16px; height: 16px; }
 .attach-type {
-  --ft: #7d7f86;
+  --ft: var(--k-text-2);
   border-radius: 6px;
   background: color-mix(in oklab, var(--ft) 16%, transparent);
   color: var(--ft);
@@ -2084,24 +2085,6 @@ a.attach-chip:hover { border-color: var(--color-border-strong); }
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
-.attach-type[data-kind="table"] { --ft: #1e9e5a; }
-.attach-type[data-kind="pdf"] { --ft: #e5484d; }
-.attach-type[data-kind="doc"] { --ft: #3e7bfa; }
-.attach-type[data-kind="code"] { --ft: #8b6cf6; }
-.attach-type[data-kind="archive"] { --ft: #d98a14; }
-.attach-type[data-kind="media"] { --ft: #d6409f; }
-.attach-type[data-kind="image"] { --ft: #0e9fb4; }
-.attach-type[data-kind="design"] { --ft: #c2410c; }
-.attach-type[data-kind="book"] { --ft: #a16207; }
-.attach-type[data-kind="app"] { --ft: #5b6b82; }
-.attach-type[data-kind="raw"] { --ft: #64748b; }
-.attach-type[data-brand="ps"] { --ft: #1c8ee6; }
-.attach-type[data-brand="ai"] { --ft: #e8860b; }
-.attach-type[data-brand="id"] { --ft: #e8336b; }
-.attach-type[data-brand="xd"] { --ft: #d53fd0; }
-.attach-type[data-brand="ae"],
-.attach-type[data-brand="pr"] { --ft: #7b6cf0; }
-.attach-type[data-brand="cdr"] { --ft: #2f9a3e; }
 .attach-thumb-box { position: relative; flex: none; display: inline-flex; }
 .attach-ext {
   position: absolute; right: -4px; bottom: -3px; padding: 1px 3px; border-radius: 4px;
@@ -3581,7 +3564,7 @@ body.split-dragging .split-zone { display: flex; }
 
 /* Строка бота, который стоит во второй панели. */
 .sb-row.k-list-item.sb-pane { box-shadow: inset 3px 0 0 var(--arc-pri); background: color-mix(in srgb, var(--arc-pri) 6%, transparent); }
-#btn-split.on { background: var(--color-bg-surface); box-shadow: 0 0 0 1px var(--color-border-default); }
+#btn-split.on { background: var(--k-brand-tint); color: var(--k-brand-text); }
 
 /* ---- страница во фрейме: только чат, без рамки окна ---- */
 html.pane-mode, .pane-mode body { background: var(--island); }

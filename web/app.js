@@ -3163,14 +3163,14 @@ function questionField(field) {
 function questionBody(ev) {
   if (ev.form?.length) {
     return `<div class="q-form">${ev.form.map(questionField).join('')}</div>
-      <div class="card-actions"><button class="primary" data-send>${tr('Ответить')}</button><button class="ghost" data-dismiss>${tr('Убрать вопрос')}</button></div>`;
+      <div class="card-actions"><button class="k-btn k-btn--primary k-btn--sm" data-send>${tr('Ответить')}</button><button class="k-btn k-btn--ghost k-btn--sm" data-dismiss>${tr('Убрать вопрос')}</button></div>`;
   }
-  const choices = (ev.choices || []).map((c) => `<button class="ghost" data-choice="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('');
+  const choices = (ev.choices || []).map((c) => `<button class="k-btn k-btn--ghost k-btn--sm" data-choice="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('');
   return `${choices ? `<div class="card-actions q-choices">${choices}</div>` : ''}
     <div class="row">
       <input class="q-input" placeholder="${choices ? tr('Или свой ответ…') : tr('Ответ…')}" />
-      <button class="primary" data-send>${tr('Ответить')}</button>
-      <button class="ghost" data-dismiss title="${tr('Убрать вопрос')}" aria-label="${tr('Убрать вопрос')}">×</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-send>${tr('Ответить')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-dismiss title="${tr('Убрать вопрос')}" aria-label="${tr('Убрать вопрос')}">×</button>
     </div>`;
 }
 
@@ -3236,8 +3236,8 @@ function specialistOfferCard(ev) {
     ${reason ? `<p class="note">${escapeHtml(reason)}</p>` : ''}
     ${taskHtml}
     <div class="card-actions">
-      <button class="primary" data-accept>${tr('Передать')}</button>
-      <button class="ghost" data-decline>${tr('Сам справлюсь')}</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-accept>${tr('Передать')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-decline>${tr('Сам справлюсь')}</button>
     </div>`,
     'card offer',
   );
@@ -3336,8 +3336,8 @@ function botChangeCard(ev, proposal) {
     ${parts.join('')}
     <p class="note">${tr('Режим подтверждений, сайты, модель, папки и лимиты не меняются.')}</p>
     <div class="card-actions">
-      <button class="primary" data-accept>${tr('Применить')}</button>
-      <button class="ghost" data-decline>${tr('Не надо')}</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-accept>${tr('Применить')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-decline>${tr('Не надо')}</button>
     </div>`, 'card offer team-proposal team-change-card');
 }
 
@@ -3364,8 +3364,8 @@ function routineProposalCard(ev, proposal) {
     ${free}
     ${quiet}
     <div class="card-actions">
-      <button class="primary" data-accept>${tr('Создать')}</button>
-      <button class="ghost" data-decline>${tr('Не надо')}</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-accept>${tr('Создать')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-decline>${tr('Не надо')}</button>
     </div>`, 'card offer team-proposal team-routine-card');
 }
 
@@ -3422,8 +3422,8 @@ function teamProposalCard(ev) {
     ${access}
     ${defaultsLine}
     <div class="card-actions">
-      <button class="primary" data-accept>${tr('Создать')}</button>
-      <button class="ghost" data-decline>${tr('Не надо')}</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-accept>${tr('Создать')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-decline>${tr('Не надо')}</button>
     </div>`,
     'card offer team-proposal',
   );
@@ -3467,8 +3467,8 @@ function optimizerOfferCard(ev) {
     ${repeat}
     ${example ? `<p class="note">${tr('Просьба')}: ${escapeHtml(example)}</p>` : ''}
     <div class="card-actions">
-      <button class="primary" data-accept>${tr('Написать скрипт')}</button>
-      <button class="ghost" data-decline>${tr('Разовая работа')}</button>
+      <button class="k-btn k-btn--primary k-btn--sm" data-accept>${tr('Написать скрипт')}</button>
+      <button class="k-btn k-btn--ghost k-btn--sm" data-decline>${tr('Разовая работа')}</button>
     </div>`,
     'card offer',
   );

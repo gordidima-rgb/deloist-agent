@@ -51,7 +51,7 @@ import { Button } from '../kit';
   h3.k-approval__title { margin: 0; }
   pre.k-approval__what { margin: 0; white-space: pre-wrap; max-height: 220px; overflow: auto; }
   .k-approval__risk { align-self: flex-start; padding: 1px 8px; border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1.4 var(--k-font-body); }
-  .k-approval__risk[data-risk='high'] { background: var(--k-coral-soft, var(--k-surface-2)); color: var(--k-coral, var(--k-text)); }
+  .k-approval__risk[data-risk='high'] { background: var(--k-danger-tint); color: var(--k-danger-text); }
   p.k-approval__purpose { margin: 0; font: 400 var(--k-text-sm) / 1.45 var(--k-font-body); color: var(--k-text-2); overflow-wrap: anywhere; }
   .k-approval__details summary { cursor: pointer; font: 600 var(--k-text-xs) / 1.4 var(--k-font-body); color: var(--k-text-3); }
   pre.k-approval__raw { margin: var(--k-space-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font: 400 var(--k-text-xs) / 1.45 var(--k-font-mono, monospace); }
