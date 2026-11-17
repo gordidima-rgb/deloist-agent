@@ -25,6 +25,8 @@ import { ListItem, EmptyState, Button, Icon } from '../kit';
       const data = await api(`/api/bots/${encodeURIComponent(bot.id)}/files?path=${encodeURIComponent(rel)}`);
       path = rel;
       items = data.items || [];
+      // MAIN.md — главный файл бота: в корне папки он первый.
+      if (!rel) items = [...items.filter((i) => !i.dir && i.name === 'MAIN.md'), ...items.filter((i) => i.dir || i.name !== 'MAIN.md')];
       loaded = true;
     } catch (err) {
       toast(err.message);

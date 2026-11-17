@@ -68,6 +68,18 @@ describe('DrawerFiles', () => {
     expect(new Set(icons.map((icon) => icon.innerHTML)).size).toBe(icons.length);
   });
 
+  it('shows MAIN.md first in the root folder', async () => {
+    const api = vi.fn(async () => ({ items: [
+      { name: 'notes', path: 'notes', dir: true },
+      { name: 'a.txt', path: 'a.txt', dir: false },
+      { name: 'MAIN.md', path: 'MAIN.md', dir: false },
+    ] }));
+    mount({ bot: { id: 'b1' }, api });
+    await waitFor(() => expect(rowByName('MAIN.md')).toBeTruthy());
+    const first = host.querySelector('.k-list-item');
+    expect(first.textContent).toContain('MAIN.md');
+  });
+
   it('opens a folder and shows its path in the breadcrumb', async () => {
     const api = fakeApi();
     mount({ bot: { id: 'b1' }, api });

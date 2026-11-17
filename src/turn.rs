@@ -1096,6 +1096,35 @@ pub(crate) const KEYS_RULE: &str = "— ключи проекта (.env, secrets
 /// Аккаунты и каналы в ответах — ссылками: человек сразу переходит на страницу, не копируя хэндл.
 pub(crate) const LINKS_RULE: &str = "— аккаунты, каналы, профили и репозитории называй кликабельной ссылкой на сайт сервиса, в том числе в таблицах и списках: [@имя](https://x.com/имя), [@имя](https://t.me/имя), [имя](https://instagram.com/имя), [имя](https://github.com/имя), [@имя](https://youtube.com/@имя), [@имя](https://tiktok.com/@имя), [имя](https://vk.com/имя), [имя](https://linkedin.com/in/имя), [имя](https://reddit.com/user/имя); если не уверен, на каком сервисе аккаунт, оставь простой текст, а не гадай;";
 
+/// Главный файл бота в его папке: всегда в ходе, как CLAUDE.md у Claude Code.
+pub(crate) const MAIN_FILE: &str = "MAIN.md";
+const MAIN_FILE_LIMIT: usize = 2_000;
+pub(crate) const MAIN_FILE_RULE: &str = "— текущие задачи, критерии и ссылки на рабочие файлы держи в MAIN.md в своей папке (его начало всегда перед тобой); меняется задача — обнови его; коротко, без журналов;";
+
+/// Начало MAIN.md до лимита, обрезка по границе строки с «…».
+pub(crate) fn main_file_text(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.chars().count() <= MAIN_FILE_LIMIT {
+        return Some(format!("# MAIN.md — главное по твоей работе (твой файл, держи его коротким)\n{raw}"));
+    }
+    let head: String = raw.chars().take(MAIN_FILE_LIMIT).collect();
+    let cut = head.rfind('\n').map(|i| &head[..i]).unwrap_or(&head).trim_end();
+    Some(format!("# MAIN.md — главное по твоей работе (твой файл, держи его коротким)\n{cut}\n…"))
+}
+
+fn main_file_block(workspace: &std::path::Path) -> Option<String> {
+    let path = workspace.join(MAIN_FILE);
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let slice = &bytes[..bytes.len().min(MAIN_FILE_LIMIT * 4)];
+    main_file_text(&String::from_utf8_lossy(slice))
+}
+
 fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>) -> String {
     let mut lines = vec![format!("Ты — {}, {}.", bot.name, bot.role)];
     if !bot.persona.is_empty() {
@@ -1129,6 +1158,7 @@ fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>
             "— перед оплатой, отправкой и удалением человек получит карточку: если он отказал, не ищи другого пути;",
             "— важное о человеке (имя, предпочтения, договорённости) запоминай через remember со scope shared — это узнают все боты; своё рабочее — со scope self; подробности общей памяти ищи через recall;",
             crate::memory::PRACTICE_RULE,
+            MAIN_FILE_RULE,
         ]
         .join("\n"),
     );
@@ -1155,6 +1185,9 @@ fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>
     }
     if !parts.own.trim().is_empty() {
         lines.push(format!("# Твоя память\n{}", parts.own.trim()));
+    }
+    if let Some(block) = main_file_block(workspace) {
+        lines.push(block);
     }
     if let Some(block) = crate::compact::prompt_block(parts.summary) {
         lines.push(block);
@@ -2981,6 +3014,26 @@ mod tests {
 
     // Часы в системном промпте — это гарантированный промах кэша на каждом ходу:
     // префикс запроса меняется сам по себе. Проверяем, что их там нет и текст стабилен.
+    #[test]
+    fn main_file_block_present_absent_and_cut() {
+        let dir = std::env::temp_dir().join(format!("main-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bot = analyser();
+        let none = system_prompt(&bot, &dir, &super::PromptParts::default());
+        assert!(!none.contains("# MAIN.md"), "{none}");
+        assert!(none.contains("держи в MAIN.md"), "правило есть всегда");
+        std::fs::write(dir.join("MAIN.md"), "Задача: комментарии в X\nКритерии: x-goal.md\n").unwrap();
+        let with = system_prompt(&bot, &dir, &super::PromptParts::default());
+        assert!(with.contains("# MAIN.md — главное") && with.contains("Критерии: x-goal.md"), "{with}");
+        assert!(with.find("# MAIN.md").unwrap() > with.find("Правила:").unwrap());
+        let long = "строка номер много слов\n".repeat(300);
+        let cut = super::main_file_text(&long).unwrap();
+        assert!(cut.ends_with("\n…"), "{cut}");
+        assert!(cut.chars().count() < 2_200);
+        assert!(cut.lines().rev().nth(1).unwrap().ends_with("слов"), "режем по границе строки");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_system_prompt_carries_no_clock() {
         let bot = analyser();
