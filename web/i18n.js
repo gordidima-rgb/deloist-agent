@@ -1909,6 +1909,8 @@
     'Работать только с': 'Work only from',
     'до': 'to',
     'Ночью': 'At night',
+    'Если пропущен запуск': 'If a run was missed',
+    'Выполнить последний': 'Run the last one',
     'Во сколько': 'At what time',
     'Дни (ни одного значит каждый день)': 'Days (none means every day)',
     'Название': 'Title',

@@ -62,6 +62,7 @@ pub fn defs() -> Vec<Value> {
                 "bot_id": { "type": "string", "description": "Чей бот выполнит рутину (ID из list_bots). По умолчанию ты сам." },
                 "enabled": { "type": "boolean", "description": "Включена ли. По умолчанию да." },
                 "quiet": { "type": "boolean", "description": "Писать в чат, только если есть что сказать. По умолчанию да." },
+                "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» — выполнить последний, «skip» — пропустить. По умолчанию last." },
             })),
             &["title"],
         ),
@@ -76,6 +77,7 @@ pub fn defs() -> Vec<Value> {
                 "goal_id": { "type": "string", "description": "Привязать рутину к цели (номер из list_goals) или пустая строка, чтобы отвязать." },
                 "enabled": { "type": "boolean", "description": "Включить или выключить." },
                 "quiet": { "type": "boolean", "description": "Только важное или писать всё." },
+                "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» или «skip»." },
             })),
             &["routine_id"],
         ),
@@ -165,6 +167,12 @@ pub(crate) fn schedule_patch(args: &Value) -> Result<Map<String, Value>, String>
         if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
             out.insert(field.into(), json!(v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой ЧЧ:ММ"))?.trim()));
         }
+    }
+    if let Some(v) = args.get("catch_up").filter(|v| !v.is_null()) {
+        out.insert("catchUp".into(), json!(v.as_str().ok_or("поле catch_up должно быть строкой: last или skip")?.trim()));
+    }
+    if !schedule::catch_up_valid(&Value::Object(out.clone())) {
+        return Err("поле catch_up: только last или skip".into());
     }
     if !schedule::times_valid(&Value::Object(out.clone())) {
         return Err("время нужно в формате ЧЧ:ММ, например 09:00".into());

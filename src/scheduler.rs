@@ -57,12 +57,19 @@ pub fn over_limit(app: &App) -> bool {
 
 /// Запустить рутину. `unattended` значит, что человека рядом нет и решать за него нельзя.
 pub async fn run_routine(app: &Arc<App>, routine: &Routine, unattended: bool) -> Result<(), crate::turn::StartError> {
-    run_routine_as(app, routine, unattended, "routine").await
+    run_routine_as(app, routine, unattended, "routine", 0).await
 }
 
 /// Тот же запуск, но с другой пометкой источника в журнале (например «device:iPhone», когда рутину запустили с устройства).
-pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str) -> Result<(), crate::turn::StartError> {
-    let mut text = format!("[рутина] {}\n{}", routine.title, routine.prompt);
+pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str, late_ms: i64) -> Result<(), crate::turn::StartError> {
+    let late_prefix = if late_ms > 0 {
+        let h = late_ms / 3_600_000;
+        let m = (late_ms % 3_600_000) / 60_000;
+        format!("Запуск опоздал на {h} ч {m} мин: компьютер был выключен или спал.\n")
+    } else {
+        String::new()
+    };
+    let mut text = format!("{late_prefix}[рутина] {}\n{}", routine.title, routine.prompt);
     let mut run = None;
     let mut goal_floor = String::new();
     if !routine.goal_id.is_empty() {
@@ -188,7 +195,13 @@ async fn tick(app: &Arc<App>) {
     let routines = app.store.routines();
     let settings = app.store.settings();
     // Идёт работа или человек попросил дежурить: компьютер не должен уснуть от простоя.
-    if !app.turns.busy_bots().is_empty() || (settings.keep_awake && routines.iter().any(|r| r.enabled)) {
+    let soon = routines.iter().any(|r| {
+        r.enabled && !r.hook && !crate::reminders::is_reminder(r) && r.next_run <= now() + 60 * 60 * 1000
+    });
+    if !app.turns.busy_bots().is_empty()
+        || (settings.keep_awake && routines.iter().any(|r| r.enabled))
+        || soon
+    {
         crate::system::hold_off_sleep();
     }
 
@@ -209,11 +222,24 @@ async fn tick(app: &Arc<App>) {
             let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;
             continue;
         }
-        // Повтор после неудачи идёт по своему сроку, даже вне окна расписания.
-        if routine.retry_attempt == 0 && !crate::schedule::should_run(&routine, now()) {
-            note(app, &routine, "skipped", "Срок прошёл, пока компьютер спал или программа была закрыта.").await;
-            let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
-            continue;
+        // Пропущенные запуски — по правилу рутины. Повтор после неудачи идёт по своему сроку, даже вне окна.
+        let mut late_ms = 0;
+        if routine.retry_attempt == 0 {
+            let missed = crate::schedule::missed(&routine, now());
+            let catch_up = routine.catch_up == "last" && missed.last_slot_ms.is_some_and(|slot| now() - slot <= crate::schedule::CATCH_UP_MS);
+            let dropped = missed.count - u32::from(catch_up);
+            if dropped > 0 {
+                note(app, &routine, "skipped", &format!("Пропущено запусков: {dropped}. Компьютер был выключен или спал.")).await;
+            }
+            if catch_up {
+                late_ms = missed.last_slot_ms.map_or(0, |slot| now() - slot);
+            } else if missed.count > 0 || !crate::schedule::open_now(&routine, now()) {
+                if missed.count == 0 {
+                    note(app, &routine, "skipped", "Срок прошёл, пока компьютер спал или программа была закрыта.").await;
+                }
+                let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
+                continue;
+            }
         }
         // Человек важнее: живая очередь идёт первой. Очередь на паузе рутину не держит: человек мог уйти
         // на всю ночь, и бот не должен простаивать из-за нажатого вечером «стоп».
@@ -227,7 +253,7 @@ async fn tick(app: &Arc<App>) {
             let _ = app.store.reschedule_routine(&routine.id, "limit").await;
             continue;
         }
-        if let Err(e) = run_routine(app, &routine, true).await {
+        if let Err(e) = run_routine_as(app, &routine, true, "routine", late_ms).await {
             note(app, &routine, "failed", &e.message).await;
         }
     }

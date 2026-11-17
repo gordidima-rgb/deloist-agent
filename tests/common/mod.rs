@@ -460,3 +460,8 @@ pub mod node_dist {
     }
 }
 
+
+/// Срок рутины «только что»: запуск пора делать, но это не пропущенный запуск (их догон — отдельно, с записью в журнал).
+pub fn due_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 1_000
+}

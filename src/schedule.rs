@@ -5,8 +5,15 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 
 use crate::store::{Bot, Routine};
 
-/// Запуск «в 09:00» догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
-const CATCH_UP_HOURS: i64 = 12;
+/// Последний пропущенный запуск догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
+pub const CATCH_UP_MS: i64 = 12 * 3_600_000;
+
+/// Запуски, которые должны были начаться, пока компьютер был выключен или спал.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Missed {
+    pub count: u32,
+    pub last_slot_ms: Option<i64>,
+}
 
 pub fn parse_time(text: &str) -> Option<NaiveTime> {
     let (hours, minutes) = text.trim().split_once(':')?;
@@ -22,6 +29,16 @@ pub fn times_valid(body: &serde_json::Value) -> bool {
         None => true,
         Some(value) => value.as_str().is_some_and(|text| text.trim().is_empty() || parse_time(text).is_some()),
     })
+}
+
+/// «catchUp» запроса — нет, «last» или «skip». Одна проверка для интерфейса и ботов.
+pub fn catch_up_valid(body: &serde_json::Value) -> bool {
+    body.get("catchUp").filter(|v| !v.is_null()).map_or(true, |v| matches!(v.as_str(), Some("last" | "skip")))
+}
+
+/// Открыто ли окно расписания сейчас.
+pub fn open_now(routine: &Routine, now_ms: i64) -> bool {
+    allowed(routine, local(now_ms))
 }
 
 fn day_allowed(routine: &Routine, date: NaiveDate) -> bool {
@@ -346,13 +363,27 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
     out
 }
 
-/// Срок подошёл: работать или срок давно прошёл, пока компьютер спал.
-pub fn should_run(routine: &Routine, now_ms: i64) -> bool {
-    if parse_time(&routine.at).is_some() {
-        now_ms - routine.next_run < CATCH_UP_HOURS * 3_600_000
-    } else {
-        allowed(routine, local(now_ms))
+/// Слоты расписания, которые должны были начаться между `routine.next_run` и `now`, но не начались.
+/// Считаются только полностью прошедшие интервалы (чтобы обычный 30-секундный тик не считался пропуском).
+/// Считаются только последние семь дней: долго выключенный ПК не делает расчёт дорогим, а последний пропуск — настоящий.
+pub fn missed(routine: &Routine, now_ms: i64) -> Missed {
+    const WEEK_MS: i64 = 7 * 24 * 3_600_000;
+    if routine.next_run <= 0 {
+        return Missed { count: 0, last_slot_ms: None };
     }
+    let interval_ms = routine.every_minutes.max(1) * 60_000;
+    let mut slot = if routine.next_run >= now_ms - WEEK_MS { routine.next_run } else { to_ms(next_after(routine, local(now_ms - WEEK_MS))) };
+    let (mut count, mut last) = (0, None);
+    while slot + interval_ms <= now_ms {
+        count += 1;
+        last = Some(slot);
+        let next = to_ms(next_after(routine, local(slot)));
+        if next <= slot {
+            break;
+        }
+        slot = next;
+    }
+    Missed { count, last_slot_ms: last }
 }
 
 #[cfg(test)]
@@ -431,15 +462,52 @@ mod tests {
     }
 
     #[test]
-    fn missed_runs_are_not_replayed_out_of_place() {
-        let night = Routine { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
-        let noon = to_ms(at(3, 12, 0));
-        assert!(!should_run(&night, noon), "ночная проверка не должна запускаться днём");
-        assert!(should_run(&night, to_ms(at(3, 1, 0))));
+    fn a_daily_run_missed_for_three_days() {
+        let r = Routine { at: "09:00".into(), next_run: to_ms(at(2, 9, 0)), ..routine(60) };
+        let m = missed(&r, to_ms(at(5, 9, 0)));
+        assert_eq!((m.count, m.last_slot_ms), (3, Some(to_ms(at(4, 9, 0)))));
+    }
 
-        let morning = Routine { at: "09:00".into(), next_run: to_ms(at(3, 9, 0)), ..routine(60) };
-        assert!(should_run(&morning, to_ms(at(3, 10, 0))), "сводка на час позже ещё нужна");
-        assert!(!should_run(&morning, to_ms(at(4, 8, 0))), "через сутки уже нет");
+    #[test]
+    fn a_daily_run_two_hours_late_is_one_missed() {
+        let r = Routine { at: "09:00".into(), next_run: to_ms(at(3, 9, 0)), ..routine(60) };
+        let m = missed(&r, to_ms(at(3, 11, 0)));
+        assert_eq!((m.count, m.last_slot_ms), (1, Some(to_ms(at(3, 9, 0)))));
+    }
+
+    #[test]
+    fn a_night_window_missed_whole() {
+        let r = Routine { window_from: "22:00".into(), window_to: "07:00".into(), next_run: to_ms(at(2, 22, 0)), ..routine(60) };
+        let m = missed(&r, to_ms(at(3, 7, 0)));
+        assert_eq!((m.count, m.last_slot_ms), (9, Some(to_ms(at(3, 6, 0)))), "22:00…06:00");
+    }
+
+    #[test]
+    fn a_normal_tick_is_not_a_miss() {
+        let r = Routine { next_run: to_ms(at(3, 9, 0)), ..routine(60) };
+        assert_eq!(missed(&r, to_ms(at(3, 9, 0)) + 40_000).count, 0);
+    }
+
+    #[test]
+    fn missed_runs_skip_days_off() {
+        let r = Routine { at: "09:00".into(), days: vec![1, 2, 3, 4, 5], next_run: to_ms(at(2, 9, 0)), ..routine(60) };
+        let m = missed(&r, to_ms(at(9, 9, 0)));
+        assert_eq!((m.count, m.last_slot_ms), (5, Some(to_ms(at(6, 9, 0)))), "пн–пт, выходные не считаются");
+    }
+
+    #[test]
+    fn after_two_weeks_off_the_last_miss_is_recent() {
+        let r = Routine { at: "09:00".into(), next_run: to_ms(at(2, 9, 0)), ..routine(60) };
+        let m = missed(&r, to_ms(at(20, 10, 30)));
+        assert_eq!((m.count, m.last_slot_ms), (7, Some(to_ms(at(20, 9, 0)))), "считаем неделю до сейчас, а не неделю от старого срока");
+    }
+
+    #[test]
+    fn catch_up_takes_only_last_or_skip() {
+        assert!(catch_up_valid(&serde_json::json!({})));
+        assert!(catch_up_valid(&serde_json::json!({ "catchUp": "skip" })));
+        assert!(!catch_up_valid(&serde_json::json!({ "catchUp": "all" })));
+        assert!(!catch_up_valid(&serde_json::json!({ "catchUp": 1 })));
     }
 
     #[test]

@@ -2322,6 +2322,9 @@ fn check_schedule(body: &Value) -> Result<(), Response> {
     if !crate::schedule::times_valid(body) {
         return Err(fail(StatusCode::BAD_REQUEST, "время нужно в формате ЧЧ:ММ"));
     }
+    if !crate::schedule::catch_up_valid(body) {
+        return Err(fail(StatusCode::BAD_REQUEST, "catchUp: только last или skip"));
+    }
     Ok(())
 }
 
