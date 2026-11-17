@@ -138,4 +138,9 @@ describe('local workspace file links', () => {
     // Обычный режим не изменился.
     expect(markdown('[x](https://a.b/c)')).not.toContain('md-remote-url');
   });
+  it('marks @mentions but leaves e-mail addresses and code alone', () => {
+    expect(markdown('Привет, @Пост, смотри')).toContain('<span class="k-mention">@Пост</span>');
+    expect(markdown('пиши на me@site.ru')).not.toContain('k-mention');
+    expect(markdown('`@Пост`')).not.toContain('k-mention');
+  });
 });

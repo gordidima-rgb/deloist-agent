@@ -711,15 +711,19 @@ function paintGuests() {
   box.dataset.key = key;
   box.innerHTML = '';
   if (!guests.length) return;
+  // Один блок-фишка кита (.k-chip--group): подпись «Гости» и у каждого гостя имя с крестиком.
+  const group = document.createElement('span');
+  group.className = 'k-chip k-chip--tool k-chip--group guest-group';
   const label = document.createElement('span');
   label.className = 'head-guests-label';
   label.textContent = tr('Гости');
-  box.append(label);
+  group.append(label);
+  box.append(group);
   for (const guest of guests) {
     const chip = document.createElement('span');
-    chip.className = 'guest-chip';
+    chip.className = 'guest-chip is-on';
     chip.dataset.id = guest.id;
-    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop" aria-label="">${DeloistUI.icon('close', { size: 12, stroke: 2.4 })}</button>`;
+    chip.innerHTML = `<button type="button" class="guest-open"></button><button type="button" class="guest-drop k-chip__rm" aria-label="">${DeloistUI.icon('close', { size: 12, stroke: 2.4 })}</button>`;
     const open = chip.querySelector('.guest-open');
     open.textContent = guest.name;
     open.title = tr('Открыть чат специалиста');
@@ -735,7 +739,7 @@ function paintGuests() {
         toast(err.message);
       }
     });
-    box.append(chip);
+    group.append(chip);
   }
 }
 
@@ -2099,7 +2103,7 @@ function showIntro(botId) {
       for (const task of tasks.slice(0, 3)) {
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'chip intro-chip';
+        chip.className = 'k-chip intro-chip';
         chip.textContent = task;
         chip.addEventListener('click', () => {
           const input = $('#input');

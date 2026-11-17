@@ -293,7 +293,8 @@
 /* =====================================================================================
    Buttons
    ===================================================================================== */
-.k-btn {
+/* .primary / .ghost / .danger: старые классы экранов. Вид один, из кита: primary = лавовая заливка, остальные = тихая кнопка. */
+.k-btn, .primary, .ghost, .danger {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -314,20 +315,21 @@
   transition: background var(--k-dur-micro) var(--k-ease-out), transform var(--k-dur-ui) var(--k-ease-press),
     box-shadow var(--k-dur-micro) var(--k-ease-out), color var(--k-dur-micro) var(--k-ease-out);
 }
-.k-btn:hover { background: color-mix(in srgb, var(--k-brand) 16%, transparent); }
-.k-btn:active { transform: scale(0.95); transition-duration: var(--k-dur-instant); }
-.k-btn:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
-.k-btn:disabled, .k-btn:disabled:hover { background: var(--k-surface-3); color: var(--k-text-3); box-shadow: none; text-shadow: none; cursor: not-allowed; transform: none; }
-.k-btn .k-i { width: 16px; height: 16px; }
+.k-btn:hover, .primary:hover, .ghost:hover, .danger:hover { background: color-mix(in srgb, var(--k-brand) 16%, transparent); }
+.k-btn:active, .primary:active, .ghost:active, .danger:active { transform: scale(0.95); transition-duration: var(--k-dur-instant); }
+.k-btn:focus-visible, .primary:focus-visible, .ghost:focus-visible, .danger:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
+.k-btn:disabled, .k-btn:disabled:hover, .primary:disabled, .primary:disabled:hover, .ghost:disabled, .danger:disabled { background: var(--k-surface-3); color: var(--k-text-3); box-shadow: none; text-shadow: none; cursor: not-allowed; transform: none; }
+.k-btn .k-i, .primary .i, .ghost .i, .danger .i { width: 16px; height: 16px; }
+a.ghost, a.primary { text-decoration: none; }
 /* primary: the one glossy lava fill on a screen */
-.k-btn--primary { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
-.k-btn--primary:hover { background: var(--k-btn-fill-hover); }
+.k-btn--primary, .primary { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
+.k-btn--primary:hover, .primary:hover { background: var(--k-btn-fill-hover); }
 .k-btn--primary .k-i { stroke-width: 2.6; }
 /* ink: kept for old screens, now a warm coal with an orange rim */
 .k-btn--ink { background: var(--k-ink); color: var(--k-on-ink); box-shadow: var(--k-ink-rim); }
 .k-btn--ink:hover { background: var(--k-ink-2); }
-.k-btn--ghost { background: transparent; color: var(--k-text-2); box-shadow: none; }
-.k-btn--ghost:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-btn--ghost, .ghost, .danger { background: transparent; color: var(--k-text-2); box-shadow: none; }
+.k-btn--ghost:hover, .ghost:hover, .danger:hover { background: var(--k-surface-2); color: var(--k-text); }
 .k-btn--attention { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
 /* danger: red outline; --solid-danger is the confirm of a destructive dialog */
 .k-btn--danger { color: var(--k-danger); background: color-mix(in srgb, var(--k-danger) 7%, transparent); box-shadow: inset 0 0 0 1.5px var(--k-danger), inset 0 0 14px -4px rgba(255, 60, 40, 0.5), 0 0 14px -6px rgba(255, 60, 40, 0.8); }
@@ -383,6 +385,21 @@
 .k-chip:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
 .k-chip[aria-pressed="true"], .k-chip[aria-current="page"] { background: var(--k-brand-tint); border-color: var(--k-brand); color: var(--k-brand-text); box-shadow: var(--k-glow); }
 .k-chip .k-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Tool chip (chat header: guests, model, browser, compact history): quiet tile, accent tint when on. */
+.k-chip--tool { height: 30px; padding: 0 var(--k-space-3); border: 0; border-radius: var(--k-radius-sm); background: var(--k-surface-2); box-shadow: inset 0 0 0 1px var(--k-line); }
+.k-chip--tool:hover { background: var(--k-surface-3); color: var(--k-text); }
+.k-chip--tool .k-i, .k-chip--tool svg { width: 14px; height: 14px; flex: none; }
+.k-chip--tool.is-on, .k-chip--tool[aria-pressed="true"] { background: var(--k-brand-tint); color: var(--k-brand-text); border: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-brand) 50%, transparent); }
+.k-chip--group { padding: 0; gap: 0; overflow: hidden; }
+.k-chip--group > * { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 var(--k-space-3); border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.k-chip--group > * + * { box-shadow: inset 1px 0 0 var(--k-line); }
+.k-chip--group > .is-on { background: var(--k-brand-tint); color: var(--k-brand-text); }
+.k-chip__rm { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -4px; padding: 0; border: 0; border-radius: var(--k-radius-xs); background: none; color: inherit; cursor: pointer; }
+.k-chip__rm:hover { background: color-mix(in srgb, var(--k-brand) 20%, transparent); }
+.k-chip--group > :focus-visible, .k-chip__rm:focus-visible { outline: none; box-shadow: var(--k-focus); }
+/* @mention inside text */
+.k-mention { color: var(--k-brand-text); font-weight: 600; }
 
 /* =====================================================================================
    Card — only where something must be held apart: a result, a decision.
@@ -1295,6 +1312,13 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-switch-button:focus-visible .k-switch { outline: 2px solid var(--k-brand-text); outline-offset: 3px; }
 .k-switch-button:disabled { opacity: 0.4; cursor: default; }
 .k-switch__label { min-width: 0; }
+/* small switch for rows under a field (chat composer bar) */
+.k-switch-button--sm { gap: var(--k-space-2); }
+.k-switch-button--sm .k-switch { width: 34px; height: 20px; }
+.k-switch-button--sm .k-switch::after { top: 3px; left: 3px; width: 14px; height: 14px; }
+.k-switch-button--sm[aria-checked="true"] > .k-switch::after { transform: translateX(14px); }
+/* hidden wins over the display of kit controls */
+.k-btn[hidden], .k-chip[hidden], .k-switch-button[hidden], .primary[hidden], .ghost[hidden], .danger[hidden] { display: none; }
 
 .k-check,
 .k-radio {
@@ -1537,7 +1561,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   transition: background var(--k-dur-fast) var(--k-ease-out);
 }
 .k-list-item:hover { background: var(--k-surface-2); }
-.k-list-item.is-active { background: var(--k-surface-2); }
+.k-list-item.is-active { background: var(--k-brand-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-brand) 40%, transparent); }
 .k-list-item.is-active .k-list-item__title { font-weight: 600; }
 .k-list-item__avatar { display: flex; flex: none; }
 .k-list-item__main {
@@ -1560,7 +1584,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 .k-list-item__title { font: 600 var(--k-text-sm) / 1.35 var(--k-font-body); color: var(--k-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-list-item__sub { font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); color: var(--k-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-list-item__pin { width: 14px; height: 14px; flex: none; color: var(--k-text-3); }
-.k-list-item__unread { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--k-brand); }
+.k-list-item__unread { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--k-brand) 65%, transparent); }
 .k-list-item__meta { flex: none; padding-left: var(--k-space-2); color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.2 var(--k-font-body); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .k-list-item__badge { flex: none; }
 .k-list-item__context { flex: none; display: flex; }

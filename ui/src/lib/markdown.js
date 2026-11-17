@@ -117,6 +117,8 @@ function inline(text) {
     return hold(anchor(href, bare)) + tail;
   });
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // @Имя в тексте: оранжевая отметка кита (.k-mention). Почта (a@b.c) не трогается: перед @ нужен пробел или скобка.
+  s = s.replace(/(^|[\s(])@([\p{L}\p{N}_][\p{L}\p{N}_-]*)/gu, '$1<span class="k-mention">@$2</span>');
   return s.replace(/\u0001(\d+)\u0001/g, (_, i) => keep[Number(i)]);
 }
 

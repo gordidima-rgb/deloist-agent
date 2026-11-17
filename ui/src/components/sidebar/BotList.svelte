@@ -4,7 +4,7 @@
   // Данные и выбор держит app.js; аватар рисует его же движок через paint(el, id, slot),
   // потому что живые аватары кэшируются по месту и переезжают между строками. Бот в двух командах
   // получает по своему месту (slot) на каждую строку, иначе аватар ушёл бы из первой.
-import { ListItem, Icon } from '../kit';
+import { ListItem, Icon, Badge } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { plainPreview, teamSubtitle } from '../../lib/preview.js';
 
@@ -275,14 +275,14 @@ import { ListItem, Icon } from '../kit';
     {/snippet}
     {#snippet context()}
       {#if !open && team.needs}
-        <span class="sb-roll is-needs" title={tr('Нужен ты: {n}', { n: team.needs })} aria-label={tr('Нужен ты: {n}', { n: team.needs })}>{team.needs}</span>
+        <Badge tone="brand" count={team.needs} class="sb-roll is-needs" title={tr('Нужен ты: {n}', { n: team.needs })} label={tr('Нужен ты: {n}', { n: team.needs })} />
       {:else if !open && team.errors}
-        <span class="sb-roll is-error" title={tr('Ошибка у участника')} aria-label={tr('Ошибка у участника')}>!</span>
+        <Badge tone="error" text="!" class="sb-roll is-error" title={tr('Ошибка у участника')} label={tr('Ошибка у участника')} />
       {/if}
       {#if !open && team.unread}
-        <span class="sb-roll" title={tr('Непрочитанных ботов: {n}', { n: team.unread })} aria-label={tr('Непрочитанных ботов: {n}', { n: team.unread })}>{team.unread}</span>
+        <Badge tone="brand" count={team.unread} class="sb-roll" title={tr('Непрочитанных ботов: {n}', { n: team.unread })} label={tr('Непрочитанных ботов: {n}', { n: team.unread })} />
       {/if}
-      <span class="sb-members" title={tr('Участников: {n}', { n: team.count })}>{team.count}</span>
+      <Badge tone="neutral" count={team.count} class="sb-members" title={tr('Участников: {n}', { n: team.count })} />
     {/snippet}
   </ListItem>
 {/snippet}
@@ -409,13 +409,14 @@ import { ListItem, Icon } from '../kit';
   }
   .sb-branch.is-open { grid-template-rows: 1fr; }
   .sb-branch > .sb-group { min-height: 0; overflow: hidden; }
+  /* Ступенька 24px на уровень, линия связи тонкая и в оттенке акцента («Угли», #teams). */
   .sb-group {
-    margin: 0 0 0 19px;
+    margin: 0 0 0 var(--k-space-5);
     padding: 0;
     list-style: none;
-    border-left: 1px solid var(--k-line);
+    border-left: 1px solid color-mix(in srgb, var(--k-brand) 30%, var(--k-line));
   }
-  .sb-sub { margin-left: 19px; }
+  .sb-sub { margin-left: 24px; }
   /* Свёрнутая ветка не держит фокус и не читается (inert), но и не мигает при раскрытии. */
   .sb-branch:not(.is-open) { visibility: hidden; transition: grid-template-rows var(--k-dur-base) var(--k-ease-out), visibility 0s linear var(--k-dur-base); }
   .sb-branch.is-open { visibility: visible; }
@@ -437,22 +438,7 @@ import { ListItem, Icon } from '../kit';
   .sb-chev-btn:focus-visible { outline: none; box-shadow: var(--k-focus); }
   :global(.sb-row.sb-team .avatar.room-icon) { color: var(--team-color, var(--k-text-2)); }
   :global(.sb-row.is-repeat .k-list-item__title) { color: var(--k-text-2); font-style: italic; }
-  .sb-members, .sb-roll {
-    display: inline-grid;
-    place-items: center;
-    min-width: 20px;
-    height: 20px;
-    margin-left: 4px;
-    padding: 0 6px;
-    border-radius: var(--k-radius-pill);
-    background: var(--k-surface-2);
-    color: var(--k-text-2);
-    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
-    font-variant-numeric: tabular-nums;
-  }
-  .sb-roll { background: var(--k-surface-3); color: var(--k-text); }
-  .sb-roll.is-needs { background: var(--k-attention); color: var(--k-attention-text); }
-  .sb-roll.is-error { background: var(--k-danger); color: #fff; }
+  :global(.sb-members), :global(.sb-roll) { margin-left: 4px; }
 
   /* Булавка видна при наведении и у закреплённых; работает с клавиатуры. */
   .sb-pin {

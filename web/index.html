@@ -90,7 +90,7 @@
           <button class="icon-btn only-mobile" id="btn-team-menu" title="Открыть боковую панель" aria-label="Открыть боковую панель"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="menu"></svg></button>
           <div class="head-text"><div class="head-name">Все боты</div></div>
           <div class="head-actions">
-            <button type="button" class="chip" id="team-demo" title="Открыть настройки модели" data-open-settings hidden>Демо-режим</button>
+            <button type="button" class="k-chip k-chip--tool" id="team-demo" title="Открыть настройки модели" data-open-settings hidden>Демо-режим</button>
           </div>
         </header>
         <div class="team-body" id="team-body"></div>
@@ -123,15 +123,15 @@
           </div>
           <div class="head-guests" id="head-guests" hidden></div>
           <div class="head-actions">
-            <button type="button" class="chip" id="head-model" title="Выбрать модель и усилие для этого бота" aria-haspopup="dialog" hidden></button>
-            <button type="button" class="chip" id="head-rebuild" hidden></button>
-            <button type="button" class="chip" id="head-reassign" data-menu-trigger aria-haspopup="menu" aria-expanded="false" hidden></button>
+            <button type="button" class="k-chip k-chip--tool" id="head-model" title="Выбрать модель и усилие для этого бота" aria-haspopup="dialog" hidden></button>
+            <button type="button" class="k-chip k-chip--tool" id="head-rebuild" hidden></button>
+            <button type="button" class="k-chip k-chip--tool" id="head-reassign" data-menu-trigger aria-haspopup="menu" aria-expanded="false" hidden></button>
             <div class="msg-row" id="head-messengers" role="group" aria-label="Мессенджеры бота" hidden></div>
-            <button type="button" class="chip chip-icon" id="btn-browser" title="Браузер бота: войти в кабинет или посмотреть, что он делает" aria-label="Браузер бота">
+            <button type="button" class="k-chip k-chip--tool" id="btn-browser" title="Браузер бота: войти в кабинет или посмотреть, что он делает" aria-label="Браузер бота">
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="globe"></svg>
               <span class="chip-label">Браузер</span>
             </button>
-            <button type="button" class="chip chip-icon" id="btn-compact" title="Свернуть старые сообщения в короткую сводку" aria-label="Сжать историю">
+            <button type="button" class="k-chip k-chip--tool" id="btn-compact" title="Свернуть старые сообщения в короткую сводку" aria-label="Сжать историю">
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="compact"></svg>
               <span class="chip-label">Сжать историю</span>
             </button>
@@ -172,17 +172,17 @@
         <div class="composer-card">
         <div class="composer">
           <input type="file" id="attach-input" multiple hidden />
-          <button type="button" id="btn-attach" class="attach" title="Прикрепить файл или картинку" aria-label="Прикрепить файл или картинку" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="paperclip"></svg></button>
+          <button type="button" id="btn-attach" class="k-btn k-btn--ghost k-btn--icon" title="Прикрепить файл или картинку" aria-label="Прикрепить файл или картинку" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="paperclip"></svg></button>
           <div class="composer-main">
             <div class="attach-list" id="attach-list" hidden></div>
             <div class="in-field" id="in-field"><textarea id="input" rows="1" placeholder="Напиши, что нужно сделать" title="Enter отправляет, Shift+Enter переносит строку" disabled></textarea></div>
             <div class="in-chips" id="in-chips"></div>
           </div>
-          <button id="btn-stop" class="send stop" title="Остановить (Esc)" aria-label="Остановить" hidden><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="stop"></svg></button>
-          <button id="btn-send" class="send" title="Отправить" aria-label="Отправить" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="send"></svg></button>
+          <button id="btn-stop" class="send stop k-btn k-btn--ink k-btn--icon" title="Остановить (Esc)" aria-label="Остановить" hidden><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="stop"></svg></button>
+          <button id="btn-send" class="send k-btn k-btn--primary k-btn--icon" title="Отправить" aria-label="Отправить" disabled><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="send"></svg></button>
         </div>
         <div class="composer-bar">
-          <button type="button" class="mode-switch" id="mode-switch" role="switch" aria-checked="false" aria-label="Свобода действий" hidden><span class="ms-track" aria-hidden="true"><span class="ms-knob"></span></span><span class="ms-label">Свобода действий</span></button>
+          <button type="button" class="mode-switch k-switch-button k-switch-button--sm" id="mode-switch" role="switch" aria-checked="false" aria-label="Свобода действий" hidden><span class="k-switch" aria-hidden="true"></span><span class="ms-label k-switch__label">Свобода действий</span></button>
           <div class="bar-right">
             <div class="grants-line" id="grants-line" hidden>
               <button type="button" class="grants-btn" id="grants-btn" aria-haspopup="true" aria-expanded="false" aria-controls="grants-pop" aria-label="Разрешено в разговоре" title="Разрешено в разговоре"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="shield-check"></svg><span class="grants-count" id="grants-count"></span></button>
