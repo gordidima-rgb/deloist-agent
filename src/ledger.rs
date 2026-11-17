@@ -67,6 +67,8 @@ pub struct Ledger {
     models: Mutex<ModelUsage>,
     behind: Mutex<Behind>,
     write_gate: tokio::sync::Mutex<()>,
+    /// День, в который что-то без человека остановилось на дневном пределе токенов.
+    daily_stop: Mutex<String>,
 }
 
 async fn read_json<T: serde::de::DeserializeOwned + Default>(dir: &std::path::Path, name: &str) -> T {
@@ -86,7 +88,7 @@ impl Ledger {
             .unwrap_or_default();
         let models = read_json(&dir, "usage_models.json").await;
         let behind = read_json(&dir, "usage_behind.json").await;
-        let ledger = Self { dir, usage: Mutex::new(usage), models: Mutex::new(models), behind: Mutex::new(behind), write_gate: tokio::sync::Mutex::new(()) };
+        let ledger = Self { dir, usage: Mutex::new(usage), models: Mutex::new(models), behind: Mutex::new(behind), write_gate: tokio::sync::Mutex::new(()), daily_stop: Mutex::new(String::new()) };
         ledger.trim_journal().await;
         ledger
     }
@@ -304,6 +306,15 @@ impl Ledger {
             "weekStart": day(start), "weekEnd": day(end), "replies": week.len(), "okCount": ok_count,
             "failedCount": week.len() - ok_count, "okPercent": percent(ok_count, week.len()), "weeks": weeks, "bots": bots,
         })
+    }
+
+    /// Рутина, цель или процесс остановились на дневном пределе токенов: кольцо ботов покажет предел сегодня.
+    pub fn note_daily_stop(&self) {
+        *self.daily_stop.lock().unwrap() = today();
+    }
+
+    pub fn daily_stopped(&self) -> bool {
+        *self.daily_stop.lock().unwrap() == today()
     }
 
     /// Расход ботов за сегодня для дневного лимита рутин. Служебная память (`_memory`: извлечение и разбор после

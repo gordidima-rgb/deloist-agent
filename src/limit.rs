@@ -1,19 +1,22 @@
 //! Сколько осталось у бота: доля бюджета для кольца в доке.
 //!
-//! У бота бывает до трёх пределов, и кольцо показывает самый тесный, тот, что кончится первым:
+//! У бота бывает до четырёх пределов, и кольцо показывает самый тесный, тот, что кончится первым:
 //! - `wallet` — кошелёк «Подписки Deloist» (боты на драйвере `deloist`): сколько осталось от баланса,
 //!   который был в начале дня. Баланс программа узнаёт, когда спрашивает сайт (окно аккаунта, пополнение);
 //!   по сети ради кольца мы не ходим, поэтому число может отставать.
-//! - `plan` — лимит подписки провайдера (Claude, ChatGPT и др.). Сколько осталось, провайдеры не сообщают;
-//!   известно только, что последний ход упёрся в лимит. Тогда доля 0, пока бот не ответит без ошибки.
-//! - `tokens` — дневной предел токенов из настроек (`dailyTokenLimit`, им же ограничены рутины)
-//!   против расхода всей команды за сегодня из `ledger`.
+//! - `plan` — лимит подписки агента (Claude, Codex, Grok по ACP): настоящий остаток, который агент сам
+//!   назвал в `/status` или `/usage` (`Providers::subscription_left`). Не назвал — предела нет, а не догадка
+//!   по тексту ошибки.
+//! - `month` — месячный предел токенов самого бота (`monthly_token_limit`), сброс 1-го числа.
+//! - `tokens` — дневной предел токенов команды (`dailyTokenLimit`). Живой разговор он не держит, поэтому
+//!   кольцо показывает его, только когда рутина, цель или процесс на нём остановились (`Ledger::daily_stopped`).
 //!
 //! Нет ни одного предела — `limit` пустой, в доке только тусклый обод цвета бота.
 
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone};
 use serde_json::{json, Value};
 
-/// Один предел: доля 0..1 и чем он измерен.
+/// Один предел: доля 0..1, чем он измерен и когда сбросится (мс, если известно).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bound {
     pub source: &'static str,
@@ -21,14 +24,17 @@ pub struct Bound {
     pub spent: i64,
     pub cap: i64,
     pub unit: &'static str,
+    pub resets_at: Option<i64>,
 }
 
-/// Порядок при равной доле: сначала то, что человек может поправить сам (кошелёк), затем подписка, затем токены.
+/// Порядок при равной доле: сначала то, что человек может поправить сам (кошелёк), затем подписка,
+/// месячный предел бота и дневной предел токенов.
 fn rank(source: &str) -> u8 {
     match source {
         "wallet" => 0,
         "plan" => 1,
-        _ => 2,
+        "month" => 2,
+        _ => 3,
     }
 }
 
@@ -55,39 +61,115 @@ pub fn wallet_bound(day: WalletDay) -> Bound {
     // Пополнили днём: «сколько было» растёт вместе с балансом, иначе кольцо показало бы больше 100 %.
     let start = day.start_kop.max(day.now_kop).max(0);
     let left = if start > 0 { day.now_kop.max(0) as f64 / start as f64 } else { 0.0 };
-    Bound { source: "wallet", left, spent: (start - day.now_kop.max(0)).max(0), cap: start, unit: "kop" }
+    Bound { source: "wallet", left, spent: (start - day.now_kop.max(0)).max(0), cap: start, unit: "kop", resets_at: None }
 }
 
-pub fn tokens_bound(spent: i64, cap: i64) -> Option<Bound> {
-    (cap > 0).then(|| Bound { source: "tokens", left: 1.0 - spent.max(0) as f64 / cap as f64, spent: spent.max(0), cap, unit: "tokens" })
+/// Остаток подписки агента: процент, который он назвал, и когда окно сбросится.
+pub fn plan_bound(left_percent: i64, resets_at: Option<i64>) -> Bound {
+    Bound { source: "plan", left: left_percent as f64 / 100.0, spent: 0, cap: 0, unit: "", resets_at }
 }
 
-/// Последний ход упёрся в лимит или кончились деньги.
-pub fn hit_limit(preview: &Value) -> bool {
-    if preview.get("error").and_then(Value::as_bool) != Some(true) {
-        return false;
+pub fn tokens_bound(source: &'static str, spent: i64, cap: i64, resets_at: Option<i64>) -> Option<Bound> {
+    (cap > 0).then(|| Bound { source, left: 1.0 - spent.max(0) as f64 / cap as f64, spent: spent.max(0), cap, unit: "tokens", resets_at })
+}
+
+/// Полночь по местному времени, мс.
+fn midnight_ms(date: NaiveDate) -> Option<i64> {
+    Local.from_local_datetime(&date.and_time(NaiveTime::MIN)).earliest().map(|t| t.timestamp_millis())
+}
+
+/// Когда начнётся следующий день.
+pub fn next_day_ms(now: DateTime<Local>) -> Option<i64> {
+    midnight_ms(now.date_naive().succ_opt()?)
+}
+
+/// Когда начнётся следующий месяц: счёт токенов бота идёт с 1-го.
+pub fn next_month_ms(now: DateTime<Local>) -> Option<i64> {
+    let (year, month) = if now.month() == 12 { (now.year() + 1, 1) } else { (now.year(), now.month() + 1) };
+    midnight_ms(NaiveDate::from_ymd_opt(year, month, 1)?)
+}
+
+/// Время сброса из строки агента → момент (мс). Агенты пишут по-разному: `16:01` (Codex: сегодня или завтра),
+/// `Nov 12` (Codex, неделя: время не названо, берём конец того дня), `Nov 13, 11:10am` и `Nov 15, 4pm` (Claude).
+/// Часовой пояс в скобках отбрасываем: агент называет время по местному часу. Не поняли строку — `None`.
+pub fn parse_reset(text: &str, now: DateTime<Local>) -> Option<i64> {
+    let text = text.split(" (").next()?.trim();
+    let text = text.strip_prefix("resets").map(str::trim).unwrap_or(text);
+    let (date, time) = match text.split_once(',') {
+        Some((d, t)) => (Some(d.trim()), Some(t.trim())),
+        None if text.starts_with(|c: char| c.is_ascii_alphabetic()) => match text.rsplit_once(' ') {
+            // «Nov 12» — одна дата; «Nov 12 4pm» — дата и время.
+            Some((d, t)) if d.contains(' ') => (Some(d.trim()), Some(t.trim())),
+            _ => (Some(text), None),
+        },
+        None => (None, Some(text)),
+    };
+    let time = match time {
+        Some(t) => Some(parse_clock(t)?),
+        None => None,
+    };
+    let local = |date: NaiveDate, time: NaiveTime| Local.from_local_datetime(&date.and_time(time)).earliest();
+    let at = match date {
+        None => {
+            let today = local(now.date_naive(), time?)?;
+            if today > now { today } else { local(now.date_naive().succ_opt()?, time?)? }
+        }
+        Some(date) => {
+            let mut words = date.split_whitespace();
+            let (month, day) = (words.next()?, words.next()?);
+            let on = |year: i32| NaiveDate::parse_from_str(&format!("{year} {month} {day}"), "%Y %b %d").ok();
+            // Без времени сброс где-то в этот день: берём его конец.
+            let build = |date: NaiveDate| match time {
+                Some(t) => local(date, t),
+                None => local(date.succ_opt()?, NaiveTime::MIN),
+            };
+            let this_year = build(on(now.year())?)?;
+            // Агент в декабре называет январскую дату: прошлое больше чем на сутки — это следующий год.
+            if this_year < now - chrono::Duration::days(1) { build(on(now.year() + 1)?)? } else { this_year }
+        }
+    };
+    Some(at.timestamp_millis())
+}
+
+/// `16:01`, `11:10am`, `4pm`. Пустая строка — `None`.
+fn parse_clock(text: &str) -> Option<NaiveTime> {
+    let lower = text.trim().to_lowercase().replace(' ', "");
+    let (body, pm) = match (lower.strip_suffix("am"), lower.strip_suffix("pm")) {
+        (Some(body), _) => (body, Some(false)),
+        (_, Some(body)) => (body, Some(true)),
+        _ => (lower.as_str(), None),
+    };
+    let (hour, minute) = body.split_once(':').unwrap_or((body, "0"));
+    let (mut hour, minute) = (hour.parse::<u32>().ok()?, minute.parse::<u32>().ok()?);
+    if let Some(pm) = pm {
+        if !(1..=12).contains(&hour) {
+            return None;
+        }
+        hour = hour % 12 + if pm { 12 } else { 0 };
     }
-    let text = preview.get("text").and_then(Value::as_str).unwrap_or_default();
-    let lower = text.to_lowercase();
-    crate::drivers::is_limit_error(text) || lower.contains("лимит") || lower.contains("закончились деньги")
+    NaiveTime::from_hms_opt(hour, minute, 0)
+}
+
+/// Что известно боту для кольца.
+#[derive(Default)]
+pub struct Inputs {
+    /// Кошелёк Deloist, только у ботов на драйвере `deloist`.
+    pub wallet: Option<WalletDay>,
+    /// Подписка агента: сколько процентов осталось в самом тесном окне и когда оно сбросится.
+    pub plan: Option<(i64, Option<i64>)>,
+    /// Дневной предел команды: расход за день и предел — только если на нём что-то остановилось.
+    pub daily: Option<(i64, i64)>,
+    /// Месяц бота: расход и предел.
+    pub month: Option<(i64, i64)>,
 }
 
 /// Поле `limit` бота в `/api/state`.
-pub fn for_bot(uses_wallet: bool, preview: &Value, wallet: Option<WalletDay>, tokens_spent: i64, token_cap: i64) -> Value {
+pub fn for_bot(inputs: Inputs, now: DateTime<Local>) -> Value {
     let mut bounds = Vec::new();
-    let blocked = hit_limit(preview);
-    if uses_wallet {
-        match wallet {
-            Some(day) => bounds.push(wallet_bound(day)),
-            None if blocked => bounds.push(Bound { source: "wallet", left: 0.0, spent: 0, cap: 0, unit: "kop" }),
-            None => {}
-        }
-    } else if blocked {
-        bounds.push(Bound { source: "plan", left: 0.0, spent: 0, cap: 0, unit: "" });
-    }
-    if let Some(b) = tokens_bound(tokens_spent, token_cap) {
-        bounds.push(b);
-    }
+    bounds.extend(inputs.wallet.map(wallet_bound));
+    bounds.extend(inputs.plan.map(|(left, at)| plan_bound(left, at)));
+    bounds.extend(inputs.daily.and_then(|(spent, cap)| tokens_bound("tokens", spent, cap, next_day_ms(now))));
+    bounds.extend(inputs.month.and_then(|(spent, cap)| tokens_bound("month", spent, cap, next_month_ms(now))));
     match tightest(bounds) {
         Some(b) => json!({
             "left": (b.left * 1000.0).round() / 1000.0,
@@ -95,7 +177,8 @@ pub fn for_bot(uses_wallet: bool, preview: &Value, wallet: Option<WalletDay>, to
             "spent": b.spent,
             "cap": b.cap,
             "unit": b.unit,
-            "moneyLeftKop": if uses_wallet { wallet.map(|w| w.now_kop.max(0)) } else { None },
+            "resetsAt": b.resets_at,
+            "moneyLeftKop": inputs.wallet.map(|w| w.now_kop.max(0)),
         }),
         None => Value::Null,
     }
@@ -112,6 +195,10 @@ pub fn month_blocked(used: i64, limit: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Local> {
+        Local.with_ymd_and_hms(2026, month, day, hour, minute, 0).unwrap()
+    }
 
     #[test]
     fn the_month_limit_blocks_at_and_above_but_not_below_or_when_unset() {
@@ -148,11 +235,11 @@ mod tests {
     #[test]
     fn the_tightest_bound_wins_and_ties_go_to_the_wallet() {
         let wallet = wallet_bound(WalletDay { start_kop: 10_000, now_kop: 2_500 });
-        let tokens = tokens_bound(500_000, 1_000_000).unwrap();
+        let tokens = tokens_bound("tokens", 500_000, 1_000_000, None).unwrap();
         let picked = tightest(vec![tokens.clone(), wallet.clone()]).unwrap();
         assert_eq!(picked.source, "wallet");
         assert!((picked.left - 0.25).abs() < 1e-9);
-        let even = tokens_bound(750_000, 1_000_000).unwrap();
+        let even = tokens_bound("tokens", 750_000, 1_000_000, None).unwrap();
         assert_eq!(tightest(vec![even, wallet]).unwrap().source, "wallet", "равные доли — кошелёк");
         assert!(tightest(vec![]).is_none());
     }
@@ -161,24 +248,56 @@ mod tests {
     fn a_top_up_never_shows_more_than_full_and_overspend_is_zero() {
         assert_eq!(wallet_bound(WalletDay { start_kop: 5_000, now_kop: 9_000 }).left, 1.0);
         assert_eq!(wallet_bound(WalletDay { start_kop: 0, now_kop: 0 }).left, 0.0);
-        let over = tightest(vec![tokens_bound(1_500_000, 1_000_000).unwrap()]).unwrap();
+        let over = tightest(vec![tokens_bound("tokens", 1_500_000, 1_000_000, None).unwrap()]).unwrap();
         assert_eq!(over.left, 0.0);
-        assert!(tokens_bound(10, 0).is_none(), "без предела токенов кольца нет");
+        assert!(tokens_bound("tokens", 10, 0, None).is_none(), "без предела токенов кольца нет");
     }
 
     #[test]
-    fn a_limit_error_empties_the_ring_of_the_right_kind() {
-        let hit = json!({ "error": true, "text": "Claude: usage limit reached, try again at 14:00" });
-        let fine = json!({ "error": false, "text": "Готово" });
-        assert_eq!(for_bot(false, &hit, None, 0, 0)["source"], "plan");
-        assert_eq!(for_bot(false, &hit, None, 0, 0)["left"], 0.0);
-        let broke = json!({ "error": true, "text": "На балансе Deloist закончились деньги. Пополни баланс" });
-        assert_eq!(for_bot(true, &broke, None, 0, 0)["source"], "wallet");
-        assert!(for_bot(false, &fine, None, 0, 0).is_null(), "нет пределов — нет кольца");
+    fn the_ring_takes_the_real_numbers_and_never_guesses_from_an_error() {
+        let now = at(11, 17, 12, 0);
+        // Нет ни подписки, ни кошелька, ни предела — кольца нет, что бы ни было в последнем ответе.
+        assert!(for_bot(Inputs::default(), now).is_null());
+        // Подписка агента: остаток и момент сброса идут в кольцо как есть.
+        let reset = at(11, 17, 15, 0).timestamp_millis();
+        let item = for_bot(Inputs { plan: Some((42, Some(reset))), ..Inputs::default() }, now);
+        assert_eq!((item["source"].as_str(), item["left"].as_f64(), item["resetsAt"].as_i64()), (Some("plan"), Some(0.42), Some(reset)));
         let wallet = Some(WalletDay { start_kop: 20_000, now_kop: 14_600 });
-        let item = for_bot(true, &fine, wallet, 100, 1_000_000);
-        assert_eq!(item["source"], "wallet");
-        assert_eq!(item["left"], 0.73);
-        assert_eq!(item["moneyLeftKop"], 14_600);
+        let item = for_bot(Inputs { wallet, ..Inputs::default() }, now);
+        assert_eq!((item["source"].as_str(), item["left"].as_f64(), item["moneyLeftKop"].as_i64()), (Some("wallet"), Some(0.73), Some(14_600)));
+    }
+
+    #[test]
+    fn the_month_limit_is_in_the_ring_and_resets_on_the_first() {
+        let now = at(11, 17, 12, 0);
+        let item = for_bot(Inputs { month: Some((250, 1_000)), ..Inputs::default() }, now);
+        assert_eq!((item["source"].as_str(), item["left"].as_f64(), item["cap"].as_i64()), (Some("month"), Some(0.75), Some(1_000)));
+        assert_eq!(item["resetsAt"].as_i64(), Some(at(12, 1, 0, 0).timestamp_millis()));
+        assert_eq!(next_month_ms(at(12, 31, 23, 0)), Some(Local.with_ymd_and_hms(2027, 1, 1, 0, 0, 0).unwrap().timestamp_millis()));
+        assert!(for_bot(Inputs { month: Some((250, 0)), ..Inputs::default() }, now).is_null(), "без предела бота кольца нет");
+        // Самый тесный из двух: месяц бота против подписки.
+        let tight = for_bot(Inputs { month: Some((250, 1_000)), plan: Some((10, None)), ..Inputs::default() }, now);
+        assert_eq!(tight["source"], "plan");
+    }
+
+    #[test]
+    fn agent_reset_strings_become_moments() {
+        let now = at(11, 17, 12, 0);
+        let ms = |month, day, hour, minute| Some(at(month, day, hour, minute).timestamp_millis());
+        assert_eq!(parse_reset("16:01", now), ms(11, 17, 16, 1), "время впереди — сегодня");
+        assert_eq!(parse_reset("09:30", now), ms(11, 18, 9, 30), "время уже прошло — завтра");
+        assert_eq!(parse_reset("Nov 13, 11:10am", now), Some(Local.with_ymd_and_hms(2027, 11, 13, 11, 10, 0).unwrap().timestamp_millis()), "прошло больше суток — следующий год");
+        assert_eq!(parse_reset("Nov 19, 11:10am (Asia/Bangkok)", now), ms(11, 19, 11, 10), "пояс в скобках не нужен");
+        assert_eq!(parse_reset("Nov 20, 4pm", now), ms(11, 20, 16, 0));
+        assert_eq!(parse_reset("resets Nov 18, 12am", now), ms(11, 18, 0, 0));
+        assert_eq!(parse_reset("Nov 18, 12pm", now), ms(11, 18, 12, 0));
+        assert_eq!(parse_reset("Nov 19", now), ms(11, 20, 0, 0), "дата без времени — конец того дня");
+        assert_eq!(parse_reset("Nov 19 4pm", now), ms(11, 19, 16, 0));
+        // Январская дата из декабря — следующий год.
+        let december = Local.with_ymd_and_hms(2026, 12, 30, 12, 0, 0).unwrap();
+        assert_eq!(parse_reset("Jan 2, 9am", december), Some(Local.with_ymd_and_hms(2027, 1, 2, 9, 0, 0).unwrap().timestamp_millis()));
+        for junk in ["", "soon", "Nov", "25:99", "Foo 12"] {
+            assert_eq!(parse_reset(junk, now), None, "{junk:?}");
+        }
     }
 }

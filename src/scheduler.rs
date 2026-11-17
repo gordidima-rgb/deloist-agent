@@ -44,9 +44,15 @@ async fn note(app: &Arc<App>, routine: &Routine, status: &str, text: &str) {
     app.turns.emit(json!({ "type": "journal", "entry": entry }));
 }
 
+/// Дневной предел токенов исчерпан. Спрашивают только те, кто идёт без человека (рутины, цели, процессы):
+/// упёрся — это и есть остановка, её запоминаем для кольца в доке.
 pub fn over_limit(app: &App) -> bool {
     let limit = app.store.settings().daily_token_limit;
-    limit > 0 && app.ledger.tokens_today() >= limit
+    let over = limit > 0 && app.ledger.tokens_today() >= limit;
+    if over {
+        app.ledger.note_daily_stop();
+    }
+    over
 }
 
 /// Запустить рутину. `unattended` значит, что человека рядом нет и решать за него нельзя.

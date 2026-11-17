@@ -1592,21 +1592,6 @@ fn effort_of(bot: &Bot) -> String {
     bot.extra.get("effort").and_then(Value::as_str).unwrap_or_default().to_string()
 }
 
-/// Событие «лимит подписки почти исчерпан»: предлагаем ступень ниже, но ничего не меняем.
-fn level_hint_event(
-    bot_id: &str,
-    turn_id: &str,
-    left: i64,
-    level: Option<crate::providers::ModelLevel>,
-) -> Option<Value> {
-    crate::providers::level_hint(left, level).map(|level| {
-        json!({
-            "type": "level_hint", "botId": bot_id, "turnId": turn_id,
-            "level": level.key(), "left": left,
-        })
-    })
-}
-
 /// Заметка в системном промпте, когда после двух неудач ход идёт на ступень выше.
 /// Если у провайдера нет другой модели на эту ступень, заметки нет: обещать нечего.
 fn escalation_note(bot: &Bot, failures: u32, driver: &str) -> Option<String> {
@@ -2173,18 +2158,6 @@ fn run_turn_body(
                     "model": &main.model, "level": level_after_failures(&bot, failures).map(|level| level.key()),
                 }));
             }
-            // Кольцо лимита подписки почти пустое: только подсказываем ступень ниже, ничего не меняем.
-            if let Some(id) = main.driver.strip_prefix("acp:") {
-                if let Some(left) = app.providers.subscription_left(&app, id) {
-                    let chosen = crate::providers::ModelLevel::parse(
-                        bot.extra.get("modelLevel").and_then(Value::as_str).unwrap_or_default(),
-                    );
-                    if let Some(event) = level_hint_event(&bot_id, &turn_id, left, chosen) {
-                        app.turns.emit(event);
-                    }
-                }
-            }
-
             // Основная недавно упёрлась в лимит: не тратим на неё запрос, сразу идём на запасную.
             if let Some(spare) = &fallback {
                 if app.turns.main_recently_limited(&main.key()) {
@@ -2951,7 +2924,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        configured_level, escalation_note, human_gap, is_quiet_answer, level_after_failures, level_hint_event, level_model_for,
+        configured_level, escalation_note, human_gap, is_quiet_answer, level_after_failures, level_model_for,
         specialists_block, system_prompt, time_context_due, time_context_text, ModelChoice, Turns, SPECIALISTS_RULE,
     };
     use crate::providers::ModelLevel;
@@ -3155,16 +3128,6 @@ mod tests {
         assert!(bot.extra.get("modelLevel").is_none());
         assert!(bot.extra.get("effort").is_none());
         assert_eq!(configured_level(&bot), None);
-    }
-
-    #[test]
-    fn a_full_limit_ring_becomes_a_level_hint_event() {
-        let event = level_hint_event("bot", "turn", 5, Some(ModelLevel::Strong)).expect("подсказка есть");
-        assert_eq!(event["type"], "level_hint");
-        assert_eq!(event["botId"], "bot");
-        assert_eq!(event["level"], "standard");
-        assert_eq!(event["left"], 5);
-        assert!(level_hint_event("bot", "turn", 50, Some(ModelLevel::Strong)).is_none());
     }
 
     #[test]

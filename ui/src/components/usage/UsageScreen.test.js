@@ -81,14 +81,21 @@ describe('UsageScreen', () => {
     expect(opened.threadId).toBe('analyst');
   });
 
-  it('lists subscription limits of connected providers', async () => {
+  it('lists subscription limits of connected agents with the time left to the reset', async () => {
     await render(async (path) => {
       if (path.startsWith('/api/usage')) return usageFixture('2026-11');
-      if (path === '/api/providers/limits') return { providers: [] };
-      return { providers: [{ id: 'openai', name: 'OpenAI', status: 'connected', limits: [{ label: 'Weekly limit', left: 40 }] }] };
+      if (path === '/api/providers/limits') {
+        return { providers: [{ id: 'codex', name: 'ChatGPT', limits: [{ label: 'Weekly limit', left: 40, resetsAt: Date.now() + 3 * 3_600_000 + 60_000 }] }] };
+      }
+      return { providers: [
+        { id: 'codex', kind: 'acp', name: 'ChatGPT', status: 'connected' },
+        { id: 'deepseek', kind: 'key', name: 'DeepSeek API', status: 'connected' },
+      ] };
     });
-    expect(host.textContent).toContain('OpenAI');
+    expect(host.textContent).toContain('ChatGPT');
     expect(host.textContent).toContain('осталось 40%');
+    expect(host.textContent).toContain('сброс через 3 ч');
+    expect(host.textContent).not.toContain('DeepSeek API');
   });
 });
 

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
 const LOAD_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
@@ -54,7 +54,7 @@ fn user_agent() -> String {
     format!("antigravity/{DESKTOP_VERSION} {os}/{arch}")
 }
 
-/// Лимиты аккаунта в виде, который понимает левое меню: `[{label, left, resets}]`. Пустой список —
+/// Лимиты аккаунта в виде, который понимает левое меню: `[{label, left, resetsAt}]`. Пустой список —
 /// показать нечего (нет входа Google, токен устарел, Google не ответил).
 pub async fn limits(home: &Path) -> (Vec<Value>, &'static str, Option<i64>) {
     let modified = std::fs::metadata(token_file(home)).and_then(|m| m.modified()).ok();
@@ -93,12 +93,12 @@ async fn read(home: &Path) -> Result<Vec<Value>, &'static str> {
     let loaded = call(LOAD_URL, json!({})).await?;
     let project = loaded["cloudaicompanionProject"].as_str().filter(|p| !p.is_empty()).ok_or("unavailable")?.to_string();
     let summary = call(QUOTA_URL, json!({ "project": project })).await?;
-    Ok(limits_of(&summary, Local::now()))
+    Ok(limits_of(&summary))
 }
 
 /// Ответ `retrieveUserQuotaSummary` → строки лимитов. Группа Gemini идёт первой и без подписи
 /// (её окна — главные кружки), прочие группы подписаны: «5h limit · Claude and GPT models».
-pub fn limits_of(summary: &Value, now: DateTime<Local>) -> Vec<Value> {
+pub fn limits_of(summary: &Value) -> Vec<Value> {
     let mut groups: Vec<(bool, String, Vec<Value>)> = Vec::new();
     for group in summary["groups"].as_array().into_iter().flatten() {
         let name = group["displayName"].as_str().unwrap_or_default().trim().to_string();
@@ -107,7 +107,7 @@ pub fn limits_of(summary: &Value, now: DateTime<Local>) -> Vec<Value> {
         }
         let gemini = name.to_lowercase().starts_with("gemini");
         // Окно → самое тесное ведро этого окна в группе.
-        let mut windows: Vec<(&'static str, f64, String)> = Vec::new();
+        let mut windows: Vec<(&'static str, f64, Option<i64>)> = Vec::new();
         for bucket in group["buckets"].as_array().into_iter().flatten() {
             let Some(fraction) = bucket["remainingFraction"].as_f64() else { continue };
             let label = format!("{} {}", bucket["window"].as_str().unwrap_or_default(), bucket["displayName"].as_str().unwrap_or_default()).to_lowercase();
@@ -118,7 +118,7 @@ pub fn limits_of(summary: &Value, now: DateTime<Local>) -> Vec<Value> {
             } else {
                 continue;
             };
-            let resets = bucket["resetTime"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| reset_text(t.with_timezone(&Local), now)).unwrap_or_default();
+            let resets = bucket["resetTime"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp_millis());
             match windows.iter_mut().find(|(w, _, _)| *w == window) {
                 Some(existing) if existing.1 <= fraction => {}
                 Some(existing) => *existing = (window, fraction, resets),
@@ -131,7 +131,7 @@ pub fn limits_of(summary: &Value, now: DateTime<Local>) -> Vec<Value> {
             .into_iter()
             .map(|(window, fraction, resets)| {
                 let label = if gemini { window.to_string() } else { format!("{window} · {name}") };
-                json!({ "label": label, "left": (fraction * 100.0).round().clamp(0.0, 100.0) as i64, "resets": resets })
+                json!({ "label": label, "left": (fraction * 100.0).round().clamp(0.0, 100.0) as i64, "resetsAt": resets })
             })
             .collect::<Vec<_>>();
         if !rows.is_empty() {
@@ -140,15 +140,6 @@ pub fn limits_of(summary: &Value, now: DateTime<Local>) -> Vec<Value> {
     }
     groups.sort_by_key(|(gemini, _, _)| !*gemini);
     groups.into_iter().flat_map(|(_, _, rows)| rows).collect()
-}
-
-/// «14:48» сегодня, «19.11 12:02» позже.
-fn reset_text(at: DateTime<Local>, now: DateTime<Local>) -> String {
-    if at.date_naive() == now.date_naive() {
-        at.format("%H:%M").to_string()
-    } else {
-        at.format("%d.%m %H:%M").to_string()
-    }
 }
 
 #[cfg(test)]
@@ -186,9 +177,10 @@ mod tests {
 
     #[test]
     fn quota_groups_become_limit_rows() {
-        let now = Local.with_ymd_and_hms(2026, 11, 13, 10, 0, 0).unwrap();
-        let today = Local.with_ymd_and_hms(2026, 11, 13, 14, 35, 0).unwrap().to_rfc3339();
-        let later = Local.with_ymd_and_hms(2026, 11, 19, 12, 2, 0).unwrap().to_rfc3339();
+        let today = Utc.with_ymd_and_hms(2026, 11, 13, 14, 35, 0).unwrap();
+        let later = Utc.with_ymd_and_hms(2026, 11, 19, 12, 2, 0).unwrap();
+        let (today_ms, later_ms) = (today.timestamp_millis(), later.timestamp_millis());
+        let (today, later) = (today.to_rfc3339(), later.to_rfc3339());
         let summary = json!({ "groups": [
             { "displayName": "Claude and GPT models", "description": "Models within this group: Claude Opus, GPT-OSS",
               "buckets": [{ "displayName": "Weekly Limit Remaining", "window": "weekly", "resetTime": later, "remainingFraction": 1 }] },
@@ -199,13 +191,13 @@ mod tests {
                 { "displayName": "5h Limit Remaining", "window": "5h", "resetTime": today, "remainingFraction": 0.9 } ] },
             { "displayName": "", "buckets": [{ "window": "weekly", "remainingFraction": 0.1 }] }
         ] });
-        let rows = limits_of(&summary, now);
+        let rows = limits_of(&summary);
         assert_eq!(rows, vec![
-            json!({ "label": "5h limit", "left": 71, "resets": "14:35" }),
-            json!({ "label": "Weekly limit", "left": 99, "resets": "19.11 12:02" }),
-            json!({ "label": "Weekly limit · Claude and GPT models", "left": 100, "resets": "19.11 12:02" }),
+            json!({ "label": "5h limit", "left": 71, "resetsAt": today_ms }),
+            json!({ "label": "Weekly limit", "left": 99, "resetsAt": later_ms }),
+            json!({ "label": "Weekly limit · Claude and GPT models", "left": 100, "resetsAt": later_ms }),
         ]);
-        assert!(limits_of(&json!({}), now).is_empty());
+        assert!(limits_of(&json!({})).is_empty());
     }
 
     #[test]

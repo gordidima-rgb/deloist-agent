@@ -71,9 +71,13 @@ import { offerEventsToShow } from './lib/pendingOffers.js';
 import * as screenLayoutLib from './lib/screenLayout.js';
 import ScreenControl from './components/ScreenControl.svelte';
 import { icon, ICONS, paintIcons } from './lib/icons.js';
+import { resetLine, ageLine } from './lib/usage.js';
 
 window.DeloistUI = {
   version: 1,
+  // Подписи лимитов («сброс через 3 ч», «обновлено 5 мин назад») для доков и окна провайдеров.
+  resetLine,
+  ageLine,
   voiceChat: voiceChatLib,
   // Раскладка экрана бота (web/screen.js): ширина панели, углы островка чата, режимы.
   screenLayout: screenLayoutLib,

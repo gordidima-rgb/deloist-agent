@@ -596,6 +596,8 @@ async fn state(State(app): Shared) -> Response {
     let settings = app.store.settings();
     let wallet = app.account.wallet_today();
     let tokens_today = app.ledger.tokens_today();
+    let daily_stopped = app.ledger.daily_stopped();
+    let now = chrono::Local::now();
     let at = crate::store::now();
     for bot in app.store.bots() {
         let mut item = serde_json::to_value(&bot).unwrap_or_else(|_| json!({}));
@@ -607,7 +609,15 @@ async fn state(State(app): Shared) -> Response {
         item["guests"] = json!(crate::store::bot_guests(&bot));
         // Кольцо в доке: самый тесный из пределов бота (правило — в limit.rs).
         let driver = if bot.driver.is_empty() { settings.driver.as_str() } else { bot.driver.as_str() };
-        item["limit"] = crate::limit::for_bot(driver == "deloist", &item["preview"], wallet, tokens_today, settings.daily_token_limit);
+        item["limit"] = crate::limit::for_bot(
+            crate::limit::Inputs {
+                wallet: wallet.filter(|_| driver == "deloist"),
+                plan: driver.strip_prefix("acp:").and_then(|id| app.providers.subscription_left(&app, id)),
+                daily: (daily_stopped && tokens_today >= settings.daily_token_limit).then_some((tokens_today, settings.daily_token_limit)),
+                month: Some((app.ledger.tokens_month(&bot.id), bot.monthly_token_limit)),
+            },
+            now,
+        );
         bots.push(item);
     }
     let mut rooms = Vec::new();

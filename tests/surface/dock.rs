@@ -155,21 +155,26 @@ async fn changing_appearance_notifies_the_dock_with_updated_state() {
 }
 
 #[tokio::test]
-async fn every_bot_carries_its_binding_limit_for_the_ring() {
+async fn a_bot_has_a_ring_only_when_it_has_a_real_limit() {
     let crew = Crew::start("dock-limit").await;
-    // По умолчанию предел токенов команды на день есть: кольцо показывает его.
+    // Дневной предел токенов живой разговор не держит: пока на нём ничего не остановилось, кольца нет.
     let state = crew.ok("GET", "/api/state", None).await;
-    for bot in state["bots"].as_array().unwrap() {
-        let limit = &bot["limit"];
-        assert_eq!(limit["source"], "tokens", "{bot}");
-        assert_eq!(limit["unit"], "tokens");
-        assert_eq!(limit["cap"], 1_000_000);
-        let left = limit["left"].as_f64().unwrap();
-        assert!((0.0..=1.0).contains(&left), "доля от 0 до 1: {left}");
-        assert!(limit["moneyLeftKop"].is_null(), "у бота не на кошельке денег нет");
-    }
-    // Без пределов кольца нет: только тусклый обод цвета бота.
-    crew.ok("PUT", "/api/settings", Some(json!({ "dailyTokenLimit": 0 }))).await;
+    assert!(state["bots"].as_array().unwrap().iter().all(|bot| bot["limit"].is_null()), "{state}");
+    // Месячный предел бота — настоящий предел: он в кольце, сброс 1-го числа.
+    let id = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.ok("PATCH", &format!("/api/bots/{id}"), Some(json!({ "monthlyTokenLimit": 5_000 }))).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"].as_array().unwrap().iter().find(|b| b["id"] == id.as_str()).unwrap();
+    let limit = &bot["limit"];
+    assert_eq!(limit["source"], "month", "{bot}");
+    assert_eq!(limit["unit"], "tokens");
+    assert_eq!(limit["cap"], 5_000);
+    let left = limit["left"].as_f64().unwrap();
+    assert!((0.0..=1.0).contains(&left), "доля от 0 до 1: {left}");
+    assert!(limit["resetsAt"].as_i64().unwrap() > 0, "{limit}");
+    assert!(limit["moneyLeftKop"].is_null(), "у бота не на кошельке денег нет");
+    // Предел сняли — кольца снова нет.
+    crew.ok("PATCH", &format!("/api/bots/{id}"), Some(json!({ "monthlyTokenLimit": null }))).await;
     let state = crew.ok("GET", "/api/state", None).await;
     assert!(state["bots"].as_array().unwrap().iter().all(|bot| bot["limit"].is_null()), "{state}");
 }

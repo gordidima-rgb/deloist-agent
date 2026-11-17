@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { icon } from './icons.js';
+import { resetLine, ageLine } from './usage.js';
 
 const source = readFileSync('../web/providers.js', 'utf8');
 const helpers = source.slice(source.indexOf('  function windows('), source.indexOf('  async function renderUsage('));
 const details = new Function('esc', 'tr', 'iconColor', 'limitLabel', 'DeloistUI', `${helpers}\nreturn details;`)(
   (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;'),
   (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key] ?? ''),
-  () => 'ffffff', (label) => label, { icon },
+  () => 'ffffff', (label) => label, { icon, resetLine, ageLine },
 );
 const provider = { id: 'antigravity', name: 'Gemini', limits: [] };
 
@@ -20,8 +21,20 @@ describe('provider quota explanation', () => {
     expect(details({ ...provider, limitsStatus: 'unavailable' })).toContain('Повторим позже');
   });
 
+  it('shows the reset as a time left and hides a window that has already reset', () => {
+    const now = Date.now();
+    expect(resetLine(now + 3 * 3_600_000, now)).toBe('сброс через 3 ч');
+    expect(resetLine(now + 25 * 60_000, now)).toBe('сброс через 25 мин');
+    expect(resetLine(now - 1, now)).toBe('');
+    expect(resetLine(null, now)).toBe('');
+    expect(ageLine(now - 5 * 60_000, now)).toBe('обновлено 5 мин назад');
+    const html = details({ ...provider, limits: [{ label: '5h limit', left: 42, resetsAt: now + 3 * 3_600_000 }], limitsStatus: 'ok', at: now - 5 * 60_000 });
+    expect(html).toContain('сброс через 3 ч');
+    expect(html).toContain('обновлено 5 мин назад');
+  });
+
   it('keeps the last quota visible with its date and stale-data explanation', () => {
-    const limits = [{ label: '5h limit', left: 42, resets: '12:00' }];
+    const limits = [{ label: '5h limit', left: 42, resetsAt: 1_800_000_000_000 }];
     const stale = details({ ...provider, limits, limitsStatus: 'auth_expired', at: 1_800_000_000_000 });
     expect(stale).toContain('осталось 42 %');
     expect(stale).toContain('Данные от');

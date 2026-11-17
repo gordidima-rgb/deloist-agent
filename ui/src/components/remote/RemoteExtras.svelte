@@ -5,6 +5,7 @@ import { Button } from '../kit';
   import { tr, trServer } from '../../lib/i18n.js';
   import { enc, errorText } from '../../lib/remote.js';
   import { whenText } from '../../lib/when.js';
+  import { resetLine } from '../../lib/usage.js';
 
   let { api, pc } = $props();
 
@@ -65,7 +66,7 @@ import { Button } from '../kit';
         <div class="rx-text">
           <span class="rx-name">{provider.name || provider.id}</span>
           <span class="rx-sub">
-            {#each provider.limits ?? [] as l, i}{i ? ' · ' : ''}{l.label ? `${l.label}: ` : ''}{tr('осталось {n}%', { n: l.left ?? '?' })}{#if l.resets}, {l.resets}{/if}{/each}
+            {#each provider.limits ?? [] as l, i}{i ? ' · ' : ''}{l.label ? `${l.label}: ` : ''}{tr('осталось {n}%', { n: l.left ?? '?' })}{#if resetLine(l.resetsAt)}, {resetLine(l.resetsAt)}{/if}{/each}
           </span>
         </div>
       </div>

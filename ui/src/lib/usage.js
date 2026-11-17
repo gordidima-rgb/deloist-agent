@@ -1,4 +1,24 @@
 // Чистые помощники экрана «Использование и лимиты»: месяцы, доли, прогноз, цвета рядов.
+import { tr } from './i18n.js';
+
+// Промежуток словами: «5 мин», «3 ч», «2 д».
+export function spanText(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return tr('{n} мин', { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return tr('{n} ч', { n: hours });
+  return tr('{n} д', { n: Math.round(hours / 24) });
+}
+
+// «сброс через 3 ч» по моменту сброса (мс). Окно, которое уже сбросилось, не показываем: его число устарело.
+export function resetLine(resetsAt, now = Date.now()) {
+  return Number(resetsAt) > now ? tr('сброс через {t}', { t: spanText(resetsAt - now) }) : '';
+}
+
+// Возраст данных: «обновлено 5 мин назад».
+export function ageLine(at, now = Date.now()) {
+  return Number(at) > 0 ? tr('обновлено {t} назад', { t: spanText(Math.max(0, now - at)) }) : '';
+}
 
 export function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;

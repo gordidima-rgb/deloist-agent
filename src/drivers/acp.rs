@@ -1058,11 +1058,11 @@ pub struct Probe {
 
 /// Строки `/status` вида `**5h limit:** 86% left (resets 16:01)` (Codex) и `/usage` вида
 /// `Current session: 30% used · resets Nov 13, 11:10am (Asia/Bangkok)` (Claude).
-pub fn parse_limits(text: &str) -> Vec<Value> {
+pub fn parse_limits(text: &str, now: chrono::DateTime<chrono::Local>) -> Vec<Value> {
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        if let Some(limit) = usage_line(line) {
+        if let Some(limit) = usage_line(line, now) {
             out.push(limit);
             continue;
         }
@@ -1073,14 +1073,14 @@ pub fn parse_limits(text: &str) -> Vec<Value> {
         let Ok(left) = number.trim().parse::<i64>() else { continue };
         let resets = tail.trim().trim_start_matches('(').trim_end_matches(')').trim();
         let resets = resets.strip_prefix("resets").map(str::trim).unwrap_or(resets);
-        out.push(json!({ "label": label.trim(), "left": left.clamp(0, 100), "resets": resets }));
+        out.push(json!({ "label": label.trim(), "left": left.clamp(0, 100), "resetsAt": crate::limit::parse_reset(resets, now) }));
     }
     out
 }
 
 /// Строка `/usage` Claude: «Current session» — окно 5 часов, «Current week (…)» — неделя.
 /// Метки приводятся к виду Codex (`5h limit`, `Weekly limit`), чтобы интерфейс читал их одинаково.
-fn usage_line(line: &str) -> Option<Value> {
+fn usage_line(line: &str, now: chrono::DateTime<chrono::Local>) -> Option<Value> {
     let (label, value) = line.split_once(':')?;
     let (number, tail) = value.trim().split_once("% used")?;
     let used = number.trim().parse::<i64>().ok()?;
@@ -1099,9 +1099,7 @@ fn usage_line(line: &str) -> Option<Value> {
     };
     let resets = tail.trim().trim_start_matches('·').trim();
     let resets = resets.strip_prefix("resets").map(str::trim).unwrap_or(resets);
-    // Часовой пояс в скобках длинный и человеку не нужен: время и так его.
-    let resets = resets.split(" (").next().unwrap_or(resets).trim();
-    Some(json!({ "label": label, "left": (100 - used).clamp(0, 100), "resets": resets }))
+    Some(json!({ "label": label, "left": (100 - used).clamp(0, 100), "resetsAt": crate::limit::parse_reset(resets, now) }))
 }
 
 /// Лимиты через `/status`: агент отвечает сам, без модели и без расхода подписки.
@@ -1161,7 +1159,7 @@ async fn status_limits(agent: &Agent, session_id: &str, inbox: &mut mpsc::Unboun
             seen.push(message);
         }
     }
-    parse_limits(&text)
+    parse_limits(&text, chrono::Local::now())
 }
 
 /// Ответ Grok на `_x.ai/billing` → окно лимита: `config.creditUsagePercent` — израсходованная доля
@@ -1178,15 +1176,9 @@ fn billing_limits(reply: &Value) -> Vec<Value> {
         _ => "Limit",
     };
     let end = config["currentPeriod"]["end"].as_str().or_else(|| config["billingPeriodEnd"].as_str()).unwrap_or_default();
-    let resets = chrono::DateTime::parse_from_rfc3339(end)
-        .map(|t| {
-            let t = t.with_timezone(&chrono::Local);
-            let format = if chrono::Timelike::minute(&t) == 0 { "%b %-d, %-I%P" } else { "%b %-d, %-I:%M%P" };
-            t.format(format).to_string()
-        })
-        .unwrap_or_default();
+    let resets_at = chrono::DateTime::parse_from_rfc3339(end).ok().map(|t| t.timestamp_millis());
     let left = (100.0 - used).round().clamp(0.0, 100.0) as i64;
-    vec![json!({ "label": label, "left": left, "resets": resets })]
+    vec![json!({ "label": label, "left": left, "resetsAt": resets_at })]
 }
 
 /// Пробный запуск агента в отдельной папке: initialize и session/new. `login` — если входа нет,
@@ -2059,7 +2051,7 @@ mod tests {
         assert_eq!(limits.len(), 1);
         assert_eq!(limits[0]["label"], "Weekly limit");
         assert_eq!(limits[0]["left"], 89);
-        assert!(limits[0]["resets"].as_str().unwrap().starts_with("Nov 1"), "{}", limits[0]);
+        assert_eq!(limits[0]["resetsAt"], 1_794_630_859_263_i64, "{}", limits[0]);
         assert!(billing_limits(&json!({ "config": {} })).is_empty());
         assert_eq!(billing_limits(&json!({ "config": { "creditUsagePercent": 140, "currentPeriod": { "type": "USAGE_PERIOD_TYPE_MONTHLY" } } }))[0]["left"], 0);
     }
@@ -2270,23 +2262,39 @@ mod tests {
 
     #[test]
     fn status_lines_become_limits() {
-        let text = "**Account:** ChatGPT plus (a@b.c)  \n**5h limit:** 86% left (resets 16:01)  \n**Weekly limit:** 57% left (resets Nov 12)\n**Context window:** 3% used";
-        let limits = parse_limits(text);
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 11, 10, 12, 0, 0).unwrap();
+        let ms = |month, day, hour, minute| chrono::Local.with_ymd_and_hms(2026, month, day, hour, minute, 0).unwrap().timestamp_millis();
+        let text = "**Account:** ChatGPT plus (a@b.c)  
+**5h limit:** 86% left (resets 16:01)  
+**Weekly limit:** 57% left (resets Nov 12)
+**Context window:** 3% used";
+        let limits = parse_limits(text, now);
         assert_eq!(limits.len(), 2);
-        assert_eq!(limits[0]["label"], "5h limit");
-        assert_eq!(limits[0]["left"], 86);
-        assert_eq!(limits[0]["resets"], "16:01");
-        assert_eq!(limits[1]["left"], 57);
+        assert_eq!(limits[0], json!({ "label": "5h limit", "left": 86, "resetsAt": ms(11, 10, 16, 1) }));
+        assert_eq!(limits[1], json!({ "label": "Weekly limit", "left": 57, "resetsAt": ms(11, 13, 0, 0) }));
     }
 
     #[test]
     fn claude_usage_lines_become_limits() {
-        let text = "You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 30% used · resets Nov 13, 11:10am (Asia/Bangkok)\nCurrent week (all models): 55% used · resets Nov 15, 4pm (Asia/Bangkok)\nCurrent week (Fable): 14% used · resets Nov 15, 4pm (Asia/Bangkok)\n\nLast 24h · 4304 requests · 20 sessions\n  85%  Give subagents a cheaper model";
-        let limits = parse_limits(text);
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 11, 13, 9, 0, 0).unwrap();
+        let ms = |month, day, hour, minute| chrono::Local.with_ymd_and_hms(2026, month, day, hour, minute, 0).unwrap().timestamp_millis();
+        let text = "You are currently using your subscription to power your Claude Code usage
+
+Current session: 30% used · resets Nov 13, 11:10am (Asia/Bangkok)
+Current week (all models): 55% used · resets Nov 15, 4pm (Asia/Bangkok)
+Current week (Fable): 14% used · resets Nov 15, 4pm (Asia/Bangkok)
+
+Last 24h · 4304 requests · 20 sessions
+  85%  Give subagents a cheaper model";
+        let limits = parse_limits(text, now);
         assert_eq!(limits.len(), 3);
-        assert_eq!(limits[0], json!({ "label": "5h limit", "left": 70, "resets": "Nov 13, 11:10am" }));
-        assert_eq!(limits[1], json!({ "label": "Weekly limit", "left": 45, "resets": "Nov 15, 4pm" }));
+        assert_eq!(limits[0], json!({ "label": "5h limit", "left": 70, "resetsAt": ms(11, 13, 11, 10) }));
+        assert_eq!(limits[1], json!({ "label": "Weekly limit", "left": 45, "resetsAt": ms(11, 15, 16, 0) }));
         assert_eq!(limits[2]["label"], "Weekly limit · Fable");
+        // Строку, которую не поняли, не выдумываем: остаток есть, момента сброса нет.
+        assert_eq!(parse_limits("Current session: 30% used · resets soon", now)[0]["resetsAt"], Value::Null);
     }
 
     #[test]

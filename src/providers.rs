@@ -300,6 +300,12 @@ struct Job {
     cancel: CancellationToken,
 }
 
+/// Строки лимитов без тех, чьё окно уже сбросилось: число в них устарело, и показывать его нельзя.
+/// Строка без `resetsAt` (агент не назвал время или мы его не поняли) остаётся.
+fn live_limits(rows: Option<&Vec<Value>>, now: i64) -> Vec<Value> {
+    rows.into_iter().flatten().filter(|l| l["resetsAt"].as_i64().is_none_or(|at| at > now)).cloned().collect()
+}
+
 const PROBE_TIMEOUT_WARNING: &str = "Не удалось проверить подключение вовремя. Показано последнее известное состояние.";
 
 fn preserve_probe_timeout(entry: &mut serde_json::Map<String, Value>, timed_out: bool, credentials_present: bool) -> bool {
@@ -397,15 +403,6 @@ impl ModelLevel {
             Self::Standard | Self::Strong => Self::Strong,
         }
     }
-
-    /// Ступень ниже: strong → standard → fast. Ниже fast нет.
-    pub fn down(self) -> Option<Self> {
-        match self {
-            Self::Strong => Some(Self::Standard),
-            Self::Standard => Some(Self::Fast),
-            Self::Fast => None,
-        }
-    }
 }
 
 /// Таблица уровней: для каждого провайдера/драйвера — id модели на strong / standard / fast.
@@ -422,11 +419,12 @@ pub const MODEL_LEVELS: &[(&str, [&str; 3])] = &[
     ("alice", ["aliceai-llm/latest", "aliceai-llm/latest", "aliceai-llm-flash/latest"]),
     // Бесплатный старт: без явного выбора человека платные модели не берём (`openrouter/auto` может уйти на платные).
     ("openrouter", ["openrouter/free", "openrouter/free", "openrouter/free"]),
-    // TODO уточнить: у NVIDIA, Groq и Cerebras модель выбирают на экране провайдеров — берём её.
+    // У NVIDIA, Groq и Cerebras каталог большой и меняется, а ступеней у провайдера нет: берём модель, выбранную на экране провайдеров.
     ("nvidia", ["", "", ""]),
     ("groq", ["", "", ""]),
     ("cerebras", ["", "", ""]),
-    // TODO уточнить: у Z.ai в коде только Flash, остальные модели появятся, когда провайдер их назовёт.
+    // Z.ai: бесплатный старт без явного выбора человека. По странице цен https://docs.z.ai/guides/overview/pricing
+    // (17.11.2026) постоянно бесплатна только GLM-4.7-Flash; GLM-5.3 и прочие платные или «Limited-time Free».
     ("zai", ["glm-4.7-flash", "glm-4.7-flash", "glm-4.7-flash"]),
     // Локальный сервер: все три уровня — выбранная человеком модель.
     ("ollama", ["", "", ""]),
@@ -472,18 +470,6 @@ pub fn levels_json() -> Value {
         );
     }
     Value::Object(out)
-}
-
-/// Остаток лимита подписки, при котором пора предложить ступень ниже (использовано ≥ 90%).
-pub const LIMIT_HINT_LEFT: i64 = 10;
-
-/// Подсказка при почти исчерпанном лимите подписки: на ступень ниже.
-/// `None`, если лимит ещё не тесен или ниже fast уже некуда.
-pub fn level_hint(left: i64, level: Option<ModelLevel>) -> Option<ModelLevel> {
-    if left > LIMIT_HINT_LEFT {
-        return None;
-    }
-    level.unwrap_or(ModelLevel::Standard).down()
 }
 
 /// Принимает ли модель OpenAI-совместимый `reasoning_effort`.
@@ -659,7 +645,7 @@ impl Providers {
             "status": status,
             "progress": job.as_ref().map(|j| json!({ "phase": j.phase, "percent": j.percent })),
             "account": saved["account"],
-            "limits": saved["limits"].as_array().cloned().unwrap_or_default(),
+            "limits": live_limits(saved["limits"].as_array(), crate::store::now()),
             "limitsAt": saved["limitsAt"],
             "models": saved["models"].as_array().cloned().unwrap_or_default(),
             "efforts": saved["efforts"].as_array().cloned().unwrap_or_default(),
@@ -716,11 +702,14 @@ impl Providers {
         Route { base_url, api_key: app.store.own_key(id), auth, model }
     }
 
-    /// Минимальный остаток лимита подписки (в процентах), сохранённый для провайдера.
-    /// Читает providers.json без запуска агента: ход не ждёт проверки `/status`.
-
-    pub fn subscription_left(&self, app: &App, id: &str) -> Option<i64> {
-        self.entry(app, id)["limits"].as_array()?.iter().filter_map(|l| l["left"].as_i64()).min()
+    /// Самое тесное окно лимита подписки, сохранённое для провайдера: остаток в процентах и момент сброса (мс).
+    /// Читает providers.json без запуска агента: ход не ждёт проверки `/status`. Окно, которое уже сбросилось,
+    /// не в счёт: его число устарело.
+    pub fn subscription_left(&self, app: &App, id: &str) -> Option<(i64, Option<i64>)> {
+        live_limits(self.entry(app, id)["limits"].as_array(), crate::store::now())
+            .iter()
+            .filter_map(|l| Some((l["left"].as_i64()?, l["resetsAt"].as_i64())))
+            .min_by_key(|(left, _)| *left)
     }
 
     /// Окно модели в токенах, которое провайдер назвал в списке моделей (для Ollama — загружаемое окно).
@@ -1453,7 +1442,7 @@ impl Providers {
                 Some(email) => format!("Gemini · {email}"),
                 None => "Gemini".to_string(),
             };
-            out.push(json!({ "id": id, "name": name, "limits": limits, "limitsStatus": status, "at": at, "icon": true, "iconUrl": icon_url(&id) }));
+            out.push(json!({ "id": id, "name": name, "limits": live_limits(Some(&limits), now), "limitsStatus": status, "at": at, "icon": true, "iconUrl": icon_url(&id) }));
         }
         for (id, entry) in &saved {
             if id == antigravity::ID {
@@ -1463,15 +1452,15 @@ impl Providers {
                 continue;
             }
             // Кружок есть у каждого подключённого агента, поэтому лимиты обновляем и у тех, кем боты сейчас
-            // не пользуются: реже, раз в час. Агент без лимитов пробуем раз в полчаса: проба могла сорваться.
+            // не пользуются: реже, раз в час. Агент, который лимитов не сообщает, заново не запускаем:
+            // его проба один раз уже прошла (`limitsAt`), а в кружке он значится «не сообщает».
             let used = Self::used_by(app, &format!("acp:{id}")) > 0;
             let has_limits = entry["limits"].as_array().is_some_and(|l| !l.is_empty());
-            let due = match (has_limits, used) {
-                (true, true) => 10 * 60_000,
-                (true, false) => 60 * 60_000,
-                (false, _) => 30 * 60_000,
+            let due = if used { 10 * 60_000 } else { 60 * 60_000 };
+            let stale = match entry["limitsAt"].as_i64() {
+                None => true,
+                Some(at) => has_limits && now - at > due,
             };
-            let stale = entry["limitsAt"].as_i64().is_none_or(|at| now - at > due);
             // A timed-out background probe should not be restarted on every menu refresh.
             let retry_pending = entry["error"] == PROBE_TIMEOUT_WARNING
                 && entry["checkedAt"].as_i64().is_some_and(|at| now - at < 5 * 60_000);
@@ -1482,7 +1471,7 @@ impl Providers {
                 let _ = self.check(app, id, false).await;
             }
             // Подключённый агент виден всегда: без лимитов у него пустые кружки и пояснение в подсказке.
-            let limits = entry["limits"].as_array().cloned().unwrap_or_default();
+            let limits = live_limits(entry["limits"].as_array(), now);
             let name = FEATURED.iter().find(|(f, _)| *f == id.as_str()).map(|(_, n)| n.to_string())
                 .or_else(|| entry["name"].as_str().map(str::to_string))
                 .unwrap_or_else(|| id.clone());
@@ -1894,18 +1883,19 @@ mod tests {
         assert_eq!(ModelLevel::Fast.up(), ModelLevel::Standard);
         assert_eq!(ModelLevel::Standard.up(), ModelLevel::Strong);
         assert_eq!(ModelLevel::Strong.up(), ModelLevel::Strong, "сильнее strong нет");
-        assert_eq!(ModelLevel::Strong.down(), Some(ModelLevel::Standard));
-        assert_eq!(ModelLevel::Standard.down(), Some(ModelLevel::Fast));
-        assert_eq!(ModelLevel::Fast.down(), None, "ниже fast нет");
     }
 
     #[test]
-    fn a_nearly_exhausted_limit_suggests_the_next_lower_level() {
-        assert_eq!(level_hint(50, Some(ModelLevel::Strong)), None, "половина лимита — не повод");
-        assert_eq!(level_hint(LIMIT_HINT_LEFT, Some(ModelLevel::Strong)), Some(ModelLevel::Standard));
-        assert_eq!(level_hint(3, Some(ModelLevel::Standard)), Some(ModelLevel::Fast));
-        assert_eq!(level_hint(3, Some(ModelLevel::Fast)), None);
-        assert_eq!(level_hint(3, None), Some(ModelLevel::Fast), "без уровня предлагаем самый быстрый");
+    fn a_window_that_has_reset_is_not_shown_and_the_ring_takes_the_tightest_live_one() {
+        let rows = vec![
+            json!({ "label": "5h limit", "left": 10, "resetsAt": 1_000 }),
+            json!({ "label": "Weekly limit", "left": 60, "resetsAt": 9_000 }),
+            json!({ "label": "Weekly limit · X", "left": 30, "resetsAt": null }),
+        ];
+        let live = live_limits(Some(&rows), 5_000);
+        assert_eq!(live.len(), 2, "5-часовое окно уже сбросилось: его 10 % устарели");
+        assert_eq!(live[0]["label"], "Weekly limit");
+        assert!(live_limits(None, 5_000).is_empty());
     }
 
     #[test]

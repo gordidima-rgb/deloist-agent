@@ -6,7 +6,7 @@
   import { api as defaultApi, lang } from '../../lib/api.js';
   import {
     monthKey, shiftMonth, monthLabel, fmtTokens, fmtPct, fmtSeconds, pct, paceForecast,
-    colorMap, dayRows, validUsage,
+    colorMap, dayRows, validUsage, resetLine,
   } from '../../lib/usage.js';
   import { usageFixture } from '../../lib/usage.fixture.js';
   import { ruForm } from '../../lib/report.js';
@@ -79,16 +79,14 @@
       if (limits.deloist) {
         const w = limits.deloist;
         const start = Math.max(w.startKop, w.nowKop, 0);
-        items.push({ id: 'deloist', name: 'Deloist', rows: [{ label: tr('Баланс'), left: start > 0 ? (Math.max(w.nowKop, 0) / start) * 100 : 0, resets: '' }] });
+        items.push({ id: 'deloist', name: 'Deloist', rows: [{ label: tr('Баланс'), left: start > 0 ? (Math.max(w.nowKop, 0) / start) * 100 : 0, resetsAt: null }] });
       }
       for (const p of list.providers || []) {
         if (p.enabled === false) continue;
         if (p.kind === 'acp') {
           for (const a of agents) {
-            if (a.id === p.id || a.id.startsWith(`${p.id}@`)) items.push({ id: a.id, name: a.name || p.name, rows: windows(a.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resets: l.resets || '' })) });
+            if (a.id === p.id || a.id.startsWith(`${p.id}@`)) items.push({ id: a.id, name: a.name || p.name, rows: windows(a.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resetsAt: l.resetsAt })) });
           }
-        } else if (p.status === 'connected') {
-          items.push({ id: p.id, name: p.name, rows: windows(p.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resets: l.resets || '' })) });
         }
       }
       subs = items;
@@ -311,7 +309,7 @@
               <div class="us-subrow">
                 <div class="us-rowhead"><span>{l.label}</span><span class="us-val" class:us-warn={l.left < 15}>{tr('осталось {p}', { p: fmtPct(l.left) })}</span></div>
                 <div class="us-bar" aria-hidden="true"><i style:width={`${Math.max(0, Math.min(100, l.left))}%`} style:background={l.left < 15 ? 'var(--k-attention)' : 'var(--k-brand)'}></i></div>
-                {#if l.resets}<p class="us-sub">{tr('сброс {t}', { t: l.resets })}</p>{/if}
+                {#if resetLine(l.resetsAt)}<p class="us-sub">{resetLine(l.resetsAt)}</p>{/if}
               </div>
             {:else}
               <p class="us-sub">{tr('Этот провайдер не сообщает лимиты')}</p>

@@ -586,7 +586,6 @@ window.DeloistProviders = (() => {
     return { hours, week, rest: list.filter((l) => l !== hours && l !== week) };
   }
 
-  const LOCAL = new Set(['ollama', 'lmstudio']);
   const money = (kop) => ((Number(kop) || 0) / 100).toLocaleString(window.LOCALE, { style: 'currency', currency: 'RUB', minimumFractionDigits: 2 });
   const DELOIST_MARK = '<span class="k-logo k-logo--xs usage-mark" aria-hidden="true"></span>';
 
@@ -607,7 +606,6 @@ window.DeloistProviders = (() => {
       const spent = Math.max(0, start - Math.max(nowKop, 0));
       return `${head}${name}<div class="usage-money"><span>${esc(tr('Баланс'))}</span><b>${esc(money(nowKop))}</b></div>${usageRow(tr('Сегодня'), left, tr('потрачено {sum}', { sum: money(spent) }))}`;
     }
-    if (item.local) return `${head}${name}<p class="usage-none">${esc(tr('Модель на этом компьютере: лимитов нет'))}</p>`;
     const { hours, week, rest } = windows(item.limits);
     const reason = ({
       auth_expired: 'Данные лимитов могут быть устаревшими: токен недействителен или истёк. Обратитесь к Gemini, чтобы обновить его',
@@ -617,9 +615,10 @@ window.DeloistProviders = (() => {
     const lastRead = reason && item.at ? ` ${tr('Данные от {time}', { time: new Date(item.at).toLocaleString(window.LOCALE) })}` : '';
     const status = reason ? `<p class="usage-none">${esc(tr(reason) + lastRead)}</p>` : '';
     if (!hours && !week && !rest.length) return `${head}${name}${status || `<p class="usage-none">${esc(tr('Этот провайдер не сообщает лимиты'))}</p>`}`;
-    const reset = (l) => (l.resets ? tr('сброс {t}', { t: l.resets }) : '');
+    const reset = (l) => DeloistUI.resetLine(l.resetsAt);
     const rows = [hours, week, ...rest].filter(Boolean).map((l) => usageRow(limitLabel(l.label), l.left, reset(l))).join('');
-    return `${head}${name}${rows}${status}`;
+    const age = DeloistUI.ageLine(item.at);
+    return `${head}${name}${rows}${status}${age ? `<p class="usage-none">${esc(age)}</p>` : ''}`;
   }
 
   async function renderUsage() {
@@ -647,8 +646,6 @@ window.DeloistProviders = (() => {
         for (const a of limits.providers || []) {
           if (a.id === p.id || a.id.startsWith(p.id + '@')) items.push({ id: a.id, icon: p.id, name: a.name || p.name, limits: a.limits, limitsStatus: a.limitsStatus, at: a.at });
         }
-      } else if (p.status === 'connected') {
-        items.push({ id: p.id, name: p.name, limits: p.limits || [], local: LOCAL.has(p.id) });
       }
     }
     usageItems = items;
@@ -659,7 +656,7 @@ window.DeloistProviders = (() => {
       if (item.wallet) {
         const start = Math.max(item.wallet.startKop, item.wallet.nowKop, 0);
         outer = start > 0 ? (Math.max(item.wallet.nowKop, 0) / start) * 100 : 0;
-      } else if (!item.local) {
+      } else {
         const { hours, week } = windows(item.limits);
         outer = week ? week.left : null;
         inner = hours ? hours.left : null;

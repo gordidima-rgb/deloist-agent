@@ -240,6 +240,7 @@
   }
 
   // Сколько осталось и какой предел сработал (правило — src/limit.rs). Число только здесь, под кольцом его нет.
+  // «Дневной предел» приходит, только когда на нём остановилась рутина: живой разговор он не держит.
   function limitText(limit) {
     if (!limit) return '';
     const percent = Math.round(Math.min(1, Math.max(0, limit.left)) * 100);
@@ -247,8 +248,13 @@
       const rub = Number.isFinite(limit.moneyLeftKop) ? (limit.moneyLeftKop / 100).toLocaleString(window.LOCALE, { style: 'currency', currency: 'RUB' }) : '';
       return rub ? tr('Осталось {percent} %: {money} · кошелёк Deloist', { percent, money: rub }) : tr('Осталось {percent} % · кошелёк Deloist', { percent });
     }
-    if (limit.source === 'plan') return tr('Упёрся в лимит подписки провайдера');
-    return tr('Осталось {percent} % дневного предела токенов', { percent });
+    if (limit.source === 'plan') {
+      const reset = DeloistUI.resetLine(limit.resetsAt);
+      const left = tr('Осталось {percent} % подписки агента', { percent });
+      return reset ? `${left} · ${reset}` : left;
+    }
+    if (limit.source === 'month') return tr('Осталось {percent} % месячного лимита бота · сброс 1-го числа', { percent });
+    return tr('Дневной предел токенов исчерпан: рутины остановлены');
   }
 
   function hideLabel() {
