@@ -2041,6 +2041,10 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 
 /* Вложения: скрепка слева от поля, лента файлов над полем, превью в переписке. */
 #chat { position: relative; background: var(--k-canvas); }
+/* Сцена оркестратора (ui/src/components/orchestrator): вместо ленты и поля ввода. */
+.orch-stage { flex: 1; min-height: 0; }
+.orch-stage[hidden] { display: none; }
+#chat.orch-on > .messages, #chat.orch-on > .composer-card, #chat.orch-on > .queue, #chat.orch-on > .toc-btn, #chat.orch-on > .toc-pop { display: none; }
 .composer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .composer-main textarea { flex: none; width: 100%; }
 /* Подсветка сроков (ChatDates.svelte) лежит позади поля, чипы — под ним. */

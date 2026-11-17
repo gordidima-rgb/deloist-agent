@@ -2119,6 +2119,139 @@ function showIntro(botId) {
 // Группы
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Сцена оркестратора: пока у команды stage = interview, вместо чата — большой шар и разговор пузырями.
+// Это тот же чат бота-оркестратора (ведущего команды): события и карточки те же, меняется только вид.
+// ---------------------------------------------------------------------------
+
+let orchStage = null; // { roomId, botId, view, api, watch }
+
+const isOrchestrator = (bot) => Boolean(bot?.orchestrator);
+// Оркестратор команды, которая ещё собирается; иначе null.
+const interviewBot = (room) => {
+  if (!room || room.archived || room.stage !== 'interview') return null;
+  const lead = botById(room.lead);
+  return isOrchestrator(lead) ? lead : null;
+};
+
+function closeOrchStage() {
+  if (!orchStage) return;
+  const { view, watch, botId } = orchStage;
+  orchStage = null;
+  watch?.disconnect();
+  try { view?.destroy(); } catch {}
+  S.avatars.delete(`side:${botId}:stage`);
+  const host = $('#orch-stage');
+  host.hidden = true;
+  host.replaceChildren();
+  $('#chat').classList.remove('orch-on');
+}
+
+// Кнопка «Перестроить команду» в шапке: только у готовой команды с оркестратором во главе.
+function paintRebuild() {
+  const room = currentRoom();
+  const show = Boolean(room && !room.archived && room.stage === 'ready' && isOrchestrator(botById(room.lead)));
+  const btn = $('#head-rebuild');
+  btn.hidden = !show;
+  if (show) {
+    btn.textContent = tr('Перестроить команду');
+    btn.title = tr('Оркестратор заново расспросит и предложит состав');
+  }
+}
+
+async function rebuildTeam() {
+  const room = currentRoom();
+  if (!room) return;
+  try {
+    await api(`/api/rooms/${encodeURIComponent(room.id)}/rebuild`, { method: 'POST' });
+    await refreshState();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+// «Новая команда»: оркестратор создаётся вместе с ней, ботов заранее иметь не нужно.
+async function newOrchestratedTeam() {
+  try {
+    const { room } = await api('/api/rooms', { method: 'POST', body: { name: tr('Новая команда'), withOrchestrator: true } });
+    await refreshState();
+    selectRoom(room.id);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+// Реплика человека (текстом или голосом) уходит оркестратору, как в обычном чате бота.
+async function stageSend(botId, text, opts = {}) {
+  const body = { text };
+  if (opts.voice) body.voice = true;
+  await api(`/api/bots/${encodeURIComponent(botId)}/messages`, { method: 'POST', body });
+}
+
+async function openOrchStage(room, bot) {
+  closeOrchStage();
+  const host = $('#orch-stage');
+  const entry = { roomId: room.id, botId: bot.id, view: null, api: null, watch: null };
+  orchStage = entry;
+  $('#chat').classList.add('orch-on');
+  host.hidden = false;
+  let history = [];
+  try {
+    ({ messages: history } = await api(`/api/bots/${encodeURIComponent(bot.id)}/thread?limit=300`));
+  } catch (err) {
+    toast(err.message);
+  }
+  if (orchStage !== entry) return;
+  // Первая реплика: показываем её сразу, пока сервер ничего не сказал.
+  if (!history.some((m) => m.role === 'assistant' && String(m.text || '').trim()) && !S.busy.has(bot.id)) {
+    history = [{ role: 'assistant', text: tr('Привет! Расскажи, какую задачу будем решать. Я подберу команду специалистов, назначу им роли и правила.') }, ...history];
+  }
+  entry.view = window.DeloistUI.mountOrchestratorStage(host, {
+    bot: { id: bot.id, name: bot.name, ...lookOf(bot) },
+    stage: 'interview',
+    history,
+    mountOrb: (el, { size }) => {
+      const avatar = window.CrewAvatar ? CrewAvatar.mount(el, { size, ...lookOf(bot), skin: 13 }) : null;
+      // Слот «side:<бот>:…» — общие настроения от событий хода доходят и до этого шара.
+      if (avatar) S.avatars.set(`side:${bot.id}:stage`, avatar);
+      return avatar;
+    },
+    onsend: (text, opts) => stageSend(bot.id, text, opts),
+    onready: (stageApi) => { entry.api = stageApi; },
+    onleave: () => {
+      if (orchStage !== entry) return;
+      closeOrchStage();
+      selectRoom(room.id);
+    },
+    onerror: (message) => toast(message),
+  });
+  // Карточки (вопрос, предложение команды, разрешение) рисует прежний код в скрытую ленту чата: забираем их на сцену.
+  entry.watch = new MutationObserver((records) => {
+    for (const rec of records) {
+      for (const node of rec.addedNodes) {
+        if (node.nodeType === 1 && node.matches?.('.card, .msg-card')) entry.api?.addCard(node);
+      }
+    }
+  });
+  entry.watch.observe(messagesEl(), { childList: true });
+  if (S.busy.has(bot.id)) entry.api?.event({ type: 'turn_start' });
+  await showPending(bot.id);
+}
+
+// Состояние команды изменилось: сцена появляется (перестроить) или уходит в угол (команда собрана).
+function syncOrchStage() {
+  if (inRoom()) {
+    const room = currentRoom();
+    const bot = interviewBot(room);
+    if (orchStage && orchStage.roomId === room?.id) {
+      if (!bot) orchStage.view?.update({ stage: 'ready' });
+    } else if (bot && !orchStage) {
+      selectRoom(room.id);
+    }
+  }
+  paintRebuild();
+}
+
 async function selectRoom(id) {
   leaveTeam();
   if (!$('#drawer').hidden) closeDrawer();
@@ -2163,6 +2296,13 @@ async function selectRoom(id) {
 
   renderSidebar();
   clearMessages();
+  paintRebuild();
+  // Команда ещё собирается: вместо чата — сцена оркестратора.
+  const orchBot = interviewBot(room);
+  if (orchBot) {
+    await openOrchStage(room, orchBot);
+    return;
+  }
 
   const cached = S.roomThreads.get(id);
   if (cached?.length) renderRoomThread(cached);
@@ -2289,13 +2429,17 @@ function toggleNewMenu() {
     items: [
       { id: 'bot', label: tr('Новый бот') },
       { id: 'team', label: tr('Новая команда') },
+      { id: 'manual', label: tr('Соберу сам') },
     ],
     label: tr('Создать'),
     onpick: (id) => {
       closeNewMenu();
       if (id === 'bot') return openModal('modal-new');
-      if (!S.bots.length) return toast(tr('Сначала создай хотя бы одного бота'));
-      openRoomModal(null);
+      if (id === 'manual') {
+        if (!S.bots.length) return toast(tr('Сначала создай хотя бы одного бота'));
+        return openRoomModal(null);
+      }
+      newOrchestratedTeam();
     },
     onclose: (focus) => closeNewMenu(focus),
   });
@@ -3390,6 +3534,13 @@ function handleEvent(ev) {
     DeloistProviders.onEvent(ev);
     return;
   }
+  // Идёт сцена оркестратора: его разговор и карточки показывает она.
+  if (orchStage && ev.botId === orchStage.botId && !ev.roomId) {
+    orchStage.api?.event(ev);
+    if (ev.type === 'question') questionCard(ev);
+    else if (ev.type === 'approval') approvalCard(ev);
+    else if (ev.type === 'team_proposal') teamProposalCard(ev);
+  }
   const roomMine = inRoom() && ev.roomId === S.view.id;
   const mine = !inRoom() && ev.botId === S.currentId;
   // Отвечающий в открытой группе бот спрашивает разрешение прямо там: иначе ход висел бы без ответа.
@@ -4293,6 +4444,7 @@ async function refreshState() {
     }
     syncRooms();
     pruneAvatars();
+    syncOrchStage();
     markLook();
     renderSidebar();
     syncWaiting();
@@ -4786,6 +4938,7 @@ async function selectBot(id) {
   setPanelTitle(tr('Профиль, память, файлы'));
   $('#btn-browser').hidden = false;
   $('#head-reassign').hidden = true;
+  $('#head-rebuild').hidden = true;
   closeReassignMenu();
   S.unread.delete(id);
   S.live = null;
@@ -7726,6 +7879,7 @@ function dropTeamAvatars() {
 }
 
 function leaveTeam() {
+  closeOrchStage();
   leaveCatalog();
   leaveRemote();
   leaveWorkflows();
@@ -7747,6 +7901,8 @@ function clearChatView() {
   $('#head-avatar').classList.remove('room-icon');
   setPanelTitle(tr('Профиль, память, файлы'));
   $('#head-reassign').hidden = true;
+  $('#head-rebuild').hidden = true;
+  closeOrchStage();
   closeReassignMenu();
   clearMessages();
   S.avatars.get('head')?.destroy();
@@ -8181,7 +8337,25 @@ function fillRoutineBots() {
 // Старт
 // ---------------------------------------------------------------------------
 
+// Новая установка: «Главная команда» с одним оркестратором ждёт расспроса — её и открываем, если больше открывать нечего.
+function firstRunRoom() {
+  if (S.bots.some((b) => !isOrchestrator(b))) return null;
+  return S.rooms.find((r) => interviewBot(r)) || null;
+}
+
+window.addEventListener('deloist:team-chosen', async () => {
+  await refreshState();
+  if (inRoom() || (S.currentId && !teamOpen())) return;
+  const first = firstRunRoom();
+  if (first) selectRoom(first.id);
+});
+
 function selectFirst() {
+  const intro = firstRunRoom();
+  if (intro) {
+    selectRoom(intro.id);
+    return;
+  }
   const first = [...S.bots].sort((a, b) => Number(b.pinned) - Number(a.pinned))[0];
   if (first) selectBot(first.id);
   else {
@@ -8290,6 +8464,7 @@ function bindUi() {
   $('#dock-activity').addEventListener('change', (e) => saveDock({ dockActivity: e.target.checked }));
   $('#head-model').addEventListener('click', openHeadModelPopover);
   $('#head-reassign').addEventListener('click', openReassignMenu);
+  $('#head-rebuild').addEventListener('click', rebuildTeam);
   document.addEventListener('click', (e) => {
     const trigger = e.target.closest('[data-open-settings]');
     if (!trigger) return;
@@ -9205,6 +9380,11 @@ async function boot() {
       sessionStorage.removeItem('deloist-dev-view');
       if (back?.kind === 'bot' && botById(back.id)) selectBot(back.id);
     } catch {}
+    // После первого запуска (chooseTeam) открываем сцену оркестратора, если ничего другого не выбрано.
+    if (!PANE && teamOpen()) {
+      const first = firstRunRoom();
+      if (first) selectRoom(first.id);
+    }
     syncWaiting();
     refreshNeeds();
     if (!PANE) noteAway();

@@ -1,0 +1,246 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
+import { mountComponent } from '../../lib/mount.svelte.js';
+import Stage from './Stage.svelte';
+import { moodForPhase, phaseOf } from './model.js';
+
+let instance;
+let host;
+let api;
+let feel;
+let destroyed;
+
+const orbFactory = () => (el) => {
+  feel = vi.fn();
+  destroyed = vi.fn();
+  return { feel, destroy: destroyed };
+};
+
+function render(props = {}) {
+  host = document.createElement('div');
+  document.body.append(host);
+  instance = mount(Stage, {
+    target: host,
+    props: {
+      bot: { id: 'o1', name: 'Оркестратор', skin: 13 },
+      stage: 'interview',
+      mountOrb: orbFactory(),
+      voice: { voiceButton: vi.fn(() => ({ cancel: vi.fn() })) },
+      onready: (a) => { api = a; },
+      ...props,
+    },
+  });
+  flushSync();
+  return host;
+}
+
+const bubbles = () => [...host.querySelectorAll('.orch-bub:not(.orch-wait)')].map((b) => ({ user: b.parentElement.classList.contains('is-user'), text: b.textContent.trim() }));
+const waitLabel = () => host.querySelector('.orch-wait-label')?.textContent;
+
+beforeEach(() => {
+  delete window.CrewAvatarStates;
+});
+
+afterEach(() => {
+  if (instance?.destroy) instance.destroy();
+  else if (instance) unmount(instance);
+  host?.remove();
+  instance = null;
+  host = null;
+  api = null;
+  vi.useRealTimers();
+  delete window.CrewAvatarStates;
+});
+
+describe('Stage bubbles', () => {
+  it('draws history: orchestrator on the left, human on the right', () => {
+    render({ history: [{ role: 'assistant', text: 'Какую задачу решаем?' }, { role: 'user', text: 'Писать посты' }, { role: 'tool', text: 'x' }] });
+    expect(bubbles()).toEqual([
+      { user: false, text: 'Какую задачу решаем?' },
+      { user: true, text: 'Писать посты' },
+    ]);
+  });
+
+  it('shows thinking, then typing dots while text_delta streams, then the final text', () => {
+    render();
+    api.event({ type: 'turn_start', botId: 'o1' });
+    flushSync();
+    expect(waitLabel()).toBe('Думает…');
+    api.event({ type: 'text_delta', turnId: 't', step: 1, text: 'Привет' });
+    api.event({ type: 'text_delta', turnId: 't', step: 1, text: ', давай' });
+    flushSync();
+    expect(waitLabel()).toBe('Печатает…');
+    expect(bubbles()).toEqual([{ user: false, text: 'Привет, давай' }]);
+    api.event({ type: 'message', message: { role: 'assistant', text: 'Привет, давай начнём' } });
+    api.event({ type: 'turn_end' });
+    flushSync();
+    expect(bubbles()).toEqual([{ user: false, text: 'Привет, давай начнём' }]);
+    expect(host.querySelector('.orch-wait')).toBeNull();
+  });
+
+  it('sending adds a right bubble at once, shows thinking, and the server echo is not doubled', async () => {
+    const onsend = vi.fn(() => Promise.resolve());
+    render({ onsend });
+    api.send('  Нужен бот для почты ');
+    flushSync();
+    expect(onsend).toHaveBeenCalledWith('Нужен бот для почты', {});
+    expect(bubbles()).toEqual([{ user: true, text: 'Нужен бот для почты' }]);
+    expect(waitLabel()).toBe('Думает…');
+    api.event({ type: 'message', message: { role: 'user', text: 'Нужен бот для почты' } });
+    flushSync();
+    expect(bubbles()).toHaveLength(1);
+  });
+
+  it('Enter in the field sends, Shift+Enter does not', () => {
+    const onsend = vi.fn(() => Promise.resolve());
+    render({ onsend });
+    const field = host.querySelector('.orch-input');
+    field.value = 'привет';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
+    expect(onsend).not.toHaveBeenCalled();
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onsend).toHaveBeenCalledWith('привет', {});
+  });
+});
+
+describe('Stage cards and «Хватит, предлагай»', () => {
+  function questionNode() {
+    const card = document.createElement('div');
+    card.className = 'card question';
+    card.innerHTML = '<button data-choice="A">A</button><button data-dismiss>Пропустить</button>';
+    return card;
+  }
+
+  it('hosts the card from app.js in the stream and drops it when app.js removes it', async () => {
+    render();
+    const card = questionNode();
+    api.addCard(card);
+    flushSync();
+    expect(host.querySelector('.orch-card .card.question')).toBe(card);
+    card.remove();
+    await Promise.resolve();
+    flushSync();
+    expect(host.querySelector('.orch-card')).toBeNull();
+  });
+
+  it('a click on an option shows the answer as the human bubble', () => {
+    render();
+    api.addCard(questionNode());
+    flushSync();
+    host.querySelector('[data-choice]').click();
+    flushSync();
+    expect(bubbles()).toEqual([{ user: true, text: 'A' }]);
+  });
+
+  it('the button skips the open question and sends the text as a message', () => {
+    const onsend = vi.fn(() => Promise.resolve());
+    render({ onsend });
+    const card = questionNode();
+    const dismissed = vi.fn();
+    card.querySelector('[data-dismiss]').addEventListener('click', dismissed);
+    api.addCard(card);
+    flushSync();
+    host.querySelector('.orch-cardbox .orch-enough').click();
+    flushSync();
+    expect(dismissed).toHaveBeenCalledTimes(1);
+    expect(onsend).toHaveBeenCalledWith('Хватит, предлагай', {});
+  });
+
+  it('without an open question the button sits above the field once the human has spoken', () => {
+    const onsend = vi.fn(() => Promise.resolve());
+    render({ onsend });
+    expect(host.querySelector('.orch-foot .orch-enough')).toBeNull();
+    api.send('задача');
+    flushSync();
+    host.querySelector('.orch-foot .orch-enough').click();
+    expect(onsend).toHaveBeenLastCalledWith('Хватит, предлагай', {});
+  });
+});
+
+describe('Stage phases and mood', () => {
+  it('maps the phases', () => {
+    expect(phaseOf({ stage: 'interview' })).toBe('listening');
+    expect(phaseOf({ stage: 'interview', busy: true })).toBe('thinking');
+    expect(phaseOf({ stage: 'interview', busy: true, streaming: true })).toBe('typing');
+    expect(phaseOf({ stage: 'interview', busy: true, openCards: 1 })).toBe('asking');
+    expect(phaseOf({ stage: 'interview', hearing: true, openCards: 1 })).toBe('listening');
+    expect(phaseOf({ stage: 'ready', openCards: 1 })).toBe('done');
+  });
+
+  it('asks avatar-states for the mood and falls back to existing ones', () => {
+    expect(moodForPhase('asking', {})).toBe('star');
+    expect(moodForPhase('done', {})).toBe('joy');
+    expect(moodForPhase('thinking', {})).toBeNull();
+    expect(moodForPhase('thinking', { stageMood: (p) => ({ thinking: 'think' })[p] })).toBe('think');
+  });
+
+  it('feels the orb for each phase with 3600 ms', () => {
+    window.CrewAvatarStates = { stageMood: (p) => `m-${p}` };
+    render();
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('m-listening', 3600);
+    api.event({ type: 'turn_start' });
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('m-thinking', 3600);
+    api.event({ type: 'text_delta', turnId: 't', step: 1, text: 'а' });
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('m-typing', 3600);
+    api.addCard(Object.assign(document.createElement('div'), { className: 'card question' }));
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('m-asking', 3600);
+  });
+
+  it('works with the fallback moods when avatar-states has no stageMood', () => {
+    render();
+    api.addCard(Object.assign(document.createElement('div'), { className: 'card question' }));
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('star', 3600);
+  });
+});
+
+describe('Stage ready', () => {
+  const mountLive = (props) => {
+    host = document.createElement('div');
+    document.body.append(host);
+    const handle = mountComponent(Stage, host, { bot: { id: 'o1', name: 'O', skin: 13 }, stage: 'interview', mountOrb: orbFactory(), voice: {}, ...props });
+    flushSync();
+    instance = { destroy: handle.destroy };
+    return handle;
+  };
+
+  it('shrinks the orb to the corner and then calls onleave', () => {
+    vi.useFakeTimers();
+    const onleave = vi.fn();
+    const handle = mountLive({ onleave });
+    handle.update({ stage: 'ready' });
+    flushSync();
+    expect(host.querySelector('.orch').classList.contains('is-leaving')).toBe(true);
+    expect(onleave).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(600);
+    expect(onleave).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves at once with prefers-reduced-motion', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = () => ({ matches: true });
+    try {
+      const onleave = vi.fn();
+      const handle = mountLive({ onleave });
+      handle.update({ stage: 'ready' });
+      flushSync();
+      await Promise.resolve();
+      expect(onleave).toHaveBeenCalledTimes(1);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('feels the done mood when the team is ready', () => {
+    window.CrewAvatarStates = { stageMood: (p) => (p === 'done' ? 'proud' : null) };
+    const handle = mountLive({ onleave: () => {} });
+    handle.update({ stage: 'ready' });
+    flushSync();
+    expect(feel).toHaveBeenLastCalledWith('proud', 3600);
+  });
+});

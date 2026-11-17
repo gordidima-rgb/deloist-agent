@@ -417,6 +417,8 @@ window.DeloistSignin = (() => {
           window.DeloistAccount = { ...window.DeloistAccount, onboarded: true, giftDenied: Boolean(res.giftDenied) };
           box.remove();
           resolve();
+          // Сервер завёл «Главную команду» с оркестратором: окно открывает её сцену.
+          window.dispatchEvent(new Event('deloist:team-chosen'));
           // Своя подписка: сразу к настройкам модели, когда окно загрузится.
           if (res.plan === 'own') window.addEventListener('deloist:ready', () => window.DeloistProviders?.open(), { once: true });
         } catch (err) {
