@@ -477,8 +477,38 @@ pub struct Routine {
     pub approval_floor: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_status: Option<String>,
+    /// Номер следующего повтора после неудачи; 0 — повторов нет.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub retry_attempt: u32,
+    /// Когда началась первая неудачная попытка этой серии: через сутки от неё рутина сдаётся.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub retry_since: i64,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+/// Чем кончилась попытка рутины для расписания.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoutineOutcome {
+    /// Выполнена или повторять не нужно (тихо, остановил человек, предел токенов).
+    Done,
+    /// Не дошла до конца: следующий повтор в `at`.
+    Retry { at: i64, attempt: u32 },
+    /// Сутки повторов не помогли: ошибка, человеку сообщаем.
+    GaveUp { attempts: u32 },
+}
+
+/// Повторяем только то, что сорвалось само: ошибку модели или обрыв хода перезапуском.
+pub fn routine_retryable(status: &str) -> bool {
+    matches!(status, "failed" | "interrupted")
 }
 
 impl Default for Routine {
@@ -503,6 +533,8 @@ impl Default for Routine {
             goal_id: String::new(),
             approval_floor: String::new(),
             last_status: None,
+            retry_attempt: 0,
+            retry_since: 0,
             extra: Map::new(),
         }
     }
@@ -2593,9 +2625,15 @@ impl Store {
             if reminders::is_reminder(r) {
                 reminders::apply(r, patch);
             }
+            let rescheduled = ["everyMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null())) || patch.get("onceAt").is_some();
+            // Человек выключил рутину или поменял расписание: прежняя серия повторов больше не нужна.
+            if rescheduled || !r.enabled || r.hook {
+                r.retry_attempt = 0;
+                r.retry_since = 0;
+            }
             if r.hook {
                 r.next_run = 0;
-            } else if ["everyMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null())) || patch.get("onceAt").is_some() {
+            } else if rescheduled {
                 r.next_run = next_run_for(r, now());
             }
             // Только для проверок: приблизить срок, не дожидаясь его.
@@ -2629,10 +2667,55 @@ impl Store {
                 return Ok(());
             };
             r.last_run = now();
-            r.last_status = Some(if ok { "ok" } else { "error" }.to_string());
+            // «Готово» ставит только конец хода: до него рутина «идёт», а обрыв перезапуском виден при старте.
+            r.last_status = Some(if ok { "running" } else { "error" }.to_string());
             r.next_run = schedule::next_run_ms(r, now());
         }
         self.persist().await
+    }
+
+    /// Ход рутины кончился со статусом `status`: выполнено — серия повторов сброшена;
+    /// сорвалось само — следующий повтор по лестнице, а через сутки неудач — ошибка.
+    pub async fn finish_routine_run(&self, id: &str, status: &str, started_at: i64) -> std::io::Result<RoutineOutcome> {
+        let outcome = {
+            let mut state = self.state.lock().unwrap();
+            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
+                return Ok(RoutineOutcome::Done);
+            };
+            let t = now();
+            // Цель ведёт свои запуски сама, вебхук без расписания, выключенную не будим.
+            let repeatable = routine_retryable(status) && r.enabled && !r.hook && r.goal_id.is_empty();
+            let outcome = if repeatable {
+                let since = if r.retry_attempt == 0 || r.retry_since == 0 { started_at.min(t) } else { r.retry_since };
+                let attempt = r.retry_attempt + 1;
+                match schedule::retry_at(attempt, since, t, schedule::next_run_ms(r, t)) {
+                    Some(at) => {
+                        r.retry_attempt = attempt;
+                        r.retry_since = since;
+                        r.next_run = at;
+                        RoutineOutcome::Retry { at, attempt }
+                    }
+                    None => {
+                        let attempts = r.retry_attempt + 1;
+                        r.retry_attempt = 0;
+                        r.retry_since = 0;
+                        r.next_run = schedule::next_run_ms(r, t);
+                        RoutineOutcome::GaveUp { attempts }
+                    }
+                }
+            } else {
+                r.retry_attempt = 0;
+                r.retry_since = 0;
+                RoutineOutcome::Done
+            };
+            r.last_status = Some(match outcome {
+                RoutineOutcome::GaveUp { .. } => "gave_up".to_string(),
+                _ => status.to_string(),
+            });
+            outcome
+        };
+        self.persist().await?;
+        Ok(outcome)
     }
 
     /// Запуск не состоялся (не то время, предел токенов): просто следующий срок.
@@ -3268,6 +3351,42 @@ mod tests {
         assert_eq!(store.read_model_thread("bot").await.len(), 2, "модель получает часы");
         assert_eq!(store.last_time_context("bot").await, Some(1));
         let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    // Рутина, не дошедшая до «выполнено», повторяется по лестнице, а через сутки сдаётся.
+    #[tokio::test]
+    async fn failed_routine_retries_on_a_ladder_and_gives_up_after_a_day() {
+        let dir = temp_dir("routine-retry");
+        let store = Store::open(dir.clone()).await.unwrap();
+        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "at": "09:00" })).await.unwrap();
+
+        store.mark_routine_run(&r.id, true).await.unwrap();
+        assert_eq!(store.routine(&r.id).unwrap().last_status.as_deref(), Some("running"), "до конца хода — не «готово»");
+
+        let t = now();
+        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "interrupted", t).await.unwrap() else { panic!("ждали повтор") };
+        assert_eq!(attempt, 1);
+        assert!((at - t - 5 * 60_000).abs() < 5_000, "первый повтор через 5 минут");
+        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "failed", t).await.unwrap() else { panic!("ждали повтор") };
+        assert_eq!(attempt, 2);
+        assert!((at - t - 10 * 60_000).abs() < 5_000, "второй через 10");
+        let saved = store.routine(&r.id).unwrap();
+        assert_eq!((saved.next_run, saved.last_status.as_deref()), (at, Some("failed")));
+
+        assert_eq!(store.finish_routine_run(&r.id, "ok", t).await.unwrap(), RoutineOutcome::Done);
+        let saved = store.routine(&r.id).unwrap();
+        assert_eq!((saved.retry_attempt, saved.retry_since), (0, 0), "выполнено — серия сброшена");
+
+        // Человек остановил ход сам: не повторяем.
+        assert_eq!(store.finish_routine_run(&r.id, "stopped", t).await.unwrap(), RoutineOutcome::Done);
+
+        // Первая неудача случилась больше суток назад: сдаёмся с ошибкой.
+        let long_ago = now() - schedule::RETRY_WINDOW_MS - 60_000;
+        assert_eq!(store.finish_routine_run(&r.id, "failed", long_ago).await.unwrap(), RoutineOutcome::GaveUp { attempts: 1 });
+        let saved = store.routine(&r.id).unwrap();
+        assert_eq!(saved.last_status.as_deref(), Some("gave_up"));
+        assert_eq!(saved.retry_attempt, 0);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     // Ночь тихих рутин не должна стоить боту памяти о живом разговоре.

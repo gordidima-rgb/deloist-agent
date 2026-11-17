@@ -1658,32 +1658,105 @@ function appendThreadMessage(msg) {
 // ---------------------------------------------------------------------------
 
 // Строка о закрытой задаче участника: ведущий узнаёт об итоге, не просыпаясь. Само сообщение хранится в ленте бота.
+// Шары подчинённых в строках задач: неподвижные, а ушедшие из ленты освобождаем, чтобы не копились.
+const taskOrbs = new Set();
+function pruneTaskOrbs() {
+  const now = Date.now();
+  for (const orb of taskOrbs) {
+    if (now - orb.born > 2000 && !orb.avatar.canvas.isConnected) {
+      orb.avatar.destroy();
+      taskOrbs.delete(orb);
+    }
+  }
+}
+
+function taskAvatar(bot, name) {
+  const face = document.createElement('div');
+  face.className = 'task-line-avatar';
+  face.setAttribute('aria-hidden', 'true');
+  pruneTaskOrbs();
+  const avatar = bot && window.CrewAvatar ? CrewAvatar.mount(face, { size: 28, still: true, ...lookOf(bot) }) : null;
+  if (avatar) {
+    taskOrbs.add({ avatar, born: Date.now() });
+  } else {
+    face.textContent = avatarInitial(bot || { name });
+    face.style.background = safeColor(bot?.color);
+  }
+  return face;
+}
+
+// Длинный отчёт свёрнут до нескольких строк: целиком — по кнопке.
+const TASK_TEXT_FOLD = 320;
+
 function taskRow(msg) {
   const row = document.createElement('div');
   row.className = `task-line task-line--${msg.state === 'done' ? 'done' : 'failed'}`;
   row.dataset.id = msg.id || '';
-  const name = msg.toName || '';
-  const head = document.createElement('span');
+  const bot = msg.to ? botById(msg.to) : null;
+  const name = msg.toName || bot?.name || '';
+  row.append(taskAvatar(bot, name));
+
+  const body = document.createElement('div');
+  body.className = 'task-line-body';
+  const head = document.createElement('div');
   head.className = 'task-line-head';
   head.textContent = msg.state === 'done'
     ? tr('{name}: задача выполнена', { name })
     : msg.state === 'interrupted'
       ? tr('{name}: задача прервана', { name })
       : tr('{name}: задача не выполнена', { name });
-  row.append(head);
+  body.append(head);
+
+  const actions = document.createElement('div');
+  actions.className = 'task-line-actions';
   if (msg.text) {
-    const text = document.createElement('span');
+    const text = document.createElement('div');
     text.className = 'task-line-text';
-    text.textContent = msg.text;
-    row.append(text);
+    // Как обычный ответ бота: ссылки на файлы в его папке открываются в ящике «Файлы».
+    text.innerHTML = md(msg.text);
+    body.append(text);
+    if (String(msg.text).length > TASK_TEXT_FOLD) {
+      text.classList.add('is-folded');
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'k-btn k-btn--sm k-btn--ghost';
+      more.textContent = tr('Показать полностью');
+      more.addEventListener('click', () => {
+        const folded = text.classList.toggle('is-folded');
+        more.textContent = folded ? tr('Показать полностью') : tr('Свернуть');
+      });
+      actions.append(more);
+    }
   }
-  if (Array.isArray(msg.files) && msg.files.length) {
-    const files = document.createElement('span');
-    files.className = 'task-line-files';
-    files.textContent = tr('Файлов: {n}', { n: msg.files.length });
-    files.title = msg.files.join(', ');
-    row.append(files);
+  // Файлы результата — ссылками: щелчок открывает файл у подчинённого.
+  const files = (Array.isArray(msg.files) ? msg.files : []).filter((path) => window.DeloistUI.workspaceRef(path));
+  if (files.length) {
+    const list = document.createElement('div');
+    list.className = 'task-line-files';
+    for (const path of files) {
+      const link = document.createElement('a');
+      link.href = '#';
+      link.className = 'md-file task-line-file';
+      link.dataset.file = path;
+      link.title = path;
+      link.innerHTML = ic('file-text');
+      link.append(String(path).split(/[\\/]/).pop());
+      list.append(link);
+    }
+    body.append(list);
   }
+  if (bot) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'k-btn k-btn--sm';
+    open.innerHTML = ic('chat-bubble');
+    open.append(tr('Открыть чат'));
+    open.title = tr('Посмотреть, как {name} сделал задачу', { name });
+    open.addEventListener('click', () => selectBot(bot.id));
+    actions.append(open);
+  }
+  if (actions.childElementCount) body.append(actions);
+  row.append(body);
   return row;
 }
 
@@ -7223,7 +7296,12 @@ const STATUS_LABELS = {
   limit: tr('упёрлось в предел токенов'),
   skipped: tr('пропущено: компьютер спал'),
   error: tr('не запустилась'),
+  running: tr('идёт'),
+  interrupted: tr('прервалась: программа закрылась'),
+  gave_up: tr('не выполнилась за сутки'),
 };
+// Чип прошлого запуска с тревожным значком: рутина не дошла до «готово».
+const BAD_STATUSES = ['failed', 'error', 'limit', 'needs', 'interrupted', 'gave_up'];
 const statusClass = (status) => (STATUS_LABELS[status] ? `st-${status}` : '');
 
 const isTime = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
@@ -7287,12 +7365,18 @@ function routineParts(r) {
   const icon = (name) => ic(name);
   const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
   const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
-  const lastTitle = r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '';
+  const retry = Number(r.retryAttempt) > 0 && r.enabled && !r.hook
+    ? tr('Повтор {n} в {time}', { n: Number(r.retryAttempt) + 1, time: nextText(r.nextRun) })
+    : '';
+  const lastTitle = r.lastRun
+    ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${retry ? `. ${retry}` : ''}`
+    : '';
+  const lastIcon = BAD_STATUSES.includes(r.lastStatus) ? 'alert-circle' : r.lastStatus === 'running' ? 'clock' : 'check-long';
   const chips = [
     `<span class="rt-chip rt-bot" title="${tr('Бот')}">${icon('user')}${escapeHtml(bot?.name || tr('бот удалён'))}</span>`,
     `<span class="rt-chip" title="${tr('Когда')}">${icon('repeat')}${escapeHtml(scheduleText(r))}</span>`,
     next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? 'link' : 'clock')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
-    r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(['failed', 'error', 'limit', 'needs'].includes(r.lastStatus) ? 'alert-circle' : 'check-long')}${escapeHtml(whenText(r.lastRun))}</span>` : '',
+    r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(lastIcon)}${escapeHtml(whenText(r.lastRun))}</span>` : '',
   ].join('');
   return { gist, chips };
 }

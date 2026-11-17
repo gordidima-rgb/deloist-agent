@@ -81,11 +81,82 @@ pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool,
         voice: false,
         run,
     };
-    let started = start_turn(app, &routine.bot_id, &text, opts);
-    if let Err(e) = app.store.mark_routine_run(&routine.id, started.is_ok()).await {
+    // «Идёт» ставим до старта: быстрый ход не должен закончиться раньше, чем его отметили запущенным.
+    if let Err(e) = app.store.mark_routine_run(&routine.id, true).await {
         eprintln!("[routine] {}: {e}", routine.title);
     }
+    let started = start_turn(app, &routine.bot_id, &text, opts);
+    if started.is_err() {
+        if let Err(e) = app.store.set_routine_status(&routine.id, "error").await {
+            eprintln!("[routine] {}: {e}", routine.title);
+        }
+    }
     started
+}
+
+fn clock(ms: i64) -> String {
+    use chrono::TimeZone;
+    chrono::Local.timestamp_millis_opt(ms).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
+}
+
+/// Ход рутины кончился (или оборвался перезапуском): статус по итогу, повтор по лестнице,
+/// через сутки неудач — ошибка. Всё, что не «выполнено», человек видит строкой в чате бота.
+pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str, status: &str, started_at: i64) {
+    use crate::store::RoutineOutcome;
+    let outcome = match app.store.finish_routine_run(&routine.id, status, started_at).await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            eprintln!("[routine] {}: {e}", routine.title);
+            return;
+        }
+    };
+    let english = app.store.settings().ui_lang == "en";
+    let title = &routine.title;
+    let interrupted = status == "interrupted";
+    let text = match &outcome {
+        RoutineOutcome::Done => return,
+        RoutineOutcome::Retry { at, attempt } => {
+            let at = clock(*at);
+            let n = attempt + 1;
+            match (interrupted, english) {
+                (true, false) => format!("Рутина «{title}» прервалась: программа закрылась посреди хода. Повторю в {at} (попытка {n})."),
+                (true, true) => format!("Routine “{title}” was cut off: the app closed mid-turn. Retrying at {at} (attempt {n})."),
+                (false, false) => format!("Рутина «{title}» не выполнена. Повторю в {at} (попытка {n})."),
+                (false, true) => format!("Routine “{title}” did not finish. Retrying at {at} (attempt {n})."),
+            }
+        }
+        RoutineOutcome::GaveUp { attempts } => {
+            let text = if english {
+                format!("Routine “{title}” has not finished for a day, attempts: {attempts}. Marked as an error; the next run follows the schedule.")
+            } else {
+                format!("Рутина «{title}» не выполнилась за сутки, попыток: {attempts}. Ставлю ошибку, дальше — по расписанию.")
+            };
+            if let Some(r) = app.store.routine(&routine.id) {
+                note(app, &r, "gave_up", &text).await;
+            }
+            text
+        }
+    };
+    let entry = json!({
+        "id": uid("msg"), "role": "assistant", "text": text, "at": now(),
+        "error": matches!(outcome, RoutineOutcome::GaveUp { .. }), "routineId": routine.id,
+    });
+    if let Err(e) = app.store.append_message(bot_id, entry.clone()).await {
+        eprintln!("[routine] {title}: {e}");
+    }
+    app.turns.emit(json!({ "type": "message", "botId": bot_id, "message": entry }));
+}
+
+/// Программа закрылась, пока рутина шла: её ход пропал целиком. При запуске отмечаем обрыв и ставим повтор.
+pub async fn recover_interrupted(app: &Arc<App>) {
+    for routine in app.store.routines() {
+        if routine.last_status.as_deref() != Some("running") || crate::reminders::is_reminder(&routine) {
+            continue;
+        }
+        note(app, &routine, "interrupted", "Программа закрылась посреди хода.").await;
+        let rref = RoutineRef { id: routine.id.clone(), title: routine.title.clone() };
+        routine_finished(app, &rref, &routine.bot_id, "interrupted", routine.last_run).await;
+    }
 }
 
 async fn tick(app: &Arc<App>) {
@@ -122,7 +193,8 @@ async fn tick(app: &Arc<App>) {
             let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;
             continue;
         }
-        if !crate::schedule::should_run(&routine, now()) {
+        // Повтор после неудачи идёт по своему сроку, даже вне окна расписания.
+        if routine.retry_attempt == 0 && !crate::schedule::should_run(&routine, now()) {
             note(app, &routine, "skipped", "Срок прошёл, пока компьютер спал или программа была закрыта.").await;
             let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
             continue;
@@ -149,6 +221,7 @@ pub fn start(app: Arc<App>) {
     tokio::spawn(async move {
         // Запуски процессов, прерванные перезапуском, продолжают проход.
         crate::workflow_run::resume(&app);
+        recover_interrupted(&app).await;
         let mut timer = tokio::time::interval(tick_period());
         timer.tick().await;
         loop {

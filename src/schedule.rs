@@ -97,6 +97,33 @@ pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
     next_run_with(routine, now_ms, local, to_ms)
 }
 
+/// Рутина не дошла до «выполнено»: повторяем через 5, 10, 15, 30, 60 минут, дальше 2, 4, 8… часов.
+/// `attempt` — номер повтора, начиная с 1.
+pub fn retry_delay_minutes(attempt: u32) -> i64 {
+    match attempt {
+        0 | 1 => 5,
+        2 => 10,
+        3 => 15,
+        4 => 30,
+        5 => 60,
+        n => 60 * 2i64.pow((n - 5).min(10)),
+    }
+}
+
+/// Сколько рутина пытается выполниться после первой неудачи, прежде чем сдаться с ошибкой.
+pub const RETRY_WINDOW_MS: i64 = 24 * 3_600_000;
+
+/// Когда повторить: по лестнице, но не позже конца суток и не позже обычного следующего запуска.
+/// `None` — сутки прошли, пора сдаться.
+pub fn retry_at(attempt: u32, since_ms: i64, now_ms: i64, regular_next_ms: i64) -> Option<i64> {
+    let deadline = since_ms + RETRY_WINDOW_MS;
+    if now_ms >= deadline {
+        return None;
+    }
+    let at = (now_ms + retry_delay_minutes(attempt) * 60_000).min(deadline);
+    Some(if regular_next_ms > now_ms { at.min(regular_next_ms) } else { at })
+}
+
 /// Расчёт срока с подставляемыми часами пояса: так его можно проверить на переводе часов в любой стране.
 /// Интервал считается в настоящем времени (мс), а в местные часы переводится только для окна и дней:
 /// иначе после перевода часов назад срок «через 5 минут» мог оказаться в прошлом и тикер крутился бы час.
@@ -538,5 +565,24 @@ mod tests {
         assert!(!out.contains("rt_hook"), "{out}");
         assert!(!out.contains("rt_off"), "{out}");
         assert_eq!(out.matches("BEGIN:VEVENT").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn retry_ladder_grows_then_doubles() {
+        let ladder: Vec<i64> = (1..=9).map(retry_delay_minutes).collect();
+        assert_eq!(ladder, vec![5, 10, 15, 30, 60, 120, 240, 480, 960]);
+    }
+
+    #[test]
+    fn retry_stops_after_a_day_and_never_passes_it() {
+        let day = RETRY_WINDOW_MS;
+        // Обычный следующий запуск далеко: решает лестница.
+        assert_eq!(retry_at(1, 0, 1_000, 10 * day), Some(1_000 + 5 * 60_000));
+        // Шаг перепрыгнул бы сутки: последняя попытка ровно на границе.
+        assert_eq!(retry_at(9, 0, day - 60_000, 10 * day), Some(day));
+        // Сутки прошли: сдаёмся.
+        assert_eq!(retry_at(10, 0, day, 10 * day), None);
+        // Частая рутина: свой срок раньше повтора.
+        assert_eq!(retry_at(5, 0, 1_000, 1_000 + 30 * 60_000), Some(1_000 + 30 * 60_000));
     }
 }

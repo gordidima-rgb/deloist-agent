@@ -2519,9 +2519,7 @@ fn run_turn_body(
                 entry["fallback"] = json!(model);
             }
             app.ledger.append_journal(&entry).await;
-            if let Err(e) = app.store.set_routine_status(&routine.id, status).await {
-                eprintln!("[routine] {}: {e}", routine.title);
-            }
+            crate::scheduler::routine_finished(&app, routine, &bot_id, status, started_at).await;
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
         }
