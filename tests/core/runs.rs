@@ -105,7 +105,7 @@ fn write_run(dir: &std::path::Path, bot: &str, origin: Value, steps: Value, atte
 }
 
 fn step(label: &str, effect: &str, state: &str) -> Value {
-    json!({ "call_id": format!("c_{label}"), "tool": "t", "label": label, "effect": effect, "state": state })
+    json!({ "call_id": format!("c_{label}"), "label": label, "effect": effect, "state": state })
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -116,7 +116,7 @@ async fn a_human_turn_cut_off_mid_step_continues_once_and_keeps_the_steps() {
     first.say(&bot, "осмотри папку").await;
     // Первый шаг готов и записан, второй запрос к модели завис: программу «убивает» перезапуск.
     common::wait_until("шаг записан", 20, || async {
-        runs_file(&dir).iter().any(|r| r["steps"].as_array().is_some_and(|s| s.iter().any(|x| x["tool"] == "list_files" && x["state"] == "ok")))
+        runs_file(&dir).iter().any(|r| r["steps"].as_array().is_some_and(|s| s.iter().any(|x| x["label"] == "список файлов" && x["state"] == "ok")))
     })
     .await;
     first.keep_data();
@@ -157,10 +157,30 @@ async fn an_external_step_without_a_result_waits_for_the_human_and_continues_on_
     second.ok("POST", &format!("/api/runs/{}/continue", item["id"].as_str().unwrap()), None).await;
     let messages = wait_thread(&second, &bot, "проверил и дошёл до конца").await;
     let note = messages.iter().find(|m| m["role"] == "user").expect("заметка продолжения");
+    assert_eq!(note["source"], "restart", "служебная строка, а не слова человека: {note}");
     assert!(note["text"].as_str().unwrap().contains("прошёл ли он — неизвестно"), "{note}");
     common::wait_until("запись закрыта", 20, || async { runs_file(&dir)[0]["state"]["kind"] == "done" }).await;
     let needs = second.ok("GET", "/api/needs", None).await;
     assert!(!needs["items"].as_array().unwrap().iter().any(|i| i["kind"] == "run"), "{needs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_parallel_continues_start_one_turn_and_the_second_is_refused() {
+    let (fake, port) = fake_server().await;
+    let (mut first, dir, bot) = first_start("runs-race", port).await;
+    first.keep_data();
+    drop(first);
+    write_run(&dir, &bot, json!("human"), json!([step("письмо клиенту", "external", "started")]), 0);
+    *fake.script.lock().unwrap() = vec![Step::Say("продолжил".into())];
+    let second = restart(&dir).await;
+    let path = "/api/runs/run_test/continue";
+    let ((a, _), (b, _)) = tokio::join!(second.send("POST", path, None), second.send("POST", path, None));
+    let mut codes = [a, b];
+    codes.sort();
+    assert_eq!(codes, [200, 409], "второе нажатие должно получить отказ");
+    wait_thread(&second, &bot, "продолжил").await;
+    assert_eq!(runs_file(&dir)[0]["attempts"], 1, "попытка засчитана один раз");
+    assert_eq!(fake.requests.lock().unwrap().len(), 1, "ход начат один раз");
 }
 
 #[tokio::test(flavor = "multi_thread")]

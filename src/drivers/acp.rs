@@ -1621,7 +1621,13 @@ fn activity_of(update: &Value) -> Option<Value> {
     if let Some(path) = update["locations"].as_array().and_then(|l| l.first()).and_then(|l| l["path"].as_str()) {
         args.insert("path".into(), json!(path));
     }
-    if let Some(command) = update["rawInput"]["command"].as_str() {
+    // Codex присылает команду списком слов: склеиваем, чтобы её можно было разобрать.
+    let command = match &update["rawInput"]["command"] {
+        Value::String(s) => Some(s.clone()),
+        Value::Array(words) => Some(words.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ")),
+        _ => None,
+    };
+    if let Some(command) = command.filter(|c| !c.is_empty()) {
         args.insert("command".into(), json!(command));
     }
     if let Some(url) = update["rawInput"]["url"].as_str() {

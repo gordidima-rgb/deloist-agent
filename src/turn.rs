@@ -2083,7 +2083,9 @@ fn run_turn_body(
                 }
             }
 
-            let mut user_entry = json!({ "role": "user", "text": user_text, "source": source });
+            // Заметка продолжения после перезапуска: модель читает её как сообщение, а человеку она показана служебной строкой.
+            let entry_source = if opts.resume.is_some() { "restart" } else { source.as_str() };
+            let mut user_entry = json!({ "role": "user", "text": user_text, "source": entry_source });
             if !attachments.is_empty() {
                 user_entry["attachments"] = json!(attachments);
             }
@@ -2725,7 +2727,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
     }
 
     // Шаг записан до выполнения: если программа умрёт посреди него, журнал знает, что шло и можно ли это повторять.
-    app.runs.step_start(&bot.id, &call.id, &call.name, &tools::step_label(&call.name, &call.args), tools::effect(&call.name, &call.args));
+    app.runs.step_start(&bot.id, &call.id, &tools::step_label(&call.name, &call.args), tools::effect(&call.name, &call.args));
     let outcome = if call.name.starts_with("mcp__") {
         crate::mcp::call(app, &call.name, &call.args).await
     } else {

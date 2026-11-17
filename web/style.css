@@ -1228,7 +1228,7 @@ body.drawer-open #chat { margin-right: var(--drawer-base); }
 .rt-quiet:hover { border-color: var(--color-border-strong); }
 .st-quiet { color: var(--color-text-muted); }
 .rt-run { height: 28px; padding: 0 var(--k-space-3); font-size: var(--text-sm); }
-.st-needs, .st-failed, .st-limit, .st-interrupted, .st-gave_up { color: var(--color-accent-text); }
+.st-needs, .st-failed, .st-limit, .st-gave_up { color: var(--color-accent-text); }
 .routine-form [hidden] { display: none; }
 .days { display: flex; flex-wrap: wrap; gap: 6px; }
 .day-btn {
@@ -1263,7 +1263,7 @@ body.drawer-open #chat { margin-right: var(--drawer-base); }
 .jr-when, .jr-bot, .jr-tokens, .jr-fallback { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .jr-title { font-weight: 600; }
 .jr-status { font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); }
-.jr-status.st-needs, .jr-status.st-failed, .jr-status.st-limit, .jr-status.st-interrupted, .jr-status.st-gave_up { color: var(--color-accent-text); }
+.jr-status.st-needs, .jr-status.st-failed, .jr-status.st-limit, .jr-status.st-gave_up { color: var(--color-accent-text); }
 .jr-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .jr-missed { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .jr-missed b { font-size: var(--text-sm); }
@@ -2831,7 +2831,7 @@ audio.result-player { height: 44px; padding: 6px 8px; box-sizing: border-box; }
 :is(.kit-sheet, .made-card, .drawer-rt-list) .rt-chip { display: inline-flex; align-items: center; gap: var(--k-space-1); height: 24px; padding: 0 var(--k-space-2); border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font: 600 var(--k-text-xs) / 1 var(--k-font-body); white-space: nowrap; font-variant-numeric: tabular-nums; }
 :is(.kit-sheet, .made-card, .drawer-rt-list) .rt-chip .i { width: 13px; height: 13px; flex: none; color: var(--k-text-3); }
 :is(.kit-sheet, .made-card, .drawer-rt-list) .rt-last.st-ok .i { color: var(--k-brand-text, currentColor); }
-:is(.kit-sheet, .drawer-rt-list) .rt-last:is(.st-failed, .st-error, .st-limit, .st-needs, .st-interrupted, .st-gave_up) .i { color: var(--k-attention-text, currentColor); }
+:is(.kit-sheet, .drawer-rt-list) .rt-last:is(.st-failed, .st-error, .st-limit, .st-needs, .st-gave_up) .i { color: var(--k-attention-text, currentColor); }
 :is(.kit-sheet, .drawer-rt-list) .routine .rt-actions { margin-left: 0; gap: var(--k-space-2); }
 :is(.kit-sheet, .drawer-rt-list) .routine .rt-run,
 :is(.kit-sheet, .drawer-rt-list) .routine .rt-quiet { width: 28px; height: 28px; padding: 0; background: transparent; }
