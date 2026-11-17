@@ -4,7 +4,7 @@
 //
 //   toolLook(tool)              — чистая функция: какой знак у вызова инструмента ({ act, icon } или null);
 //   moodFor(event)              — чистая функция: разовая эмоция по событию без истории ({ mood, seconds } или null);
-//   stageMood(phase)            — чистая функция: фаза сцены оркестратора (listening|thinking|typing|asking|done) -> listen|think|talk|curious|proud или null;
+//   stageLook(phase)            — чистая функция: фаза сцены оркестратора -> { state, act, mood? } из готовых видов шара;
 //   waitOf(event)               — чистая функция: открылось или закрылось ожидание решения человека;
 //   createTracker(avatarsOf)    — состояние окна: знак по ходу вызовов, ошибки подряд, редкая радость.
 //
@@ -346,11 +346,18 @@
     };
   }
 
-  // Сцена оркестратора: фаза расспроса -> настроение шара (долгое, пока фаза длится; по её концу avatar.feel(null)).
-  const STAGE_MOODS = { listening: 'listen', thinking: 'think', typing: 'talk', asking: 'curious', done: 'proud' };
-  function stageMood(phase) {
-    return Object.prototype.hasOwnProperty.call(STAGE_MOODS, phase) ? STAGE_MOODS[phase] : null;
+  // Сцена оркестратора: фаза расспроса -> готовый вид шара (своих настроений не заводим).
+  // state и act — как у обычной работы (значок занятия), mood — разовая эмоция на входе в фазу.
+  const STAGE_LOOKS = {
+    listening: { state: 'idle', act: '' },
+    thinking: { state: 'work', act: 'search' },
+    typing: { state: 'work', act: 'doc' },
+    asking: { state: 'wait', act: '', mood: 'surprise' },
+    done: { state: 'idle', act: '', mood: 'star' },
+  };
+  function stageLook(phase) {
+    return Object.prototype.hasOwnProperty.call(STAGE_LOOKS, phase) ? { ...STAGE_LOOKS[phase] } : null;
   }
 
-  window.CrewAvatarStates = { toolLook, moodFor, waitOf, clears, errorMood, stageMood, setApps, createTracker };
+  window.CrewAvatarStates = { toolLook, moodFor, waitOf, clears, errorMood, stageLook, setApps, createTracker };
 })();

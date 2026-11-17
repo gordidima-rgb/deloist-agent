@@ -267,16 +267,16 @@ describe('createTracker', () => {
   });
 });
 
-describe('stageMood', () => {
-  it('фазы сцены оркестратора -> настроения шара', () => {
-    expect(S.stageMood('listening')).toBe('listen');
-    expect(S.stageMood('thinking')).toBe('think');
-    expect(S.stageMood('typing')).toBe('talk');
-    expect(S.stageMood('asking')).toBe('curious');
-    expect(S.stageMood('done')).toBe('proud');
+describe('stageLook', () => {
+  it('фазы сцены оркестратора -> готовые виды шара', () => {
+    expect(S.stageLook('listening')).toEqual({ state: 'idle', act: '' });
+    expect(S.stageLook('thinking')).toEqual({ state: 'work', act: 'search' });
+    expect(S.stageLook('typing')).toEqual({ state: 'work', act: 'doc' });
+    expect(S.stageLook('asking')).toEqual({ state: 'wait', act: '', mood: 'surprise' });
+    expect(S.stageLook('done')).toEqual({ state: 'idle', act: '', mood: 'star' });
   });
 
   it('неизвестная фаза и мусор -> null, без падения на прототипе', () => {
-    for (const phase of ['', 'idle', 'toString', '__proto__', null, undefined, 7]) expect(S.stageMood(phase)).toBeNull();
+    for (const phase of ['', 'idle', 'toString', '__proto__', null, undefined, 7]) expect(S.stageLook(phase)).toBeNull();
   });
 });

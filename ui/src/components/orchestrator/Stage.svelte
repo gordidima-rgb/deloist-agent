@@ -6,7 +6,7 @@
   import { tr } from '../../lib/i18n.js';
   import { markdown } from '../../lib/markdown.js';
   import Icon from '../kit/Icon.svelte';
-  import { moodForPhase, phaseOf, bubbleOf } from './model.js';
+  import { lookForPhase, phaseOf, bubbleOf } from './model.js';
 
   let {
     bot = {},
@@ -229,8 +229,10 @@
     if (p === lastPhase && current === lastOrb) return;
     lastPhase = p;
     lastOrb = current;
-    const mood = moodForPhase(p);
-    if (mood) current?.feel?.(mood, 3600);
+    const look = lookForPhase(p);
+    if (!look) return;
+    current?.set?.({ state: look.state, act: look.act || '' });
+    if (look.mood) current?.feel?.(look.mood, 2);
   });
 
   const reduced = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
@@ -356,7 +358,7 @@
         b.shown = true;
         await tick();
         fly(b.id);
-        botOrbs.get(b.id)?.feel?.('joy', 3600);
+        botOrbs.get(b.id)?.feel?.('joy', 2);
         await sleep(700);
         await typeOut(b.full, 2500, (t) => { b.typed = t; });
       }

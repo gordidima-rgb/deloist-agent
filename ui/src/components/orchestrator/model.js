@@ -3,15 +3,10 @@
 // Фазы разговора: человек говорит/пишет, оркестратор думает, пишет, спрашивает, команда собрана.
 export const PHASES = ['listening', 'thinking', 'typing', 'asking', 'done'];
 
-// Запас, пока в программе нет настроений listen/think/talk/curious/proud (ветка эмоций ещё не влита).
-// Для фаз без запасного настроения шар остаётся как есть.
-const FALLBACK = { asking: 'star', done: 'joy' };
-
-// Настроение шара для фазы: сначала то, что знает avatar-states.js, потом запас.
-export function moodForPhase(phase, states = typeof window !== 'undefined' ? window.CrewAvatarStates : null) {
-  const own = states?.stageMood?.(phase);
-  if (own) return own;
-  return FALLBACK[phase] || null;
+// Вид шара для фазы — из готовых видов (avatar-states.js stageLook): состояние, значок занятия и короткая эмоция.
+// Своих настроений сцена не заводит. Нет avatar-states — шар остаётся как есть.
+export function lookForPhase(phase, states = typeof window !== 'undefined' ? window.CrewAvatarStates : null) {
+  return states?.stageLook?.(phase) ?? null;
 }
 
 // Фаза по состоянию сцены. Приоритет: команда собрана, человек говорит, вопрос ждёт ответа, идёт текст, ход идёт, иначе слушаем.

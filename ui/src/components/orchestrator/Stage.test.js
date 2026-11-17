@@ -2,18 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mountComponent } from '../../lib/mount.svelte.js';
 import Stage from './Stage.svelte';
-import { moodForPhase, phaseOf } from './model.js';
+import { lookForPhase, phaseOf } from './model.js';
 
 let instance;
 let host;
 let api;
 let feel;
+let set;
 let destroyed;
 
 const orbFactory = () => (el) => {
   feel = vi.fn();
+  set = vi.fn();
   destroyed = vi.fn();
-  return { feel, destroy: destroyed };
+  return { feel, set, destroy: destroyed };
 };
 
 function render(props = {}) {
@@ -168,34 +170,34 @@ describe('Stage phases and mood', () => {
     expect(phaseOf({ stage: 'ready', openCards: 1 })).toBe('done');
   });
 
-  it('asks avatar-states for the mood and falls back to existing ones', () => {
-    expect(moodForPhase('asking', {})).toBe('star');
-    expect(moodForPhase('done', {})).toBe('joy');
-    expect(moodForPhase('thinking', {})).toBeNull();
-    expect(moodForPhase('thinking', { stageMood: (p) => ({ thinking: 'think' })[p] })).toBe('think');
+  it('takes the look from avatar-states and invents none', () => {
+    expect(lookForPhase('thinking', {})).toBeNull();
+    expect(lookForPhase('thinking', { stageLook: (p) => ({ thinking: { state: 'work', act: 'search' } })[p] })).toEqual({ state: 'work', act: 'search' });
   });
 
-  it('feels the orb for each phase with 3600 ms', () => {
-    window.CrewAvatarStates = { stageMood: (p) => `m-${p}` };
+  it('sets the ready-made look for each phase and a short mood on entry', () => {
+    window.CrewAvatarStates = { stageLook: (p) => ({ state: `s-${p}`, act: `a-${p}`, mood: p === 'asking' ? 'surprise' : undefined }) };
     render();
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('m-listening', 3600);
+    expect(set).toHaveBeenLastCalledWith({ state: 's-listening', act: 'a-listening' });
     api.event({ type: 'turn_start' });
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('m-thinking', 3600);
+    expect(set).toHaveBeenLastCalledWith({ state: 's-thinking', act: 'a-thinking' });
     api.event({ type: 'text_delta', turnId: 't', step: 1, text: 'а' });
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('m-typing', 3600);
+    expect(set).toHaveBeenLastCalledWith({ state: 's-typing', act: 'a-typing' });
     api.addCard(Object.assign(document.createElement('div'), { className: 'card question' }));
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('m-asking', 3600);
+    expect(set).toHaveBeenLastCalledWith({ state: 's-asking', act: 'a-asking' });
+    expect(feel).toHaveBeenLastCalledWith('surprise', 2);
   });
 
-  it('works with the fallback moods when avatar-states has no stageMood', () => {
+  it('leaves the orb alone when avatar-states has no stageLook', () => {
     render();
     api.addCard(Object.assign(document.createElement('div'), { className: 'card question' }));
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('star', 3600);
+    expect(set).not.toHaveBeenCalled();
+    expect(feel).not.toHaveBeenCalled();
   });
 });
 
@@ -237,11 +239,11 @@ describe('Stage ready', () => {
   });
 
   it('feels the done mood when the team is ready', () => {
-    window.CrewAvatarStates = { stageMood: (p) => (p === 'done' ? 'proud' : null) };
+    window.CrewAvatarStates = { stageLook: (p) => (p === 'done' ? { state: 'idle', act: '', mood: 'star' } : null) };
     const handle = mountLive({ onleave: () => {} });
     handle.update({ stage: 'ready' });
     flushSync();
-    expect(feel).toHaveBeenLastCalledWith('proud', 3600);
+    expect(feel).toHaveBeenLastCalledWith('star', 2);
   });
 });
 
@@ -273,7 +275,7 @@ describe('Stage assembly', () => {
   beforeEach(() => vi.useFakeTimers());
 
   it('reveals new orbs one by one, types the persona (3 lines max), then the rules, then leaves', async () => {
-    window.CrewAvatarStates = { stageMood: (p) => `m-${p}` };
+    window.CrewAvatarStates = { stageLook: (p) => ({ state: `s-${p}`, act: '', mood: `m-${p}` }) };
     const onleave = vi.fn();
     const handle = mountLive({ onleave });
     handle.update({ stage: 'ready', newBots: bots, rules: 'Правило 1\nПравило 2' });
@@ -281,7 +283,7 @@ describe('Stage assembly', () => {
     await vi.advanceTimersByTimeAsync(10);
     flushSync();
     expect(hiddenIds()).toEqual([false, true]);
-    expect(feel).toHaveBeenLastCalledWith('m-typing', 3600);
+    expect(set).toHaveBeenLastCalledWith({ state: 's-typing', act: '' });
     await vi.advanceTimersByTimeAsync(1500);
     flushSync();
     expect(texts()[0].length).toBeGreaterThan(0);
@@ -294,7 +296,7 @@ describe('Stage assembly', () => {
     await vi.advanceTimersByTimeAsync(2000);
     flushSync();
     expect(texts().at(-1)).toBe('Правило 1\nПравило 2');
-    expect(feel).toHaveBeenLastCalledWith('m-done', 3600);
+    expect(feel).toHaveBeenLastCalledWith('m-done', 2);
     expect(onleave).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(3000);
     expect(onleave).toHaveBeenCalledTimes(1);
