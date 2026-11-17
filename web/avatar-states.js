@@ -4,6 +4,7 @@
 //
 //   toolLook(tool)              — чистая функция: какой знак у вызова инструмента ({ act, icon } или null);
 //   moodFor(event)              — чистая функция: разовая эмоция по событию без истории ({ mood, seconds } или null);
+//   stageMood(phase)            — чистая функция: фаза сцены оркестратора (listening|thinking|typing|asking|done) -> listen|think|talk|curious|proud или null;
 //   waitOf(event)               — чистая функция: открылось или закрылось ожидание решения человека;
 //   createTracker(avatarsOf)    — состояние окна: знак по ходу вызовов, ошибки подряд, редкая радость.
 //
@@ -345,5 +346,11 @@
     };
   }
 
-  window.CrewAvatarStates = { toolLook, moodFor, waitOf, clears, errorMood, setApps, createTracker };
+  // Сцена оркестратора: фаза расспроса -> настроение шара (долгое, пока фаза длится; по её концу avatar.feel(null)).
+  const STAGE_MOODS = { listening: 'listen', thinking: 'think', typing: 'talk', asking: 'curious', done: 'proud' };
+  function stageMood(phase) {
+    return Object.prototype.hasOwnProperty.call(STAGE_MOODS, phase) ? STAGE_MOODS[phase] : null;
+  }
+
+  window.CrewAvatarStates = { toolLook, moodFor, waitOf, clears, errorMood, stageMood, setApps, createTracker };
 })();

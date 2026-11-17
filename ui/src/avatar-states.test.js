@@ -266,3 +266,17 @@ describe('createTracker', () => {
     expect(log.filter(([k]) => k === 'feel').map((e) => e[1])).toEqual(['grumpy', 'surprise', 'dizzy', 'love', 'star', 'sad']);
   });
 });
+
+describe('stageMood', () => {
+  it('фазы сцены оркестратора -> настроения шара', () => {
+    expect(S.stageMood('listening')).toBe('listen');
+    expect(S.stageMood('thinking')).toBe('think');
+    expect(S.stageMood('typing')).toBe('talk');
+    expect(S.stageMood('asking')).toBe('curious');
+    expect(S.stageMood('done')).toBe('proud');
+  });
+
+  it('неизвестная фаза и мусор -> null, без падения на прототипе', () => {
+    for (const phase of ['', 'idle', 'toString', '__proto__', null, undefined, 7]) expect(S.stageMood(phase)).toBeNull();
+  });
+});
