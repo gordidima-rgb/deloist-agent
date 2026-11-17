@@ -1975,7 +1975,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 .k-choice__opt:disabled { opacity: 0.45; cursor: default; }
 .k-choice__opt:focus-visible { outline: 2px solid var(--k-brand-text); outline-offset: 1px; }
 
-.k-saved { display: inline-flex; align-items: center; gap: 5px; font: 500 var(--k-text-xs) / 1 var(--k-font-body); color: var(--k-text-3); white-space: nowrap; }
+.k-saved { display: inline-flex; align-items: center; gap: 6px; font: 600 var(--k-text-xs) / 1 var(--k-font-body); color: var(--k-text-3); white-space: nowrap; }
 .k-saved[data-state="error"] { color: var(--k-danger-text); }
 .k-saved[data-state="dirty"], .k-saved[data-state="saving"] { color: var(--k-text-2); }
 .k-saved__tick { color: var(--k-brand); }
