@@ -10,15 +10,21 @@ const memory = {
   ],
   used: 120,
   limit: 1000,
+  file: '- Любит кофе\n  Пьёт без сахара\n',
+  fullLimit: 2500,
+  brain: 'Отвечай коротко.',
+  brainLimit: 4000,
+  sharedByBot: [{ id: 's1', title: 'Общий факт', body: 'для всех' }],
   journal: [{ id: 'j1', at: Date.now(), who: { kind: 'human' }, action: 'add', note: '', added: ['Любит кофе'], undoable: true }],
 };
 
 function fakeApi() {
   return vi.fn(async (path, opts = {}) => {
     if (path === '/api/bots/b1/memory') return memory;
-    if (path === '/api/memory/facts' && opts.method === 'POST') return { id: 'f3' };
-    if (path === '/api/memory/facts/f2' && opts.method === 'DELETE') return {};
-    if (path === '/api/memory/facts/f1' && opts.method === 'PATCH') return { fact: {} };
+    if (path === '/api/bots/b1/memory-file' && opts.method === 'PUT') return { file: opts.body.text, entryId: 'j2' };
+    if (path === '/api/bots/b1/brain' && opts.method === 'PUT') return { brain: opts.body.text };
+    if (path === '/api/memory/facts/m18' && opts.method === 'DELETE') return {};
+    if (path === '/api/memory/facts/m18' && opts.method === 'PATCH') return { fact: {} };
     if (path === '/api/memory/undo/j1' && opts.method === 'POST') return {};
     throw new Error(`unexpected request: ${path} ${opts.method || 'GET'}`);
   });
@@ -50,48 +56,85 @@ afterEach(() => {
 });
 
 describe('DrawerMemory', () => {
-  it('renders one group per kind with its count, the counter and the journal', async () => {
+  it('shows memory.md and brain.md in text areas with hints, the counter and the journal', async () => {
     const api = fakeApi();
     mount({ bot: { id: 'b1' }, api });
-    await waitFor(() => {
-      const titles = [...host.querySelectorAll('.k-section__title')].map((h) => h.textContent);
-      expect(titles).toContain('О человеке · 1');
-      expect(titles).toContain('Поправка · 1');
-    });
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const [file, brain] = host.querySelectorAll('textarea');
+    expect(file.value).toBe(memory.file);
+    expect(brain.value).toBe('Отвечай коротко.');
+    expect(host.textContent).toMatch(/Пока память меньше 2\s500 знаков/);
     expect(host.textContent).toContain('120');
     expect(host.querySelector('.dm-jr-title').textContent).toBe('Дописал в память');
-    expect(api).toHaveBeenCalledWith('/api/bots/b1/memory');
+    expect(host.textContent).toContain('Общий факт');
   });
 
-  it('adds a fact with scope set to the bot id', async () => {
+  it('saves memory.md through the memory-file route and reloads', async () => {
     const api = fakeApi();
     mount({ bot: { id: 'b1' }, api });
-    await waitFor(() => expect(host.querySelectorAll('.dm-fact').length).toBe(2));
-    buttonByText(host, 'Добавить факт').click();
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const file = host.querySelector('textarea');
+    expect(buttonByText(host, 'Сохранить').disabled).toBe(true);
+    file.value = '- Новая запись\n';
+    file.dispatchEvent(new Event('input'));
     flushSync();
-    const form = host.querySelector('form.dm-form');
-    const [title, body] = [form.querySelector('input'), form.querySelector('textarea')];
-    title.value = 'Новый';
-    title.dispatchEvent(new Event('input'));
-    body.value = 'Текст';
-    body.dispatchEvent(new Event('input'));
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
-    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/facts', {
-      method: 'POST',
-      body: { title: 'Новый', body: 'Текст', kind: 'user', entities: [], scope: 'b1' },
-    }));
+    buttonByText(host, 'Сохранить').click();
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/bots/b1/memory-file', { method: 'PUT', body: { text: '- Новая запись\n' } }));
   });
 
-  it('deletes a fact and shows the toast about the journal', async () => {
+  it('saves brain.md through the brain route', async () => {
     const api = fakeApi();
     mount({ bot: { id: 'b1' }, api });
-    await waitFor(() => expect(host.querySelectorAll('.dm-fact').length).toBe(2));
-    const row = [...host.querySelectorAll('.dm-fact')].find((el) => el.textContent.includes('Не звонить'));
-    buttonByText(row, 'Удалить').click();
-    await waitFor(() => {
-      expect(api).toHaveBeenCalledWith('/api/memory/facts/f2', { method: 'DELETE' });
-      expect(document.body.textContent).toContain('Удалено. Отменить можно в журнале');
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const brain = host.querySelectorAll('textarea')[1];
+    brain.value = 'Всегда на «вы».';
+    brain.dispatchEvent(new Event('input'));
+    flushSync();
+    const buttons = [...host.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Сохранить');
+    buttons[1].click();
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/bots/b1/brain', { method: 'PUT', body: { text: 'Всегда на «вы».' } }));
+  });
+
+  it('shows the server message when the file is refused', async () => {
+    const api = vi.fn(async (path, opts = {}) => {
+      if (opts.method === 'PUT') throw new Error('В памяти секрет');
+      return memory;
     });
+    mount({ bot: { id: 'b1' }, api });
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const file = host.querySelector('textarea');
+    file.value = '- ключ';
+    file.dispatchEvent(new Event('input'));
+    flushSync();
+    buttonByText(host, 'Сохранить').click();
+    await waitFor(() => expect(document.body.textContent).toContain('В памяти секрет'));
+  });
+
+  it('does not overwrite typed text when a reload arrives', async () => {
+    const api = fakeApi();
+    let reload;
+    mount({ bot: { id: 'b1' }, api, registerReload: (fn) => { if (fn) reload = fn; } });
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const file = host.querySelector('textarea');
+    file.value = '- набираю';
+    file.dispatchEvent(new Event('input'));
+    flushSync();
+    await reload();
+    flushSync();
+    expect(host.querySelector('textarea').value).toBe('- набираю');
+  });
+
+  it('reverts the typed text with «Отменить правку»', async () => {
+    const api = fakeApi();
+    mount({ bot: { id: 'b1' }, api });
+    await waitFor(() => expect(host.querySelectorAll('textarea').length).toBe(2));
+    const file = host.querySelector('textarea');
+    file.value = '- лишнее';
+    file.dispatchEvent(new Event('input'));
+    flushSync();
+    buttonByText(host, 'Отменить правку').click();
+    flushSync();
+    expect(host.querySelector('textarea').value).toBe(memory.file);
   });
 
   it('undoes a journal entry', async () => {
@@ -102,27 +145,34 @@ describe('DrawerMemory', () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/undo/j1', { method: 'POST' }));
   });
 
-  it('shows a section per team with its facts', async () => {
-    const api = vi.fn(async () => ({
-      ...memory,
-      teams: [{ id: 'r1', name: 'Картинки', used: 40, limit: 8000, facts: [{ id: 'm18', title: 'Сюжет выбирает человек', body: 'и Художник', kind: 'project' }] }],
-    }));
+  it('shows a section per team and deletes a team fact', async () => {
+    const api = vi.fn(async (path, opts = {}) => {
+      if (opts.method === 'DELETE') return {};
+      return {
+        ...memory,
+        teams: [{ id: 'r1', name: 'Картинки', used: 40, limit: 8000, facts: [{ id: 'm18', title: 'Сюжет выбирает человек', body: 'и Художник', kind: 'project' }] }],
+      };
+    });
     mount({ bot: { id: 'b1' }, api });
     await waitFor(() => {
       const titles = [...host.querySelectorAll('.k-section__title')].map((h) => h.textContent);
       expect(titles).toContain('Память команды «Картинки» · 1');
     });
     expect(host.textContent).toContain('Сюжет выбирает человек');
+    buttonByText(host, 'Удалить').click();
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/facts/m18', { method: 'DELETE' }));
   });
 
-  it('pins a fact with the "always in context" switch', async () => {
-    const api = fakeApi();
+  it('pins a team fact with the "always in context" switch', async () => {
+    const api = vi.fn(async (path, opts = {}) => {
+      if (opts.method === 'PATCH') return { fact: {} };
+      return { ...memory, teams: [{ id: 'r1', name: 'Картинки', facts: [{ id: 'm18', title: 'Сюжет', body: '', kind: 'project', pinned: false }] }] };
+    });
     mount({ bot: { id: 'b1' }, api });
-    await waitFor(() => expect(host.querySelectorAll('.dm-fact').length).toBe(2));
-    const row = [...host.querySelectorAll('.dm-fact')].find((el) => el.textContent.includes('Любит кофе'));
-    const toggle = row.querySelector('[role="switch"]');
+    await waitFor(() => expect(host.querySelector('[role="switch"]')).not.toBeNull());
+    const toggle = host.querySelector('[role="switch"]');
     expect(toggle.getAttribute('aria-checked')).toBe('false');
     toggle.click();
-    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/facts/f1', { method: 'PATCH', body: { pinned: true } }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/facts/m18', { method: 'PATCH', body: { pinned: true } }));
   });
 });

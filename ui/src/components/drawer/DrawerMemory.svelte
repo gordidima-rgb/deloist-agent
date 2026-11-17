@@ -1,25 +1,12 @@
 <script>
-  // Вкладка «Память» в ящике бота: факты по типам, правка в строке, журнал правок с отменой.
+  // Вкладка «Память» в ящике бота: memory.md и brain.md как текст, память команд, журнал правок с отменой.
   // Данные: GET /api/bots/{id}/memory. Перечитывание по событию памяти идёт через registerReload(load).
-import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Button, Switch } from '../kit';
+  import { Section, ListItem, Field, TextArea, Button, Switch } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { toast } from '../../lib/toast.js';
   import { whenText, numberRu } from '../../lib/when.js';
 
   let { bot, api, registerReload = null } = $props();
-
-  const KINDS = ['user', 'feedback', 'project', 'reference'];
-
-  function kindLabel(kind) {
-    const labels = {
-      user: tr('О человеке'),
-      feedback: tr('Поправка'),
-      project: tr('Дела и решения'),
-      reference: tr('Ссылки и кабинеты'),
-    };
-    return labels[kind] || kind;
-  }
-  const kindOptions = $derived(KINDS.map((value) => ({ value, label: kindLabel(value) })));
 
   function whoText(who) {
     if (!who) return '';
@@ -37,6 +24,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
       doctor: tr('Навёл порядок'),
       undo: tr('Отменил правку'),
       remove: tr('Убрал из памяти'),
+      files: tr('Правил memory.md'),
     };
     return map[entry.action] || '';
   }
@@ -49,40 +37,45 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     ];
   }
 
-  function blankDraft(fact = null) {
-    return {
-      title: fact?.title || '',
-      body: fact?.body || '',
-      kind: fact?.kind || 'user',
-      entities: (fact?.entities || []).join(', '),
-    };
-  }
-
   let data = $state(null);
-  let adding = $state(false);
-  let editing = $state(null);
-  let draft = $state(blankDraft());
+  let fileText = $state('');
+  let brainText = $state('');
+  let fileSaved = $state('');
+  let brainSaved = $state('');
+  let savingFile = $state(false);
+  let savingBrain = $state(false);
   let expanded = $state({});
   let undoing = $state(null);
   let alive = true;
 
-  const formOpen = $derived(adding || editing !== null);
-  const groups = $derived(
-    KINDS.map((kind) => ({ kind, facts: (data?.facts || []).filter((f) => f.kind === kind) })).filter((g) => g.facts.length),
-  );
   const sharedByBot = $derived(Array.isArray(data?.sharedByBot) ? data.sharedByBot : []);
   const teams = $derived(Array.isArray(data?.teams) ? data.teams : []);
+  const fileDirty = $derived(fileText !== fileSaved);
+  const brainDirty = $derived(brainText !== brainSaved);
   const journal = $derived(Array.isArray(data?.journal) ? data.journal : []);
+  const fileHint = $derived(
+    tr('Каждая запись — строка «- …», подробности — с отступом. Раздел «Всегда» бот видит в каждом ходе целиком, остальное — первой строкой.')
+      + (data?.fullLimit ? ' ' + tr('Пока память меньше {n} знаков, бот видит её целиком.', { n: numberRu(data.fullLimit) }) : ''),
+  );
+  const brainCount = $derived(
+    data?.brainLimit ? tr('{n} из {limit} знаков', { n: numberRu(brainText.length), limit: numberRu(data.brainLimit) }) : '',
+  );
   const countText = $derived(
     data?.limit ? tr('{n} из {limit} знаков', { n: numberRu(data.used || 0), limit: numberRu(data.limit) }) : '',
   );
 
-  // Открытую форму не трогаем: перечитывание не должно стереть набранный текст.
+  // Набранный текст не затираем: если поле правили, перечитывание его не трогает.
   async function load() {
-    if (formOpen) return;
     try {
       const next = await api(`/api/bots/${encodeURIComponent(bot.id)}/memory`);
-      if (alive && !formOpen) data = next;
+      if (!alive) return;
+      data = next;
+      const file = next.file ?? '';
+      const brain = next.brain ?? '';
+      if (fileText === fileSaved) fileText = file;
+      if (brainText === brainSaved) brainText = brain;
+      fileSaved = file;
+      brainSaved = brain;
     } catch (err) {
       toast(err.message);
     }
@@ -100,40 +93,40 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
 
   load();
 
-  function startAdd() {
-    if (formOpen) return;
-    draft = blankDraft();
-    adding = true;
-  }
-
-  function startEdit(fact) {
-    if (formOpen) return;
-    draft = blankDraft(fact);
-    editing = fact.id;
-  }
-
-  function cancel() {
-    adding = false;
-    editing = null;
-    load();
-  }
-
-  async function save(event) {
-    event.preventDefault();
-    const body = {
-      title: draft.title.trim(),
-      body: draft.body.trim(),
-      kind: draft.kind,
-      entities: draft.entities.split(',').map((x) => x.trim()).filter(Boolean),
-    };
+  async function saveFile() {
+    savingFile = true;
     try {
-      if (editing !== null) await api(`/api/memory/facts/${encodeURIComponent(editing)}`, { method: 'PATCH', body });
-      else await api('/api/memory/facts', { method: 'POST', body: { ...body, scope: bot.id } });
-      toast(tr('Факт сохранён'));
-      cancel();
+      await api(`/api/bots/${encodeURIComponent(bot.id)}/memory-file`, { method: 'PUT', body: { text: fileText } });
+      toast(tr('Память сохранена'));
+      fileSaved = fileText;
+      await load();
     } catch (err) {
       toast(err.message);
+    } finally {
+      savingFile = false;
     }
+  }
+
+  function revertFile() {
+    fileText = fileSaved;
+  }
+
+  async function saveBrain() {
+    savingBrain = true;
+    try {
+      await api(`/api/bots/${encodeURIComponent(bot.id)}/brain`, { method: 'PUT', body: { text: brainText } });
+      toast(tr('Правила сохранены'));
+      brainSaved = brainText;
+      await load();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      savingBrain = false;
+    }
+  }
+
+  function revertBrain() {
+    brainText = brainSaved;
   }
 
   async function remove(fact) {
@@ -146,7 +139,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     }
   }
 
-  // «Всегда в ходе»: закреплённый факт идёт в промпт бота целиком, остальные — заголовком.
+  // «Всегда в ходе»: закреплённый факт идёт в промпт целиком, остальные — заголовком.
   async function setPinned(fact, pinned) {
     try {
       await api(`/api/memory/facts/${encodeURIComponent(fact.id)}`, { method: 'PATCH', body: { pinned } });
@@ -154,16 +147,6 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     } catch (err) {
       toast(err.message);
       await load();
-    }
-  }
-
-  async function moveShared(fact) {
-    try {
-      await api(`/api/memory/facts/${encodeURIComponent(fact.id)}`, { method: 'PATCH', body: { scope: 'shared' } });
-      toast(tr('Перенёс в общую память'));
-      await load();
-    } catch (err) {
-      toast(err.message);
     }
   }
 
@@ -184,29 +167,6 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   }
 </script>
 
-{#snippet factForm()}
-  <form class="dm-form" onsubmit={save}>
-    <Field label={tr('Заголовок')}>
-      {#snippet children(f)}<TextInput id={f.id} bind:value={draft.title} required />{/snippet}
-    </Field>
-    <Field label={tr('Текст')}>
-      {#snippet children(f)}<TextArea id={f.id} rows={4} autosize={false} bind:value={draft.body} />{/snippet}
-    </Field>
-    <div class="dm-pair">
-      <Field label={tr('Тип')}>
-        {#snippet children(f)}<Select id={f.id} options={kindOptions} bind:value={draft.kind} />{/snippet}
-      </Field>
-      <Field label={tr('Про что (через запятую)')}>
-        {#snippet children(f)}<TextInput id={f.id} bind:value={draft.entities} />{/snippet}
-      </Field>
-    </div>
-    <div class="dm-form-actions">
-      <Button size="sm" variant="ghost" onclick={cancel}>{tr('Отмена')}</Button>
-      <Button size="sm" variant="primary" type="submit">{tr('Сохранить')}</Button>
-    </div>
-  </form>
-{/snippet}
-
 {#snippet pinSwitch(fact)}
   <div class="dm-pin">
     <Switch label={tr('Всегда в ходе')} checked={!!fact.pinned} onchange={(value) => setPinned(fact, value)} />
@@ -214,58 +174,35 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   </div>
 {/snippet}
 
-{#snippet factRow(fact)}
-  {#snippet actions()}
-    <div class="dm-actions">
-      <Button size="sm" variant="ghost" onclick={() => startEdit(fact)}>{tr('Изменить')}</Button>
-      <Button size="sm" variant="ghost" onclick={() => remove(fact)}>{tr('Удалить')}</Button>
-      <Button size="sm" variant="ghost" onclick={() => moveShared(fact)}>{tr('В общую память')}</Button>
-    </div>
-  {/snippet}
-  <div class="dm-fact">
-    <ul class="k-list">
-      <ListItem title={fact.title} meta={`[${fact.id}]`} onclick={() => toggle(fact.id)} context={actions} />
-    </ul>
-    {@render pinSwitch(fact)}
-    {#if expanded[fact.id]}
-      <div class="dm-detail">
-        {#if fact.body}<p class="dm-body">{fact.body}</p>{/if}
-        {#if fact.entities?.length}
-          <div class="dm-ents">
-            {#each fact.entities as name (name)}<span class="k-chip dm-ent">{name}</span>{/each}
-          </div>
-        {/if}
-        {#if fact.links?.length}<p class="dm-note">{tr('связано: {ids}', { ids: fact.links.join(', ') })}</p>{/if}
-      </div>
-    {/if}
-  </div>
-{/snippet}
-
 <div class="dm">
-  <p class="dm-note">{tr('В каждом ходе бот видит закреплённые факты целиком, остальные — заголовком, подробности открывает сам. Бот дописывает сюда сам через инструмент {tool}.', { tool: 'remember' })}</p>
+  {#if data}
+  <Section title={tr('Память — memory.md')}>
+    <Field label={tr('Текст памяти')} hint={fileHint}>
+      {#snippet children(f)}<TextArea id={f.id} describedby={f.describedby} rows={10} autosize={false} bind:value={fileText} />{/snippet}
+    </Field>
+    <div class="dm-bar">
+      <span class="dm-note">{countText}</span>
+      <div class="dm-form-actions">
+        <Button size="sm" variant="ghost" disabled={!fileDirty || savingFile} onclick={revertFile}>{tr('Отменить правку')}</Button>
+        <Button size="sm" variant="primary" disabled={!fileDirty || savingFile} onclick={saveFile}>{tr('Сохранить')}</Button>
+      </div>
+    </div>
+  </Section>
 
-  <div class="dm-bar">
-    <span class="dm-note">{countText}</span>
-    <Button size="sm" variant="ghost" disabled={formOpen} onclick={startAdd}>{tr('Добавить факт')}</Button>
-  </div>
+  <Section title={tr('Правила — brain.md')}>
+    <Field label={tr('Текст правил')} hint={tr('Правила от человека: бот следует им в каждом ходе. Сам бот правил не меняет — только предлагает карточкой.')}>
+      {#snippet children(f)}<TextArea id={f.id} describedby={f.describedby} rows={6} autosize={false} bind:value={brainText} />{/snippet}
+    </Field>
+    <div class="dm-bar">
+      <span class="dm-note">{brainCount}</span>
+      <div class="dm-form-actions">
+        <Button size="sm" variant="ghost" disabled={!brainDirty || savingBrain} onclick={revertBrain}>{tr('Отменить правку')}</Button>
+        <Button size="sm" variant="primary" disabled={!brainDirty || savingBrain} onclick={saveBrain}>{tr('Сохранить')}</Button>
+      </div>
+    </div>
+  </Section>
 
-  {#if adding}{@render factForm()}{/if}
-
-  {#if data && !groups.length && !sharedByBot.length && !teams.some((t) => t.facts?.length)}
-    <EmptyState title={tr('Фактов пока нет.')} />
   {/if}
-
-  {#each groups as group (group.kind)}
-    <Section title={`${kindLabel(group.kind)} · ${group.facts.length}`}>
-      {#each group.facts as fact (fact.id)}
-        {#if editing === fact.id}
-          {@render factForm()}
-        {:else}
-          {@render factRow(fact)}
-        {/if}
-      {/each}
-    </Section>
-  {/each}
 
   {#each teams as team (team.id)}
     <Section title={tr('Память команды «{name}» · {n}', { name: team.name, n: (team.facts || []).length })}>
@@ -332,16 +269,6 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   .dm { display: flex; flex-direction: column; gap: var(--k-space-4); min-width: 0; }
   .dm-note { margin: 0; color: var(--k-text-3); font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); overflow-wrap: anywhere; }
   .dm-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); }
-  .dm-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--k-space-3);
-    padding: var(--k-space-4);
-    border: 1px solid var(--k-line-strong);
-    border-radius: var(--k-radius-md);
-    background: var(--k-surface);
-  }
-  .dm-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--k-space-3); }
   .dm-form-actions { display: flex; justify-content: flex-end; gap: var(--k-space-2); }
   .dm-fact { border-top: 1px solid var(--k-line); }
   .dm-fact:first-child { border-top: 0; }
@@ -355,13 +282,6 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .dm-ents { display: flex; flex-wrap: wrap; gap: var(--k-space-1); }
-  .dm-ent {
-    border: 1px solid var(--k-line-strong);
-    background: var(--k-surface);
-    color: var(--k-text-2);
-    font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
-  }
   .dm-journal { display: flex; flex-direction: column; }
   .dm-jr { display: flex; flex-direction: column; gap: 4px; padding: var(--k-space-2) 0; border-top: 1px solid var(--k-line); }
   .dm-jr:first-child { border-top: 0; }
@@ -369,7 +289,4 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
   .dm-jr-meta { color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.3 var(--k-font-body); font-variant-numeric: tabular-nums; }
   .dm-jr-title { margin: 0; color: var(--k-text); font: 600 var(--k-text-sm) / 1.3 var(--k-font-body); }
   .dm-line { margin: 0; color: var(--k-text-3); font: 400 var(--k-text-xs) / 1.4 var(--k-font-body); overflow-wrap: anywhere; }
-  @media (max-width: 520px) {
-    .dm-pair { grid-template-columns: 1fr; }
-  }
 </style>

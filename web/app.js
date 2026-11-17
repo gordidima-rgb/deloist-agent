@@ -3588,10 +3588,15 @@ function botChangeCard(ev, proposal) {
   if (rule) {
     if (rule.add) parts.push(`<p class="team-routine-title"><b>${escapeHtml(rule.add)}</b></p>`);
     if (rule.remove) parts.push(`<p class="note">${tr('Убрать правило: «{rule}»', { rule: escapeHtml(rule.remove) })}</p>`);
-    parts.push(`<p class="note">${tr('Попадёт в инструкцию бота, раздел «Правила от человека», и будет в каждом ходе.')}</p>`);
-    if (proposal.instructions) {
-      parts.push(`<details class="team-full"><summary>${tr('Инструкция целиком')}</summary><pre class="team-full-text">${escapeHtml(proposal.instructions.after || '')}</pre></details>`);
+    parts.push(`<p class="note">${tr('Попадёт в brain.md — правила от человека — и будет в каждом ходе.')}</p>`);
+    if (proposal.brain) {
+      parts.push(`<details class="team-full"><summary>${tr('brain.md целиком')}</summary><pre class="team-full-text">${escapeHtml(proposal.brain.after || '')}</pre></details>`);
     }
+  }
+  // Файл правил изменили не через карточку: «Применить» принимает новый текст, «Не надо» возвращает файл.
+  if (proposal.drift && proposal.brain && !rule) {
+    parts.push(`<p class="note">${tr('Файл правил в папке бота изменили не через «Применить» (командой бота или вручную). Пока ход идёт по прежним правилам.')}</p>`);
+    parts.push(beforeAfterBlock(tr('Правила'), proposal.brain, true));
   }
   if (proposal.role) parts.push(beforeAfterBlock(tr('Роль'), proposal.role, false));
   if (proposal.instructions && !rule) parts.push(beforeAfterBlock(tr('Инструкции'), proposal.instructions, true));
@@ -3601,7 +3606,9 @@ function botChangeCard(ev, proposal) {
       : '';
     parts.push(`<p class="note team-warn">${tr('Уберу из команды «{room}»', { room: escapeHtml(proposal.removeFrom.name) })}.${lead}</p>`);
   }
-  const title = rule
+  const title = proposal.drift && !rule
+    ? tr('brain.md изменён вне карточки')
+    : rule
     ? (rule.add ? tr('Предлагаю себе правило') : tr('Предлагаю убрать своё правило'))
     : tr('Предлагаю изменить: {name}', { name: target });
   mountProposalCard(ev, proposal, `<div class="card-title">${title}</div>
