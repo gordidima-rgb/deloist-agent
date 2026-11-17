@@ -1,10 +1,12 @@
 <script>
+  import Icon from '../media/Icon.svelte';
   // Кнопка кита «Угли» (.k-btn, docs/design/kit.md). Вид задаёт variant: primary (лава, одна на экран), secondary (оранжевый контур), ghost, danger (красный контур), danger-solid (подтверждение удаления). Высоту — size.
   // Загрузка показывает девять пикселей «действует» и держит кнопку недоступной (aria-busy).
   let {
     variant = 'secondary',
     size = 'md',
     icon = null,
+    iconName = '',
     loading = false,
     disabled = false,
     type = 'button',
@@ -43,6 +45,8 @@
 >
   {#if loading}
     <span class="k-btn__pix k-pix k-pix--act" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+  {:else if iconName}
+    <span class="k-btn__icon" aria-hidden="true"><Icon name={iconName} size={16} /></span>
   {:else if icon}
     <span class="k-btn__icon" aria-hidden="true">{@render icon()}</span>
   {/if}

@@ -10,6 +10,7 @@
   import LinkHint from './LinkHint.svelte';
   import BotPicker from './BotPicker.svelte';
   import WfIcon from './WfIcon.svelte';
+  import { TextInput } from '../kit';
 
   let { id, fields = {} } = $props();
 
@@ -31,7 +32,7 @@
     <LinkHint name={targetLabel(target)} onopen={() => ctx.openSettings(target)} />
   {/if}
 {:else if target === 'file'}
-  <input class="wfo-input nodrag" class:is-bad={bad} type="text" placeholder={tr('Путь, например отчёты/итог.txt')} value={fields.path || ''} oninput={(e) => ctx.model.setField(id, 'path', e.currentTarget.value)} />
+  <TextInput class="nodrag" invalid={bad} placeholder={tr('Путь, например отчёты/итог.txt')} value={fields.path || ''} oninput={(e) => ctx.model.setField(id, 'path', e.currentTarget.value)} />
   <div class="wfo-place" class:is-bad={bad} aria-live="polite">
     <WfIcon name="file" size={14} />
     {#if bad}
@@ -55,24 +56,6 @@
     font: 400 12.5px/1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
-  .wfo-input {
-    width: 100%;
-    box-sizing: border-box;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid var(--k-line);
-    border-radius: 12px;
-    background: var(--k-surface);
-    color: var(--k-text);
-    font: 500 13px/1 var(--k-font-body);
-  }
-  .wfo-input:focus {
-    outline: 2px solid color-mix(in oklab, var(--k-brand) 45%, transparent);
-    outline-offset: 1px;
-  }
-  .wfo-input.is-bad {
-    border-color: var(--k-attention);
-  }
   .wfo-place {
     display: flex;
     align-items: flex-start;
@@ -85,8 +68,8 @@
     transition: background 200ms var(--k-ease-out, ease);
   }
   .wfo-place.is-bad {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
   .wfo-trail {
     display: flex;

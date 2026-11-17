@@ -4,6 +4,7 @@
   import { tr, trServer } from '../../lib/i18n.js';
   import { toMs, stepSeconds } from '../../lib/workflows/graph.js';
   import { statusLabel, sourceLabel, sourceIcon, versionKindLabel, whenText, seconds } from './Labels.svelte';
+  import { Button } from '../kit';
   import WfIcon from './WfIcon.svelte';
 
   /** api(path); workflowId; mode; viewedId — какой запуск сейчас показан; onview(run|null); onpreview(version); onclose(). */
@@ -69,14 +70,14 @@
   <header class="wf-hp__head">
     <b>{mode === 'runs' ? tr('История запусков') : tr('Версии процесса')}</b>
     {#if mode === 'runs' && viewedId}
-      <button type="button" class="wf-hp__back" onclick={() => onview?.(null)}>{tr('К текущему')}</button>
+      <Button class="wf-hp__back" variant="secondary" size="sm" onclick={() => onview?.(null)}>{tr('К текущему')}</Button>
     {/if}
   </header>
 
   <div class="wf-hp__list">
     {#if failed}
       <p class="wf-hp__msg is-err">{failed}</p>
-      <button type="button" class="wf-hp__more" onclick={() => load(false)}>{tr('Повторить')}</button>
+      <Button class="wf-hp__more" variant="secondary" size="sm" onclick={() => load(false)}>{tr('Повторить')}</Button>
     {:else if loading && !rows.length}
       <p class="wf-hp__msg">{tr('Загружаю…')}</p>
     {:else if !rows.length}
@@ -95,7 +96,7 @@
         </button>
       {/each}
       {#if before}
-        <button type="button" class="wf-hp__more" disabled={loading} onclick={() => load(true)}>{tr('Показать ещё')}</button>
+        <Button class="wf-hp__more" variant="ghost" size="sm" disabled={loading} onclick={() => load(true)}>{tr('Показать ещё')}</Button>
       {/if}
     {:else}
       {#each rows as v (v.v)}
@@ -137,20 +138,6 @@
   }
   .wf-hp__head b {
     font: 800 15px/1.2 var(--k-font-display);
-  }
-  .wf-hp__back {
-    height: 28px;
-    padding: 0 11px;
-    border: 0;
-    border-radius: 9px;
-    background: var(--k-brand-tint);
-    color: var(--k-brand-text);
-    font: 700 12px/1 var(--k-font-body);
-    cursor: pointer;
-    transition: transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-hp__back:active {
-    transform: scale(0.94);
   }
   .wf-hp__list {
     display: grid;
@@ -199,8 +186,8 @@
     text-align: center;
   }
   .wf-hp__chip[data-status='done'] {
-    background: color-mix(in oklab, var(--k-bot-mint) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-mint) 75%, var(--k-text));
+    background: var(--k-surface-2);
+    color: var(--k-brand-text);
   }
   .wf-hp__chip[data-status='failed'],
   .wf-hp__chip[data-status='approval'] {
@@ -218,8 +205,8 @@
     width: 30px;
     height: 30px;
     border-radius: 10px;
-    background: color-mix(in oklab, var(--k-bot-violet) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-violet) 70%, var(--k-text));
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
   }
   .wf-hp__main {
     display: grid;
@@ -249,16 +236,6 @@
     font: 400 12px/1.2 var(--k-font-body);
     color: var(--k-text-3);
     font-variant-numeric: tabular-nums;
-  }
-  .wf-hp__more {
-    margin: 4px 8px 0;
-    height: 32px;
-    border: 0;
-    border-radius: 10px;
-    background: var(--k-surface-2);
-    color: var(--k-text-2);
-    font: 600 12.5px/1 var(--k-font-body);
-    cursor: pointer;
   }
   @keyframes wf-hp-in {
     from {

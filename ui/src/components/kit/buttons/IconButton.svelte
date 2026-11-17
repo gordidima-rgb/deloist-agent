@@ -1,7 +1,9 @@
 <script>
+  import Icon from '../media/Icon.svelte';
   // Круглая кнопка только со значком (.k-btn--icon). Подпись обязательна: она и aria-label, и title.
   let {
-    icon,
+    icon = null,
+    name = '',
     label = '',
     variant = 'ghost',
     size = 'md',
@@ -34,5 +36,5 @@
   {onclick}
   {...rest}
 >
-  <span class="k-i" aria-hidden="true">{@render icon?.()}</span>
+  <span class="k-i" aria-hidden="true">{#if name}<Icon {name} size={18} />{:else}{@render icon?.()}{/if}</span>
 </button>

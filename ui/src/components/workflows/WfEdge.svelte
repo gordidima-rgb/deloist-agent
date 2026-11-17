@@ -1,11 +1,11 @@
 <script>
-  // Ребро: плавная кривая; пока шаг идёт, по ней бежит «комета». У выбранного ребра — кнопка удаления.
+  // Ребро: плавная кривая цвета лавы с мягким свечением; пока шаг идёт, по ней бегут искры. У выбранного ребра — кнопка удаления.
   import { getContext } from 'svelte';
   import { BaseEdge, EdgeLabel, getBezierPath } from '@xyflow/svelte';
   import { tr } from '../../lib/i18n.js';
-  import { edgeFlow, outTypeOf } from '../../lib/workflows/graph.js';
+  import { edgeFlow } from '../../lib/workflows/graph.js';
   import { WF } from './ctx.js';
-  import WfIcon from './WfIcon.svelte';
+  import { IconButton } from '../kit';
 
   let { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected = false, data } = $props();
 
@@ -14,14 +14,9 @@
   const path = $derived(geometry[0]);
   const flow = $derived(edgeFlow({ source, target, branch: data?.branch }, ctx.steps));
   const branch = $derived(data?.branch);
-  const type = $derived.by(() => {
-    const n = ctx.model.nodes.find((x) => x.id === source);
-    const t = n ? outTypeOf(n.data.kind, n.data.fields) : 'text';
-    return t === 'image' || t === 'file' ? t : 'text';
-  });
 </script>
 
-<BaseEdge {id} {path} class={['wfe', `wfe--${flow}`, `wfe--t-${type}`, selected && 'wfe--sel']} interactionWidth={22} />
+<BaseEdge {id} {path} class={['wfe', `wfe--${flow}`, selected && 'wfe--sel']} interactionWidth={22} />
 {#if flow === 'live'}
   <path d={path} pathLength="100" class="wfe-comet" fill="none" />
 {/if}
@@ -30,97 +25,67 @@
 {/if}
 {#if selected}
   <EdgeLabel x={geometry[1]} y={geometry[2]} class="wfe-del">
-    <button type="button" class="nodrag nopan" aria-label={tr('Удалить связь')} title={tr('Удалить связь')} onclick={() => ctx.removeEdge(id)}>
-      <WfIcon name="x" size={12} />
-    </button>
+    <IconButton class="nodrag nopan" name="close" size="sm" label={tr('Удалить связь')} onclick={() => ctx.removeEdge(id)} />
   </EdgeLabel>
 {/if}
 
 <style>
   :global(.svelte-flow__edge-path.wfe) {
-    stroke: var(--k-line-strong);
-    stroke-width: 2.2;
+    stroke: color-mix(in oklab, var(--k-brand) 78%, var(--k-brand-hover));
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--k-brand) 55%, transparent));
     transition:
-      stroke 220ms var(--k-ease-out, ease),
-      stroke-width 150ms var(--k-ease-out, ease);
+      stroke var(--k-dur-base) var(--k-ease-out),
+      stroke-width var(--k-dur-micro) var(--k-ease-out),
+      opacity var(--k-dur-base) var(--k-ease-out);
   }
-  :global(.svelte-flow__edge-path.wfe--t-image) {
-    stroke: color-mix(in oklab, var(--k-bot-rose) 70%, var(--k-line-strong));
-  }
-  :global(.svelte-flow__edge-path.wfe--t-file) {
-    stroke: color-mix(in oklab, var(--k-bot-tangerine) 75%, var(--k-line-strong));
-  }
-  :global(.svelte-flow__edge-path.wfe--pending) {
-    stroke: color-mix(in oklab, var(--k-brand) 55%, var(--k-line-strong));
+  :global(.svelte-flow__edge-path.wfe--idle) {
+    opacity: 0.55;
   }
   :global(.svelte-flow__edge-path.wfe--done) {
-    stroke: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-line-strong));
-  }
-  :global(.svelte-flow__edge-path.wfe--live) {
-    stroke: color-mix(in oklab, var(--k-brand) 60%, var(--k-line-strong));
+    opacity: 0.85;
   }
   :global(.svelte-flow__edge-path.wfe--off) {
     stroke-dasharray: 3 7;
-    opacity: 0.45;
+    opacity: 0.3;
+    filter: none;
   }
   :global(.svelte-flow__edge-path.wfe--sel) {
-    stroke: var(--k-brand);
-    stroke-width: 3;
+    stroke-width: 3.2;
+    opacity: 1;
   }
   .wfe-comet {
-    stroke: var(--k-brand);
-    stroke-width: 3.6;
+    stroke: color-mix(in oklab, var(--k-brand) 45%, var(--k-on-brand));
+    stroke-width: 2.8;
     stroke-linecap: round;
-    stroke-dasharray: 14 86;
-    filter: drop-shadow(0 0 5px var(--k-brand));
+    stroke-dasharray: 0.4 6;
+    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--k-brand) 90%, transparent));
     pointer-events: none;
-    animation: wfe-run 1.1s linear infinite;
+    animation: wfe-run 0.9s linear infinite;
   }
   @keyframes wfe-run {
     from {
-      stroke-dashoffset: 14;
+      stroke-dashoffset: 6.4;
     }
     to {
-      stroke-dashoffset: -86;
+      stroke-dashoffset: 0;
     }
   }
   :global(.wfe-branch) {
     padding: 2px 9px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
-    font: 700 11px/1.5 var(--k-font-body);
+    font: 700 11px / 1.5 var(--k-font-body);
     color: var(--k-text-2);
   }
   :global(.wfe-branch--yes) {
-    color: color-mix(in oklab, var(--k-bot-mint) 75%, var(--k-text));
-  }
-  :global(.wfe-branch--no) {
-    color: var(--k-attention-text);
+    color: var(--k-brand-text);
   }
   :global(.wfe-del) {
     background: transparent !important;
-  }
-  :global(.wfe-del) button {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid var(--k-line);
-    border-radius: 50%;
-    background: var(--k-surface);
-    color: var(--k-text-2);
-    box-shadow: var(--k-shadow-1);
-    cursor: pointer;
-    animation: wfe-pop 0.34s var(--k-ease-spring, ease) both;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      color 150ms var(--k-ease-out, ease);
-  }
-  :global(.wfe-del) button:hover {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    animation: wfe-pop var(--k-dur-ui) var(--k-ease-spring) both;
   }
   @keyframes wfe-pop {
     from {

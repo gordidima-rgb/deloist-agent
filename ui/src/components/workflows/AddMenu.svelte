@@ -102,7 +102,6 @@
           role="menuitem"
           class="wf-am__item"
           class:is-active={flat[active] === k}
-          style:--tone="var(--k-bot-{KINDS[k].tone})"
           onpointermove={() => (active = flat.indexOf(k))}
           onclick={() => onpick?.(k)}
         >
@@ -206,8 +205,8 @@
     width: 34px;
     height: 34px;
     border-radius: 12px;
-    background: color-mix(in oklab, var(--tone) 26%, var(--k-surface));
-    color: color-mix(in oklab, var(--tone) 78%, var(--k-text));
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
     transition: transform 320ms var(--k-ease-spring, ease);
   }
   .is-active .wf-am__ico {

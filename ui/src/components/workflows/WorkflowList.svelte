@@ -3,7 +3,7 @@
   import { tr } from '../../lib/i18n.js';
   import { statusLabel, agoText } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
-  import WfSwitch from './WfSwitch.svelte';
+  import { Button, IconButton, Switch } from '../kit';
 
   /** items: [{id,title,steps,updated_at,last_run}]; selected: id; handlers приходят от экрана. */
   let { items = [], selected = '', loading = false, onselect, oncreate, onrename, onduplicate, ondelete, onenabled, onmenu } = $props();
@@ -40,13 +40,9 @@
 
 <aside class="wfl" aria-label={tr('Рабочие процессы')}>
   <header class="wfl-head">
-    <button type="button" class="wfl-menu" title={tr('Открыть боковую панель')} aria-label={tr('Открыть боковую панель')} onclick={() => onmenu?.()}>
-      <WfIcon name="list" size={18} />
-    </button>
+    <IconButton class="wfl-menu" name="wf-list" size="sm" label={tr('Открыть боковую панель')} onclick={() => onmenu?.()} />
     <h2>{tr('Рабочие процессы')}</h2>
-    <button type="button" class="wfl-new" title={tr('Новый процесс')} aria-label={tr('Новый процесс')} onclick={() => oncreate?.()}>
-      <WfIcon name="plus" size={16} />
-    </button>
+    <IconButton class="wfl-new" name="plus" variant="primary" size="sm" label={tr('Новый процесс')} onclick={() => oncreate?.()} />
   </header>
 
   <div class="wfl-scroll">
@@ -93,14 +89,16 @@
               </span>
             </button>
             <span class="wfl-sw">
-              <WfSwitch checked={item.enabled !== false} label={tr('Включён')} title={item.enabled === false ? tr('Выключен: расписание, вебхук и мессенджеры его не запустят') : tr('Включён: расписание, вебхук и мессенджеры его запускают')} onchange={(v) => onenabled?.(item.id, v)} />
+              <Switch checked={item.enabled !== false} aria-label={tr("Включён")} title={item.enabled === false ? tr('Выключен: расписание, вебхук и мессенджеры его не запустят') : tr('Включён: расписание, вебхук и мессенджеры его запускают')} onchange={(v) => onenabled?.(item.id, v)} />
             </span>
             <span class="wfl-acts">
-              <button type="button" title={tr('Переименовать')} aria-label={tr('Переименовать')} onclick={() => startEdit(item)}><WfIcon name="pencil" size={14} /></button>
-              <button type="button" title={tr('Дублировать')} aria-label={tr('Дублировать')} onclick={() => onduplicate?.(item.id)}><WfIcon name="dup" size={14} /></button>
-              <button type="button" class:is-danger={confirming === item.id} title={confirming === item.id ? tr('Нажмите ещё раз, чтобы удалить') : tr('Удалить')} aria-label={tr('Удалить')} onclick={() => askDelete(item)}>
-                {#if confirming === item.id}<span class="wfl-sure">{tr('Удалить?')}</span>{:else}<WfIcon name="trash" size={14} />{/if}
-              </button>
+              <IconButton name="wf-pencil" size="sm" label={tr('Переименовать')} onclick={() => startEdit(item)} />
+              <IconButton name="wf-dup" size="sm" label={tr('Дублировать')} onclick={() => onduplicate?.(item.id)} />
+              {#if confirming === item.id}
+                <Button variant="danger-solid" size="sm" title={tr('Нажмите ещё раз, чтобы удалить')} aria-label={tr('Удалить')} onclick={() => askDelete(item)}>{tr('Удалить?')}</Button>
+              {:else}
+                <IconButton name="wf-trash" size="sm" label={tr('Удалить')} onclick={() => askDelete(item)} />
+              {/if}
             </span>
           </div>
         </li>
@@ -122,88 +120,58 @@
   .wfl-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--k-space-2);
     min-height: 60px;
-    padding: 10px 12px 10px 16px;
+    padding: var(--k-space-3) var(--k-space-3) var(--k-space-3) var(--k-space-4);
   }
   .wfl-head h2 {
     flex: 1;
     margin: 0;
-    font: 800 17px/1.2 var(--k-font-display);
-    letter-spacing: -0.01em;
+    font: 700 var(--k-text-lg) / 1.2 var(--k-font-display);
   }
-  .wfl-menu {
+  .wfl-head :global(.wfl-menu) {
     display: none;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border: 0;
-    border-radius: 11px;
-    background: transparent;
-    color: var(--k-text-2);
-    cursor: pointer;
-  }
-  .wfl-new {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border: 0;
-    border-radius: 12px;
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wfl-new:hover {
-    background: var(--k-ink-3, #24262c);
-  }
-  .wfl-new:active {
-    transform: scale(0.92);
   }
   .wfl-scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 8px 12px;
+    padding: 0 var(--k-space-3) var(--k-space-4);
   }
   .wfl-empty {
-    margin: 8px 10px;
-    font: 400 13px/1.5 var(--k-font-body);
+    margin: var(--k-space-2) var(--k-space-2) 0;
+    font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfl-list {
     display: grid;
-    gap: 3px;
+    gap: var(--k-space-2);
     margin: 0;
     padding: 0;
     list-style: none;
   }
   .wfl-list li {
-    animation: wfl-in 0.45s var(--k-ease-out, ease) both;
-    animation-delay: calc(var(--i, 0) * 35ms);
+    animation: wfl-in var(--k-dur-appear) var(--k-ease-spring) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
   }
   .wfl-item {
     position: relative;
     display: flex;
     align-items: center;
-    border-radius: 14px;
-    transition: background 150ms var(--k-ease-out, ease);
+    gap: var(--k-space-1);
+    padding-right: var(--k-space-2);
+    border-radius: var(--k-radius-md);
+    box-shadow: inset 0 0 0 1px transparent;
+    transition:
+      background var(--k-dur-micro) var(--k-ease-out),
+      box-shadow var(--k-dur-ui) var(--k-ease-out);
   }
   .wfl-item:hover {
     background: var(--k-surface-2);
   }
   .wfl-item.on {
-    background: var(--k-surface-2);
-    box-shadow: inset 0 0 0 1px var(--k-line-strong);
-  }
-  .wfl-sw {
-    flex: none;
-    padding-right: 12px;
+    background: var(--k-brand-tint);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--k-brand) 40%, transparent);
   }
   .wfl-item.off .wfl-main {
     opacity: 0.55;
@@ -212,29 +180,34 @@
     display: flex;
     flex: 1;
     align-items: center;
-    gap: 11px;
+    gap: var(--k-space-3);
     min-width: 0;
-    padding: 9px 10px;
+    padding: var(--k-space-3);
     border: 0;
-    border-radius: 14px;
+    border-radius: var(--k-radius-md);
     background: transparent;
-    color: var(--k-text);
+    color: inherit;
     text-align: left;
     cursor: pointer;
-    transition: transform 300ms var(--k-ease-spring, ease);
+    transition: transform var(--k-dur-ui) var(--k-ease-press);
   }
   .wfl-main:active {
     transform: scale(0.98);
   }
+  .wfl-main:focus-visible {
+    outline: 2px solid var(--k-brand-text);
+    outline-offset: -2px;
+  }
   .wfl-ico {
     display: grid;
-    place-items: center;
     flex: none;
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
-    background: color-mix(in oklab, var(--k-bot-violet) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-violet) 70%, var(--k-text));
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--k-radius-sm);
+    background: var(--k-surface);
+    color: var(--k-brand);
+    box-shadow: inset 0 0 0 1px var(--k-line);
   }
   .wfl-text {
     display: grid;
@@ -246,147 +219,100 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 700 13.5px/1.25 var(--k-font-body);
+    font: 600 var(--k-text-sm) / 1.25 var(--k-font-body);
   }
   .wfl-text small {
     display: flex;
     align-items: center;
-    flex-wrap: nowrap;
-    min-width: 0;
-    white-space: nowrap;
+    flex-wrap: wrap;
     gap: 6px;
-    font: 400 12px/1.3 var(--k-font-body);
+    font: 400 var(--k-text-xs) / 1.2 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfl-chip {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 1px 8px;
-    white-space: nowrap;
-    border-radius: 999px;
-    background: var(--k-surface-3);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: var(--k-radius-xs);
+    background: var(--k-surface-2);
     color: var(--k-text-2);
-    font: 600 11px/1.5 var(--k-font-body);
+    font: 600 var(--k-text-micro) / 1.5 var(--k-font-body);
   }
   .wfl-chip i {
-    margin-left: 5px;
     font-style: normal;
     font-weight: 400;
-    opacity: 0.7;
+    color: var(--k-text-3);
   }
-  .wfl-chip[data-status='done'] {
-    background: color-mix(in oklab, var(--k-bot-mint) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-mint) 75%, var(--k-text));
-  }
-  .wfl-chip[data-status='failed'],
-  .wfl-chip[data-status='approval'] {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+  .wfl-chip[data-status='failed'] {
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
   .wfl-chip[data-status='running'],
-  .wfl-chip[data-status='stopping'] {
+  .wfl-chip[data-status='stopping'],
+  .wfl-chip[data-status='approval'] {
     background: var(--k-brand-tint);
     color: var(--k-brand-text);
   }
   .wfl-edit {
     width: 100%;
     min-width: 0;
-    height: 24px;
-    padding: 0 6px;
+    height: 26px;
+    padding: 0 var(--k-space-2);
     border: 1px solid var(--k-brand);
-    border-radius: 7px;
+    border-radius: var(--k-radius-xs);
     background: var(--k-surface);
     color: var(--k-text);
-    font: 700 13.5px/1 var(--k-font-body);
+    font: 600 var(--k-text-sm) / 1 var(--k-font-body);
     box-shadow: var(--k-focus);
     outline: none;
   }
-  .wfl-acts {
-    position: absolute;
-    right: 52px;
-    top: 50%;
+  .wfl-sw {
     display: flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: 11px;
-    background: var(--k-surface-2);
-    opacity: 0;
-    translate: 6px -50%;
-    pointer-events: none;
-    transition:
-      opacity 150ms var(--k-ease-out, ease),
-      translate 220ms var(--k-ease-out, ease);
+    flex: none;
+  }
+  .wfl-acts {
+    display: none;
+    align-items: center;
+    gap: var(--k-space-0);
   }
   .wfl-item:hover .wfl-acts,
   .wfl-item:focus-within .wfl-acts {
-    opacity: 1;
-    translate: 0 -50%;
-    pointer-events: auto;
-  }
-  .wfl-acts button {
-    display: grid;
-    place-items: center;
-    min-width: 26px;
-    height: 26px;
-    padding: 0 4px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--k-text-2);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      color 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wfl-acts button:hover {
-    background: var(--k-surface-3);
-    color: var(--k-text);
-  }
-  .wfl-acts button:active {
-    transform: scale(0.9);
-  }
-  .wfl-acts button.is-danger {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
-  }
-  .wfl-sure {
-    font: 700 11.5px/1 var(--k-font-body);
-    white-space: nowrap;
+    display: flex;
   }
   .wfl-skel {
     display: grid;
-    gap: 6px;
-    padding: 4px 6px;
+    gap: var(--k-space-2);
   }
   .wfl-skel span {
-    height: 52px;
-    border-radius: 14px;
+    height: 54px;
+    border-radius: var(--k-radius-md);
     background: var(--k-surface-2);
+    animation: wfl-pulse 1.4s ease-in-out infinite;
   }
   @keyframes wfl-in {
     from {
       opacity: 0;
-      transform: translateX(-8px);
+      transform: translateY(6px);
+      filter: blur(4px);
+    }
+  }
+  @keyframes wfl-pulse {
+    50% {
+      opacity: 0.5;
     }
   }
   @media (max-width: 820px) {
-    .wfl-menu {
-      display: grid;
+    .wfl-head :global(.wfl-menu) {
+      display: inline-flex;
     }
     .wfl-item.on .wfl-acts {
-      opacity: 1;
-      translate: 0 -50%;
-      pointer-events: auto;
-    }
-    .wfl-item.on .wfl-main {
-      padding-right: 104px;
+      display: flex;
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .wfl-list li {
+    .wfl-list li,
+    .wfl-skel span {
       animation: none;
     }
   }

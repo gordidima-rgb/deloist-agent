@@ -8,6 +8,7 @@
   import { WF } from './ctx.js';
   import { kindTitle, kindHint, statusLabel, seconds } from './Labels.svelte';
   import WfIcon from './WfIcon.svelte';
+  import { Button, IconButton, TextArea, TextInput, ChoiceGrid } from '../kit';
   import BotPicker from './BotPicker.svelte';
   import TriggerFields from './TriggerFields.svelte';
   import OutputFields from './OutputFields.svelte';
@@ -84,7 +85,6 @@
   class:is-flash={data.flash}
   data-kind={kind}
   data-status={status}
-  style:--tone="var(--k-bot-{meta.tone || 'sky'})"
 >
   {#if meta.inputs}
     <Handle type="target" position={Position.Left} class="wfn-port" />
@@ -97,7 +97,7 @@
       <span class="wfn-branch wfn-branch--{step.branch}">{step.branch === 'yes' ? tr('Да') : tr('Нет')}</span>
     {/if}
     {#if locked}
-      <button type="button" class="wfn-lock nodrag" title={tr('Разблокировать')} aria-label={tr('Разблокировать')} onclick={() => ctx.model.toggleLock(id)}><WfIcon name="lock" size={13} /></button>
+      <IconButton class="wfn-lock nodrag" name="wf-lock" size="sm" label={tr('Разблокировать')} onclick={() => ctx.model.toggleLock(id)} />
     {/if}
     <span class="wfn-state" aria-label={statusLabel(status)} title={statusLabel(status)}>
       {#if status === 'running'}
@@ -122,39 +122,37 @@
     {#if kind === 'trigger'}
       <TriggerFields {id} {fields} schedule={data.schedule} />
     {:else if kind === 'prompt'}
-      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что сказать следующему шагу')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)}></textarea>
+      <TextArea class="wfn-area nodrag nowheel" rows={3} autosize={false} placeholder={tr('Что сказать следующему шагу')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)} />
     {:else if kind === 'bot'}
       <BotPicker bots={ctx.bots} value={fields.bot_id || ''} onchange={(v) => ctx.model.setFields(id, { bot_id: v })} />
-      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что поручить боту')} value={fields.task || ''} oninput={(e) => set('task', e.currentTarget.value)}></textarea>
+      <TextArea class="wfn-area nodrag nowheel" rows={3} autosize={false} placeholder={tr('Что поручить боту')} value={fields.task || ''} oninput={(e) => set('task', e.currentTarget.value)} />
     {:else if kind === 'approval'}
-      <input class="wfn-input nodrag" type="text" placeholder={tr('Что спросить у вас')} value={fields.question || ''} oninput={(e) => set('question', e.currentTarget.value)} />
+      <TextInput class="wfn-input nodrag" placeholder={tr('Что спросить у вас')} value={fields.question || ''} oninput={(e) => set('question', e.currentTarget.value)} />
       {#if status === 'approval' && step}
         <div class="wfn-decide nodrag">
-          <button type="button" class="wfn-btn wfn-btn--ok" onclick={() => ctx.decide(step, true)}>{tr('Одобрить')}</button>
-          <button type="button" class="wfn-btn wfn-btn--no" onclick={() => ctx.decide(step, false)}>{tr('Отклонить')}</button>
+          <Button variant="primary" size="sm" onclick={() => ctx.decide(step, true)}>{tr('Одобрить')}</Button>
+          <Button variant="danger" size="sm" onclick={() => ctx.decide(step, false)}>{tr('Отклонить')}</Button>
         </div>
       {/if}
     {:else if kind === 'llm'}
-      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
-        <WfIcon name="llm" size={14} />
+      <Button class="wfn-model nodrag" variant="ghost" iconName="wf-llm" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
         <span>{modelText}</span>
         <WfIcon name="chevron" size={14} />
-      </button>
-      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что спросить у модели')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)}></textarea>
-      <button type="button" class="wfn-more nodrag" aria-expanded={systemOpen || Boolean(fields.system)} onclick={() => (systemOpen = !systemOpen)}>
+      </Button>
+      <TextArea class="wfn-area nodrag nowheel" rows={3} autosize={false} placeholder={tr('Что спросить у модели')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)} />
+      <Button class="wfn-more nodrag" variant="ghost" size="sm" aria-expanded={systemOpen || Boolean(fields.system)} onclick={() => (systemOpen = !systemOpen)}>
         <WfIcon name="chevron" size={13} />
         <span>{tr('Системная инструкция')}</span>
-      </button>
+      </Button>
       {#if systemOpen || fields.system}
-        <textarea class="wfn-area wfn-area--sys nodrag nowheel" rows="2" placeholder={tr('Роль и правила для модели')} value={fields.system || ''} oninput={(e) => set('system', e.currentTarget.value)}></textarea>
+        <TextArea class="wfn-area wfn-area--sys nodrag nowheel" rows={2} autosize={false} placeholder={tr('Роль и правила для модели')} value={fields.system || ''} oninput={(e) => set('system', e.currentTarget.value)} />
       {/if}
     {:else if kind === 'condition'}
-      <textarea class="wfn-area nodrag nowheel" rows="2" placeholder={tr('Условие: например, в ответе есть ошибка')} value={fields.rule || ''} oninput={(e) => set('rule', e.currentTarget.value)}></textarea>
-      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
-        <WfIcon name="llm" size={14} />
+      <TextArea class="wfn-area nodrag nowheel" rows={2} autosize={false} placeholder={tr('Условие: например, в ответе есть ошибка')} value={fields.rule || ''} oninput={(e) => set('rule', e.currentTarget.value)} />
+      <Button class="wfn-model nodrag" variant="ghost" iconName="wf-llm" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
         <span>{modelText}</span>
         <WfIcon name="chevron" size={14} />
-      </button>
+      </Button>
     {:else if kind === 'asset'}
       {#if fields.name || fields.text || textMode}
         <div class="wfn-file">
@@ -167,10 +165,10 @@
             <b>{fields.name || tr('Текст')}</b>
             <small>{[fields.mime, sizeText].filter(Boolean).join(' · ') || tr('Готовый текст')}</small>
           </span>
-          <button type="button" class="wfn-icon nodrag" title={tr('Убрать')} aria-label={tr('Убрать')} onclick={() => { textMode = false; ctx.clearAsset(id); }}><WfIcon name="x" size={14} /></button>
+          <IconButton class="nodrag" name="close" size="sm" label={tr('Убрать')} onclick={() => { textMode = false; ctx.clearAsset(id); }} />
         </div>
         {#if !fields.name || fields.text}
-          <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Вставьте текст')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)}></textarea>
+          <TextArea class="wfn-area nodrag nowheel" rows={3} autosize={false} placeholder={tr('Вставьте текст')} value={fields.text || ''} oninput={(e) => set('text', e.currentTarget.value)} />
         {:else if !fields.path}
           <p class="wfn-hint">{tr('Файл пока только на этом экране: на сервер он попадёт вместе с запуском.')}</p>
         {/if}
@@ -179,24 +177,19 @@
           <span class="wfn-drop__ico"><WfIcon name="asset" size={22} /></span>
           <b>{tr('Перетащите файл сюда')}</b>
           <span class="wfn-drop__acts">
-            <button type="button" class="wfn-btn wfn-btn--ok" onclick={() => fileInput?.click()}>{tr('Выбрать файл')}</button>
-            <button type="button" class="wfn-btn wfn-btn--no" onclick={() => (textMode = true)}>{tr('Вставить текст')}</button>
+            <Button variant="secondary" size="sm" onclick={() => fileInput?.click()}>{tr('Выбрать файл')}</Button>
+            <Button variant="ghost" size="sm" onclick={() => (textMode = true)}>{tr('Вставить текст')}</Button>
           </span>
         </div>
       {/if}
       <input bind:this={fileInput} class="wfn-hidden" type="file" onchange={pickedFile} tabindex="-1" aria-hidden="true" />
     {:else if kind === 'image'}
-      <button type="button" class="wfn-model nodrag" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
-        <WfIcon name="image" size={14} />
+      <Button class="wfn-model nodrag" variant="ghost" iconName="wf-image" onclick={(e) => ctx.pickModel(id, e.currentTarget)}>
         <span>{modelText}</span>
         <WfIcon name="chevron" size={14} />
-      </button>
-      <textarea class="wfn-area nodrag nowheel" rows="3" placeholder={tr('Что нарисовать')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)}></textarea>
-      <div class="wfn-seg wfn-seg--3 nodrag" role="radiogroup" aria-label={tr('Размер картинки')}>
-        {#each IMAGE_SIZES as sz (sz)}
-          <button type="button" role="radio" aria-checked={(fields.size || '1024x1024') === sz} class:on={(fields.size || '1024x1024') === sz} onclick={() => set('size', sz)}>{sz.replace('x', '×')}</button>
-        {/each}
-      </div>
+      </Button>
+      <TextArea class="wfn-area nodrag nowheel" rows={3} autosize={false} placeholder={tr('Что нарисовать')} value={fields.prompt || ''} oninput={(e) => set('prompt', e.currentTarget.value)} />
+      <ChoiceGrid class="nodrag" items={IMAGE_SIZES.map((sz) => ({ id: sz, label: sz.replace('x', '×') }))} value={fields.size || '1024x1024'} label={tr('Размер картинки')} onchange={(sz) => set('size', sz)} />
       {#if imageUrl}
         <button type="button" class="wfn-thumb nodrag" title={tr('Открыть крупно')} onclick={() => ctx.zoomImage(imageUrl)}>
           <img src={imageUrl} alt={fields.prompt || tr('Изображение')} />
@@ -213,7 +206,7 @@
         <span>{statusLabel(status)}</span>
         <span class="wfn-sec">{seconds(elapsed)}</span>
         {#if step}
-          <button type="button" class="wfn-link nodrag" onclick={() => ctx.stopStep(step)}>{tr('Остановить')}</button>
+          <Button class="wfn-link nodrag" variant="ghost" size="sm" onclick={() => ctx.stopStep(step)}>{tr('Остановить')}</Button>
         {/if}
       </div>
     {/if}
@@ -223,24 +216,20 @@
         <div class="wfn-res-head">
           {#if attempts.length > 1}
             <span class="wfn-pager nodrag">
-              <button type="button" aria-label={tr('Предыдущий результат')} disabled={pickAt <= 0} onclick={() => ctx.pick(id, pickAt - 1)}><WfIcon name="chevron" size={12} /></button>
+              <IconButton class="wfn-prev" name="chevron-left" size="sm" label={tr('Предыдущий результат')} disabled={pickAt <= 0} onclick={() => ctx.pick(id, pickAt - 1)} />
               <span>{pickAt + 1}/{attempts.length}</span>
-              <button type="button" aria-label={tr('Следующий результат')} disabled={pickAt >= attempts.length - 1} onclick={() => ctx.pick(id, pickAt + 1)}><WfIcon name="chevron" size={12} /></button>
+              <IconButton class="wfn-next" name="chevron-right" size="sm" label={tr('Следующий результат')} disabled={pickAt >= attempts.length - 1} onclick={() => ctx.pick(id, pickAt + 1)} />
             </span>
           {/if}
-          <button type="button" class="wfn-res-toggle" aria-expanded={resultOpen} onclick={() => (resultOpen = !resultOpen)}>
+          <Button class="wfn-res-toggle" variant="ghost" size="sm" aria-expanded={resultOpen} onclick={() => (resultOpen = !resultOpen)}>
             <span>{errText ? tr('Ошибка') : tr('Результат')}</span>
             <span class="wfn-sec">{seconds(elapsed)}</span>
             {#if step?.reused}<span class="wfn-reused" title={tr('Результат взят из прошлого запуска')}>{tr('из прошлого запуска')}</span>{/if}
             <WfIcon name="chevron" size={14} />
-          </button>
-          <button type="button" class="wfn-icon" title={copied ? tr('Скопировано') : tr('Скопировать')} aria-label={tr('Скопировать')} onclick={copy}>
-            <WfIcon name={copied ? 'check' : 'copy'} size={14} />
-          </button>
+          </Button>
+          <IconButton name={copied ? 'check' : 'wf-copy'} size="sm" label={tr('Скопировать')} title={copied ? tr('Скопировано') : tr('Скопировать')} onclick={copy} />
           {#if status !== 'running'}
-            <button type="button" class="wfn-icon" title={tr('Повторить шаг')} aria-label={tr('Повторить шаг')} onclick={() => ctx.retry(step)}>
-              <WfIcon name="retry" size={14} />
-            </button>
+            <IconButton name="wf-retry" size="sm" label={tr('Повторить шаг')} onclick={() => ctx.retry(step)} />
           {/if}
         </div>
         {#if !(kind === 'image' && imageUrl)}<pre class="wfn-res-text">{errText || outText}</pre>{/if}
@@ -261,66 +250,61 @@
 
 <style>
   .wfn {
-    --tone: var(--k-bot-sky);
     position: relative;
     width: 304px;
-    border-radius: 20px;
-    border: 1px solid var(--k-line);
+    border-radius: var(--k-radius-lg);
     background: var(--k-surface);
     color: var(--k-text);
     box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.06),
-      0 14px 30px -18px rgba(0, 0, 0, 0.35);
+      0 0 0 1px var(--k-line-strong),
+      0 16px 34px -18px rgba(40, 15, 0, 0.45);
     transition:
-      border-color 150ms var(--k-ease-out, ease),
-      box-shadow 220ms var(--k-ease-out, ease),
-      opacity 220ms var(--k-ease-out, ease);
-    animation: wfn-in 0.5s var(--k-ease-spring, ease) both;
+      box-shadow var(--k-dur-ui) var(--k-ease-out),
+      opacity var(--k-dur-base) var(--k-ease-out);
+    animation: wfn-in var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wfn.is-selected {
-    border-color: var(--k-brand);
     box-shadow:
-      0 0 0 3px color-mix(in oklab, var(--k-brand) 28%, transparent),
-      0 18px 36px -16px color-mix(in oklab, var(--k-brand) 55%, transparent);
+      0 0 0 1.5px var(--k-brand),
+      0 0 26px -6px color-mix(in oklab, var(--k-brand) 70%, transparent),
+      0 16px 34px -18px rgba(40, 15, 0, 0.45);
   }
   .wfn.is-hit {
-    border-color: var(--k-bot-lemon);
-    box-shadow: 0 0 0 4px color-mix(in oklab, var(--k-bot-lemon) 38%, transparent);
+    box-shadow:
+      0 0 0 2px var(--k-brand),
+      0 0 0 6px color-mix(in oklab, var(--k-brand) 28%, transparent);
   }
   .wfn.is-invalid {
-    border-color: var(--k-attention);
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--k-attention) 30%, transparent);
+    box-shadow:
+      0 0 0 1.5px var(--k-danger),
+      0 0 0 5px color-mix(in oklab, var(--k-danger) 22%, transparent);
   }
   .wfn.is-leaving {
     pointer-events: none;
-    animation: wfn-out 0.38s var(--k-ease-out, ease) both;
+    animation: wfn-out var(--k-dur-exit) var(--k-ease-in) both;
   }
   .wfn.is-flash {
     animation:
-      wfn-in 0.5s var(--k-ease-spring, ease) both,
-      wfn-flash 1.5s var(--k-ease-out, ease) both;
+      wfn-in var(--k-dur-appear) var(--k-ease-spring) both,
+      wfn-flash 1.5s var(--k-ease-out) both;
   }
   .wfn.is-soon {
     opacity: 0.72;
-    border-style: dashed;
   }
-  .wfn[data-status='running'] {
-    border-color: var(--k-brand);
+  .wfn[data-status='running'],
+  .wfn[data-status='approval'] {
+    box-shadow:
+      0 0 0 1.5px var(--k-brand),
+      0 0 26px -6px color-mix(in oklab, var(--k-brand) 70%, transparent),
+      0 16px 34px -18px rgba(40, 15, 0, 0.45);
     animation:
-      wfn-in 0.5s var(--k-ease-spring, ease) both,
+      wfn-in var(--k-dur-appear) var(--k-ease-spring) both,
       wfn-glow 1.8s ease-in-out infinite;
   }
-  .wfn[data-status='approval'] {
-    border-color: var(--k-attention);
-    animation:
-      wfn-in 0.5s var(--k-ease-spring, ease) both,
-      wfn-glow-warn 1.8s ease-in-out infinite;
-  }
-  .wfn[data-status='done'] {
-    border-color: color-mix(in oklab, var(--k-bot-mint) 70%, var(--k-line));
-  }
   .wfn[data-status='failed'] {
-    border-color: var(--k-attention);
+    box-shadow:
+      0 0 0 1.5px var(--k-danger),
+      0 16px 34px -18px rgba(40, 15, 0, 0.45);
   }
   .wfn[data-status='skipped'] {
     opacity: 0.5;
@@ -332,30 +316,23 @@
   .wfn-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px 8px;
+    gap: var(--k-space-3);
+    padding: var(--k-space-3) var(--k-space-4) var(--k-space-2);
   }
   .wfn-badge {
     display: grid;
     place-items: center;
     width: 30px;
     height: 30px;
-    border-radius: 10px;
-    background: color-mix(in oklab, var(--tone) 24%, var(--k-surface));
-    color: color-mix(in oklab, var(--tone) 70%, var(--k-text));
+    border-radius: var(--k-radius-sm);
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--k-brand) 35%, transparent);
   }
   .wfn-title {
     flex: 1;
     min-width: 0;
-    font: 800 16px/1.2 var(--k-font-display);
-    letter-spacing: -0.01em;
-  }
-  .wfn-soon {
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--k-surface-3);
-    color: var(--k-text-2);
-    font: 600 11px/1.4 var(--k-font-body);
+    font: 700 var(--k-text-md) / 1.2 var(--k-font-display);
   }
   .wfn-state {
     display: grid;
@@ -369,19 +346,21 @@
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    animation: wfn-pop 0.45s var(--k-ease-spring, ease) both;
+    animation: wfn-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wfn-st--done {
-    background: color-mix(in oklab, var(--k-bot-mint) 26%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-text));
+    background: var(--k-surface-2);
+    color: var(--k-brand);
+    box-shadow: inset 0 0 0 1px var(--k-line-strong);
   }
   .wfn-st--failed {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
   .wfn-st--approval {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    background: var(--k-btn-fill);
+    color: var(--k-on-brand);
+    box-shadow: var(--k-btn-rim);
   }
   .wfn-st--stopped,
   .wfn-st--skipped,
@@ -400,111 +379,35 @@
 
   .wfn-body {
     display: grid;
-    gap: 8px;
-    padding: 2px 14px 14px;
+    gap: var(--k-space-2);
+    padding: var(--k-space-0) var(--k-space-4) var(--k-space-4);
   }
   .wfn-hint {
     margin: 0;
-    font: 400 12.5px/1.4 var(--k-font-body);
+    font: 400 var(--k-text-xs) / 1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
-  .wfn-seg {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 3px;
-    border-radius: 12px;
-    background: var(--k-surface-2);
-  }
-  .wfn-seg button {
-    height: 28px;
-    border: 0;
-    border-radius: 9px;
-    background: transparent;
-    color: var(--k-text-2);
-    font: 600 12px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      color 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wfn-seg button:active {
-    transform: scale(0.95);
-  }
-  .wfn-seg button.on {
-    background: var(--k-surface);
-    color: var(--k-text);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  }
-  .wfn-area,
-  .wfn-input {
-    width: 100%;
-    box-sizing: border-box;
-    border: 1px solid var(--k-line);
-    border-radius: 12px;
-    background: var(--k-surface-2);
-    color: var(--k-text);
-    font: 400 13.5px/1.45 var(--k-font-body);
-    resize: none;
-    padding: 9px 11px;
-    transition:
-      border-color 150ms var(--k-ease-out, ease),
-      box-shadow 150ms var(--k-ease-out, ease),
-      background 150ms var(--k-ease-out, ease);
-  }
-  .wfn-area {
-    field-sizing: content;
+  .wfn-body :global(.wfn-area) {
     min-height: 66px;
     max-height: 220px;
+    font-size: var(--k-text-sm);
+    field-sizing: content;
   }
-  .wfn-input {
+  .wfn-body :global(.wfn-area--sys) {
+    min-height: 48px;
+  }
+  .wfn-body :global(.wfn-input) {
     height: 36px;
+    font-size: var(--k-text-sm);
   }
-  .wfn-area:focus,
-  .wfn-input:focus {
-    outline: none;
-    border-color: var(--k-brand);
-    background: var(--k-surface);
-    box-shadow: var(--k-focus);
-  }
-  .wfn-area::placeholder,
-  .wfn-input::placeholder {
-    color: var(--k-text-3);
-  }
-  .wfn-target {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    height: 36px;
-    padding: 0 11px;
-    border-radius: 12px;
+  .wfn-body :global(.wfn-model) {
+    justify-content: flex-start;
+    width: 100%;
     background: var(--k-surface-2);
-    font: 600 13.5px/1 var(--k-font-body);
-    color: var(--k-text-2);
-  }
-  .wfn-model {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 36px;
-    padding: 0 10px;
     border: 1px solid var(--k-line);
-    border-radius: 12px;
-    background: var(--k-surface-2);
     color: var(--k-text);
-    font: 600 13px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
   }
-  .wfn-model:hover {
-    background: var(--k-surface-3);
-  }
-  .wfn-model:active {
-    transform: scale(0.97);
-  }
-  .wfn-model span {
+  .wfn-body :global(.wfn-model span) {
     flex: 1;
     min-width: 0;
     text-align: left;
@@ -512,115 +415,58 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .wfn-more {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px;
-    border: 0;
-    background: transparent;
+  .wfn-body :global(.wfn-more) {
+    justify-self: start;
     color: var(--k-text-2);
-    font: 600 12px/1 var(--k-font-body);
-    cursor: pointer;
   }
-  .wfn-more :global(.wf-ico) {
-    transition: transform 220ms var(--k-ease-out, ease);
+  .wfn-body :global(.wfn-more .wf-ico) {
+    transition: transform var(--k-dur-base) var(--k-ease-out);
     transform: rotate(-90deg);
   }
-  .wfn-more[aria-expanded='true'] :global(.wf-ico) {
+  .wfn-body :global(.wfn-more[aria-expanded='true'] .wf-ico) {
     transform: none;
-  }
-  .wfn-area--sys {
-    min-height: 48px;
-  }
-  .wfn-hint--branches {
-    padding-right: 36px;
-    text-align: right;
   }
   .wfn-branch {
     padding: 2px 9px;
-    border-radius: 999px;
-    font: 700 11.5px/1.5 var(--k-font-body);
-    animation: wfn-pop 0.45s var(--k-ease-spring, ease) both;
-  }
-  .wfn-branch--yes {
-    background: color-mix(in oklab, var(--k-bot-mint) 24%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-text));
+    border-radius: var(--k-radius-pill);
+    background: var(--k-brand-tint);
+    color: var(--k-brand-text);
+    font: 700 var(--k-text-xs) / 1.5 var(--k-font-body);
+    animation: wfn-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wfn-branch--no {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
-  }
-  .wfn-lock {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--k-text-3);
-    cursor: pointer;
-  }
-  .wfn-lock:hover {
     background: var(--k-surface-2);
-    color: var(--k-text);
+    color: var(--k-text-2);
   }
   .wfn-out {
     position: absolute;
-    right: 14px;
+    right: var(--k-space-4);
     translate: 0 -50%;
-    font: 700 11.5px/1 var(--k-font-body);
+    font: 700 var(--k-text-xs) / 1 var(--k-font-body);
     pointer-events: none;
   }
   .wfn-out--yes {
-    color: color-mix(in oklab, var(--k-bot-mint) 80%, var(--k-text));
+    color: var(--k-brand-text);
   }
   .wfn-out--no {
-    color: var(--k-attention-text);
+    color: var(--k-text-3);
   }
   .wfn-reused {
     padding: 1px 7px;
-    border-radius: 999px;
+    border-radius: var(--k-radius-pill);
     background: var(--k-surface-3);
     color: var(--k-text-3);
-    font: 500 10.5px/1.5 var(--k-font-body);
+    font: 500 var(--k-text-micro) / 1.5 var(--k-font-body);
     white-space: nowrap;
   }
   .wfn-pager {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 0 2px 0 6px;
-    font: 600 11px/1 var(--k-font-body);
+    gap: var(--k-space-0);
+    padding: 0 var(--k-space-0) 0 6px;
+    font: 600 var(--k-text-micro) / 1 var(--k-font-body);
     color: var(--k-text-3);
     font-variant-numeric: tabular-nums;
-  }
-  .wfn-pager button {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-  .wfn-pager button:first-child :global(.wf-ico) {
-    transform: rotate(90deg);
-  }
-  .wfn-pager button:last-child :global(.wf-ico) {
-    transform: rotate(-90deg);
-  }
-  .wfn-pager button:hover:not(:disabled) {
-    background: color-mix(in oklab, currentColor 14%, transparent);
-  }
-  .wfn-pager button:disabled {
-    opacity: 0.3;
-    cursor: default;
   }
   .wfn-hidden {
     position: absolute;
@@ -629,64 +475,53 @@
     opacity: 0;
     pointer-events: none;
   }
-  .wfn-seg--3 {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  .wfn-seg--3 button {
-    font-size: 11.5px;
-  }
   .wfn-drop {
     display: grid;
     justify-items: center;
-    gap: 8px;
-    padding: 14px 10px 12px;
+    gap: var(--k-space-2);
+    padding: var(--k-space-3) var(--k-space-3) var(--k-space-3);
     border: 1.5px dashed var(--k-line-strong);
-    border-radius: 14px;
+    border-radius: var(--k-radius-md);
     color: var(--k-text-2);
-    font: 600 13px/1.2 var(--k-font-body);
+    font: 600 var(--k-text-sm) / 1.2 var(--k-font-body);
     text-align: center;
     transition:
-      border-color 150ms var(--k-ease-out, ease),
-      background 150ms var(--k-ease-out, ease);
+      border-color var(--k-dur-micro) var(--k-ease-out),
+      background var(--k-dur-micro) var(--k-ease-out);
   }
   .wfn-drop:hover {
-    border-color: var(--k-bot-tangerine);
-    background: color-mix(in oklab, var(--k-bot-tangerine) 8%, transparent);
+    border-color: var(--k-brand);
+    background: var(--k-brand-tint);
   }
   .wfn-drop__ico {
     display: grid;
     place-items: center;
     width: 40px;
     height: 40px;
-    border-radius: 13px;
-    background: color-mix(in oklab, var(--k-bot-tangerine) 24%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-tangerine) 78%, var(--k-text));
+    border-radius: var(--k-radius-md);
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
   }
   .wfn-drop__acts {
     display: flex;
-    gap: 6px;
-  }
-  .wfn-drop__acts .wfn-btn {
-    height: 30px;
-    padding: 0 12px;
-    font-size: 12.5px;
+    gap: var(--k-space-2);
   }
   .wfn-file {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 8px 8px 8px;
-    border-radius: 14px;
+    gap: var(--k-space-3);
+    padding: var(--k-space-2);
+    border-radius: var(--k-radius-md);
     background: var(--k-surface-2);
   }
   .wfn-file__zoom {
     flex: none;
     padding: 0;
     border: 0;
-    border-radius: 11px;
+    border-radius: var(--k-radius-sm);
     background: none;
     cursor: zoom-in;
-    transition: transform 300ms var(--k-ease-spring, ease);
+    transition: transform var(--k-dur-ui) var(--k-ease-spring);
   }
   .wfn-file__zoom:hover {
     transform: scale(1.06);
@@ -696,14 +531,14 @@
     flex: none;
     width: 46px;
     height: 46px;
-    border-radius: 11px;
+    border-radius: var(--k-radius-sm);
     object-fit: cover;
   }
   .wfn-file__ico {
     display: grid;
     place-items: center;
-    background: color-mix(in oklab, var(--k-bot-tangerine) 24%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-tangerine) 78%, var(--k-text));
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
   }
   .wfn-file__meta {
     display: grid;
@@ -715,22 +550,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 700 13px/1.2 var(--k-font-body);
+    font: 700 var(--k-text-sm) / 1.2 var(--k-font-body);
   }
   .wfn-file__meta small {
-    font: 400 11.5px/1.2 var(--k-font-body);
+    font: 400 var(--k-text-xs) / 1.2 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wfn-thumb {
     display: block;
     padding: 0;
     border: 0;
-    border-radius: 14px;
+    border-radius: var(--k-radius-md);
     overflow: hidden;
     background: var(--k-surface-2);
     cursor: zoom-in;
-    animation: wfn-fold 0.4s var(--k-ease-out, ease) both;
-    transition: transform 320ms var(--k-ease-spring, ease);
+    animation: wfn-fold var(--k-dur-appear) var(--k-ease-out) both;
+    transition: transform var(--k-dur-ui) var(--k-ease-spring);
   }
   .wfn-thumb:hover {
     transform: scale(1.02);
@@ -743,12 +578,6 @@
   }
   .wfn.is-shake {
     animation: wfn-shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
-  }
-  :global(.wfn-port--t-image) {
-    background: var(--k-bot-rose) !important;
-  }
-  :global(.wfn-port--t-file) {
-    background: var(--k-bot-tangerine) !important;
   }
   @keyframes wfn-shake {
     10%,
@@ -772,127 +601,61 @@
   .wfn-decide {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  .wfn-btn {
-    height: 34px;
-    border: 0;
-    border-radius: 11px;
-    font: 700 13px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      transform 300ms var(--k-ease-spring, ease),
-      background 150ms var(--k-ease-out, ease);
-  }
-  .wfn-btn:active {
-    transform: scale(0.95);
-  }
-  .wfn-btn--ok {
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
-  }
-  .wfn-btn--ok:hover {
-    background: var(--k-ink-3, #24262c);
-  }
-  .wfn-btn--no {
-    background: var(--k-surface-2);
-    color: var(--k-attention-text);
-  }
-  .wfn-btn--no:hover {
-    background: var(--k-attention-tint);
+    gap: var(--k-space-2);
   }
   .wfn-live {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font: 600 12px/1 var(--k-font-body);
+    gap: var(--k-space-2);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-brand-text);
   }
   .wfn-sec {
-    font: 500 11.5px/1 var(--k-font-body);
+    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-3);
     font-variant-numeric: tabular-nums;
   }
-  .wfn-link {
+  .wfn-live :global(.wfn-link) {
     margin-left: auto;
-    padding: 4px 8px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--k-text-2);
-    font: 600 12px/1 var(--k-font-body);
-    cursor: pointer;
-  }
-  .wfn-link:hover {
-    background: var(--k-surface-2);
-    color: var(--k-text);
   }
   .wfn-res {
-    border-radius: 12px;
+    border-radius: var(--k-radius-md);
     background: var(--k-surface-2);
     overflow: hidden;
-    animation: wfn-fold 0.35s var(--k-ease-out, ease) both;
+    animation: wfn-fold var(--k-dur-appear) var(--k-ease-out) both;
   }
   .wfn-res.is-err {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
   .wfn-res-head {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 4px 0 2px;
+    gap: var(--k-space-0);
+    padding: var(--k-space-0) var(--k-space-1) 0 var(--k-space-0);
   }
-  .wfn-res-toggle {
-    display: flex;
+  .wfn-res-head :global(.wfn-res-toggle) {
     flex: 1;
-    align-items: center;
-    gap: 8px;
-    height: 30px;
-    padding: 0 8px;
-    border: 0;
-    background: transparent;
+    justify-content: flex-start;
     color: inherit;
-    font: 700 12px/1 var(--k-font-body);
-    cursor: pointer;
   }
-  .wfn-res-toggle :global(.wf-ico:last-child) {
+  .wfn-res-head :global(.wfn-res-toggle .wf-ico:last-child) {
     margin-left: auto;
-    transition: transform 220ms var(--k-ease-out, ease);
+    transition: transform var(--k-dur-base) var(--k-ease-out);
   }
-  .wfn-res.is-open .wfn-res-toggle :global(.wf-ico:last-child) {
+  .wfn-res.is-open .wfn-res-head :global(.wfn-res-toggle .wf-ico:last-child) {
     transform: rotate(180deg);
-  }
-  .wfn-icon {
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wfn-icon:hover {
-    background: color-mix(in oklab, currentColor 12%, transparent);
-  }
-  .wfn-icon:active {
-    transform: scale(0.9);
   }
   .wfn-res-text {
     margin: 0;
-    padding: 0 12px 10px;
+    padding: 0 var(--k-space-3) var(--k-space-3);
     max-height: 3.3em;
     overflow: hidden;
     white-space: pre-wrap;
     word-break: break-word;
-    font: 400 12.5px/1.5 var(--k-font-body);
+    font: 400 var(--k-text-xs) / 1.5 var(--k-font-body);
     color: var(--k-text-2);
-    transition: max-height 320ms var(--k-ease-morph, ease);
+    transition: max-height var(--k-dur-morph) var(--k-ease-morph);
   }
   .wfn-res.is-err .wfn-res-text {
     color: inherit;
@@ -901,34 +664,23 @@
     max-height: 260px;
     overflow-y: auto;
   }
-
   :global(.wfn-port) {
-    width: 14px !important;
-    height: 14px !important;
+    width: 12px !important;
+    height: 12px !important;
+    border: 0 !important;
     border-radius: 50% !important;
-    border: 3px solid var(--k-surface) !important;
-    background: var(--k-text-3) !important;
-    box-shadow: 0 0 0 1px var(--k-line-strong);
-    transition:
-      scale 300ms var(--k-ease-spring, ease),
-      background 150ms var(--k-ease-out, ease);
+    background: var(--k-canvas) !important;
+    box-shadow:
+      inset 0 0 0 2.5px var(--k-brand),
+      0 0 8px color-mix(in oklab, var(--k-brand) 60%, transparent);
+    transition: scale var(--k-dur-ui) var(--k-ease-spring);
   }
   :global(.wfn-port:hover),
-  :global(.wfn-port.connectingfrom) {
-    scale: 1.35;
+  :global(.wfn-port.connectingfrom),
+  :global(.wfn-port.valid) {
+    scale: 1.4;
     background: var(--k-brand) !important;
   }
-  :global(.wfn-port.valid) {
-    background: var(--k-bot-mint) !important;
-    scale: 1.5;
-  }
-  :global(.wfn-port--yes) {
-    background: var(--k-bot-mint) !important;
-  }
-  :global(.wfn-port--no) {
-    background: var(--k-attention) !important;
-  }
-
   @keyframes wfn-out {
     to {
       opacity: 0;
@@ -975,22 +727,15 @@
     0%,
     100% {
       box-shadow:
-        0 0 0 3px color-mix(in oklab, var(--k-brand) 14%, transparent),
-        0 14px 30px -18px rgba(0, 0, 0, 0.35);
+        0 0 0 1.5px var(--k-brand),
+        0 0 14px -6px color-mix(in oklab, var(--k-brand) 60%, transparent),
+        0 16px 34px -18px rgba(40, 15, 0, 0.45);
     }
     50% {
       box-shadow:
-        0 0 0 6px color-mix(in oklab, var(--k-brand) 26%, transparent),
-        0 18px 36px -14px color-mix(in oklab, var(--k-brand) 55%, transparent);
-    }
-  }
-  @keyframes wfn-glow-warn {
-    0%,
-    100% {
-      box-shadow: 0 0 0 3px color-mix(in oklab, var(--k-attention) 14%, transparent);
-    }
-    50% {
-      box-shadow: 0 0 0 6px color-mix(in oklab, var(--k-attention) 28%, transparent);
+        0 0 0 2px var(--k-brand),
+        0 0 34px -4px color-mix(in oklab, var(--k-brand) 80%, transparent),
+        0 16px 34px -18px rgba(40, 15, 0, 0.45);
     }
   }
   @media (prefers-reduced-motion: reduce) {

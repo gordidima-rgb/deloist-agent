@@ -23,7 +23,7 @@
   import HistoryPopover from './HistoryPopover.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import WfIcon from './WfIcon.svelte';
-  import WfSwitch from './WfSwitch.svelte';
+  import { Button, IconButton, Switch, SaveMark } from '../kit';
   import ToolArt from './ToolArt.svelte';
 
   /**
@@ -747,7 +747,7 @@
     onnodecontextmenu={onNodeContext}
     onedgecontextmenu={onEdgeContext}
   >
-    <Background gap={24} size={1.7} patternColor="color-mix(in oklab, var(--k-text) 22%, var(--k-canvas))" bgColor="var(--k-canvas)" />
+    <Background gap={18} size={1.4} patternColor="color-mix(in oklab, var(--k-text) 16%, transparent)" bgColor="var(--k-canvas)" />
     <StrokesLayer
       strokes={model.strokes}
       tool={readonly ? null : drawTool}
@@ -767,16 +767,14 @@
           <WfIcon name="versions" size={16} />
           <b>{preview.label}</b>
           <span class="wf-bar__hint">{tr('Только просмотр')}</span>
-          <button type="button" class="wf-run" onclick={() => preview.onrestore?.()}>{tr('Сделать текущей')}</button>
-          <button type="button" class="wf-ib" title={tr('Закрыть просмотр')} aria-label={tr('Закрыть просмотр')} onclick={() => preview.onclose?.()}><WfIcon name="x" size={16} /></button>
+          <Button variant="primary" size="sm" onclick={() => preview.onrestore?.()}>{tr('Сделать текущей')}</Button>
+          <IconButton name="close" size="sm" label={tr('Закрыть просмотр')} onclick={() => preview.onclose?.()} />
         </div>
       </Panel>
     {:else}
       <Panel position="top-left" class="wf-p-top">
         <div class="wf-bar wf-bar--title">
-          <button type="button" class="wf-ib wf-ib--list" title={tr('Список процессов')} aria-label={tr('Список процессов')} onclick={() => onlist?.()}>
-            <WfIcon name="list" size={17} />
-          </button>
+          <IconButton class="wf-ib--list" name="wf-list" size="sm" label={tr('Список процессов')} onclick={() => onlist?.()} />
           <input
             class="wf-title"
             type="text"
@@ -799,23 +797,15 @@
         <div class="wf-bar">
           {#if !readonly}
             <span class="wf-en" class:off={!enabled} title={enabled ? tr('Процесс включён: расписание, вебхук и мессенджеры запускают его') : tr('Процесс выключен: расписание, вебхук и мессенджеры его не запустят. Вручную запускать можно.')}>
-              <WfSwitch checked={enabled} label={tr('Включён')} onchange={(v) => onenabled?.(v)} />
+              <Switch checked={enabled} aria-label={tr("Включён")} onchange={(v) => onenabled?.(v)} />
               <span>{enabled ? tr('Включён') : tr('Выключен')}</span>
             </span>
           {/if}
-          <span class="wf-save" data-state={saveState}>{saveText}</span>
-          <button type="button" class="wf-ib" title={tr('Отменить (Ctrl+Z)')} aria-label={tr('Отменить')} disabled={!model.canUndo} onclick={() => model.undo()}>
-            <WfIcon name="undo" size={16} />
-          </button>
-          <button type="button" class="wf-ib" title={tr('Повторить (Ctrl+Shift+Z)')} aria-label={tr('Повторить')} disabled={!model.canRedo} onclick={() => model.redo()}>
-            <WfIcon name="redo" size={16} />
-          </button>
-          <button type="button" class="wf-ib" class:on={panel === 'runs'} data-wf-history-btn title={tr('История запусков')} aria-label={tr('История')} aria-pressed={panel === 'runs'} onclick={() => (panel = panel === 'runs' ? null : 'runs')}>
-            <WfIcon name="history" size={16} />
-          </button>
-          <button type="button" class="wf-ib" class:on={panel === 'versions'} data-wf-history-btn title={tr('Версии процесса')} aria-label={tr('Версии')} aria-pressed={panel === 'versions'} onclick={() => (panel = panel === 'versions' ? null : 'versions')}>
-            <WfIcon name="versions" size={16} />
-          </button>
+          <SaveMark class="wf-save" state={saveState} text={saveText} />
+          <IconButton name="wf-undo" size="sm" label={tr('Отменить')} title={tr('Отменить (Ctrl+Z)')} disabled={!model.canUndo} onclick={() => model.undo()} />
+          <IconButton name="wf-redo" size="sm" label={tr('Повторить')} title={tr('Повторить (Ctrl+Shift+Z)')} disabled={!model.canRedo} onclick={() => model.redo()} />
+          <IconButton class="wf-ib" name="wf-history" size="sm" label={tr('История')} title={tr('История запусков')} data-wf-history-btn aria-pressed={panel === 'runs'} onclick={() => (panel = panel === 'runs' ? null : 'runs')} />
+          <IconButton class="wf-ib" name="wf-versions" size="sm" label={tr('Версии')} title={tr('Версии процесса')} data-wf-history-btn aria-pressed={panel === 'versions'} onclick={() => (panel = panel === 'versions' ? null : 'versions')} />
           {#if run}
             <span class="wf-runchip" data-status={run.status} title={statusLabel(run.status)}>
               {#if runOpen}<span class="wf-runchip__dot"></span>{/if}
@@ -823,20 +813,19 @@
               <span class="wf-runchip__sec">{seconds(runSeconds)}</span>
             </span>
           {/if}
-          <button type="button" class="wf-run" class:is-stop={runOpen} title={runOpen ? tr('Остановить (Ctrl+Enter)') : tr('Запустить (Ctrl+Enter)')} onclick={runOrStop}>
-            <WfIcon name={runOpen ? 'stop' : 'play'} size={13} />
+          <Button class="wf-run" variant={runOpen ? 'danger' : 'primary'} size="sm" iconName={runOpen ? 'wf-stop' : 'wf-play'} title={runOpen ? tr('Остановить (Ctrl+Enter)') : tr('Запустить (Ctrl+Enter)')} onclick={runOrStop}>
             <span>{runOpen ? tr('Остановить') : tr('Запустить')}</span>
-          </button>
+          </Button>
         </div>
       </Panel>
 
       <Panel position="bottom-right" class="wf-p-zoom">
         <div class="wf-bar wf-bar--zoom">
-          <button type="button" class="wf-ib" title={tr('Отдалить')} aria-label={tr('Отдалить')} onclick={() => flow.zoomOut({ duration: 200 })}><WfIcon name="minus" size={15} /></button>
-          <button type="button" class="wf-zoomval" title={tr('Масштаб 100%')} onclick={() => flow.setZoom(1, { duration: 200 })}>{zoomPct}%</button>
-          <button type="button" class="wf-ib" title={tr('Приблизить')} aria-label={tr('Приблизить')} onclick={() => flow.zoomIn({ duration: 200 })}><WfIcon name="plus" size={15} /></button>
-          <button type="button" class="wf-ib" title={tr('Показать всё')} aria-label={tr('Показать всё')} onclick={fitAll}><WfIcon name="fit" size={15} /></button>
-          <button type="button" class="wf-ib" class:on={minimap} aria-pressed={minimap} title={tr('Мини-карта')} aria-label={tr('Мини-карта')} onclick={() => (minimap = !minimap)}><WfIcon name="map" size={15} /></button>
+          <IconButton name="wf-minus" size="sm" label={tr('Отдалить')} onclick={() => flow.zoomOut({ duration: 200 })} />
+          <Button class="wf-zoomval" variant="ghost" size="sm" title={tr('Масштаб 100%')} onclick={() => flow.setZoom(1, { duration: 200 })}>{zoomPct}%</Button>
+          <IconButton name="plus" size="sm" label={tr('Приблизить')} onclick={() => flow.zoomIn({ duration: 200 })} />
+          <IconButton name="wf-fit" size="sm" label={tr('Показать всё')} onclick={fitAll} />
+          <IconButton class="wf-ib" name="wf-map" size="sm" label={tr('Мини-карта')} aria-pressed={minimap} onclick={() => (minimap = !minimap)} />
         </div>
       </Panel>
 
@@ -876,23 +865,22 @@
               }}
             />
             <span class="wf-search__n">{query ? tr('{n} найдено', { n: hitList.length }) : ''}</span>
-            <button type="button" class="wf-ib" aria-label={tr('Закрыть поиск')} onclick={closeSearch}><WfIcon name="x" size={14} /></button>
+            <IconButton name="close" size="sm" label={tr('Закрыть поиск')} onclick={closeSearch} />
           </div>
         {/if}
         <div class="wf-tools nodrag nopan" role="toolbar" aria-label={tr('Инструменты холста')}>
-          <button type="button" class="wf-tool" class:on={tool === 'select'} aria-pressed={tool === 'select'} title={toolTitle(tr('Выбор'), 'V')} aria-label={tr('Выбор')} onclick={() => (tool = 'select')}><WfIcon name="select" size={18} /></button>
-          <button type="button" class="wf-tool" class:on={tool === 'hand'} aria-pressed={tool === 'hand'} title={toolTitle(tr('Рука'), 'H')} aria-label={tr('Рука')} onclick={() => (tool = 'hand')}><WfIcon name="hand" size={18} /></button>
+          <IconButton class="wf-tool" name="wf-select" label={tr('Выбор')} title={toolTitle(tr('Выбор'), 'V')} aria-pressed={tool === 'select'} onclick={() => (tool = 'select')} />
+          <IconButton class="wf-tool" name="wf-hand" label={tr('Рука')} title={toolTitle(tr('Рука'), 'H')} aria-pressed={tool === 'hand'} onclick={() => (tool = 'hand')} />
           <span class="wf-sep"></span>
-          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'draw'} aria-pressed={tool === 'draw'} title={toolTitle(tr('Рисование'), 'P')} aria-label={tr('Рисование')} onclick={() => (tool = tool === 'draw' ? 'select' : 'draw')}><ToolArt name="pencil" /></button>
-          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'note'} aria-pressed={tool === 'note'} title={toolTitle(tr('Заметка'), 'N')} aria-label={tr('Заметка')} onclick={() => (tool = tool === 'note' ? 'select' : 'note')}><ToolArt name="note" /></button>
-          <button type="button" class="wf-tool wf-tool--art" class:on={tool === 'shape'} aria-pressed={tool === 'shape'} title={toolTitle(tr('Фигуры'), 'R')} aria-label={tr('Фигуры')} onclick={() => (tool = tool === 'shape' ? 'select' : 'shape')}><ToolArt name="shapes" /></button>
-          <button type="button" class="wf-tool wf-tool--t" class:on={tool === 'text'} aria-pressed={tool === 'text'} title={toolTitle(tr('Текст'), 'T')} aria-label={tr('Текст')} onclick={() => (tool = tool === 'text' ? 'select' : 'text')}><span class="wf-tool__t">T</span></button>
-          <button type="button" class="wf-tool" class:on={searchOpen} aria-pressed={searchOpen} title={toolTitle(tr('Поиск'), 'Ctrl+F')} aria-label={tr('Поиск')} onclick={() => (searchOpen ? closeSearch() : openSearch())}><WfIcon name="search" size={18} /></button>
+          <IconButton class="wf-tool wf-tool--art" label={tr('Рисование')} title={toolTitle(tr('Рисование'), 'P')} aria-pressed={tool === 'draw'} onclick={() => (tool = tool === 'draw' ? 'select' : 'draw')}>{#snippet icon()}<ToolArt name="pencil" />{/snippet}</IconButton>
+          <IconButton class="wf-tool wf-tool--art" label={tr('Заметка')} title={toolTitle(tr('Заметка'), 'N')} aria-pressed={tool === 'note'} onclick={() => (tool = tool === 'note' ? 'select' : 'note')}>{#snippet icon()}<ToolArt name="note" />{/snippet}</IconButton>
+          <IconButton class="wf-tool wf-tool--art" label={tr('Фигуры')} title={toolTitle(tr('Фигуры'), 'R')} aria-pressed={tool === 'shape'} onclick={() => (tool = tool === 'shape' ? 'select' : 'shape')}>{#snippet icon()}<ToolArt name="shapes" />{/snippet}</IconButton>
+          <IconButton class="wf-tool wf-tool--t" label={tr('Текст')} title={toolTitle(tr('Текст'), 'T')} aria-pressed={tool === 'text'} onclick={() => (tool = tool === 'text' ? 'select' : 'text')}>{#snippet icon()}<span class="wf-tool__t">T</span>{/snippet}</IconButton>
+          <IconButton class="wf-tool" name="wf-search" label={tr('Поиск')} title={toolTitle(tr('Поиск'), 'Ctrl+F')} aria-pressed={searchOpen} onclick={() => (searchOpen ? closeSearch() : openSearch())} />
           <span class="wf-sep"></span>
-          <button type="button" class="wf-add" aria-haspopup="menu" aria-expanded={Boolean(menu && !menu.pos && !menu.edgeId)} onclick={() => (menu && !menu.pos ? (menu = null) : openAddMenu())}>
-            <WfIcon name="plus" size={15} />
+          <Button class="wf-add" variant="secondary" iconName="plus" aria-haspopup="menu" aria-expanded={Boolean(menu && !menu.pos && !menu.edgeId)} onclick={() => (menu && !menu.pos ? (menu = null) : openAddMenu())}>
             <span>{tr('Добавить узел')}</span>
-          </button>
+          </Button>
         </div>
       </Panel>
     {/if}
@@ -903,7 +891,7 @@
       <div class="wf-empty__ico"><WfIcon name="graph" size={26} /></div>
       <b>{tr('Процесс пуст')}</b>
       <p>{tr('Добавьте первый узел: триггер запускает процесс, дальше идут шаги.')}</p>
-      <button type="button" class="wf-run" onclick={openAddMenu}><WfIcon name="plus" size={13} /><span>{tr('Добавить узел')}</span></button>
+      <Button variant="primary" iconName="plus" onclick={openAddMenu}>{tr('Добавить узел')}</Button>
     </div>
   {/if}
 
@@ -958,7 +946,7 @@
     <div class="wf-viewing">
       <WfIcon name="history" size={15} />
       <span>{tr('Показан прошлый запуск')}</span>
-      <button type="button" onclick={() => onview?.(null)}>{tr('К текущему')}</button>
+      <Button variant="secondary" size="sm" onclick={() => onview?.(null)}>{tr('К текущему')}</Button>
     </div>
   {/if}
 </div>
@@ -975,7 +963,7 @@
   }
   .wf-canvas :global(.svelte-flow) {
     --xy-background-color: var(--k-canvas);
-    --xy-edge-stroke: var(--k-line-strong);
+    --xy-edge-stroke: var(--k-brand);
     --xy-selection-background-color: color-mix(in oklab, var(--k-brand) 10%, transparent);
     --xy-selection-border: 1.5px solid var(--k-brand);
     --xy-minimap-background-color: var(--k-surface);
@@ -984,7 +972,7 @@
     font-family: var(--k-font-body);
   }
   .wf-canvas :global(.svelte-flow__node) {
-    --xy-node-border-radius: 20px;
+    --xy-node-border-radius: var(--k-radius-inset);
   }
   .wf-canvas :global(.svelte-flow__node.selectable:focus),
   .wf-canvas :global(.svelte-flow__node.selectable:focus-visible) {
@@ -1010,52 +998,53 @@
   }
   .wf-canvas :global(.svelte-flow__minimap) {
     margin: 0 14px 14px 0;
-    border-radius: 16px;
+    border-radius: var(--k-radius-md);
     border: 1px solid var(--k-line);
     box-shadow: var(--k-shadow-2);
     overflow: hidden;
-    animation: wf-pop 0.34s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wf-canvas :global(.svelte-flow__panel) {
-    margin: 14px;
+    margin: var(--k-space-3);
   }
   .wf-canvas :global(.wf-p-top) {
-    margin-top: 12px;
+    margin-top: var(--k-space-3);
   }
   .wf-canvas :global(.wf-p-tools) {
     display: grid;
     justify-items: center;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--k-space-2);
+    margin-bottom: var(--k-space-3);
   }
-
   .wf-bar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px;
-    border-radius: 16px;
+    gap: var(--k-space-1);
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-3);
+    border-radius: var(--k-radius-md);
     border: 1px solid var(--k-line);
-    background: color-mix(in oklab, var(--k-surface) 86%, transparent);
-    backdrop-filter: blur(14px);
+    background: var(--k-surface);
     box-shadow: var(--k-shadow-2);
-    animation: wf-pop 0.45s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
+  }
+  .wf-bar--title,
+  .wf-bar--zoom {
+    padding: var(--k-space-1);
   }
   .wf-title {
     field-sizing: content;
     min-width: 140px;
     max-width: min(34vw, 360px);
-    height: 34px;
-    padding: 0 10px;
+    height: 30px;
+    padding: 0 var(--k-space-3);
     border: 1px solid transparent;
-    border-radius: 11px;
+    border-radius: var(--k-radius-sm);
     background: transparent;
     color: var(--k-text);
-    font: 800 15px/1 var(--k-font-display);
-    letter-spacing: -0.01em;
+    font: 700 var(--k-text-md) / 1 var(--k-font-display);
     transition:
-      background 150ms var(--k-ease-out, ease),
-      border-color 150ms var(--k-ease-out, ease);
+      background var(--k-dur-micro) var(--k-ease-out),
+      border-color var(--k-dur-micro) var(--k-ease-out);
   }
   .wf-title:hover {
     background: var(--k-surface-2);
@@ -1066,75 +1055,45 @@
     border-color: var(--k-brand);
     box-shadow: var(--k-focus);
   }
-  .wf-ib {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border: 0;
-    border-radius: 11px;
-    background: transparent;
-    color: var(--k-text-2);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      color 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-ib:hover:not(:disabled) {
-    background: var(--k-surface-2);
-    color: var(--k-text);
-  }
-  .wf-ib:active:not(:disabled) {
-    transform: scale(0.95);
-  }
-  .wf-ib:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-  .wf-ib.on {
-    background: var(--k-brand-tint);
-    color: var(--k-brand-text);
-  }
-  .wf-ib--list {
+  .wf-canvas :global(.wf-ib--list) {
     display: none;
   }
-  .wf-save {
-    padding: 0 8px;
-    font: 500 12px/1 var(--k-font-body);
-    color: var(--k-text-3);
-    white-space: nowrap;
+  .wf-canvas :global(.wf-ib[aria-pressed='true']),
+  .wf-canvas :global(.wf-tool[aria-pressed='true']) {
+    color: var(--k-brand-text);
+    background: var(--k-surface);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--k-brand) 50%, transparent),
+      0 2px 10px -4px color-mix(in oklab, var(--k-brand) 60%, transparent);
   }
-  .wf-save[data-state='error'] {
-    color: var(--k-attention-text);
+  .wf-bar :global(.wf-save) {
+    padding: 0 var(--k-space-2);
   }
   .wf-runchip {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    height: 30px;
-    margin: 0 2px;
-    padding: 0 11px;
-    border-radius: 999px;
+    height: 26px;
+    margin: 0 var(--k-space-0);
+    padding: 0 10px;
+    border-radius: var(--k-radius-sm);
     background: var(--k-surface-2);
-    font: 700 12px/1 var(--k-font-body);
+    font: 700 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-2);
-    animation: wf-pop 0.4s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wf-runchip[data-status='running'],
   .wf-runchip[data-status='stopping'] {
     background: var(--k-brand-tint);
     color: var(--k-brand-text);
   }
-  .wf-runchip[data-status='done'] {
-    background: color-mix(in oklab, var(--k-bot-mint) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-mint) 75%, var(--k-text));
+  .wf-runchip[data-status='failed'] {
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
-  .wf-runchip[data-status='failed'],
   .wf-runchip[data-status='approval'] {
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
+    background: var(--k-brand);
+    color: var(--k-on-brand);
   }
   .wf-runchip__sec {
     font-weight: 500;
@@ -1145,131 +1104,52 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: currentColor;
+    background: var(--k-ember);
+    box-shadow: 0 0 6px 1px color-mix(in oklab, var(--k-brand) 80%, transparent);
     animation: wf-blink 1.2s ease-in-out infinite;
   }
-  .wf-run {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 34px;
-    padding: 0 15px 0 13px;
-    border: 0;
-    border-radius: 11px;
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
-    font: 700 13px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-run:hover {
-    background: var(--k-ink-3, #24262c);
-  }
-  .wf-run:active {
-    transform: scale(0.95);
-  }
-  .wf-run.is-stop {
-    background: var(--k-attention);
-    color: #fff;
-  }
-  :global(:root[data-theme='dark']) .wf-run:not(.is-stop),
-  :global(:root:not([data-theme='light'])) .wf-run:not(.is-stop) {
-    box-shadow: inset 0 0 0 1px var(--k-ink-line);
-  }
-
   .wf-bar--zoom {
-    gap: 2px;
+    gap: var(--k-space-0);
   }
-  .wf-zoomval {
+  .wf-bar :global(.wf-zoomval) {
     min-width: 50px;
-    height: 34px;
-    padding: 0 6px;
-    border: 0;
-    border-radius: 11px;
-    background: transparent;
-    color: var(--k-text);
-    font: 700 12.5px/1 var(--k-font-body);
     font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    transition: background 150ms var(--k-ease-out, ease);
   }
-  .wf-zoomval:hover {
-    background: var(--k-surface-2);
-  }
-
   .wf-tools {
     display: flex;
     align-items: center;
-    gap: 3px;
-    padding: 6px;
-    border-radius: 20px;
+    gap: var(--k-space-0);
+    padding: var(--k-space-1);
+    border-radius: var(--k-radius-lg);
     border: 1px solid var(--k-line);
-    background: color-mix(in oklab, var(--k-surface) 88%, transparent);
-    backdrop-filter: blur(14px);
+    background: var(--k-surface);
     box-shadow: var(--k-shadow-3);
-    animation: wf-pop 0.5s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
-  .wf-tool {
-    display: grid;
-    place-items: center;
+  .wf-tools :global(.wf-tool) {
     width: 40px;
-    height: 38px;
-    padding: 0;
-    border: 0;
-    border-radius: 13px;
-    background: transparent;
     color: var(--k-text-2);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      color 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
   }
-  .wf-tool:hover {
-    background: var(--k-surface-2);
-    color: var(--k-text);
+  .wf-tools :global(.wf-tool--art) {
+    width: 46px;
   }
-  .wf-tool:active {
-    transform: scale(0.92);
-  }
-  .wf-tool.on {
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
+  .wf-tool__t {
+    font: 800 20px / 1 var(--k-font-display);
   }
   .wf-sep {
     width: 1px;
     height: 22px;
-    margin: 0 4px;
+    margin: 0 var(--k-space-1);
     background: var(--k-line);
-  }
-  .wf-tool--art {
-    width: 46px;
-    height: 44px;
-  }
-  .wf-tool--art.on {
-    background: color-mix(in oklab, var(--k-text) 9%, transparent);
-  }
-  .wf-tool--t .wf-tool__t {
-    font: 800 20px/1 var(--k-font-display);
-    transition: transform 320ms var(--k-ease-spring, ease);
-  }
-  .wf-tool--t:hover .wf-tool__t {
-    transform: translateY(-2px) scale(1.1);
-  }
-  .wf-tool--t.on {
-    background: color-mix(in oklab, var(--k-text) 9%, transparent);
-    color: var(--k-text);
   }
   .wf-en {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 0 6px 0 2px;
-    font: 600 12.5px/1 var(--k-font-body);
+    gap: var(--k-space-2);
+    padding: 0 var(--k-space-2) 0 var(--k-space-0);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-2);
-    transition: color 200ms var(--k-ease-out, ease);
+    transition: color var(--k-dur-base) var(--k-ease-out);
   }
   .wf-en.off {
     color: var(--k-text-3);
@@ -1282,51 +1162,27 @@
     place-items: center;
     background: var(--k-backdrop);
     cursor: zoom-out;
-    animation: wf-pop 0.3s var(--k-ease-out, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-out) both;
   }
   .wf-lightbox img {
     max-width: 86%;
     max-height: 86%;
-    border-radius: 18px;
+    border-radius: var(--k-radius-lg);
     box-shadow: var(--k-shadow-3);
   }
-  .wf-add {
-    white-space: nowrap;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    height: 38px;
-    padding: 0 15px 0 12px;
-    border: 0;
-    border-radius: 13px;
-    background: var(--k-text);
-    color: var(--k-canvas);
-    font: 700 13.5px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-add:hover {
-    background: color-mix(in oklab, var(--k-text) 86%, var(--k-canvas));
-  }
-  .wf-add:active {
-    transform: scale(0.95);
-  }
-
   .wf-search {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--k-space-2);
     width: min(380px, 80vw);
     height: 44px;
-    padding: 0 6px 0 14px;
-    border-radius: 16px;
+    padding: 0 var(--k-space-1) 0 var(--k-space-4);
+    border-radius: var(--k-radius-md);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
     box-shadow: var(--k-shadow-2);
     color: var(--k-text-3);
-    animation: wf-pop 0.34s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
     transform-origin: bottom center;
   }
   .wf-search input {
@@ -1337,24 +1193,23 @@
     outline: none;
     background: transparent;
     color: var(--k-text);
-    font: 500 14px/1 var(--k-font-body);
+    font: 500 var(--k-text-md) / 1 var(--k-font-body);
   }
   .wf-search__n {
-    font: 500 12px/1 var(--k-font-body);
+    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
     white-space: nowrap;
   }
-
   .wf-empty {
     position: absolute;
     inset: 0;
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 6px;
-    padding: 0 24px 90px;
+    gap: var(--k-space-2);
+    padding: 0 var(--k-space-6) 90px;
     text-align: center;
     pointer-events: none;
-    animation: wf-pop 0.6s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
   .wf-empty > * {
     pointer-events: auto;
@@ -1364,23 +1219,22 @@
     place-items: center;
     width: 56px;
     height: 56px;
-    margin-bottom: 6px;
-    border-radius: 18px;
-    background: var(--k-surface);
+    margin-bottom: var(--k-space-2);
+    border-radius: var(--k-radius-inset);
+    background: var(--k-brand-tint);
     border: 1px solid var(--k-line);
-    color: var(--k-text-2);
+    color: var(--k-brand);
     box-shadow: var(--k-shadow-1);
   }
   .wf-empty b {
-    font: 800 18px/1.2 var(--k-font-display);
+    font: 800 var(--k-text-lg) / 1.2 var(--k-font-display);
   }
   .wf-empty p {
     max-width: 320px;
-    margin: 0 0 8px;
-    font: 400 13.5px/1.45 var(--k-font-body);
+    margin: 0 0 var(--k-space-2);
+    font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
     color: var(--k-text-3);
   }
-
   @keyframes wf-pop {
     from {
       opacity: 0;
@@ -1398,8 +1252,8 @@
   }
   .wf-canvas :global(.svelte-flow__panel) {
     transition:
-      opacity 220ms var(--k-ease-out, ease),
-      translate 280ms var(--k-ease-out, ease);
+      opacity var(--k-dur-base) var(--k-ease-out),
+      translate var(--k-dur-ui) var(--k-ease-out);
   }
   .wf-canvas.is-hud-off :global(.svelte-flow__panel) {
     opacity: 0;
@@ -1413,16 +1267,16 @@
   }
   .wf-bar--preview {
     white-space: nowrap;
-    gap: 10px;
-    padding: 5px 5px 5px 14px;
+    gap: var(--k-space-3);
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-4);
     color: var(--k-text-2);
   }
   .wf-bar--preview b {
-    font: 800 14px/1 var(--k-font-display);
+    font: 800 var(--k-text-md) / 1 var(--k-font-display);
     color: var(--k-text);
   }
   .wf-bar__hint {
-    font: 500 12px/1 var(--k-font-body);
+    font: 500 var(--k-text-xs) / 1 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wf-viewing {
@@ -1432,33 +1286,17 @@
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 10px;
-    height: 38px;
-    padding: 0 6px 0 14px;
-    border-radius: 999px;
+    gap: var(--k-space-3);
+    padding: var(--k-space-1) var(--k-space-1) var(--k-space-1) var(--k-space-4);
+    border-radius: var(--k-radius-pill);
     border: 1px solid var(--k-line);
     background: var(--k-surface);
     box-shadow: var(--k-shadow-2);
     color: var(--k-text-2);
-    font: 600 12.5px/1 var(--k-font-body);
+    font: 600 var(--k-text-xs) / 1 var(--k-font-body);
     translate: -50% 0;
-    animation: wf-pop 0.4s var(--k-ease-spring, ease) both;
+    animation: wf-pop var(--k-dur-appear) var(--k-ease-spring) both;
   }
-  .wf-viewing button {
-    height: 28px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--k-brand-tint);
-    color: var(--k-brand-text);
-    font: 700 12px/1 var(--k-font-body);
-    cursor: pointer;
-    transition: transform 300ms var(--k-ease-spring, ease);
-  }
-  .wf-viewing button:active {
-    transform: scale(0.94);
-  }
-
   @container (max-width: 1040px) {
     .wf-canvas :global(.wf-p-zoom) {
       margin-bottom: 80px;
@@ -1473,17 +1311,17 @@
     }
   }
   @media (max-width: 1300px) {
-    .wf-save {
+    .wf-bar :global(.wf-save) {
       display: none;
     }
   }
   @media (max-width: 820px) {
-    .wf-ib--list {
-      display: grid;
+    .wf-canvas :global(.wf-ib--list) {
+      display: inline-flex;
     }
-    .wf-save,
-    .wf-add span,
-    .wf-run span {
+    .wf-bar :global(.wf-save),
+    .wf-tools :global(.wf-add span),
+    .wf-bar :global(.wf-run span) {
       display: none;
     }
     .wf-title {
@@ -1493,18 +1331,13 @@
     .wf-canvas :global(.wf-p-zoom) {
       margin-bottom: 80px;
     }
-    .wf-run {
-      padding: 0 11px;
-    }
   }
   @media (prefers-reduced-motion: reduce) {
     .wf-bar,
     .wf-tools,
     .wf-search,
     .wf-empty,
-    .wf-runchip {
-      animation: none;
-    }
+    .wf-runchip,
     .wf-runchip__dot {
       animation: none;
     }

@@ -11,6 +11,7 @@
   import WorkflowList from './WorkflowList.svelte';
   import WorkflowCanvas from './WorkflowCanvas.svelte';
   import WfIcon from './WfIcon.svelte';
+  import { Button } from '../kit';
 
   /** api(path,{method,body}); bots [{id,name,color,emoji}]; onmenu() открывает боковую панель на узком окне. */
   let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu, onsettings, uploadAsset, fileUrl } = $props();
@@ -397,8 +398,8 @@
       {#if conflict}
         <div class="wfs-conflict" role="alertdialog" aria-label={tr('Процесс изменили в другом месте')}>
           <span>{tr('Процесс изменили в другом месте, а у вас есть несохранённые правки. Автосохранение на паузе.')}</span>
-          <button type="button" class="wfs-cf-btn" onclick={keepMine}>{tr('Оставить мои правки')}</button>
-          <button type="button" class="wfs-cf-btn" onclick={loadFresh}>{tr('Загрузить свежую')}</button>
+          <Button class="wfs-cf-btn" variant="primary" size="sm" onclick={keepMine}>{tr('Оставить мои правки')}</Button>
+          <Button class="wfs-cf-btn" variant="secondary" size="sm" onclick={loadFresh}>{tr('Загрузить свежую')}</Button>
         </div>
       {/if}
       {#if previewV}
@@ -422,11 +423,11 @@
         {#if loadError}
           <b>{tr('Не удалось загрузить процессы')}</b>
           <p>{loadError}</p>
-          <button type="button" class="wfs-btn" onclick={loadList}>{tr('Повторить')}</button>
+          <Button variant="secondary" onclick={loadList}>{tr('Повторить')}</Button>
         {:else}
           <b>{tr('Соберите процесс из шагов')}</b>
           <p>{tr('Триггер запускает цепочку: промпт, боты, одобрение, вывод. Шаги соединяются линиями, результат виден на каждом узле.')}</p>
-          <button type="button" class="wfs-btn" onclick={create}><WfIcon name="plus" size={14} /><span>{tr('Создать процесс')}</span></button>
+          <Button variant="primary" iconName="plus" onclick={create}>{tr('Создать процесс')}</Button>
         {/if}
       </div>
     {/if}
@@ -465,29 +466,16 @@
     align-items: center;
     gap: 8px;
     max-width: min(560px, calc(100% - 24px));
-    padding: 10px 12px;
+    padding: var(--k-space-3);
     translate: -50% 0;
-    border-radius: 14px;
+    border-radius: var(--k-radius-md);
     background: var(--k-surface);
     color: var(--k-text);
-    box-shadow: var(--k-shadow-pop, 0 8px 28px rgb(0 0 0 / 0.25)), inset 0 0 0 1px var(--k-line-strong);
-    font: 500 13px/1.35 var(--k-font-body);
+    box-shadow: var(--k-shadow-2), inset 0 0 0 1px var(--k-line-strong);
+    font: 500 var(--k-text-sm) / 1.35 var(--k-font-body);
   }
   .wfs-conflict span {
     flex: 1 1 240px;
-  }
-  .wfs-cf-btn {
-    padding: 6px 12px;
-    border: 0;
-    border-radius: 10px;
-    background: var(--k-surface-3);
-    color: var(--k-text);
-    font: 600 12.5px/1.2 var(--k-font-body);
-    cursor: pointer;
-  }
-  .wfs-cf-btn:first-of-type {
-    background: var(--k-accent, var(--k-surface-3));
-    color: var(--k-accent-ink, var(--k-text));
   }
   .wfs-preview {
     position: absolute;
@@ -512,40 +500,18 @@
     width: 64px;
     height: 64px;
     margin-bottom: 6px;
-    border-radius: 22px;
-    background: color-mix(in oklab, var(--k-bot-violet) 22%, var(--k-surface));
-    color: color-mix(in oklab, var(--k-bot-violet) 70%, var(--k-text));
+    border-radius: var(--k-radius-lg);
+    background: var(--k-brand-tint);
+    color: var(--k-brand);
   }
   .wfs-empty b {
-    font: 800 20px/1.2 var(--k-font-display);
+    font: 700 var(--k-text-xl) / 1.2 var(--k-font-display);
   }
   .wfs-empty p {
     max-width: 380px;
     margin: 0 0 8px;
-    font: 400 14px/1.5 var(--k-font-body);
+    font: 400 var(--k-text-md) / 1.5 var(--k-font-body);
     color: var(--k-text-3);
-  }
-  .wfs-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 40px;
-    padding: 0 18px 0 15px;
-    border: 0;
-    border-radius: 13px;
-    background: var(--k-ink, #000);
-    color: var(--k-on-ink, #fff);
-    font: 700 14px/1 var(--k-font-body);
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
-  }
-  .wfs-btn:hover {
-    background: var(--k-ink-3, #24262c);
-  }
-  .wfs-btn:active {
-    transform: scale(0.95);
   }
   @keyframes wfs-in {
     from {

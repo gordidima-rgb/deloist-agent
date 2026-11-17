@@ -44,3 +44,8 @@ export { default as ListItem } from './layout/ListItem.svelte';
 // media
 export { default as Avatar } from './media/Avatar.svelte';
 export { default as Icon } from './media/Icon.svelte';
+
+// Угли, этап B3: статичная метка, сетка-переключатель, состояние сохранения.
+export { default as Tag } from './status/Tag.svelte';
+export { default as SaveMark } from './status/SaveMark.svelte';
+export { default as ChoiceGrid } from './choice/ChoiceGrid.svelte';

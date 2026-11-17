@@ -10,6 +10,7 @@
   import LinkHint from './LinkHint.svelte';
   import ScheduleEditor from './ScheduleEditor.svelte';
   import WfIcon from './WfIcon.svelte';
+  import { Button, IconButton, TextInput } from '../kit';
 
   let { id, fields = {}, schedule } = $props();
 
@@ -55,11 +56,10 @@
 <KindChips options={TRIGGER_KINDS} value={kind} label={triggerLabel} aria={tr('Как запускать')} unavailable={(k) => !isLinked(k, ctx.connections)} onchange={pick} />
 
 {#if kind === 'schedule'}
-  <button type="button" class="wft-sched nodrag" aria-expanded={schedOpen} onclick={() => (schedOpen = !schedOpen)}>
-    <WfIcon name="clock" size={14} />
+  <Button class="wft-sched nodrag" variant="ghost" iconName="wf-clock" aria-expanded={schedOpen} onclick={() => (schedOpen = !schedOpen)}>
     <span>{scheduleText(schedule)}</span>
     <WfIcon name="chevron" size={14} />
-  </button>
+  </Button>
   {#if schedOpen}
     <ScheduleEditor {schedule} onchange={(s) => ctx.model.setSchedule(id, s)} />
   {/if}
@@ -70,10 +70,8 @@
 {:else if kind === 'webhook'}
   {#if hookUrl}
     <div class="wft-url nodrag nowheel">
-      <input type="text" readonly value={hookUrl} aria-label={tr('Адрес вебхука')} onfocus={(e) => e.currentTarget.select()} />
-      <button type="button" class="wft-copy" class:done={copied} title={tr('Скопировать адрес')} aria-label={tr('Скопировать адрес')} onclick={copy}>
-        <WfIcon name={copied ? 'check' : 'copy'} size={14} />
-      </button>
+      <TextInput readonly value={hookUrl} aria-label={tr('Адрес вебхука')} onfocus={(e) => e.currentTarget.select()} />
+      <IconButton name={copied ? 'check' : 'wf-copy'} size="sm" label={tr('Скопировать адрес')} onclick={copy} />
     </div>
     <p class="wft-warn">{tr('Адрес показан один раз: скопируйте его сейчас. Потом его не открыть, можно только выпустить новый.')}</p>
   {:else if trig?.hook}
@@ -81,15 +79,12 @@
   {:else}
     <p class="wft-note"><span>{tr('Любой POST на адрес запускает процесс, а тело запроса попадёт в первый шаг как данные.')}</span></p>
   {/if}
-  <button type="button" class="wft-btn nodrag" disabled={hookBusy} onclick={makeHook}>
-    <WfIcon name="webhook" size={14} />
-    <span>{trig?.hook || hookUrl ? tr('Новый адрес') : tr('Создать адрес')}</span>
-  </button>
+  <Button class="nodrag" variant="secondary" size="sm" iconName="wf-webhook" disabled={hookBusy} onclick={makeHook}>{trig?.hook || hookUrl ? tr('Новый адрес') : tr('Создать адрес')}</Button>
   {#if trig?.hook || hookUrl}
     <p class="wft-warn wft-warn--soft">{tr('Старый адрес после этого перестанет работать.')}</p>
   {/if}
 {:else if isMessenger(kind)}
-  <input class="wft-input nodrag" type="text" placeholder={tr('Только с этим текстом (необязательно)')} value={fields.text || ''} oninput={(e) => ctx.model.setField(id, 'text', e.currentTarget.value)} />
+  <TextInput class="nodrag" placeholder={tr('Только с этим текстом (необязательно)')} value={fields.text || ''} oninput={(e) => ctx.model.setField(id, 'text', e.currentTarget.value)} />
   {#if !linked}
     <LinkHint name={triggerLabel(kind)} onopen={() => ctx.openSettings(kind)} />
   {:else}
@@ -108,9 +103,9 @@
   .wft-off {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 8px;
+    gap: var(--k-space-1) var(--k-space-2);
     margin: 0;
-    font: 400 12.5px/1.4 var(--k-font-body);
+    font: 400 var(--k-text-xs) / 1.4 var(--k-font-body);
     color: var(--k-text-3);
   }
   .wft-note b {
@@ -118,132 +113,37 @@
     color: var(--k-text-2);
   }
   .wft-warn {
-    padding: 7px 10px;
-    border-radius: 11px;
-    background: var(--k-attention-tint);
-    color: var(--k-attention-text);
-    font-weight: 500;
-    animation: wft-in 0.4s var(--k-ease-spring, ease) both;
+    padding: var(--k-space-2) var(--k-space-3);
+    border-radius: var(--k-radius-sm);
+    background: var(--k-brand-tint);
+    color: var(--k-brand-text);
   }
   .wft-warn--soft {
-    background: transparent;
-    padding: 0 2px;
+    background: none;
+    padding: 0;
     color: var(--k-text-3);
-    animation: none;
   }
   .wft-off {
     align-items: center;
-    padding: 6px 10px;
-    border-radius: 11px;
-    background: var(--k-surface-2);
-    color: var(--k-text-2);
-  }
-  .wft-sched {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid var(--k-line);
-    border-radius: 12px;
-    background: var(--k-surface);
-    color: var(--k-text);
-    font: 600 13px/1 var(--k-font-body);
-    cursor: pointer;
-  }
-  .wft-sched span {
-    flex: 1;
-    text-align: left;
+    color: var(--k-text-3);
   }
   .wft-url {
     display: flex;
-    gap: 6px;
-    animation: wft-in 0.45s var(--k-ease-spring, ease) both;
-  }
-  .wft-url input,
-  .wft-input {
-    flex: 1;
-    min-width: 0;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid var(--k-line);
-    border-radius: 12px;
-    background: var(--k-surface-2);
-    color: var(--k-text);
-    font: 500 12.5px/1 var(--k-font-body);
-  }
-  .wft-input {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--k-surface);
-  }
-  .wft-input:focus,
-  .wft-url input:focus {
-    outline: 2px solid color-mix(in oklab, var(--k-brand) 45%, transparent);
-    outline-offset: 1px;
-  }
-  .wft-copy,
-  .wft-btn {
-    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 7px;
-    border: 0;
-    cursor: pointer;
-    transition:
-      background 150ms var(--k-ease-out, ease),
-      transform 300ms var(--k-ease-spring, ease);
+    gap: var(--k-space-1);
   }
-  .wft-copy {
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
-    background: var(--k-surface-3);
+  :global(.wft-sched) {
+    justify-content: flex-start;
+    width: 100%;
+    background: var(--k-surface-2);
+    border: 1px solid var(--k-line);
     color: var(--k-text);
   }
-  .wft-copy.done {
-    background: color-mix(in oklab, var(--k-bot-mint) 40%, var(--k-surface));
+  :global(.wft-sched span) {
+    flex: 1;
+    text-align: left;
   }
-  .wft-btn {
-    height: 36px;
-    padding: 0 14px;
-    border-radius: 12px;
-    background: var(--k-surface-3);
-    color: var(--k-text);
-    font: 700 13px/1 var(--k-font-body);
-  }
-  .wft-btn:hover,
-  .wft-copy:hover {
-    background: var(--k-line-strong, var(--k-surface-3));
-  }
-  .wft-btn:active,
-  .wft-copy:active {
-    transform: scale(0.95);
-  }
-  .wft-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .wft-sched:focus-visible,
-  .wft-btn:focus-visible,
-  .wft-copy:focus-visible {
-    outline: 2px solid var(--k-brand);
-    outline-offset: 2px;
-  }
-  @keyframes wft-in {
-    from {
-      opacity: 0;
-      transform: translateY(-5px) scale(0.97);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .wft-warn,
-    .wft-url,
-    .wft-copy,
-    .wft-btn {
-      animation: none;
-      transition: none;
-    }
+  :global(.wft-sched[aria-expanded='true'] .wf-ico:last-child) {
+    transform: rotate(180deg);
   }
 </style>
