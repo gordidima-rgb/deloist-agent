@@ -58,6 +58,9 @@ fn build_prompt(bot: &Bot, messages: &[Value], memory: &str, workspace: &Path, p
     if !bot.persona.is_empty() {
         lines.push(bot.persona.clone());
     }
+    if let Some(block) = crate::brain::prompt_block(bot) {
+        lines.push(block);
+    }
     if !memory.is_empty() {
         lines.push(format!("# Твоя память\n{memory}"));
     }

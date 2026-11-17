@@ -1611,7 +1611,46 @@ async fn get_memory(State(app): Shared, Path(id): Path<String>) -> Response {
         "used": crate::memory::usage(&app, &id).await,
         "limit": crate::memory::BOT_LIMIT,
         "journal": crate::memory::journal(&app, Some(&id), 30).await,
+        "file": crate::memory::bot_file_text(&app, &id).await,
+        "fullLimit": crate::memory::OWN_FULL_LIMIT,
+        "brain": app.store.bot(&id).map(|b| b.brain).unwrap_or_default(),
+        "brainLimit": crate::brain::LIMIT,
     }))
+}
+
+/// Человек правит memory.md бота текстом в ящике: новые и изменённые строки — его, в журнале и отменяются.
+async fn put_memory_file(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = need_bot(&app, &id) {
+        return r;
+    }
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let text = body.get("text").and_then(Value::as_str).unwrap_or_default();
+    match crate::memory::human_file_write(&app, &id, text).await {
+        Ok(entry) => ok(json!({ "file": crate::memory::bot_file_text(&app, &id).await, "entryId": entry })),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+/// Человек правит brain.md (правила от человека) в ящике бота: это и есть одобрение.
+async fn put_brain(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = need_bot(&app, &id) {
+        return r;
+    }
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let text = body.get("text").and_then(Value::as_str).unwrap_or_default();
+    match crate::brain::set(&app, &id, text).await {
+        Ok(bot) => {
+            app.turns.emit(json!({ "type": "state_changed" }));
+            ok(json!({ "brain": bot.brain }))
+        }
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
 }
 
 /// Экран общей памяти: факты, оглавление, которое видят все боты, пределы, доктор и журнал.
@@ -4014,6 +4053,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/bots/{id}/clear", post(clear))
         .route("/api/bots/{id}/stats", get(get_stats))
         .route("/api/bots/{id}/memory", get(get_memory))
+        .route("/api/bots/{id}/memory-file", axum::routing::put(put_memory_file))
+        .route("/api/bots/{id}/brain", axum::routing::put(put_brain))
         .route("/api/bots/{id}/compact", post(compact_bot))
         .route("/api/bots/{id}/intro", get(bot_intro))
         .route("/api/memory", get(get_shared_memory))

@@ -16,6 +16,7 @@ mod relay;
 #[path = "relay_stub.rs"]
 mod relay;
 mod agents_md;
+mod brain;
 mod agent_client;
 mod browser;
 mod browser_tools;
@@ -281,6 +282,8 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , instabox: instabox::Hub::default(), relay: relay::Relay::default(), slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default(), workflows: workflows::Workflows::open(&data) });
     // До первого хода: отметки задач у новой версии начинаются с этой минуты.
     extract::init(&app).await;
+    // 0.4.3: правила из инструкций — в brain.md, MAIN.md — в memory.md (тот при первом чтении памяти).
+    brain::migrate_all(&app).await;
     scheduler::start(app.clone());
     providers::start(app.clone());
     update::start(app.clone());

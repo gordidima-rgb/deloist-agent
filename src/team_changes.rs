@@ -47,6 +47,12 @@ pub struct BotChange {
     /// именно добавить или убрать, чтобы карточка показала одну строку, а не 4000 знаков «было → стало».
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<RuleNote>,
+    /// Правила от человека (`brain.md`): было → станет. Его пишут `propose_rule` и карточка о правке файла вне карточки.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain: Option<Edit>,
+    /// Карточка о том, что `brain.md` в папке бота изменили мимо «Применить»; «Не надо» возвращает файл.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub drift: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -107,6 +113,8 @@ impl Change {
                 "instructions": c.instructions,
                 "removeFrom": c.remove_from,
                 "rule": c.rule,
+                "brain": c.brain,
+                "drift": c.drift,
                 "at": offer.at,
             }),
             Change::Routine(r) => json!({
@@ -210,7 +218,7 @@ pub fn plan_bot_change(app: &App, bot: &Bot, args: &Value) -> Result<BotChange, 
     if role.is_none() && instructions.is_none() && remove_from.is_none() {
         return Err("нечего менять: укажи role, instructions или removeFromRoom (и они должны отличаться от нынешних)".into());
     }
-    Ok(BotChange { host_id: bot.id.clone(), host_name: bot.name.clone(), target_id: target.id, target_name: target.name, role, instructions, remove_from, rule: None })
+    Ok(BotChange { host_id: bot.id.clone(), host_name: bot.name.clone(), target_id: target.id, target_name: target.name, role, instructions, remove_from, rule: None, brain: None, drift: false })
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +282,9 @@ pub fn plan_rule(bot: &Bot, args: &Value) -> Result<BotChange, String> {
     if add.is_empty() && remove.is_empty() {
         return Err("нечего менять: укажи rule (новое правило) или remove (текст правила, которое убрать)".into());
     }
-    let after = with_rule(&bot.persona, &add, &remove)?;
-    if after.chars().count() > MAX_INSTRUCTIONS {
-        return Err(format!("инструкция станет длиннее {MAX_INSTRUCTIONS} знаков: предложи убрать устаревшее правило (remove)"));
+    let after = crate::brain::with_rule(&bot.brain, &add, &remove)?;
+    if after.chars().count() > crate::brain::LIMIT {
+        return Err(format!("brain.md станет длиннее {} знаков: предложи убрать устаревшее правило (remove)", crate::brain::LIMIT));
     }
     Ok(BotChange {
         host_id: bot.id.clone(),
@@ -284,9 +292,11 @@ pub fn plan_rule(bot: &Bot, args: &Value) -> Result<BotChange, String> {
         target_id: bot.id.clone(),
         target_name: bot.name.clone(),
         role: None,
-        instructions: Some(Edit { before: bot.persona.clone(), after }),
+        instructions: None,
         remove_from: None,
         rule: Some(RuleNote { add, remove }),
+        brain: Some(Edit { before: crate::brain::normalize(&bot.brain), after }),
+        drift: false,
     })
 }
 
@@ -428,9 +438,12 @@ async fn apply_bot_change(app: &Arc<App>, c: &BotChange) -> Result<String, Strin
     let target = app.store.bot(&c.target_id).ok_or_else(|| format!("бота «{}» больше нет", c.target_name))?;
     // Предлагал участник команды: если бота убрали из команды, пока карточка висела, права на правку он потерял.
     // Правило себе (`propose_rule`) команды не требует.
-    let own_rule = c.host_id == c.target_id && c.rule.is_some();
+    let own_rule = c.host_id == c.target_id && (c.rule.is_some() || c.brain.is_some());
     if !own_rule && (app.store.bot(&c.host_id).is_none() || shared_rooms(app, &c.host_id, &c.target_id).is_empty()) {
         return Err(format!("«{}» больше не в одной команде с «{}»: предложи заново", c.host_name, target.name));
+    }
+    if c.brain.as_ref().is_some_and(|e| e.before != crate::brain::normalize(&target.brain)) {
+        return Err(format!("правила «{}» уже изменились, пока карточка висела: предложи заново", target.name));
     }
     if c.role.as_ref().is_some_and(|e| e.before != target.role) || c.instructions.as_ref().is_some_and(|e| e.before != target.persona) {
         return Err(format!("у «{}» роль или инструкции уже изменились, пока карточка висела: предложи заново", target.name));
@@ -471,11 +484,17 @@ async fn apply_bot_change(app: &Arc<App>, c: &BotChange) -> Result<String, Strin
         if c.role.is_some() {
             done.push("роль".to_string());
         }
+        if c.instructions.is_some() {
+            done.push("инструкции".to_string());
+        }
+    }
+    // Правила — в brain.md: одобренная копия в данных бота и файл в его папке.
+    if let Some(e) = &c.brain {
+        crate::brain::set(app, &c.target_id, &e.after).await?;
         match &c.rule {
-            Some(rule) if !rule.add.is_empty() => done.push(format!("добавлено правило «{}»", rule.add)),
-            Some(rule) => done.push(format!("убрано правило «{}»", rule.remove)),
-            None if c.instructions.is_some() => done.push("инструкции".to_string()),
-            None => {}
+            Some(rule) if !rule.add.is_empty() => done.push(format!("добавлено правило «{}» в brain.md", rule.add)),
+            Some(rule) => done.push(format!("убрано правило «{}» из brain.md", rule.remove)),
+            None => done.push("правила в brain.md".to_string()),
         }
     }
     if let Some(room) = room {

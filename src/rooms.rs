@@ -774,6 +774,9 @@ fn room_messages(app: &App, room: &Room, bot: &Bot, history: &[Value], memory: &
     if !bot.persona.is_empty() {
         prompt.push(bot.persona.clone());
     }
+    if let Some(block) = crate::brain::prompt_block(bot) {
+        prompt.push(block);
+    }
     prompt.push(format!(
         "Ты в групповом чате «{}». Участники: {}. Отвечай только за себя, не говори от лица других и не пересказывай их ответы.",
         room.name,

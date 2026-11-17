@@ -374,6 +374,9 @@ pub struct Bot {
     pub emoji: String,
     pub color: String,
     pub persona: String,
+    /// Одобренные правила от человека (`brain.md`, см. `brain.rs`). В ход идёт эта копия, а не файл в папке бота.
+    /// Меняется только карточкой «Применить» или в ящике бота: в общем PATCH бота этого поля нет.
+    pub brain: String,
     pub driver: String,
     pub model: String,
     /// `lead` или `specialist`: кого показывать в боковой панели и кого звать гостем.
@@ -420,6 +423,7 @@ impl Default for Bot {
             emoji: String::new(),
             color: "#7a8595".into(),
             persona: String::new(),
+            brain: String::new(),
             driver: String::new(),
             model: String::new(),
             rank: "lead".into(),
@@ -2066,6 +2070,7 @@ impl Store {
             emoji: take_chars(&text_or(input, "emoji", ""), 4),
             color: text_or(input, "color", "#7a8595"),
             persona: text_or(input, "persona", "Ты — полезный ассистент. Отвечай коротко и по делу."),
+            brain: String::new(),
             driver: text_or(input, "driver", ""),
             model: text_or(input, "model", ""),
             rank: match input.get("rank").and_then(Value::as_str) {
@@ -3210,6 +3215,20 @@ impl Store {
         let mut mine = state.rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| id == bot_id));
         let first = mine.clone().find(|r| r.stage == STAGE_INTERVIEW);
         first.or_else(|| mine.next()).cloned()
+    }
+
+    /// Одобренные правила бота (`brain.md`). Вызывает только `brain::set`.
+    pub async fn set_bot_brain(&self, id: &str, text: &str) -> std::io::Result<Option<Bot>> {
+        let bot = {
+            let mut state = self.state.lock().unwrap();
+            let Some(bot) = state.bots.iter_mut().find(|b| b.id == id) else {
+                return Ok(None);
+            };
+            bot.brain = text.to_string();
+            bot.clone()
+        };
+        self.persist().await?;
+        Ok(Some(bot))
     }
 
     pub async fn set_room_stage(&self, id: &str, stage: &str) -> std::io::Result<Option<Room>> {

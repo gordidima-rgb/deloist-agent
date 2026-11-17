@@ -137,7 +137,7 @@ pub(crate) fn hidden_in_instructions(c: char) -> bool {
 }
 
 /// Знаки смены направления текста: в инструкциях запрещены (остальные Cf, например соединитель эмодзи, допустимы).
-pub(crate) fn is_bidi_control(c: char) -> bool {
+pub fn is_bidi_control(c: char) -> bool {
     matches!(c as u32, 0x061C | 0x200E | 0x200F | 0x202A..=0x202E | 0x2066..=0x2069)
 }
 
@@ -403,6 +403,12 @@ pub(crate) async fn await_decision(
 pub fn decline(app: &App, offer: &Offer) {
     if offer.team.is_some() || offer.change.is_some() {
         app.offers.decide(&offer.id, "Человек отказался: ничего не создано. Не предлагай то же снова без новой причины.".into());
+    }
+    // brain.md правили мимо карточки, человек не принял: файл снова такой, как одобрено.
+    if let Some(crate::team_changes::Change::BotChange(c)) = &offer.change {
+        if c.drift {
+            crate::brain::restore_file(app, &c.target_id);
+        }
     }
 }
 
