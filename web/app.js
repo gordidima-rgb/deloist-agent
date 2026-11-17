@@ -947,6 +947,7 @@ function botMenuItems(bot) {
     { id: 'unread', label: S.unread.has(bot.id) ? tr('Отметить прочитанным') : tr('Отметить непрочитанным'), icon: 'eye' },
     { id: 'dock', label: bot.dock !== false ? tr('Убрать из дока') : tr('Показать в доке'), icon: 'dock-hide' },
     { id: 'compact', label: tr('Сжать историю'), icon: 'compact' },
+    ...(S.debug ? [{ id: 'debug', label: tr('Скопировать отладку'), icon: 'copy' }] : []),
     { kind: 'sep' },
     { id: 'delete', label: tr('Удалить бота'), icon: 'trash', danger: true },
   ];
@@ -1017,6 +1018,7 @@ async function botMenuPick(bot, pick, from = '') {
   }
   if (pick === 'dock') return setDockBot(id, bot.dock === false);
   if (pick === 'compact') return compactBot(id);
+  if (pick === 'debug') return copyDebug(id);
   if (pick === 'delete') {
     if (!confirm(tr('Удалить «{name}» вместе с чатом и памятью?', { name: bot.name }))) return;
     try {
@@ -2022,6 +2024,42 @@ function toastAction(message, label, onClick, ms = 12000) {
 
 // Сжать историю личного чата бота. Пока бот работает, сжатие ждёт конца хода (turn_end).
 const compactAfterTurn = new Set();
+
+// Только в отладочной сборке: всё нужное для разбора чата одним куском текста (без ключей и содержимого .env).
+const DEBUG_TEXT_MAX = 1500;
+const DEBUG_TOOL_MAX = 700;
+const debugClip = (v, n) => {
+  const t = typeof v === 'string' ? v : JSON.stringify(v ?? '');
+  return t.length > n ? `${t.slice(0, n)}…[+${t.length - n}]` : t;
+};
+
+async function copyDebug(id) {
+  const bot = botById(id);
+  if (!bot) return;
+  try {
+    const { messages } = await api(`/api/bots/${encodeURIComponent(id)}/thread?limit=300`);
+    const lines = (messages || []).slice(-40).map((m) => {
+      const head = `[${m.role || '?'}${m.at ? ' ' + m.at : ''}] ${debugClip(m.text || m.content || '', DEBUG_TEXT_MAX)}`;
+      const tools = (m.tools || m.steps || []).map((t) => `  - ${t.name} (${t.status}) args=${debugClip(t.args, 300)} result=${debugClip(t.result, DEBUG_TOOL_MAX)}`);
+      return [head, ...tools].join('\n');
+    });
+    const routines = (S.routines || []).filter((r) => r.botId === id).map((r) => `${r.title} (${r.enabled ? 'on' : 'off'}) at=${r.at || ''} every=${r.everyMinutes || ''}`);
+    const out = [
+      `# debug: ${bot.name} (${id})`,
+      `driver=${bot.driver || ''} model=${bot.model || ''} approval=${bot.approval} floor=${bot.approvalFloor || ''}`,
+      `orchestrator=${!!bot.orchestrator} busy=${S.busy.has(id)}`,
+      `routines: ${routines.join('; ') || '-'}`,
+      `goals: ${(S.goals || []).filter((g) => g.botId === id).map((g) => g.title).join('; ') || '-'}`,
+      `url=${location.href} ua=${navigator.userAgent}`,
+      '',
+      ...lines,
+    ].join('\n');
+    await copyText(out);
+    toast(tr('Отладка скопирована: {n} знаков', { n: out.length }));
+  } catch (err) {
+    toast(err.message);
+  }
+}
 
 async function compactBot(id) {
   if (S.busy.has(id)) {
@@ -4776,6 +4814,7 @@ async function refreshState() {
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
+    S.debug = data.debug === true;
     S.imageReady = data.imageReady === true;
     S.platform = data.platform || S.platform || {};
     S.levels = data.levels || S.levels || {};
@@ -9777,6 +9816,7 @@ async function boot() {
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
+    S.debug = data.debug === true;
     S.imageReady = data.imageReady === true;
     S.platform = data.platform || S.platform || {};
     S.levels = data.levels || S.levels || {};

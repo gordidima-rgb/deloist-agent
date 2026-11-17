@@ -202,6 +202,14 @@ pub fn plan_bot_change(app: &App, bot: &Bot, args: &Value) -> Result<BotChange, 
 // propose_routine
 // ---------------------------------------------------------------------------
 
+/// Режим бота с учётом пола осторожности идущего хода (передача задачи, рутина): так его видит и карточка, и «Применить».
+/// Без этого бот в режиме «решай сам», которому дали задачу из осторожного, получал карточку «осторожно», а при
+/// применении сравнивался с сохранённым «решай сам», и каждая рутина отклонялась как «сменился режим».
+fn effective_mode(app: &App, bot: &Bot) -> String {
+    let stored = app.store.bot(&bot.id).map(|b| b.approval).unwrap_or_else(|| bot.approval.clone());
+    app.turns.effective_approval(&app.store, &bot.id, &stored)
+}
+
 pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, String> {
     let name = text_arg(args, "bot")?.unwrap_or_default();
     let target = if name.is_empty() { bot.clone() } else { find_bot(app, bot, &name, true)? };
@@ -236,6 +244,7 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
     let quiet = input.get("quiet").and_then(Value::as_bool).unwrap_or(false);
     let input = Value::Object(input);
     let preview = crate::store::Store::preview_routine(&input);
+    let free_mode = effective_mode(app, &target) == "auto";
     Ok(RoutinePlan {
         host_id: bot.id.clone(),
         host_name: bot.name.clone(),
@@ -246,7 +255,7 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
         input,
         schedule: crate::schedule::describe(&preview),
         next: crate::schedule::describe_next(&preview),
-        free_mode: target.approval == "auto",
+        free_mode,
         quiet,
     })
 }
@@ -376,7 +385,8 @@ async fn apply_bot_change(app: &Arc<App>, c: &BotChange) -> Result<String, Strin
 async fn apply_routine(app: &Arc<App>, r: &RoutinePlan) -> Result<String, String> {
     let target = app.store.bot(&r.target_id).ok_or_else(|| format!("бота «{}» больше нет", r.target_name))?;
     // Карточка предупреждала про «Свободу действий» (или нет): если режим сменился, она устарела.
-    if (target.approval == "auto") != r.free_mode {
+    let mode = effective_mode(app, &target);
+    if (mode == "auto") != r.free_mode {
         return Err(format!("у «{}» сменился режим подтверждений, пока карточка висела: предложи заново", target.name));
     }
     if r.target_id != r.host_id && (app.store.bot(&r.host_id).is_none() || shared_rooms(app, &r.host_id, &r.target_id).is_empty()) {
@@ -385,8 +395,8 @@ async fn apply_routine(app: &Arc<App>, r: &RoutinePlan) -> Result<String, String
     // Рутина для бота без «Свободы действий» не должна стать смелее него позже: пол осторожности — его режим сейчас.
     // Пустым он остаётся только у «решай сам» (карточка про это предупреждала).
     let mut input = r.input.clone();
-    if target.approval != "auto" {
-        input["approvalFloor"] = json!(target.approval);
+    if mode != "auto" {
+        input["approvalFloor"] = json!(mode);
     }
     let made = app
         .store

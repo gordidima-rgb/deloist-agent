@@ -607,6 +607,8 @@
     'выучен ботом': 'learned by a bot',
     'Отменить правку': 'Undo edit',
     'Сжать историю': 'Compact history',
+    'Скопировать отладку': 'Copy debug info',
+    'Отладка скопирована: {n} знаков': 'Debug info copied: {n} characters',
     'Содержание разговора': 'Conversation contents',
     'Свернуть старые сообщения в короткую сводку': 'Fold old messages into a short summary',
     'Общая память': 'Shared memory',
