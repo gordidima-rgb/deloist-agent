@@ -578,6 +578,8 @@ fn human_only(path: &str) -> bool {
         // «Начать бесплатно»: вход в OpenRouter открывает браузер и кладёт ключ в хранилище.
         || (path.starts_with("/api/providers/") && (path.ends_with("/connect") || path.ends_with("/cancel")))
         || path.starts_with("/api/know-me")
+        // Ручная правка фактов памяти (в том числе памяти команды): то, что потом читают боты, меняет только человек.
+        || path.starts_with("/api/memory/facts")
         // Токен своего бота Telegram, привязка чата и переписка от лица человека — только окно.
         || path.starts_with("/api/telegram")
         // Токен своего бота Discord, привязка личной переписки и ответы от лица человека — тоже.

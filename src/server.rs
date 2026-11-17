@@ -1607,6 +1607,7 @@ async fn get_memory(State(app): Shared, Path(id): Path<String>) -> Response {
     ok(json!({
         "facts": crate::memory::facts(&app, &id).await,
         "sharedByBot": crate::memory::shared_by(&app, &id).await,
+        "teams": crate::memory::teams_for(&app, &id).await,
         "used": crate::memory::usage(&app, &id).await,
         "limit": crate::memory::BOT_LIMIT,
         "journal": crate::memory::journal(&app, Some(&id), 30).await,
@@ -1670,7 +1671,11 @@ async fn add_fact(State(app): Shared, body: axum::body::Bytes) -> Response {
         Ok(v) => v,
         Err(r) => return r,
     };
-    if let Some(scope) = body.get("scope").and_then(Value::as_str).filter(|s| *s != crate::memory::SHARED && !s.is_empty()) {
+    if let Some(scope) = body
+        .get("scope")
+        .and_then(Value::as_str)
+        .filter(|s| *s != crate::memory::SHARED && !s.is_empty() && !crate::memory::is_room_scope(s))
+    {
         if let Err(r) = need_bot(&app, scope) {
             return r;
         }

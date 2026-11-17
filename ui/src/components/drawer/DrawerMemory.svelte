@@ -71,6 +71,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
     KINDS.map((kind) => ({ kind, facts: (data?.facts || []).filter((f) => f.kind === kind) })).filter((g) => g.facts.length),
   );
   const sharedByBot = $derived(Array.isArray(data?.sharedByBot) ? data.sharedByBot : []);
+  const teams = $derived(Array.isArray(data?.teams) ? data.teams : []);
   const journal = $derived(Array.isArray(data?.journal) ? data.journal : []);
   const countText = $derived(
     data?.limit ? tr('{n} из {limit} знаков', { n: numberRu(data.used || 0), limit: numberRu(data.limit) }) : '',
@@ -231,7 +232,7 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
 
   {#if adding}{@render factForm()}{/if}
 
-  {#if data && !groups.length && !sharedByBot.length}
+  {#if data && !groups.length && !sharedByBot.length && !teams.some((t) => t.facts?.length)}
     <EmptyState title={tr('Фактов пока нет.')} />
   {/if}
 
@@ -243,6 +244,27 @@ import { Section, ListItem, EmptyState, Field, TextInput, TextArea, Select, Butt
         {:else}
           {@render factRow(fact)}
         {/if}
+      {/each}
+    </Section>
+  {/each}
+
+  {#each teams as team (team.id)}
+    <Section title={tr('Память команды «{name}» · {n}', { name: team.name, n: (team.facts || []).length })}>
+      <p class="dm-note">{tr('Эти факты видят только боты этой команды. Договорённости команды бот пишет сюда сам (remember со scope team).')}</p>
+      {#each team.facts || [] as fact (fact.id)}
+        {#snippet teamActions()}
+          <div class="dm-actions">
+            <Button size="sm" variant="ghost" onclick={() => remove(fact)}>{tr('Удалить')}</Button>
+          </div>
+        {/snippet}
+        <div class="dm-fact">
+          <ul class="k-list">
+            <ListItem title={fact.title} meta={`[${fact.id}]`} onclick={() => toggle(fact.id)} context={teamActions} />
+          </ul>
+          {#if expanded[fact.id] && fact.body}
+            <div class="dm-detail"><p class="dm-body">{fact.body}</p></div>
+          {/if}
+        </div>
       {/each}
     </Section>
   {/each}

@@ -100,4 +100,17 @@ describe('DrawerMemory', () => {
     buttonByText(host.querySelector('.dm-jr'), 'Отменить').click();
     await waitFor(() => expect(api).toHaveBeenCalledWith('/api/memory/undo/j1', { method: 'POST' }));
   });
+
+  it('shows a section per team with its facts', async () => {
+    const api = vi.fn(async () => ({
+      ...memory,
+      teams: [{ id: 'r1', name: 'Картинки', used: 40, limit: 8000, facts: [{ id: 'm18', title: 'Сюжет выбирает человек', body: 'и Художник', kind: 'project' }] }],
+    }));
+    mount({ bot: { id: 'b1' }, api });
+    await waitFor(() => {
+      const titles = [...host.querySelectorAll('.k-section__title')].map((h) => h.textContent);
+      expect(titles).toContain('Память команды «Картинки» · 1');
+    });
+    expect(host.textContent).toContain('Сюжет выбирает человек');
+  });
 });

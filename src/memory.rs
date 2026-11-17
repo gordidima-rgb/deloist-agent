@@ -18,7 +18,7 @@ use tokio::io::AsyncWriteExt;
 use crate::episodes;
 use crate::sensitive::{contact_in, secret_in};
 use crate::service;
-use crate::store::{now, uid, Bot};
+use crate::store::{now, uid, Bot, Room};
 use crate::vault;
 use crate::App;
 
@@ -45,6 +45,56 @@ static STARTED_AT: AtomicI64 = AtomicI64::new(0);
 static CHECKED_DAY: Mutex<String> = Mutex::new(String::new());
 
 pub const SHARED: &str = "shared";
+/// Память команды: `room:<id группы>`. Видят и пишут только боты этой (не убранной в архив) группы.
+pub const ROOM_PREFIX: &str = "room:";
+
+pub fn room_scope(room_id: &str) -> String {
+    format!("{ROOM_PREFIX}{room_id}")
+}
+
+pub fn is_room_scope(scope: &str) -> bool {
+    scope.starts_with(ROOM_PREFIX)
+}
+
+/// Группы, где бот участник и которые ещё не убраны в архив.
+fn teams_in<'a>(rooms: &'a [Room], bot_id: &str) -> Vec<&'a Room> {
+    rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).collect()
+}
+
+fn team_scopes_in(rooms: &[Room], bot_id: &str) -> Vec<String> {
+    teams_in(rooms, bot_id).into_iter().map(|r| room_scope(&r.id)).collect()
+}
+
+/// Командные памяти бота — по группам, где он сейчас состоит.
+pub fn team_scopes(app: &App, bot_id: &str) -> Vec<String> {
+    team_scopes_in(&app.store.rooms(), bot_id)
+}
+
+/// Может ли бот править факт этой памяти: общую, свою и своей команды — да, чужую — нет.
+fn bot_may_touch(rooms: &[Room], bot_id: &str, scope: &str) -> bool {
+    scope == SHARED || scope == bot_id || team_scopes_in(rooms, bot_id).iter().any(|s| s == scope)
+}
+
+/// Какую память команды имеет в виду бот: единственная его группа, а если их несколько — названная в `team`.
+fn resolve_team(rooms: &[Room], bot_id: &str, team: &str) -> Result<String, String> {
+    let mine = teams_in(rooms, bot_id);
+    let team = team.trim();
+    if !team.is_empty() {
+        return mine
+            .iter()
+            .find(|r| r.id == team || r.name.trim().to_lowercase() == team.to_lowercase())
+            .map(|r| room_scope(&r.id))
+            .ok_or_else(|| format!("ты не состоишь в команде «{team}»: запиши в свою память (scope self) или назови свою команду"));
+    }
+    match mine.len() {
+        0 => Err("ты не состоишь ни в одной команде: запиши в свою память (scope self) или в общую (scope shared)".into()),
+        1 => Ok(room_scope(&mine[0].id)),
+        _ => Err(format!(
+            "ты состоишь в нескольких командах ({}): передай team с названием нужной, либо запиши в свою память (scope self)",
+            mine.iter().map(|r| format!("«{}»", r.name)).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
 
 pub fn kind_label(kind: &str) -> &'static str {
     match kind {
@@ -70,7 +120,7 @@ pub(crate) fn clean_kind(kind: &str, scope: &str) -> String {
 #[serde(rename_all = "camelCase", default)]
 pub struct Fact {
     pub id: String,
-    /// `shared` или id бота.
+    /// `shared`, id бота или `room:<id группы>` (память команды).
     pub scope: String,
     pub kind: String,
     pub title: String,
@@ -562,8 +612,8 @@ fn full_of(fact: &Fact) -> String {
     text
 }
 
-fn visible<'a>(book: &'a Book, bot_id: &str) -> Vec<&'a Fact> {
-    book.facts.iter().filter(|f| f.scope == SHARED || f.scope == bot_id).collect()
+fn visible<'a>(book: &'a Book, bot_id: &str, teams: &[String]) -> Vec<&'a Fact> {
+    book.facts.iter().filter(|f| f.scope == SHARED || f.scope == bot_id || teams.contains(&f.scope)).collect()
 }
 
 fn kind_rank(kind: &str) -> usize {
@@ -606,7 +656,12 @@ pub fn index_text(all: &[Fact], limit: usize) -> String {
 
 /// Личные факты бота целиком: самые новые, если не влезают все.
 fn own_text(book: &Book, bot_id: &str) -> String {
-    let mut own: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == bot_id).collect();
+    scope_text(book, bot_id)
+}
+
+/// Факты одной памяти целиком: самые новые, если не влезают все.
+fn scope_text(book: &Book, scope: &str) -> String {
+    let mut own: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == scope).collect();
     own.sort_by_key(|f| number(&f.id));
     let mut kept: Vec<String> = Vec::new();
     let mut used = 0;
@@ -622,6 +677,19 @@ fn own_text(book: &Book, bot_id: &str) -> String {
     kept.join("\n")
 }
 
+/// Личная память бота и память его команд: у каждой команды свой раздел, чужих команд здесь нет.
+fn own_with_teams(book: &Book, rooms: &[Room], bot_id: &str) -> String {
+    let mut parts = vec![own_text(book, bot_id)];
+    for room in teams_in(rooms, bot_id) {
+        let text = scope_text(book, &room_scope(&room.id));
+        if !text.is_empty() {
+            parts.push(format!("Память команды «{}» (её видят только боты этой команды):\n{text}", room.name));
+        }
+    }
+    parts.retain(|p| !p.is_empty());
+    parts.join("\n")
+}
+
 pub async fn shared_for_prompt(app: &App) -> String {
     let index = index_text(&load(app).await.facts, INDEX_LIMIT);
     if index.is_empty() {
@@ -631,7 +699,7 @@ pub async fn shared_for_prompt(app: &App) -> String {
 }
 
 pub async fn own_for_prompt(app: &App, bot_id: &str) -> String {
-    own_text(&load(app).await, bot_id)
+    own_with_teams(&load(app).await, &app.store.rooms(), bot_id)
 }
 
 /// Поиск по видимым фактам (BM25 по основам слов): лучшие совпадения и их соседи по графу.
@@ -674,7 +742,8 @@ pub async fn recall(app: &App, bot_id: &str, args: &Value) -> String {
         return recall_episodes(app, &viewer, &id, query).await;
     }
     let book = load(app).await;
-    let facts = visible(&book, bot_id);
+    let teams = if bot_id.is_empty() { Vec::new() } else { team_scopes(app, bot_id) };
+    let facts = visible(&book, bot_id, &teams);
     if !id.is_empty() {
         let Some(fact) = facts.iter().find(|f| f.id == id) else {
             return format!("Факта [{id}] нет или он не твой.");
@@ -745,12 +814,12 @@ fn line_ids(text: &str) -> impl Iterator<Item = (&str, &str)> {
 /// Подбор без диска: до 5 фактов (до 1 500 знаков) и до 2 эпизодов (по 500). Не берём то, что
 /// модель и так видит целиком в своём промпте (`prompt`): строку оглавления без подробностей,
 /// личные факты бота — и то, что уже показано в окне. Новое после снимка промпта приходит только сюда.
-fn pick_recall(facts: &[Fact], episodes: &[episodes::Episode], query: &str, shown: &HashSet<String>, prompt: &PromptMemory, own: Option<&str>) -> Option<String> {
+fn pick_recall(facts: &[Fact], episodes: &[episodes::Episode], query: &str, shown: &HashSet<String>, prompt: &PromptMemory, own: Option<&str>, teams: &[String]) -> Option<String> {
     let mut whole: HashSet<&str> = line_ids(&prompt.own).map(|(id, _)| id).collect();
     whole.extend(line_ids(&prompt.shared).filter(|(_, line)| !line.ends_with(" …")).map(|(id, _)| id));
     let candidates: Vec<&Fact> = facts
         .iter()
-        .filter(|f| f.scope == SHARED || Some(f.scope.as_str()) == own)
+        .filter(|f| f.scope == SHARED || Some(f.scope.as_str()) == own || teams.contains(&f.scope))
         .filter(|f| !(whole.contains(f.id.as_str()) && (f.body.trim().is_empty() || f.scope != SHARED)))
         .filter(|f| !shown.contains(&f.id))
         .collect();
@@ -805,9 +874,15 @@ pub async fn recall_block(app: &App, thread: &str, query: &str, window: &[Value]
     }
     let book = load(app).await;
     let own = thread.strip_prefix("bot:");
+    // Бот видит память своих команд; в ленте группы — только память этой группы.
+    let teams: Vec<String> = match (own, thread.strip_prefix(ROOM_PREFIX)) {
+        (Some(bot), _) => team_scopes(app, bot),
+        (None, Some(room)) => app.store.room(room).filter(|r| !r.archived).map(|r| vec![room_scope(&r.id)]).unwrap_or_default(),
+        _ => Vec::new(),
+    };
     let since = window.iter().filter_map(|e| e["at"].as_i64()).min().unwrap_or(i64::MAX);
     let all: Vec<episodes::Episode> = episodes::list(app).await.into_iter().filter(|e| e.visible_to(thread) && !(e.thread == thread && e.ended >= since)).collect();
-    pick_recall(&book.facts, &all, query, &shown_ids(window), prompt, own)
+    pick_recall(&book.facts, &all, query, &shown_ids(window), prompt, own, &teams)
 }
 
 // ---------------------------------------------------------------------------
@@ -897,7 +972,7 @@ async fn forget_prompts_where(app: &App, gone: impl Fn(&str) -> bool) {
 /// Общая память и профиль — во всех лентах, личная — только в ленте своего бота.
 /// Вызывать без `GATE`: снимок сам читает память.
 async fn forget_prompts_for(app: &App, scopes: &[String]) {
-    if scopes.iter().any(|s| s == SHARED || s.is_empty()) {
+    if scopes.iter().any(|s| s == SHARED || s.is_empty() || is_room_scope(s)) {
         forget_prompts_where(app, |_| true).await;
     } else {
         let keys: Vec<String> = scopes.iter().map(|s| thread_key(crate::store::Thread::Bot(s))).collect();
@@ -914,6 +989,8 @@ async fn forget_prompts_for(app: &App, scopes: &[String]) {
 pub struct Draft {
     pub id: String,
     pub scope: String,
+    /// Для scope `team`: название команды, если бот состоит в нескольких.
+    pub team: String,
     pub kind: String,
     pub title: String,
     pub body: Option<String>,
@@ -935,6 +1012,7 @@ impl Draft {
         Self {
             id: bare_id(&text("id")),
             scope: text("scope"),
+            team: text("team"),
             kind: text("kind"),
             title,
             body,
@@ -944,13 +1022,22 @@ impl Draft {
     }
 }
 
-/// Куда пишет бот: `shared` — в общую память, иначе в свою. Человек называет scope прямо.
-fn target_scope(draft_scope: &str, actor: Option<&Bot>) -> String {
-    match (draft_scope.trim(), actor) {
+/// Куда пишет бот: `shared` — в общую память, `team` — в память своей команды, иначе в свою.
+/// Человек называет scope прямо (в том числе `room:<id>` существующей группы).
+fn target_scope(draft: &Draft, actor: Option<&Bot>, rooms: &[Room]) -> Result<String, String> {
+    Ok(match (draft.scope.trim(), actor) {
         ("shared", _) | ("", None) => SHARED.to_string(),
+        ("team", Some(bot)) => resolve_team(rooms, &bot.id, &draft.team)?,
         (_, Some(bot)) => bot.id.clone(),
+        (other, None) if is_room_scope(other) => {
+            let id = &other[ROOM_PREFIX.len()..];
+            if !rooms.iter().any(|r| r.id == id) {
+                return Err("такой команды нет".into());
+            }
+            other.to_string()
+        }
         (other, None) => other.to_string(),
-    }
+    })
 }
 
 /// Кто пишет в память.
@@ -981,7 +1068,8 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
     if !human && secret_in(&format!("{title}\n{}", body.as_deref().unwrap_or_default())).is_some() {
         return Err(SECRET_REFUSAL.into());
     }
-    let wanted_scope = target_scope(&draft.scope, actor);
+    let rooms = app.store.rooms();
+    let wanted_scope = target_scope(&draft, actor, &rooms)?;
     let (fact, created, size) = {
         let _gate = GATE.lock().await;
         let mut book = load(app).await;
@@ -999,8 +1087,8 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
             Some(index) => {
                 let before = book.facts[index].clone();
                 if let Some(bot) = actor {
-                    if before.scope != SHARED && before.scope != bot.id {
-                        return Err("это личный факт другого бота".into());
+                    if !bot_may_touch(&rooms, &bot.id, &before.scope) {
+                        return Err(if is_room_scope(&before.scope) { "это память другой команды: ты в ней не состоишь" } else { "это личный факт другого бота" }.into());
                     }
                 }
                 // Программа (внешний агент, извлекатель) правит только общую память: личное — боту и человеку.
@@ -1062,7 +1150,13 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
             trigger_doctor(app, "overflow");
             return Err("память переполнена: доктор памяти уже разбирает её, запиши позже".into());
         }
-        let place = if fact.scope == SHARED { "общая память" } else { "память бота" };
+        let place = if fact.scope == SHARED {
+            "общая память"
+        } else if is_room_scope(&fact.scope) {
+            "память команды"
+        } else {
+            "память бота"
+        };
         let name = match writer {
             Writer::Human => "Вручную".to_string(),
             Writer::Bot(bot) => bot.name.clone(),
@@ -1084,7 +1178,14 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
 /// Инструмент `remember`.
 pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
     let (fact, created) = write(app, &Writer::Bot(bot), Draft::from_args(args)).await?;
-    let place = if fact.scope == SHARED { "общую память — это узнают все боты" } else { "твою память" };
+    let place = if fact.scope == SHARED {
+        "общую память — это узнают все боты".to_string()
+    } else if is_room_scope(&fact.scope) {
+        let name = app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name).unwrap_or_default();
+        format!("память команды «{name}» — её увидят только боты этой команды")
+    } else {
+        "твою память".to_string()
+    };
     if !created && now() - fact.updated_at > 5_000 {
         // Правка ничего не изменила: не говорим «обновлён», иначе бот считает, что записал.
         return Ok(format!("Факт [{}] уже такой, ничего не изменилось. Чтобы поменять текст, передай body (или id и title).", fact.id));
@@ -1368,7 +1469,13 @@ async fn human_delete_locked(app: &Arc<App>, id: &str) -> Result<String, String>
             changes.push((Some(before), Some(fact.clone())));
         }
     }
-    let place = if removed.scope == SHARED { "общая память" } else { "память бота" };
+    let place = if removed.scope == SHARED {
+        "общая память"
+    } else if is_room_scope(&removed.scope) {
+        "память команды"
+    } else {
+        "память бота"
+    };
     commit(app, &book, who_human(), "remove", &format!("Удалено вручную — {place}"), changes, json!({})).await.map_err(|e| e.to_string())?;
     Ok(removed.scope)
 }
@@ -1394,6 +1501,19 @@ pub async fn facts(app: &App, scope: &str) -> Vec<Fact> {
 /// Факты в общей памяти, которые записал этот бот: на его экране памяти они иначе не видны.
 pub async fn shared_by(app: &App, bot_id: &str) -> Vec<Fact> {
     load(app).await.facts.into_iter().filter(|f| f.scope == SHARED && f.author == bot_id).collect()
+}
+
+/// Память команд бота для его экрана: по группе — её факты и сколько занято.
+pub async fn teams_for(app: &App, bot_id: &str) -> Vec<Value> {
+    let book = load(app).await;
+    teams_in(&app.store.rooms(), bot_id)
+        .into_iter()
+        .map(|room| {
+            let scope = room_scope(&room.id);
+            let facts: Vec<&Fact> = book.facts.iter().filter(|f| f.scope == scope).collect();
+            json!({ "id": room.id, "name": room.name, "facts": facts, "used": scope_size(&book, &scope), "limit": BOT_LIMIT })
+        })
+        .collect()
 }
 
 pub async fn usage(app: &App, scope: &str) -> usize {
@@ -1524,7 +1644,8 @@ fn doctor_input(book: &Book, bots: &[Bot]) -> (String, HashMap<String, String>) 
         short_of.insert(bot.id.clone(), short);
     }
     text.push_str("\n# Факты\n");
-    for fact in &book.facts {
+    // Память команд доктор не видит и не трогает: переносы и слияния между командами ей не нужны.
+    for fact in book.facts.iter().filter(|f| !is_room_scope(&f.scope)) {
         let date = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(fact.updated_at).map(|t| t.format("%Y-%m-%d").to_string()).unwrap_or_default();
         let owner = short_of.get(&fact.scope).cloned().unwrap_or_else(|| "?".into());
         let mut line = format!("[{}] {owner} · {} · {date} · {}", fact.id, fact.kind, fact.title);
@@ -1777,7 +1898,7 @@ async fn doctor(app: &Arc<App>, reason: &str) -> Result<Value, String> {
     }
     let bots = app.store.bots();
     let (input, targets) = doctor_input(&book, &bots);
-    let snapshot: HashMap<String, i64> = book.facts.iter().map(|f| (f.id.clone(), f.updated_at)).collect();
+    let snapshot: HashMap<String, i64> = book.facts.iter().filter(|f| !is_room_scope(&f.scope)).map(|f| (f.id.clone(), f.updated_at)).collect();
     let reply = service::complete_as("memory", app, &worker, &doctor_prompt(), &input).await?;
     let answer = service::json_object(&reply).ok_or("доктор памяти ответил не JSON")?;
     let ops = answer["ops"].as_array().cloned().unwrap_or_default();
@@ -1854,6 +1975,76 @@ mod tests {
         }
     }
 
+    fn room(id: &str, name: &str, bots: &[&str], archived: bool) -> Room {
+        Room { id: id.into(), name: name.into(), bot_ids: bots.iter().map(|b| b.to_string()).collect(), archived, ..Room::default() }
+    }
+
+    fn team_book() -> Book {
+        Book {
+            next: 9,
+            facts: vec![
+                fact("m1", SHARED, "user", "Человека зовут Ваня"),
+                fact("m2", "room:r1", "project", "Сюжет картинки выбирают человек и Художник"),
+                fact("m3", "room:r2", "project", "Reddit: пост по средам"),
+                fact("m4", "b1", "project", "Личное Художника"),
+                fact("m5", "b9", "project", "Личное чужого бота"),
+            ],
+            ..Book::default()
+        }
+    }
+
+    #[test]
+    fn team_facts_are_seen_only_by_the_bots_of_that_team() {
+        let rooms = vec![room("r1", "Картинки", &["b1", "b2"], false), room("r2", "Reddit", &["b3"], false)];
+        let book = team_book();
+        let ids = |bot: &str| -> Vec<String> {
+            let mut v: Vec<String> = visible(&book, bot, &team_scopes_in(&rooms, bot)).iter().map(|f| f.id.clone()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids("b1"), ["m1", "m2", "m4"], "своя команда есть, чужой команды нет");
+        assert_eq!(ids("b2"), ["m1", "m2"]);
+        assert_eq!(ids("b3"), ["m1", "m3"]);
+        assert_eq!(ids("b7"), ["m1"], "бот без команды видит общую память");
+        let text = own_with_teams(&book, &rooms, "b1");
+        assert!(text.contains("Сюжет картинки") && text.contains("«Картинки»") && !text.contains("Reddit"), "{text}");
+        let multi = vec![room("r1", "Картинки", &["b1"], false), room("r2", "Reddit", &["b1"], false)];
+        assert_eq!(team_scopes_in(&multi, "b1"), ["room:r1", "room:r2"]);
+        let archived = vec![room("r1", "Картинки", &["b1"], true)];
+        assert!(team_scopes_in(&archived, "b1").is_empty(), "команда в архиве память не отдаёт");
+    }
+
+    #[test]
+    fn auto_recall_brings_only_own_team_facts() {
+        let book = team_book();
+        let prompt = PromptMemory::default();
+        let pick = |own: &str, teams: &[String], q: &str| pick_recall(&book.facts, &[], q, &HashSet::new(), &prompt, Some(own), teams);
+        let own_team = vec!["room:r1".to_string()];
+        assert!(pick("b1", &own_team, "сюжет картинки").unwrap().contains("[m2]"));
+        assert!(pick("b1", &own_team, "Reddit пост среда").is_none(), "чужая команда не подбирается");
+        assert!(pick("b3", &[], "сюжет картинки").is_none(), "бот без команды факт команды не получает");
+    }
+
+    #[test]
+    fn a_bot_writes_to_its_team_and_never_to_a_foreign_room() {
+        let rooms = vec![room("r1", "Картинки", &["b1"], false), room("r2", "Reddit", &["b3"], false), room("r3", "Две", &["b1"], false)];
+        // единственная команда — без названия; несколько — нужно название; без команды — понятная ошибка
+        assert_eq!(resolve_team(&rooms[..2], "b3", "").unwrap(), "room:r2");
+        assert!(resolve_team(&rooms, "b1", "").unwrap_err().contains("нескольких"));
+        assert_eq!(resolve_team(&rooms, "b1", "две").unwrap(), "room:r3");
+        assert!(resolve_team(&rooms, "b1", "Reddit").is_err(), "чужую команду назвать нельзя");
+        assert!(resolve_team(&rooms, "b7", "").unwrap_err().contains("self"));
+        assert!(bot_may_touch(&rooms, "b1", "room:r1"));
+        assert!(!bot_may_touch(&rooms, "b1", "room:r2"), "править факт чужой команды нельзя");
+        assert!(!bot_may_touch(&rooms, "b1", "b9"));
+        assert!(bot_may_touch(&rooms, "b1", SHARED));
+        let draft = Draft { scope: "team".into(), ..Draft::default() };
+        assert_eq!(target_scope(&draft, Some(&Bot { id: "b3".into(), ..Bot::default() }), &rooms[..2]).unwrap(), "room:r2");
+        let human = Draft { scope: "room:nope".into(), ..Draft::default() };
+        assert!(target_scope(&human, None, &rooms).is_err());
+        assert_eq!(limit_of("room:r1"), BOT_LIMIT);
+    }
+
     #[test]
     fn the_doctor_works_by_fact_numbers_and_keeps_links_whole() {
         let mut book = book();
@@ -1906,12 +2097,12 @@ mod tests {
     fn search_returns_hits_and_their_graph_neighbours() {
         let mut book = book();
         book.facts[0].links = vec!["m2".into()];
-        let facts = visible(&book, "b1");
+        let facts = visible(&book, "b1", &[]);
         let text = search_text(&facts, "ozon");
         assert!(text.contains("[m4]") && text.contains("[m6]"), "{text}");
         let text = search_text(&facts, "зовут");
         assert!(text.contains("Связано:\n[m2]"), "сосед по связи: {text}");
-        assert!(search_text(&visible(&book, "b2"), "Новосибирск").contains("ничего нет"), "чужие личные факты не видны");
+        assert!(search_text(&visible(&book, "b2", &[]), "Новосибирск").contains("ничего нет"), "чужие личные факты не видны");
     }
 
     #[test]
@@ -1920,25 +2111,25 @@ mod tests {
         book.facts[3].body = "Шаблон в папке reports, отправлять Маше".into();
         let episode = episodes::Episode { id: "e1".into(), title: "Собрали отчёт Ozon за неделю".into(), body: "Выгрузили продажи".into(), ended: 1, ..Default::default() };
         let prompt = PromptMemory { shared: index_text(&book.facts, INDEX_LIMIT), own: own_text(&book, "b1"), ..PromptMemory::default() };
-        let block = pick_recall(&book.facts, &[episode.clone()], "сделай отчёт Ozon", &HashSet::new(), &prompt, Some("b1")).expect("есть что подать");
+        let block = pick_recall(&book.facts, &[episode.clone()], "сделай отчёт Ozon", &HashSet::new(), &prompt, Some("b1"), &[]).expect("есть что подать");
         assert!(block.starts_with(RECALL_HEAD), "{block}");
         assert!(block.contains("[m4] дела и решения: Отчёт Ozon по понедельникам\n  Шаблон в папке reports"), "факт с подробностями: {block}");
         assert!(block.contains("[e1] эпизод "), "похожий эпизод: {block}");
         assert!(!block.contains("[m6]"), "личные факты бота и так в промпте целиком: {block}");
         let shown = shown_ids(&[json!({ "role": "user", RECALL_FIELD: block })]);
         assert!(shown.contains("m4") && shown.contains("e1"), "{shown:?}");
-        assert!(pick_recall(&book.facts, &[episode], "отчёт Ozon", &shown, &prompt, Some("b1")).is_none(), "показанное второй раз не подаём");
-        assert!(pick_recall(&book.facts, &[], "зовут", &HashSet::new(), &prompt, Some("b1")).is_none(), "факт без подробностей уже виден в оглавлении");
+        assert!(pick_recall(&book.facts, &[episode], "отчёт Ozon", &shown, &prompt, Some("b1"), &[]).is_none(), "показанное второй раз не подаём");
+        assert!(pick_recall(&book.facts, &[], "зовут", &HashSet::new(), &prompt, Some("b1"), &[]).is_none(), "факт без подробностей уже виден в оглавлении");
         // Факт появился после снимка промпта: его в промпте нет, значит — блоком.
         let stale = PromptMemory::default();
-        assert!(pick_recall(&book.facts, &[], "зовут", &HashSet::new(), &stale, Some("b1")).unwrap().contains("[m1]"));
-        assert!(pick_recall(&book.facts, &[], "Новосибирске", &HashSet::new(), &stale, Some("b1")).unwrap().contains("[m5]"), "и свой личный тоже");
+        assert!(pick_recall(&book.facts, &[], "зовут", &HashSet::new(), &stale, Some("b1"), &[]).unwrap().contains("[m1]"));
+        assert!(pick_recall(&book.facts, &[], "Новосибирске", &HashSet::new(), &stale, Some("b1"), &[]).unwrap().contains("[m5]"), "и свой личный тоже");
     }
 
     #[test]
     fn the_recall_block_keeps_to_its_budget() {
         let facts: Vec<Fact> = (1..=8).map(|n| Fact { body: "отчёт ".repeat(200), ..fact(&format!("m{n}"), SHARED, "project", &format!("Отчёт номер {n}")) }).collect();
-        let block = pick_recall(&facts, &[], "отчёт", &HashSet::new(), &PromptMemory::default(), None).unwrap();
+        let block = pick_recall(&facts, &[], "отчёт", &HashSet::new(), &PromptMemory::default(), None, &[]).unwrap();
         let body = block.strip_prefix(RECALL_HEAD).unwrap();
         assert!(chars(body) <= RECALL_FACT_CHARS + 1, "{}", chars(body));
         assert!(body.matches("\n[m").count() <= RECALL_FACTS);

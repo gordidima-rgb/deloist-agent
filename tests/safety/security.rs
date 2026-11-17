@@ -3951,3 +3951,27 @@ async fn the_program_key_cannot_rebuild_a_team_or_make_one_with_an_orchestrator(
     assert_eq!(after["rooms"][0]["stage"], "ready");
     crew.ok("POST", &format!("/api/rooms/{room}/rebuild"), None).await;
 }
+
+#[tokio::test]
+async fn the_program_key_cannot_edit_memory_facts_by_hand() {
+    let crew = Crew::start("memory-facts-agent").await;
+    let made = crew.ok("POST", "/api/memory/facts", Some(json!({ "title": "Любит крепкий кофе" }))).await;
+    let id = made["fact"]["id"].as_str().unwrap().to_string();
+    let token = agent_token(&crew);
+    let calls = [
+        ("POST", "/api/memory/facts".to_string()),
+        ("PATCH", format!("/api/memory/facts/{id}")),
+        ("DELETE", format!("/api/memory/facts/{id}")),
+    ];
+    for (method, path) in calls {
+        let response = reqwest::Client::new()
+            .request(method.parse().unwrap(), format!("{}{path}", crew.base))
+            .bearer_auth(&token)
+            .header("content-type", "application/json")
+            .body(json!({ "title": "Чужой", "scope": "shared" }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "ключ программы правит память руками: {method} {path}");
+    }
+}
