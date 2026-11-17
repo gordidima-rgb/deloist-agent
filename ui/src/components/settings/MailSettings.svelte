@@ -364,14 +364,11 @@
                   {tr('Выключено: каждое письмо бот отправляет только после вашего согласия. Включено: без вопроса — только адресатам из белого списка и тем, чьё письмо бот прочитал в этом же запуске; новому адресату — всё равно карточка.')}
                 </p>
                 {#each draft.bots as id (id)}
-                  <div class="ml-switch-row">
-                    <span>{botName(id)}</span>
-                    <Switch
-                      label={tr('Автоматическая работа: {bot}', { bot: botName(id) })}
-                      checked={draft.autoBots.includes(id)}
-                      onchange={(on) => toggleAuto(id, on)}
-                    />
-                  </div>
+                  <Switch
+                    label={botName(id)}
+                    checked={draft.autoBots.includes(id)}
+                    onchange={(on) => toggleAuto(id, on)}
+                  />
                 {/each}
               </div>
             {/if}
@@ -386,7 +383,7 @@
             </Field>
             <Field
               label={tr('Доверенные отправители')}
-              hint={tr('Письмо от них бот выполняет как поручение, только если почтовый сервер подтвердил адрес (DKIM/SPF). Остальные письма — просто данные.')}
+              hint={tr('Письмо от них бот выполняет как поручение, только если почтовый сервер подтвердил адрес подписью (DKIM или DMARC). Остальные письма — просто данные.')}
             >
               {#snippet children(f)}
                 <TextArea id={f.id} describedby={f.describedby} rows={3} bind:value={draft.trusted} />
@@ -632,16 +629,6 @@
   .ml-group-title {
     color: var(--k-text-3);
     font: 600 var(--k-text-xs) / 1.3 var(--k-font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  .ml-switch-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--k-space-3);
-    color: var(--k-text);
-    font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
   }
   .ml-sent {
     display: flex;

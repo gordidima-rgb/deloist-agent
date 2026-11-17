@@ -153,7 +153,7 @@ describe('MailSettings', () => {
     type(areas[0], '@corp.ru\nboss@x.ru');
     flushSync();
     // Включаем авторабота бота с доступом.
-    host.querySelector('.ml-switch-row button[role="switch"]').click();
+    host.querySelector('button[role="switch"]').click();
     flushSync();
     button('Сохранить').click();
     await drain();
