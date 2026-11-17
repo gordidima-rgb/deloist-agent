@@ -64,12 +64,12 @@
   --k-danger: #e5482d;
   --k-danger-tint: #fff0ec;
   --k-danger-text: #c4351b;
-  --k-glow: 0 0 0 1px rgba(255, 107, 19, 0.18), 0 8px 20px -12px rgba(255, 107, 19, 0.55);
+  --k-glow: 0 0 0 1px rgba(255, 107, 19, 0.3), 0 0 3px rgba(255, 107, 19, 0.35);
   --k-halo: radial-gradient(60% 60% at 80% 0%, rgba(255, 140, 60, 0.2), transparent 70%);
   --k-well: #ffffff;
   --k-badge: #d8f25a;
   --k-on-badge: #1f2a05;
-  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.35), 0 6px 16px -6px rgba(255, 90, 0, 0.6);
+  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.35), 0 1px 3px rgba(255, 90, 0, 0.35);
   --k-lava-hi: #ffd25e;
   --k-lava-mid: #ff9a1f;
   --k-lava-lo: #ff5a12;
@@ -197,12 +197,12 @@
     --k-danger: #ff6a4d;
     --k-danger-tint: #3a1913;
     --k-danger-text: #ff9a85;
-    --k-glow: 0 0 0 1px rgba(255, 122, 38, 0.45), 0 12px 34px -10px rgba(255, 110, 30, 0.55);
+    --k-glow: 0 0 0 1px rgba(255, 122, 38, 0.45), 0 0 3px rgba(255, 110, 30, 0.45);
     --k-halo: radial-gradient(60% 60% at 80% 0%, rgba(255, 110, 30, 0.22), transparent 70%), radial-gradient(45% 30% at 0% 100%, rgba(255, 95, 20, 0.26), transparent 72%);
     --k-well: #1a100b;
     --k-badge: #d8f25a;
     --k-on-badge: #1f2a05;
-    --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.55), 0 0 14px 1px rgba(255, 95, 10, 0.55), 0 6px 18px -6px rgba(255, 90, 0, 0.8);
+    --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.55), 0 0 3px rgba(255, 95, 10, 0.5);
     --k-shadow-1: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 18px 40px -20px rgba(0, 0, 0, 0.8);
     --k-shadow-2: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--k-line);
     --k-shadow-3: 0 26px 64px -18px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--k-line);
@@ -237,12 +237,12 @@
   --k-danger: #ff6a4d;
   --k-danger-tint: #3a1913;
   --k-danger-text: #ff9a85;
-  --k-glow: 0 0 0 1px rgba(255, 122, 38, 0.45), 0 12px 34px -10px rgba(255, 110, 30, 0.55);
+  --k-glow: 0 0 0 1px rgba(255, 122, 38, 0.45), 0 0 3px rgba(255, 110, 30, 0.45);
   --k-halo: radial-gradient(60% 60% at 80% 0%, rgba(255, 110, 30, 0.22), transparent 70%), radial-gradient(45% 30% at 0% 100%, rgba(255, 95, 20, 0.26), transparent 72%);
   --k-well: #1a100b;
   --k-badge: #d8f25a;
   --k-on-badge: #1f2a05;
-  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.55), 0 0 14px 1px rgba(255, 95, 10, 0.55), 0 6px 18px -6px rgba(255, 90, 0, 0.8);
+  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.55), 0 0 3px rgba(255, 95, 10, 0.5);
   --k-shadow-1: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 18px 40px -20px rgba(0, 0, 0, 0.8);
   --k-shadow-2: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--k-line);
   --k-shadow-3: 0 26px 64px -18px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--k-line);
@@ -279,12 +279,12 @@
   --k-danger: #e5482d;
   --k-danger-tint: #fff0ec;
   --k-danger-text: #c4351b;
-  --k-glow: 0 0 0 1px rgba(255, 107, 19, 0.18), 0 8px 20px -12px rgba(255, 107, 19, 0.55);
+  --k-glow: 0 0 0 1px rgba(255, 107, 19, 0.3), 0 0 3px rgba(255, 107, 19, 0.35);
   --k-halo: radial-gradient(60% 60% at 80% 0%, rgba(255, 140, 60, 0.2), transparent 70%);
   --k-well: #ffffff;
   --k-badge: #d8f25a;
   --k-on-badge: #1f2a05;
-  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.35), 0 6px 16px -6px rgba(255, 90, 0, 0.6);
+  --k-btn-glow: 0 0 0 1px rgba(200, 60, 0, 0.35), 0 1px 3px rgba(255, 90, 0, 0.35);
   --k-shadow-1: 0 1px 2px rgba(80, 40, 10, 0.05), 0 12px 32px -18px rgba(80, 40, 10, 0.22);
   --k-shadow-2: 0 20px 48px rgba(80, 40, 10, 0.12), 0 3px 10px rgba(80, 40, 10, 0.05), 0 0 0 1px var(--k-line);
   --k-shadow-3: 0 28px 70px -12px rgba(60, 25, 5, 0.3), 0 0 0 1px var(--k-line);
@@ -314,7 +314,7 @@
   white-space: nowrap;
   cursor: pointer;
   /* secondary: a glowing orange outline */
-  box-shadow: inset 0 0 0 1.5px var(--k-brand), inset 0 0 14px -4px rgba(255, 120, 30, 0.55), 0 0 14px -6px rgba(255, 110, 20, 0.7);
+  box-shadow: inset 0 0 0 1.5px var(--k-brand), inset 0 0 3px rgba(255, 120, 30, 0.55), 0 0 3px rgba(255, 110, 20, 0.7);
   transition: background var(--k-dur-micro) var(--k-ease-out), transform var(--k-dur-ui) var(--k-ease-press),
     box-shadow var(--k-dur-micro) var(--k-ease-out), color var(--k-dur-micro) var(--k-ease-out);
 }
@@ -335,9 +335,9 @@ a.ghost, a.primary { text-decoration: none; }
 .k-btn--ghost:hover, .ghost:hover, .danger:hover { background: var(--k-surface-2); color: var(--k-text); }
 .k-btn--attention { background: var(--k-btn-fill); color: #fff; box-shadow: var(--k-btn-rim), var(--k-btn-glow); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35); }
 /* danger: red outline; --solid-danger is the confirm of a destructive dialog */
-.k-btn--danger { color: var(--k-danger); background: color-mix(in srgb, var(--k-danger) 7%, transparent); box-shadow: inset 0 0 0 1.5px var(--k-danger), inset 0 0 14px -4px rgba(255, 60, 40, 0.5), 0 0 14px -6px rgba(255, 60, 40, 0.8); }
+.k-btn--danger { color: var(--k-danger); background: color-mix(in srgb, var(--k-danger) 7%, transparent); box-shadow: inset 0 0 0 1.5px var(--k-danger), inset 0 0 3px rgba(255, 60, 40, 0.5), 0 0 3px rgba(255, 60, 40, 0.8); }
 .k-btn--danger:hover { background: color-mix(in srgb, var(--k-danger) 14%, transparent); }
-.k-btn--danger-solid { color: #fff; background: var(--k-danger-fill); text-shadow: 0 1px 0 rgba(110, 15, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 160, 140, 0.8), inset 0 1px 0 1px rgba(255, 210, 195, 0.45), 0 0 0 1px rgba(170, 30, 10, 0.55), 0 0 14px 1px rgba(255, 60, 30, 0.45); }
+.k-btn--danger-solid { color: #fff; background: var(--k-danger-fill); text-shadow: 0 1px 0 rgba(110, 15, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 160, 140, 0.8), inset 0 1px 0 1px rgba(255, 210, 195, 0.45), 0 0 0 1px rgba(170, 30, 10, 0.55), 0 0 3px rgba(255, 60, 30, 0.45); }
 .k-btn--danger-solid:hover { background: var(--k-danger-fill); filter: brightness(1.06); }
 .k-btn--sm { height: 30px; padding: 0 var(--k-space-3); font-size: var(--k-text-xs); }
 .k-btn--icon { width: 38px; padding: 0; }
@@ -423,7 +423,7 @@ a.ghost, a.primary { text-decoration: none; }
   padding: var(--k-space-4);
   border-radius: var(--k-radius-lg);
   background: var(--k-surface);
-  box-shadow: 0 0 0 1.5px var(--k-brand), 0 14px 32px -16px rgba(255, 90, 20, 0.5);
+  box-shadow: 0 0 0 1.5px var(--k-brand), 0 0 3px rgba(255, 90, 20, 0.5);
 }
 .k-approval__head { display: flex; align-items: center; gap: var(--k-space-2); }
 .k-approval__title { font: 700 var(--k-text-lg) / var(--k-leading-tight) var(--k-font-display); color: var(--k-text); }
@@ -455,7 +455,7 @@ a.ghost, a.primary { text-decoration: none; }
   width: 0;
   border-radius: var(--k-radius-sm);
   background: var(--k-btn-fill);
-  box-shadow: var(--k-btn-rim), 0 0 14px -4px rgba(255, 95, 10, 0.6);
+  box-shadow: var(--k-btn-rim), 0 0 3px rgba(255, 95, 10, 0.6);
   transition: transform var(--k-dur-appear) var(--k-ease-spring), width var(--k-dur-appear) var(--k-ease-spring);
 }
 .k-tab {
@@ -534,8 +534,8 @@ a.ghost, a.primary { text-decoration: none; }
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   transition: transform var(--k-dur-ui) var(--k-ease-spring), width var(--k-dur-ui) var(--k-ease-spring), background var(--k-dur-ui) var(--k-ease-out), box-shadow var(--k-dur-ui) var(--k-ease-out);
 }
-[aria-checked="true"] > .k-switch { background: linear-gradient(90deg, #e8500a, #ff8a1e); box-shadow: inset 0 0 0 1px rgba(255, 190, 120, 0.6), 0 0 12px -2px rgba(255, 100, 10, 0.7); }
-[aria-checked="true"] > .k-switch::after { transform: translateX(16px); background: radial-gradient(circle at 50% 45%, #fffdf2 0 30%, #ffe8b0 100%); box-shadow: 0 0 8px 2px rgba(255, 170, 50, 0.7); }
+[aria-checked="true"] > .k-switch { background: linear-gradient(90deg, #e8500a, #ff8a1e); box-shadow: inset 0 0 0 1px rgba(255, 190, 120, 0.6), 0 0 3px rgba(255, 100, 10, 0.7); }
+[aria-checked="true"] > .k-switch::after { transform: translateX(16px); background: radial-gradient(circle at 50% 45%, #fffdf2 0 30%, #ffe8b0 100%); box-shadow: 0 0 3px rgba(255, 170, 50, 0.7); }
 button:active > .k-switch::after { width: 24px; }
 button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10px); }
 
@@ -551,7 +551,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   border-radius: var(--k-radius-md);
   background: var(--k-ink);
   color: var(--k-on-ink);
-  box-shadow: var(--k-ink-rim), var(--k-shadow-island), 0 0 22px -6px rgba(255, 100, 20, 0.45);
+  box-shadow: var(--k-ink-rim), var(--k-shadow-island), 0 0 3px rgba(255, 100, 20, 0.45);
   font: 400 var(--k-text-sm) / 1.3 var(--k-font-body);
 }
 .k-toast__icon { flex: none; width: 18px; height: 18px; color: var(--k-brand); }
@@ -604,9 +604,9 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   transition: stroke-dasharray var(--k-dur-ring) var(--k-ease-out);
 }
 /* less than 15%: the arc turns red and the ring flashes once */
-.k-ring.is-low .k-ring__arc { stroke: var(--k-danger); filter: drop-shadow(0 0 4px rgba(255, 60, 40, 0.8)); }
+.k-ring.is-low .k-ring__arc { stroke: var(--k-danger); filter: drop-shadow(0 0 3px rgba(255, 60, 40, 0.8)); }
 .k-ring.is-low { animation: k-ring-flash 1200ms var(--k-ease-out) 1; }
-@keyframes k-ring-flash { 0% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0.7); } 40% { box-shadow: 0 0 0 7px rgba(255, 74, 50, 0.16), 0 0 16px 2px rgba(255, 74, 50, 0.5); } 100% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0); } }
+@keyframes k-ring-flash { 0% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0.7); } 40% { box-shadow: 0 0 0 3px rgba(255, 74, 50, 0.16), 0 0 3px rgba(255, 74, 50, 0.5); } 100% { box-shadow: 0 0 0 0 rgba(255, 74, 50, 0); } }
 /* empty: no arc, the face goes grey */
 .k-ring.is-empty .k-ring__arc { stroke-opacity: 0; filter: none; }
 .k-ring.is-empty .k-ring__face { filter: grayscale(1) brightness(0.6); }
@@ -614,7 +614,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-ring.is-free .k-ring__arc, .k-ring.is-unknown .k-ring__arc { stroke-opacity: 0; filter: none; }
 .k-ring.is-free .k-ring__track, .k-ring.is-unknown .k-ring__track { stroke-dasharray: 3 4.5; }
 /* selected: orange halo outside the ring */
-.k-ring.is-sel::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--k-brand) 70%, transparent), 0 0 14px -2px rgba(255, 110, 20, 0.6); }
+.k-ring.is-sel::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--k-brand) 70%, transparent), 0 0 3px rgba(255, 110, 20, 0.6); }
 .k-ring__face {
   /* the bot's own avatar sits here at full size: the glass orb the person chose */
   width: calc(var(--ring-size) - 2 * (var(--k-ring-gap) + var(--ring-stroke)));
@@ -627,9 +627,9 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 /* Badges: working = smouldering ember dot bottom-right; needs you = lava pill top-right; done and unopened = ember dot top-right. */
 .k-ring__work, .k-ring__done, .k-ring__need { position: absolute; z-index: 1; pointer-events: none; --k-badge-cut: var(--k-ink); }
 .k-ring__work { right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: var(--k-ink); box-shadow: 0 0 0 2px var(--k-badge-cut); display: grid; place-items: center; }
-.k-ring__work::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 6px 1px rgba(255, 140, 40, 0.9); animation: k-ember 1.4s ease-in-out infinite; }
-.k-ring__done { right: -2px; top: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 8px 1px rgba(255, 120, 20, 0.85); }
-.k-ring__need { right: -3px; top: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; display: grid; place-items: center; font: 800 10px/1 var(--k-font-body); color: var(--k-on-brand); background: var(--k-btn-fill); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 10px rgba(255, 100, 10, 0.8); }
+.k-ring__work::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 140, 40, 0.9); animation: k-ember 1.4s ease-in-out infinite; }
+.k-ring__done { right: -2px; top: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 3px rgba(255, 120, 20, 0.85); }
+.k-ring__need { right: -3px; top: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; display: grid; place-items: center; font: 800 10px/1 var(--k-font-body); color: var(--k-on-brand); background: var(--k-btn-fill); box-shadow: 0 0 0 2px var(--k-badge-cut), 0 0 3px rgba(255, 100, 10, 0.8); }
 
 /* Percent text: NOT used in the dock (owner, round 1: the ring is the information; the exact value
    lives in the hover tip). Kept for settings and reports, where a ring sits next to a table. */
@@ -750,8 +750,8 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
    Use: <div class="k-edge"><i class="k-fillet k-fillet--top"></i><div class="k-island">…</div><i class="k-fillet k-fillet--bottom"></i></div>
    Mirror with .k-edge--left.
    ===================================================================================== */
-.k-edge { display: flex; flex-direction: column; align-items: flex-end; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(-5px 0 12px rgba(255, 100, 20, 0.24)); } /* follows the silhouette, fillets included: warm brown plus a light orange halo, at most ~17px out so the window edge never cuts it */
-.k-edge--left { align-items: flex-start; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(5px 0 12px rgba(255, 100, 20, 0.24)); }
+.k-edge { display: flex; flex-direction: column; align-items: flex-end; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(0 0 3px rgba(255, 100, 20, 0.24)); } /* follows the silhouette, fillets included: warm brown plus a light orange halo, at most ~17px out so the window edge never cuts it */
+.k-edge--left { align-items: flex-start; filter: drop-shadow(0 6px 10px rgba(40, 15, 0, 0.34)) drop-shadow(0 0 3px rgba(255, 100, 20, 0.24)); }
 .k-island {
   background: var(--k-ink);
   color: var(--k-on-ink);
@@ -968,7 +968,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-mic:not([data-state="idle"]) .k-mic__disc { transform: scale(1); }
 
 /* recording: bars from the real level, the halo breathes with the level */
-.k-mic[data-state="recording"] { box-shadow: var(--k-ink-rim), 0 0 18px rgba(255, 90, 40, 0.8); }
+.k-mic[data-state="recording"] { box-shadow: var(--k-ink-rim), 0 0 3px rgba(255, 90, 40, 0.8); }
 .k-mic[data-state="recording"] .k-mic__halo { transform: scale(calc(0.86 + var(--lvl) * 0.26)); }
 .k-mic[data-state="recording"] .k-mic__bars > i { transform: scaleY(calc(0.2 + var(--b) * 0.8)); }
 
@@ -1267,7 +1267,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   list-style: none;
   background: var(--k-canvas);
   border-radius: var(--k-radius-md);
-  box-shadow: 0 0 0 1px var(--k-line-strong), 0 18px 40px -14px rgba(0, 0, 0, 0.45), 0 0 22px -10px rgba(255, 110, 20, 0.5);
+  box-shadow: 0 0 0 1px var(--k-line-strong), 0 18px 40px -14px rgba(0, 0, 0, 0.45), 0 0 3px rgba(255, 110, 20, 0.5);
   transform-origin: top center;
   animation: k-dd-in var(--k-dur-ui) var(--k-ease-spring);
 }
@@ -1373,16 +1373,16 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   transition: clip-path var(--k-dur-ui) var(--k-ease-out);
   filter: drop-shadow(0 0 2px rgba(255, 140, 40, 0.9));
 }
-.k-check__input:checked + .k-check__box { background: var(--k-well); box-shadow: inset 0 0 0 1.5px var(--k-brand), 0 0 10px -1px rgba(255, 110, 20, 0.65); }
+.k-check__input:checked + .k-check__box { background: var(--k-well); box-shadow: inset 0 0 0 1.5px var(--k-brand), 0 0 3px rgba(255, 110, 20, 0.65); }
 .k-check__input:checked + .k-check__box::after { clip-path: inset(0); }
-.k-radio__input:checked + .k-radio__dot { background: var(--k-well); box-shadow: inset 0 0 0 2px var(--k-brand), 0 0 12px -1px rgba(255, 110, 20, 0.7); }
+.k-radio__input:checked + .k-radio__dot { background: var(--k-well); box-shadow: inset 0 0 0 2px var(--k-brand), 0 0 3px rgba(255, 110, 20, 0.7); }
 .k-radio__input:checked + .k-radio__dot::after {
   content: "";
   position: absolute;
   inset: 5px;
   border-radius: 50%;
   background: var(--k-ember);
-  box-shadow: 0 0 6px 1px rgba(255, 140, 40, 0.9);
+  box-shadow: 0 0 3px rgba(255, 140, 40, 0.9);
   animation: k-dot var(--k-dur-ui) var(--k-ease-spring);
 }
 @keyframes k-dot { from { transform: scale(0); } }
@@ -1417,7 +1417,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   width: calc(var(--k-thumb) / 2 + (100% - var(--k-thumb)) * var(--k-at));
   border-radius: var(--k-radius-pill);
   background: linear-gradient(90deg, #c2410c 0%, #f05a0c 35%, #ff8a1e 75%, #ffc45a 100%);
-  box-shadow: 0 0 6px 1px rgba(255, 120, 20, 0.75), 0 0 18px 3px rgba(255, 100, 10, 0.35);
+  box-shadow: 0 0 3px rgba(255, 120, 20, 0.75), 0 0 3px rgba(255, 100, 10, 0.35);
 }
 .k-slider__bubble {
   position: absolute; top: -20px;
@@ -1428,7 +1428,7 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
   background: linear-gradient(180deg, #ff8f26, #e8500a); color: #fff;
   font: 700 var(--k-text-xs) / 1.1 var(--k-font-body); font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 0 rgba(140, 35, 0, 0.35);
-  box-shadow: inset 0 0 0 1px rgba(255, 190, 120, 0.8), 0 0 12px -2px rgba(255, 100, 10, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 120, 0.8), 0 0 3px rgba(255, 100, 10, 0.7);
   pointer-events: none;
 }
 .k-slider__bubble::after { content: ""; position: absolute; left: 50%; bottom: -3px; width: 7px; height: 7px; transform: translateX(-50%) rotate(45deg); background: #e8500a; }
@@ -1441,19 +1441,19 @@ button:active[aria-checked="true"] > .k-switch::after { transform: translateX(10
 .k-slider__input::-webkit-slider-thumb {
   width: var(--k-thumb); height: var(--k-thumb); border: 0; border-radius: 50%;
   background: radial-gradient(circle at 50% 45%, #fffdf2 0 18%, #ffe08a 38%, #ffab38 66%, #f0700f 100%);
-  box-shadow: 0 0 0 1.5px rgba(255, 200, 120, 0.9), 0 0 10px 3px rgba(255, 170, 50, 0.75), 0 0 26px 6px rgba(255, 120, 20, 0.4);
+  box-shadow: 0 0 0 1.5px rgba(255, 200, 120, 0.9), 0 0 3px rgba(255, 170, 50, 0.75), 0 0 3px rgba(255, 120, 20, 0.4);
   -webkit-appearance: none;
   transition: transform var(--k-dur-micro) var(--k-ease-spring), box-shadow var(--k-dur-micro) var(--k-ease-out);
 }
 .k-slider__input:hover::-webkit-slider-thumb { transform: scale(1.08); }
 .k-slider__input:active::-webkit-slider-thumb { transform: scale(1.15); }
 .k-slider__input:focus-visible { outline: none; }
-.k-slider__input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 1.5px rgba(255, 200, 120, 0.9), 0 0 0 5px rgba(255, 122, 38, 0.45), 0 0 18px 4px rgba(255, 140, 40, 0.6); }
+.k-slider__input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 1.5px rgba(255, 200, 120, 0.9), 0 0 0 3px rgba(255, 122, 38, 0.45), 0 0 3px rgba(255, 140, 40, 0.6); }
 .k-slider__input::-moz-range-track { height: var(--k-thumb); background: transparent; }
 .k-slider__input::-moz-range-thumb {
   width: var(--k-thumb); height: var(--k-thumb); border: 0; border-radius: 50%;
   background: radial-gradient(circle at 50% 45%, #fffdf2 0 18%, #ffe08a 38%, #ffab38 66%, #f0700f 100%);
-  box-shadow: 0 0 10px 3px rgba(255, 170, 50, 0.75);
+  box-shadow: 0 0 3px rgba(255, 170, 50, 0.75);
 }
 /* ticks stand at the real values; no notches on the track */
 .k-slider__marks { position: relative; display: block; height: 16px; margin-top: calc(var(--k-space-1) * -1); }
@@ -1632,9 +1632,9 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 }
 /* Three colours, told apart by FORM. lava = new / needs you; neutral = quiet count; tint + live dot = working. */
 .k-badge--neutral { background: var(--k-surface-2); color: var(--k-text-2); box-shadow: inset 0 0 0 1px var(--k-line-strong); }
-.k-badge--brand, .k-badge--attention { color: #fff; background: var(--k-btn-fill); box-shadow: inset 0 0 0 1px rgba(255, 200, 140, 0.75), inset 0 1px 0 rgba(255, 235, 200, 0.55), 0 0 10px -1px rgba(255, 100, 10, 0.75); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.4); }
+.k-badge--brand, .k-badge--attention { color: #fff; background: var(--k-btn-fill); box-shadow: inset 0 0 0 1px rgba(255, 200, 140, 0.75), inset 0 1px 0 rgba(255, 235, 200, 0.55), 0 0 3px rgba(255, 100, 10, 0.75); text-shadow: 0 1px 0 rgba(140, 35, 0, 0.4); }
 .k-badge--ai { background: var(--k-brand-tint); color: var(--k-brand-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-brand) 45%, transparent); }
-.k-badge--ai::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 6px 1px rgba(255, 130, 30, 0.85); animation: k-ember 1.8s ease-in-out infinite; }
+.k-badge--ai::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 3px rgba(255, 130, 30, 0.85); animation: k-ember 1.8s ease-in-out infinite; }
 .k-badge--ai.is-dot::before { content: none; }
 .k-badge--done { background: var(--k-surface-2); color: var(--k-text-2); box-shadow: inset 0 0 0 1px var(--k-line); }
 .k-badge--done::before { content: ""; flex: none; width: 9px; height: 5px; margin-top: -2px; border-left: 2px solid var(--k-brand); border-bottom: 2px solid var(--k-brand); transform: rotate(-45deg) scale(0.9); }
@@ -1645,7 +1645,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
 .k-badge--error::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--k-danger); }
 @keyframes k-ember { 50% { box-shadow: 0 0 2px 0 rgba(255, 130, 30, 0.4); transform: scale(0.8); } }
 /* dot: something new, no number */
-.k-badge.is-dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-surface), 0 0 8px 1px rgba(255, 120, 20, 0.8); }
+.k-badge.is-dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--k-ember); box-shadow: 0 0 0 2px var(--k-surface), 0 0 3px rgba(255, 120, 20, 0.8); }
 .k-badge.is-dot.k-badge--neutral { background: var(--k-text-3); box-shadow: 0 0 0 2px var(--k-surface); }
 .k-badge.is-dot.k-badge--error { background: var(--k-danger); box-shadow: 0 0 0 2px var(--k-surface); }
 
@@ -1690,7 +1690,7 @@ button.k-list-item__main:focus-visible { outline: none; box-shadow: var(--k-focu
   border-radius: var(--k-radius-sm);
   background: var(--k-ink);
   color: var(--k-on-ink);
-  box-shadow: 0 0 0 1px rgba(255, 140, 60, 0.35), 0 0 22px -2px rgba(255, 100, 20, 0.45), 0 0 48px 2px rgba(255, 110, 30, 0.18), 0 18px 40px -14px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 140, 60, 0.35), 0 0 3px rgba(255, 100, 20, 0.45), 0 0 3px rgba(255, 110, 30, 0.18), 0 18px 40px -14px rgba(0, 0, 0, 0.6);
   filter: blur(3px);
   font: 400 var(--k-text-xs) / 1.35 var(--k-font-body);
   white-space: nowrap;
