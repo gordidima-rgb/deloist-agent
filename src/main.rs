@@ -60,6 +60,7 @@ mod keys;
 mod know_me;
 mod ledger;
 mod limit;
+mod history;
 mod memory;
 mod messengers;
 mod oauth;

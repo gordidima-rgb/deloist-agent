@@ -137,7 +137,7 @@ fn browser_tools() -> Value {
 fn browser_request(root: &Path, bot: &str, name: &str, args: &Value, pending: &BrowserPending) -> Result<String, String> {
     // Память не должна ждать браузер: пока действие висит, `remember` и `recall` раньше получали отказ
     // «действие ещё выполняется», и бот решал, что не может записывать в память.
-    if matches!(name, "remember" | "recall") {
+    if matches!(name, "remember" | "recall" | "search_history" | "read_history") {
         return call_browser(root, bot, name, args);
     }
     let mut slot = pending.lock().map_err(|_| "ожидание браузера прервано")?;
