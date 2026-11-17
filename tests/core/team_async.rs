@@ -264,7 +264,7 @@ async fn a_repeat_gets_the_same_id_and_the_fourth_open_task_is_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn another_bots_task_id_is_not_found_and_a_running_task_restarts_as_interrupted() {
+async fn another_bots_task_id_is_not_found_and_a_running_task_resumes_after_a_restart() {
     let mut t = team("async-restart", 12_000).await;
     let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Бета", "text": "долго" }))]).await;
     let id = task_id(&out[0]);
@@ -286,13 +286,18 @@ async fn another_bots_task_id_is_not_found_and_a_running_task_restarts_as_interr
     crew.listen().await;
     let state = crew.ok("GET", "/api/state", None).await;
     let alpha = state["bots"].as_array().unwrap().iter().find(|b| b["name"] == "Альфа").unwrap()["id"].as_str().unwrap().to_string();
-    let text = std::fs::read_to_string(crew.data_dir.join("team_tasks.json")).unwrap();
-    assert!(text.contains("interrupted") && !text.contains("\"running\""), "{text}");
+    // Задача, что шла, встаёт в очередь заново (одна попытка потрачена), а не помечается прерванной.
+    let tasks: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("team_tasks.json")).unwrap()).unwrap();
+    let task = tasks.iter().find(|t| t["id"] == id).unwrap_or_else(|| panic!("задачи {id} нет: {tasks:?}"));
+    assert_ne!(task["state"], "interrupted", "{task}");
+    assert_eq!(task["attempts"], 1, "{task}");
     crew.say(&alpha, &script(&[("task_status", json!({}))])).await;
     crew.wait_event("конец", |e| e["type"] == "turn_end").await;
     let thread = crew.ok("GET", &format!("/api/bots/{alpha}/thread?limit=200"), None).await;
     let result = thread["messages"].as_array().unwrap().iter().flat_map(|m| m["toolCalls"].as_array().cloned().unwrap_or_default()).last().unwrap()["result"].as_str().unwrap().to_string();
-    assert!(result.contains("прервана перезапуском") && !result.contains("в работе"), "{result}");
+    // task_status у ведущего показывает задачу как продолжающуюся, а не оборванную.
+    assert!(!result.contains("прервана перезапуском"), "{result}");
+    assert!(result.contains("ждёт") || result.contains("в работе") || result.contains("готово") || result.contains("ошибка"), "{result}");
     drop(model);
 }
 
