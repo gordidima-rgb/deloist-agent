@@ -1177,12 +1177,22 @@ pub fn label(name: &str) -> &str {
 /// Таблицы чужие: «только читает» — `is_read_only` и объявление MCP-сервера, команды — `reach` и `grants`.
 pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
     use crate::runs::Effect;
+    let action = args["action"].as_str().unwrap_or_default();
+    match name {
+        // Загрузка файла и принятие диалога меняют мир, хотя `browser_page` в целом читает.
+        "browser_page" if matches!(action, "upload" | "dialog") => return Effect::External,
+        // Адрес по ссылке может подтвердить, отписать или оплатить; назад, вперёд и вкладки — нет.
+        "browser_nav" => return if matches!(action, "open" | "new_tab") { Effect::External } else { Effect::Local },
+        _ => {}
+    }
     if is_read_only(name) || crate::mcp::is_read_only(name) {
         return Effect::Read;
     }
     match name {
         "run_command" => command_effect(args["command"].as_str().unwrap_or_default()),
         "web_fetch" | "web_search" | "telegram_posts" => Effect::Read,
+        // Другой бот или процесс действует по нашей просьбе; его ход журнал не ведёт, повтор сделал бы то же дважды.
+        "delegate" | "assign_task" | "run_goal" | "run_workflow" => Effect::External,
         // Нажатия и ввод на сайте, вход паролем, отладчик с произвольным кодом, платная картинка.
         "browser_mouse" | "browser_keyboard" | "browser_login" | "browser_human" | "browser_devtools" | "generate_image" => Effect::External,
         // Инструмент MCP-сервера, не объявленный «только чтение», может сделать что угодно снаружи.
@@ -1191,19 +1201,36 @@ pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
     }
 }
 
-/// Команда оболочки: читающая — Read; выпуск, отправка, удаление, оплата, пароли и непонятная команда — External.
+/// Программы, которые меняют только этот компьютер. Всё, чего здесь нет, считается внешним действием.
+const LOCAL_PROGRAMS: &[&str] = &[
+    "mkdir", "md", "copy", "move", "xcopy", "ren", "rename", "del", "erase", "touch", "cp", "mv", "rm", "echo", "type", "cd", "set",
+    "cargo", "rustc", "npm", "npx", "pnpm", "yarn", "node", "uv", "pip", "python", "py", "tsc", "vitest", "pytest", "make",
+];
+/// Подкоманды git, которые ходят в сеть или меняют чужой репозиторий.
+const GIT_REMOTE: &[&str] = &["push", "remote", "fetch", "pull", "clone", "submodule", "send-email", "request-pull", "credential"];
+/// Подкоманды менеджеров пакетов, которые публикуют или входят в аккаунт.
+const PACKAGE_REMOTE: &[&str] = &["publish", "login", "logout", "adduser", "owner", "deprecate", "unpublish", "token", "access", "dist-tag", "upload"];
+
+/// Команда оболочки: читающая — Read; известная локальная — Local; всё остальное (отправка, выпуск, облако, базы) — External.
 fn command_effect(command: &str) -> crate::runs::Effect {
     use crate::runs::Effect;
     if crate::grants::is_plain_read_only(command) {
         return Effect::Read;
     }
-    if crate::reach::release_command(command).is_some() {
+    if crate::reach::release_command(command).is_some() || command.chars().any(|c| matches!(c, '|' | '&' | ';' | '`' | '$' | '>' | '<' | '(' | ')')) {
         return Effect::External;
     }
-    match crate::reach::command_place(command) {
-        Some((_, "")) => Effect::Local,
-        _ => Effect::External,
-    }
+    let mut words = command.split_whitespace().map(str::to_lowercase);
+    let program = words.next().unwrap_or_default();
+    let program = program.rsplit(['\\', '/']).next().unwrap_or_default().trim_end_matches(".exe").to_string();
+    let rest: Vec<String> = words.collect();
+    let remote = |list: &[&str]| rest.iter().any(|w| list.contains(&w.as_str()));
+    let local = match program.as_str() {
+        "git" => !remote(GIT_REMOTE),
+        "cargo" | "npm" | "npx" | "pnpm" | "yarn" | "uv" | "pip" => !remote(PACKAGE_REMOTE),
+        other => LOCAL_PROGRAMS.contains(&other),
+    };
+    if local { Effect::Local } else { Effect::External }
 }
 
 /// Подпись шага для журнала: название инструмента, у записи файла ещё и путь. Аргументы команд и сайтов не берём: в них бывают секреты.
@@ -1219,8 +1246,8 @@ pub fn step_label(name: &str, args: &Value) -> String {
     }
 }
 
-/// Шаг по строке хода внешнего агента (ACP): `(инструмент, подпись, действие)`. Названия и команды агента — не берём, в них бывают секреты.
-pub fn activity_step(row: &Value) -> (String, String, crate::runs::Effect) {
+/// Шаг по строке хода внешнего агента (ACP): `(подпись, действие)`. Названия и команды агента — не берём, в них бывают секреты.
+pub fn activity_step(row: &Value) -> (String, crate::runs::Effect) {
     use crate::runs::Effect;
     let kind = row["kind"].as_str().unwrap_or("other");
     let path = row["args"]["path"].as_str().unwrap_or_default();
@@ -1236,7 +1263,7 @@ pub fn activity_step(row: &Value) -> (String, String, crate::runs::Effect) {
         "execute" => ("команда агента".to_string(), command_effect(row["args"]["command"].as_str().unwrap_or_default())),
         _ => ("действие агента".to_string(), Effect::External),
     };
-    (format!("acp:{kind}"), label, effect)
+    (label, effect)
 }
 
 // ---------------------------------------------------------------------------
@@ -1821,5 +1848,40 @@ mod unix_read_only_tests {
         assert!(!unix_read_only_in("sort x.csv -o x.csv", ws));
         assert!(!unix_read_only_in("uniq x.csv y.csv", ws));
         assert!(unix_read_only_in("sort x.csv | uniq -c", ws));
+    }
+}
+
+#[cfg(test)]
+mod effect_tests {
+    use super::effect;
+    use crate::runs::Effect::{External, Local, Read};
+    use serde_json::json;
+
+    fn cmd(command: &str) -> crate::runs::Effect {
+        effect("run_command", &json!({ "command": command }))
+    }
+
+    #[test]
+    fn commands_are_local_only_when_known() {
+        assert_eq!(cmd("git status"), Read);
+        assert_eq!(cmd("git commit -m fix"), Local);
+        assert_eq!(cmd("cargo build -q"), Local);
+        assert_eq!(cmd("mkdir out"), Local);
+        for command in ["git push origin main", "gh pr create", "docker push app", "aws s3 cp a b", "kubectl apply -f x", "psql -c select", "npm publish", "sendmail a@b.c", "cargo build && curl x"] {
+            assert_eq!(cmd(command), External, "{command}");
+        }
+    }
+
+    #[test]
+    fn handing_work_over_and_site_actions_are_external() {
+        for name in ["delegate", "assign_task", "run_goal", "run_workflow", "browser_mouse"] {
+            assert_eq!(effect(name, &json!({})), External, "{name}");
+        }
+        assert_eq!(effect("browser_page", &json!({ "action": "upload" })), External);
+        assert_eq!(effect("browser_page", &json!({ "action": "dialog" })), External);
+        assert_eq!(effect("browser_page", &json!({ "action": "read" })), Read);
+        assert_eq!(effect("browser_nav", &json!({ "action": "open" })), External);
+        assert_eq!(effect("browser_nav", &json!({ "action": "back" })), Local);
+        assert_eq!(effect("write_file", &json!({})), Local);
     }
 }

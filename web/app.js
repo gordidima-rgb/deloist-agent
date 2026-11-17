@@ -1601,7 +1601,9 @@ function messageRow(msg) {
   if (msg.role === 'compacted') return compactedRow(msg);
   if (msg.role === 'task') return taskRow(msg);
   const row = document.createElement('div');
-  row.className = `msg ${msg.role === 'user' ? 'user' : 'bot'}`;
+  // Заметка продолжения после перезапуска пишется от имени программы, а не человека.
+  const restart = msg.role === 'user' && msg.source === 'restart';
+  row.className = `msg ${msg.role === 'user' && !restart ? 'user' : 'bot'}`;
   row.dataset.id = msg.id || '';
   // Для содержания разговора: время и имена файлов человеческого сообщения.
   if (msg.role === 'user') {
@@ -1614,7 +1616,7 @@ function messageRow(msg) {
 
   // Задачу от другого бота видно в треде получателя: «от Скаут 2» (след передачи, карточки на неё нет).
   const delegatedFrom = msg.role === 'user' && String(msg.source || '').startsWith('delegation:') ? String(msg.source).slice('delegation:'.length) : '';
-  const author = msg.name || (delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
+  const author = msg.name || (restart ? tr('Программа перезапущена') : delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
   if (author) {
     const who = document.createElement('div');
     who.className = 'msg-author';
@@ -1635,6 +1637,7 @@ function messageRow(msg) {
     col.append(bubble);
   }
   if (results?.files.length) col.append(Attach.resultCards(results.files, resultContext()));
+  if (msg.runId && needsItems.some((n) => n.id === msg.runId)) col.append(runActionsNode(msg.runId));
 
   if (Array.isArray(msg.attachments) && msg.attachments.length) col.append(Attach.sent(msg.attachments, attachOwner()));
 
@@ -4409,6 +4412,7 @@ function boardSections() {
   const where = (item) => (item.roomName ? `${item.botName || ''} · ${item.roomName}` : item.botName || '');
   const needs = needsItems.map((item) => ({
     id: item.id, ref: item, where: where(item), meta: needKind(item), title: needTitle(item).slice(0, 140),
+    actions: item.kind === 'run' ? [{ key: 'continue', label: tr('Продолжить') }, { key: 'dismiss', label: tr('Отменить ход') }] : undefined,
   }));
   const working = boardWorking.map((item) => ({
     id: `${item.kind}:${item.id || item.botId}`, ref: item, where: where(item),
@@ -4460,7 +4464,33 @@ function renderNeeds() {
   btn.setAttribute('aria-expanded', String(!list.hidden));
   if (list.hidden) return;
   if (needsBoardView) needsBoardView.update({ sections });
-  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard });
+  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard, onaction: (item, key) => runAction(item.ref.id, key) });
+}
+
+// «Продолжить» или «Отменить» для хода, который оборвал перезапуск (карточка «Нужен ты» и строка в чате).
+async function runAction(id, key) {
+  try {
+    await api(`/api/runs/${encodeURIComponent(id)}/${key}`, { method: 'POST' });
+  } catch (e) {
+    toast(trServer(e.message));
+  }
+  document.querySelectorAll(`.run-actions[data-run="${id}"]`).forEach((el) => el.remove());
+  await refreshNeeds();
+}
+
+function runActionsNode(id) {
+  const box = document.createElement('div');
+  box.className = 'run-actions';
+  box.dataset.run = id;
+  for (const [key, label, variant] of [['continue', tr('Продолжить'), 'primary'], ['dismiss', tr('Отменить ход'), 'ghost']]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `k-btn k-btn--sm k-btn--${variant}`;
+    button.textContent = label;
+    button.addEventListener('click', () => runAction(id, key));
+    box.append(button);
+  }
+  return box;
 }
 
 // Переход к карточке: открыть разговор, дорисовать карточку, если её нет на странице, и показать её.
@@ -7959,11 +7989,10 @@ const STATUS_LABELS = {
   skipped: tr('пропущено: компьютер спал'),
   error: tr('не запустилась'),
   running: tr('идёт'),
-  interrupted: tr('прервалась: программа закрылась'),
   gave_up: tr('не выполнилась за сутки'),
 };
 // Чип прошлого запуска с тревожным значком: рутина не дошла до «готово».
-const BAD_STATUSES = ['failed', 'error', 'limit', 'needs', 'interrupted', 'gave_up'];
+const BAD_STATUSES = ['failed', 'error', 'limit', 'needs', 'gave_up'];
 const statusClass = (status) => (STATUS_LABELS[status] ? `st-${status}` : '');
 
 const isTime = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);

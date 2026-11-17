@@ -20,12 +20,14 @@ const KEEP_CLOSED: usize = 200;
 const KEEP_MS: i64 = 7 * 24 * 3600 * 1000;
 /// Шагов в записи: старые отбрасываются, нужны последние.
 const MAX_STEPS: usize = 30;
+/// Законченных внешних действий в записи.
+const MAX_EXTERNAL: usize = 50;
 /// Сколько последних шагов называем в заметке продолжения.
 const NOTE_STEPS: usize = 12;
 const LABEL_CHARS: usize = 80;
 
 /// Что шаг делает с миром: по этому выбирается, можно ли повторять его после обрыва.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
     /// Только читает.
@@ -44,18 +46,11 @@ pub enum StepState {
     Err,
 }
 
-/// Почему запуск остановился. Объявлено здесь для задач про лимиты и повторы; пока ставятся только `Human` и `Unknown`.
-#[allow(dead_code)]
+/// Почему запуск остановился. Задачи про лимиты и повторы добавят свои причины.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
-    Limit,
-    Network,
-    Login,
     Human,
-    Budget,
-    Check,
-    Stuck,
     Unknown,
 }
 
@@ -73,9 +68,6 @@ pub enum Origin {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunState {
     Running,
-    /// Ждёт срока (сброс лимита): заполняют задачи про лимиты.
-    #[allow(dead_code)]
-    Paused { until_ms: i64, reason: StopReason },
     NeedsHuman { reason: StopReason, text: String },
     Done,
     Failed { reason: StopReason, text: String },
@@ -85,7 +77,6 @@ pub enum RunState {
 pub struct Step {
     /// Номер вызова у модели или агента: по нему шаг получает итог.
     pub call_id: String,
-    pub tool: String,
     /// Короткая подпись для человека, без секретов.
     pub label: String,
     pub effect: Effect,
@@ -108,9 +99,12 @@ pub struct Run {
     /// Сколько раз ход уже продолжали после обрыва.
     pub attempts: u32,
     pub steps: Vec<Step>,
-    /// Заметка прогресса (ложится в следующий запуск).
+    /// Внешние действия, которые прошли: их после обрыва не повторяют. Шаги вытесняются по счёту, этот список — нет.
     #[serde(default)]
-    pub note: String,
+    pub done_external: Vec<String>,
+    /// Внешние действия, которые кончились ошибкой: могли и пройти.
+    #[serde(default)]
+    pub failed_external: Vec<String>,
 }
 
 impl Run {
@@ -129,7 +123,8 @@ impl Run {
             state: RunState::Running,
             attempts: 0,
             steps: Vec::new(),
-            note: String::new(),
+            done_external: Vec::new(),
+            failed_external: Vec::new(),
         }
     }
 
@@ -167,14 +162,15 @@ impl Run {
         let last = self.steps.last().map(|s| s.label.as_str()).unwrap_or("начало хода");
         let tail = self.steps.len().saturating_sub(NOTE_STEPS);
         let done: Vec<&str> = self.steps[tail..].iter().filter(|s| s.state == StepState::Ok).map(|s| s.label.as_str()).collect();
-        let mut external: Vec<&str> = self.steps.iter().filter(|s| s.state == StepState::Ok && s.effect == Effect::External).map(|s| s.label.as_str()).collect();
-        external.dedup();
         let mut text = format!("Тебя прервал перезапуск программы на шаге «{last}».");
         if !done.is_empty() {
             text.push_str(&format!(" Уже сделано: {}.", done.join("; ")));
         }
-        if !external.is_empty() {
-            text.push_str(&format!(" Внешние действия ({}) уже выполнены — не повторяй их.", external.join("; ")));
+        if !self.done_external.is_empty() {
+            text.push_str(&format!(" Внешние действия ({}) уже выполнены — не повторяй их.", self.done_external.join("; ")));
+        }
+        if !self.failed_external.is_empty() {
+            text.push_str(&format!(" Внешние действия ({}) завершились ошибкой, но могли пройти — проверь, прежде чем повторять.", self.failed_external.join("; ")));
         }
         if let Some(step) = self.unknown_external() {
             text.push_str(&format!(" Шаг «{}» оборвался на полпути, прошёл ли он — неизвестно: сначала проверь, и повторяй, только если он не прошёл.", step.label));
@@ -264,9 +260,9 @@ impl Runs {
     }
 
     /// Шаг начался. Вызывается до выполнения: если процесс умрёт, запись знает, что шло.
-    pub fn step_start(&self, bot_id: &str, call_id: &str, tool: &str, label: &str, effect: Effect) {
+    pub fn step_start(&self, bot_id: &str, call_id: &str, label: &str, effect: Effect) {
         self.on_active(bot_id, |run| {
-            push_step(run, call_id, tool, label, effect, StepState::Started);
+            push_step(run, call_id, label, effect, StepState::Started);
             true
         });
     }
@@ -283,13 +279,16 @@ impl Runs {
             Some("error" | "denied") => StepState::Err,
             _ => StepState::Started,
         };
-        let (tool, label, effect) = crate::tools::activity_step(row);
+        let (label, effect) = crate::tools::activity_step(row);
         self.on_active(bot_id, |run| {
-            if run.steps.iter().any(|s| s.call_id == call_id) {
-                return set_step(run, call_id, state);
-            }
-            push_step(run, call_id, &tool, &label, effect, state);
-            true
+            let Some(step) = run.steps.iter_mut().rev().find(|s| s.call_id == call_id) else {
+                push_step(run, call_id, &label, effect, state);
+                return true;
+            };
+            // Строгий класс остаётся: позднее обновление строки не делает внешнее действие безобидным.
+            let stricter = effect > step.effect;
+            step.effect = step.effect.max(effect);
+            set_step(run, call_id, state) || stricter
         });
     }
 
@@ -300,6 +299,35 @@ impl Runs {
         let Some(run) = inner.items.iter_mut().find(|r| r.id == id) else { return };
         if change(run) {
             run.updated_ms = now();
+            self.save(&inner.items);
+        }
+    }
+
+    /// Занять запись для продолжения одним действием под замком: попытка +1, состояние «идёт».
+    /// `from_human` — запись обязана ждать человека, иначе обязана идти (остаток прошлого запуска). Возвращает прежнее состояние.
+    fn claim(&self, id: &str, from_human: bool) -> Option<(RunState, Run)> {
+        let mut inner = self.inner.lock().unwrap();
+        let run = inner.items.iter_mut().find(|r| r.id == id)?;
+        if from_human != matches!(run.state, RunState::NeedsHuman { .. }) || (!from_human && !run.is_running()) {
+            return None;
+        }
+        let held = std::mem::replace(&mut run.state, RunState::Running);
+        run.attempts += 1;
+        run.updated_ms = now();
+        let copy = run.clone();
+        self.save(&inner.items);
+        Some((held, copy))
+    }
+
+    /// Ход не стартовал: возвращаем запись, как была, но только если никто её уже не взял.
+    fn release(&self, id: &str, held: RunState) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.active.values().any(|a| a == id) {
+            return;
+        }
+        if let Some(run) = inner.items.iter_mut().find(|r| r.id == id).filter(|r| r.is_running()) {
+            run.state = held;
+            run.attempts = run.attempts.saturating_sub(1);
             self.save(&inner.items);
         }
     }
@@ -320,8 +348,9 @@ impl Runs {
     }
 }
 
-fn push_step(run: &mut Run, call_id: &str, tool: &str, label: &str, effect: Effect, state: StepState) {
-    run.steps.push(Step { call_id: call_id.into(), tool: tool.into(), label: label.chars().take(LABEL_CHARS).collect(), effect, state });
+fn push_step(run: &mut Run, call_id: &str, label: &str, effect: Effect, state: StepState) {
+    run.steps.push(Step { call_id: call_id.into(), label: label.chars().take(LABEL_CHARS).collect(), effect, state });
+    note_external(run, call_id);
     let extra = run.steps.len().saturating_sub(MAX_STEPS);
     run.steps.drain(..extra);
 }
@@ -331,15 +360,31 @@ fn set_step(run: &mut Run, call_id: &str, state: StepState) -> bool {
     match run.steps.iter_mut().rev().find(|s| s.call_id == call_id) {
         Some(step) if step.state != state => {
             step.state = state;
+            note_external(run, call_id);
             true
         }
         _ => false,
     }
 }
 
+/// Законченное внешнее действие — в отдельный список: шаги вытесняются по счёту, а «не повторяй» должно помниться.
+fn note_external(run: &mut Run, call_id: &str) {
+    let Some(step) = run.steps.iter().rev().find(|s| s.call_id == call_id) else { return };
+    let list = match (step.effect, step.state) {
+        (Effect::External, StepState::Ok) => &mut run.done_external,
+        (Effect::External, StepState::Err) => &mut run.failed_external,
+        _ => return,
+    };
+    if !list.contains(&step.label) {
+        list.push(step.label.clone());
+        let extra = list.len().saturating_sub(MAX_EXTERNAL);
+        list.drain(..extra);
+    }
+}
+
 fn prune(items: &mut Vec<Run>) {
     let at = now();
-    items.retain(|r| r.is_running() || matches!(r.state, RunState::NeedsHuman { .. } | RunState::Paused { .. }) || at - r.updated_ms < KEEP_MS);
+    items.retain(|r| r.is_running() || matches!(r.state, RunState::NeedsHuman { .. }) || at - r.updated_ms < KEEP_MS);
     let closed = items.iter().filter(|r| !r.is_running()).count();
     let mut drop = closed.saturating_sub(KEEP_CLOSED);
     items.retain(|r| {
@@ -367,8 +412,10 @@ pub async fn recover(app: &Arc<App>) {
             needs_human(app, &run, &text).await;
         } else if run.attempts >= 1 {
             needs_human(app, &run, "Ход прерывался дважды — нужен ты.").await;
-        } else if let Err(e) = continue_run(app, &id).await {
-            needs_human(app, &run, &format!("Не смог продолжить: {e}")).await;
+        } else if let Some((_, claimed)) = app.runs.claim(&id, false) {
+            if let Err(e) = launch(app, &claimed) {
+                needs_human(app, &run, &format!("Не смог продолжить: {e}")).await;
+            }
         }
     }
     // Очередь не стоит после перезапуска: сообщения, которые ждали, идут теперь.
@@ -377,34 +424,18 @@ pub async fn recover(app: &Arc<App>) {
     }
 }
 
-/// Продолжить запись: счётчик попыток растёт, ход идёт с заметкой «что уже сделано».
-/// Командную задачу запускает её собственный путь (она ждёт в очереди задач).
-pub async fn continue_run(app: &Arc<App>, id: &str) -> Result<(), String> {
-    let run = app.runs.update(id, |r| {
-        r.attempts += 1;
-        r.state = RunState::Running;
-    });
-    let Some(run) = run else { return Err("запись не найдена".into()) };
+/// Запустить ход продолжения. Командную задачу запускает её собственный путь (она ждёт в очереди задач).
+fn launch(app: &Arc<App>, run: &Run) -> Result<(), String> {
     if let Origin::Team { task_id } = &run.origin {
         return crate::team_tasks::requeue(app, task_id);
     }
-    let note = run.continuation_note();
-    match crate::turn::start_turn(app, &run.bot_id, &note, run.options()) {
-        Ok(()) => Ok(()),
-        Err(StartError { message, .. }) => {
-            app.runs.update(id, |r| r.attempts = r.attempts.saturating_sub(1));
-            Err(message)
-        }
-    }
+    crate::turn::start_turn(app, &run.bot_id, &run.continuation_note(), run.options()).map_err(|StartError { message, .. }| message)
 }
 
-/// Человек нажал «Продолжить» на карточке «Нужен ты».
+/// Человек нажал «Продолжить» на карточке «Нужен ты». Два нажатия подряд: второе получает отказ и записи не касается.
 pub async fn resume_by_human(app: &Arc<App>, id: &str) -> Result<(), String> {
-    let run = app.runs.get(id).filter(|r| matches!(r.state, RunState::NeedsHuman { .. })).ok_or("запись уже не ждёт человека")?;
-    let held = run.state.clone();
-    continue_run(app, id).await.inspect_err(|_| {
-        app.runs.update(id, |r| r.state = held);
-    })
+    let (held, run) = app.runs.claim(id, true).ok_or("запись уже не ждёт человека")?;
+    launch(app, &run).inspect_err(|_| app.runs.release(id, held))
 }
 
 /// Человек отказался продолжать: запись закрыта.
@@ -454,7 +485,7 @@ mod tests {
     fn run_with(steps: Vec<(&str, Effect, StepState)>) -> Run {
         let mut run = Run::new("bot", Origin::Human, &TurnOptions::default());
         for (i, (label, effect, state)) in steps.into_iter().enumerate() {
-            push_step(&mut run, &format!("c{i}"), "t", label, effect, state);
+            push_step(&mut run, &format!("c{i}"), label, effect, state);
         }
         run
     }
@@ -482,10 +513,34 @@ mod tests {
     }
 
     #[test]
+    fn finished_external_steps_outlive_the_step_cap_and_do_not_repeat() {
+        let mut run = run_with(Vec::new());
+        push_step(&mut run, "mail", "письмо клиенту", Effect::External, StepState::Ok);
+        push_step(&mut run, "pay", "оплата", Effect::External, StepState::Err);
+        push_step(&mut run, "mail2", "письмо клиенту", Effect::External, StepState::Ok);
+        for i in 0..40 {
+            push_step(&mut run, &format!("r{i}"), "чтение", Effect::Read, StepState::Ok);
+        }
+        assert!(run.steps.iter().all(|s| s.effect == Effect::Read), "внешние шаги вытеснены по счёту");
+        assert_eq!(run.done_external, vec!["письмо клиенту"], "без повтора");
+        let note = run.continuation_note();
+        assert!(note.contains("Внешние действия (письмо клиенту) уже выполнены"), "{note}");
+        assert!(note.contains("(оплата) завершились ошибкой"), "{note}");
+    }
+
+    #[test]
+    fn a_goal_self_check_keeps_its_run_kind_after_a_restart() {
+        let origin = Origin::Goal { id: "checkin_bot".into(), title: "Самопроверка".into(), run: crate::goals::Run::CheckIn };
+        let run = Run::new("bot", origin, &TurnOptions::default());
+        assert_eq!(run.options().run, Some(crate::goals::Run::CheckIn));
+        assert!(run.options().routine.is_some());
+    }
+
+    #[test]
     fn steps_keep_only_the_last_ones() {
         let mut run = run_with(Vec::new());
         for i in 0..40 {
-            push_step(&mut run, &format!("c{i}"), "t", "x", Effect::Read, StepState::Ok);
+            push_step(&mut run, &format!("c{i}"), "x", Effect::Read, StepState::Ok);
         }
         assert_eq!(run.steps.len(), MAX_STEPS);
         assert_eq!(run.steps[0].call_id, "c10");
