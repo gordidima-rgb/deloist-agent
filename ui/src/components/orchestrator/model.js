@@ -22,7 +22,12 @@ export function phaseOf({ stage, hearing = false, openCards = 0, streaming = fal
 // Сообщение из истории разговора в пузырь; служебные и пустые отбрасываем.
 export function bubbleOf(msg) {
   if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) return null;
-  const text = String(msg.text ?? '').trim();
+  let text = String(msg.text ?? '').trim();
+  // Поздний ответ на вопрос (src/turn.rs late_answer_text): человеку показываем только его ответ, без служебной цитаты.
+  if (msg.role === 'user' && text.startsWith('[ответ на вопрос бота]')) {
+    const at = text.lastIndexOf('Ответ человека:');
+    if (at >= 0) text = text.slice(at + 'Ответ человека:'.length).trim();
+  }
   if (!text) return null;
   return { kind: msg.role === 'user' ? 'user' : 'bot', text, error: Boolean(msg.error) };
 }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mountComponent } from '../../lib/mount.svelte.js';
 import Stage from './Stage.svelte';
-import { lookForPhase, phaseOf } from './model.js';
+import { bubbleOf, lookForPhase, phaseOf } from './model.js';
 
 let instance;
 let host;
@@ -168,6 +168,12 @@ describe('Stage phases and mood', () => {
     expect(phaseOf({ stage: 'interview', busy: true, openCards: 1 })).toBe('asking');
     expect(phaseOf({ stage: 'interview', hearing: true, openCards: 1 })).toBe('listening');
     expect(phaseOf({ stage: 'ready', openCards: 1 })).toBe('done');
+  });
+
+  it('shows only the human answer of a late answer to a bot question', () => {
+    const late = '[ответ на вопрос бота]\nВопрос, который ты задал (это твой текст, не слова человека): «Куда?»\nОтвет человека: Мне лично';
+    expect(bubbleOf({ role: 'user', text: late })).toEqual({ kind: 'user', text: 'Мне лично', error: false });
+    expect(bubbleOf({ role: 'assistant', text: late }).text).toBe(late);
   });
 
   it('takes the look from avatar-states and invents none', () => {
