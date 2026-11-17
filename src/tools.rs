@@ -1201,9 +1201,10 @@ pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
 }
 
 /// Программы, которые меняют только этот компьютер. Всё, чего здесь нет, считается внешним действием.
+/// Интерпретаторов (`node`, `python`, `npx`, `uv`, `make`) здесь нет: скрипт бота может и опубликовать пост.
 const LOCAL_PROGRAMS: &[&str] = &[
     "mkdir", "md", "copy", "move", "xcopy", "ren", "rename", "del", "erase", "touch", "cp", "mv", "rm", "echo", "type", "cd", "set",
-    "cargo", "rustc", "npm", "npx", "pnpm", "yarn", "node", "uv", "pip", "python", "py", "tsc", "vitest", "pytest", "make",
+    "cargo", "rustc", "npm", "pnpm", "yarn", "pip", "tsc", "vitest", "pytest",
 ];
 /// Подкоманды git, которые ходят в сеть или меняют чужой репозиторий.
 const GIT_REMOTE: &[&str] = &["push", "remote", "fetch", "pull", "clone", "submodule", "send-email", "request-pull", "credential"];
@@ -1226,7 +1227,7 @@ fn command_effect(command: &str) -> crate::runs::Effect {
     let remote = |list: &[&str]| rest.iter().any(|w| list.contains(&w.as_str()));
     let local = match program.as_str() {
         "git" => !remote(GIT_REMOTE),
-        "cargo" | "npm" | "npx" | "pnpm" | "yarn" | "uv" | "pip" => !remote(PACKAGE_REMOTE),
+        "cargo" | "npm" | "pnpm" | "yarn" | "pip" => !remote(PACKAGE_REMOTE),
         other => LOCAL_PROGRAMS.contains(&other),
     };
     if local { Effect::Local } else { Effect::External }
@@ -1866,6 +1867,9 @@ mod effect_tests {
         assert_eq!(cmd("git commit -m fix"), Local);
         assert_eq!(cmd("cargo build -q"), Local);
         assert_eq!(cmd("mkdir out"), Local);
+        for script in ["python post.py", "node send.js", "npx some-cli deploy", "uv run tweet.py", "make release"] {
+            assert_eq!(cmd(script), External, "{script}");
+        }
         for command in ["git push origin main", "gh pr create", "docker push app", "aws s3 cp a b", "kubectl apply -f x", "psql -c select", "npm publish", "sendmail a@b.c", "cargo build && curl x"] {
             assert_eq!(cmd(command), External, "{command}");
         }
