@@ -8,6 +8,8 @@
 
 Этап C2 (17.11): ✓ — файл переведён на `Button` / `IconButton` / `ListRow` / `Menu`, ◐ — переведена часть (остались строки-карточки, дорожка-полоса отчёта, микрофон и отправка у Stage, `AddMenu` — поиск с группами, а не меню).
 
+Этап C3 (17.11): ✓ `web/messengers.js` (фишка и сегменты), `web/turn-card.js` (Стоп), `web/snap.html`, `web/dock.html` (кнопки чата и заметки), `web/voice.js` (свой `<style>` убран в блок C3 `web/kit.css`), `web/user-chrome.js`, `web/stt.js`; алиасы `.primary/.ghost/.danger` из `web/kit.css` удалены (нигде не используются). ◐ `web/app.js` (кнопки уже `k-btn`; остались `.icon-btn`, `.day-btn`, `.look-btn`, `.seg`), `web/index.html` и `web/style.css` — предупреждения 272 → 20, самодельные кнопки-классы остались.
+
 Заменить на: `Button` / `IconButton` (`.k-btn`, варианты primary/secondary/ghost/danger/danger-solid)
 
 - `ui/src/components/ChatModelPopover.svelte` — 1: 68 ✓ C2
