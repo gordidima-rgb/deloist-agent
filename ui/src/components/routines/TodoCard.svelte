@@ -198,9 +198,9 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
     flex-direction: column;
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
     align-self: start;
   }
   .tc-head {
@@ -210,12 +210,12 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
   }
   .tc-h {
     margin: 0;
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 700 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
   }
   .tc-error {
     margin: 0;
-    color: var(--k-attention-text, #b4321b);
+    color: var(--k-attention-text);
     font: 600 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .tc-row {
@@ -230,12 +230,12 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
     min-width: 0;
   }
   .tc-label {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 600 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, system-ui);
     letter-spacing: 0.04em;
   }
   .tc-hint {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
   }
   .tc-items {

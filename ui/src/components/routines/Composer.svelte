@@ -189,23 +189,23 @@ import { Icon } from '../kit';
 
 <style>
   .cmp {
-    --cmp-date: var(--k-brand-tint, #e7efff);
-    --cmp-time: var(--k-ai-tint, #eeebff);
-    --cmp-repeat: color-mix(in srgb, var(--k-bot-mint, #3ddc97) 26%, var(--k-surface, #fff));
+    --cmp-date: var(--k-brand-tint);
+    --cmp-time: var(--k-ai-tint);
+    --cmp-repeat: color-mix(in srgb, var(--k-brand) 14%, var(--k-surface));
     display: flex;
     flex-direction: column;
     gap: var(--k-space-2, 8px);
   }
   .cmp-field {
     position: relative;
-    border: 1px solid var(--k-line-strong, #cfcdc7);
+    border: 1px solid var(--k-line-strong);
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
     transition: border-color 140ms var(--k-ease-out, ease), box-shadow 140ms var(--k-ease-out, ease);
   }
   .cmp--focus .cmp-field {
-    border-color: var(--k-brand, #025bff);
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
+    border-color: var(--k-brand);
+    box-shadow: var(--k-focus);
   }
   .cmp--off .cmp-field {
     opacity: 0.6;
@@ -236,10 +236,10 @@ import { Icon } from '../kit';
     overflow: hidden;
     outline: none;
     background: transparent;
-    color: var(--k-text, #262931);
+    color: var(--k-text);
   }
   .cmp-input::placeholder {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
   }
   .cmp-mark {
     border-radius: 5px;
@@ -269,7 +269,7 @@ import { Icon } from '../kit';
     padding: 3px 4px 3px 10px;
     border-radius: var(--k-radius-pill, 999px);
     background: var(--cmp-bg);
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 600 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
     animation: cmp-in 140ms var(--k-ease-out, ease) both;
   }
@@ -291,16 +291,16 @@ import { Icon } from '../kit';
     border: 0;
     border-radius: var(--k-radius-pill, 999px);
     background: transparent;
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     cursor: pointer;
   }
   .cmp-chip-x:hover {
-    background: color-mix(in srgb, var(--k-text, #262931) 12%, transparent);
-    color: var(--k-text, #262931);
+    background: color-mix(in srgb, var(--k-text) 12%, transparent);
+    color: var(--k-text);
   }
   .cmp-chip-x:focus-visible {
     outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
+    box-shadow: var(--k-focus);
   }
   @keyframes cmp-in {
     from {

@@ -85,7 +85,7 @@ import { Select, Chip } from '../kit';
     display: flex;
     align-items: center;
     gap: var(--k-space-2, 8px);
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .tr-rec-num {

@@ -2,7 +2,7 @@
   // Куда прислать напоминание: фишки Windows и Telegram. Telegram доступен, только когда чат привязан;
   // без привязки рядом ссылка на настройки. Общие для вкладок «Напоминания» и «Привычки».
   import { tr } from '../../lib/i18n.js';
-import { Chip } from '../kit';
+import { Chip, Button } from '../kit';
 
   let { windows = $bindable(true), telegram = $bindable(false), paired = false, onopentelegram } = $props();
 </script>
@@ -15,7 +15,7 @@ import { Chip } from '../kit';
   {#if !paired}
     <p class="ch-hint">
       {tr('Telegram не подключён.')}
-      <button type="button" class="ch-link" onclick={() => onopentelegram?.()}>{tr('Открыть настройки Telegram')}</button>
+      <Button class="ch-link" variant="ghost" size="sm" onclick={() => onopentelegram?.()}>{tr('Открыть настройки Telegram')}</Button>
     </p>
   {/if}
 </div>
@@ -37,22 +37,7 @@ import { Chip } from '../kit';
   }
   .ch-hint {
     margin: 0;
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
-  }
-  .ch-link {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--k-brand-text, #0250e0);
-    font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  .ch-link:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-    border-radius: 4px;
   }
 </style>

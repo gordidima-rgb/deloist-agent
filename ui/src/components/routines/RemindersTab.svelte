@@ -240,7 +240,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
   <div class="rm-form">
     <div class="rm-form-head">
       <h4 class="rm-h">{editing ? tr('Изменить напоминание') : tr('Новое напоминание')}</h4>
-      {#if editing}<button type="button" class="rm-link" onclick={reset}>{tr('Отмена')}</button>{/if}
+      {#if editing}<Button class="rm-link" variant="ghost" size="sm" onclick={reset}>{tr('Отмена')}</Button>{/if}
     </div>
     <Composer
       bind:this={composer}
@@ -325,9 +325,9 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     flex-direction: column;
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface-2, #f1f0ec);
+    background: var(--k-surface-2);
   }
   .rm-form-head {
     display: flex;
@@ -336,7 +336,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
   }
   .rm-h {
     margin: 0;
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 700 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
   }
   .rm-hint,
@@ -345,26 +345,11 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .rm-hint {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
   }
   .rm-error {
-    color: var(--k-attention-text, #b4321b);
+    color: var(--k-danger-text);
     font-weight: 600;
-  }
-  .rm-link {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--k-brand-text, #0250e0);
-    font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  .rm-link:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-    border-radius: 4px;
   }
   .rm-opts {
     display: flex;
@@ -378,7 +363,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     min-width: 160px;
   }
   .rm-label {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 600 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, system-ui);
     letter-spacing: 0.04em;
   }
@@ -400,19 +385,19 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     align-items: center;
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-3, 12px) var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
   }
   .rm-item--off .rm-title {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
   }
   .rm-main {
     flex: 1 1 240px;
     min-width: 0;
   }
   .rm-title {
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 600 var(--k-text-md, 15px) / 1.35 var(--k-font-body, system-ui);
     overflow-wrap: anywhere;
   }
@@ -420,16 +405,16 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon } from '../kit';
     display: flex;
     flex-wrap: wrap;
     gap: 2px var(--k-space-3, 12px);
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-xs, 12px) / 1.5 var(--k-font-body, system-ui);
   }
   .rm-test {
     margin-top: 4px;
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 500 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
   }
   .rm-bad {
-    color: var(--k-attention-text, #b4321b);
+    color: var(--k-danger-text);
   }
   .rm-side {
     display: flex;

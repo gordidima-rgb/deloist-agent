@@ -238,7 +238,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
         <div class="hb-remind">
           <input type="time" class="hb-time" aria-label={tr('Время напоминания')} bind:value={form.remindAt} />
           {#if form.remindAt}
-            <button type="button" class="hb-link" onclick={() => (form.remindAt = '')}>{tr('Не напоминать')}</button>
+            <Button class="hb-link" variant="ghost" size="sm" onclick={() => (form.remindAt = '')}>{tr('Не напоминать')}</Button>
           {:else}
             <span class="hb-hint">{tr('Пусто — без напоминания.')}</span>
           {/if}
@@ -266,11 +266,11 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
           <h5 class="hb-group-title">{groupTitle(group)}</h5>
           <div class="hb-tpls">
             {#each templates.templates.filter((t) => t.group === group.id) as tpl (tpl.title)}
-              <button type="button" class="hb-tpl" disabled={taken(tpl) || saving} onclick={() => addTemplate(tpl)}>
+              <Button class="hb-tpl" variant="secondary" size="sm" disabled={taken(tpl) || saving} onclick={() => addTemplate(tpl)}>
                 <HabitIcon name={tpl.icon} size={18} />
                 <span>{templateTitle(tpl)}</span>
                 {#if taken(tpl)}<span class="hb-tpl-mark">{tr('добавлена')}</span>{/if}
-              </button>
+              </Button>
             {/each}
           </div>
         </div>
@@ -343,8 +343,8 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     margin: 0;
     padding: var(--k-space-2, 8px) var(--k-space-3, 12px);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-attention-tint, #ffe8e2);
-    color: var(--k-attention-text, #b4321b);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
     font: 500 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .hb-bar {
@@ -356,7 +356,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
   }
   .hb-sum {
     margin: 0;
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 600 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
   }
   .hb-bar-actions {
@@ -369,9 +369,9 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     flex-direction: column;
     gap: var(--k-space-4, 16px);
     padding: var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface-2, #f1f0ec);
+    background: var(--k-surface-2);
   }
   .hb-field {
     display: flex;
@@ -379,7 +379,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     gap: var(--k-space-2, 8px);
   }
   .hb-label {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     font: 600 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, system-ui);
     letter-spacing: 0.04em;
   }
@@ -396,27 +396,23 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     width: 38px;
     height: 38px;
     padding: 0;
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface, #fff);
-    color: var(--k-text-2, #5c5f66);
+    background: var(--k-surface);
+    color: var(--k-text-2);
     cursor: pointer;
     transition: background 120ms var(--k-ease-out, ease), color 120ms var(--k-ease-out, ease);
   }
   .hb-ico:hover {
-    color: var(--k-text, #262931);
+    color: var(--k-text);
   }
   .hb-ico[aria-checked='true'] {
-    border-color: var(--k-brand, #025bff);
-    background: var(--k-brand-tint, #e7efff);
-    color: var(--k-brand-text, #0250e0);
+    border-color: var(--k-brand);
+    background: var(--k-brand-tint);
+    color: var(--k-brand-text);
   }
   .hb-ico:focus-visible,
   .hb-check:focus-visible,
-  .hb-tpl:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-  }
   .hb-remind {
     display: flex;
     flex-wrap: wrap;
@@ -426,36 +422,26 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
   .hb-time {
     min-height: 38px;
     padding: 0 var(--k-space-3, 12px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface, #fff);
-    color: var(--k-text, #262931);
+    background: var(--k-surface);
+    color: var(--k-text);
     font: 500 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
   }
   .hb-time:focus-visible {
     outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-  }
-  .hb-link {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--k-brand-text, #0250e0);
-    font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    box-shadow: var(--k-focus);
   }
   .hb-hint {
     margin: 0;
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .hb-bell {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--k-brand-text, #0250e0);
+    color: var(--k-brand-text);
   }
   .hb-form-actions {
     display: flex;
@@ -473,32 +459,13 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
   }
   .hb-group-title {
     margin: 0;
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 700 var(--k-text-xs, 12px) / 1.3 var(--k-font-body, system-ui);
     letter-spacing: 0.06em;
     text-transform: uppercase;
   }
-  .hb-tpl {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--k-space-2, 8px);
-    padding: 8px 14px 8px 10px;
-    border: 1px solid var(--k-line, #e0ded9);
-    border-radius: var(--k-radius-pill, 999px);
-    background: var(--k-surface, #fff);
-    color: var(--k-text, #262931);
-    font: 500 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
-    cursor: pointer;
-  }
-  .hb-tpl:hover:not(:disabled) {
-    border-color: var(--k-brand, #025bff);
-  }
-  .hb-tpl:disabled {
-    cursor: default;
-    opacity: 0.55;
-  }
   .hb-tpl-mark {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font-size: var(--k-text-xs, 12px);
   }
   .hb-list {
@@ -514,12 +481,12 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     align-items: center;
     gap: var(--k-space-3, 12px);
     padding: var(--k-space-3, 12px) var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
   }
   .hb-item--off .hb-title {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
   }
   .hb-check {
     display: grid;
@@ -528,7 +495,7 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     width: 44px;
     height: 44px;
     padding: 0;
-    border: 2px solid var(--k-line-strong, #cfcdc7);
+    border: 2px solid var(--k-line-strong);
     border-radius: var(--k-radius-pill, 999px);
     background: transparent;
     color: transparent;
@@ -536,22 +503,22 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     transition: background 160ms var(--k-ease-out, ease), border-color 160ms var(--k-ease-out, ease), color 160ms var(--k-ease-out, ease), transform 160ms var(--k-ease-out, ease);
   }
   .hb-check:hover {
-    border-color: var(--k-brand, #025bff);
+    border-color: var(--k-brand);
   }
   .hb-check:active {
     transform: scale(0.94);
   }
   .hb-check--on {
-    border-color: var(--k-brand, #025bff);
-    background: var(--k-brand, #025bff);
-    color: var(--k-on-brand, #fff);
+    border-color: var(--k-brand);
+    background: var(--k-brand);
+    color: var(--k-on-brand);
   }
   .hb-icon {
     display: grid;
     flex: none;
     place-items: center;
     width: 32px;
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
   }
   .hb-main {
     flex: 1;
@@ -559,19 +526,19 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
   }
   .hb-title {
     overflow: hidden;
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 600 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .hb-item--done .hb-title {
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
   }
   .hb-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 2px var(--k-space-3, 12px);
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
   }
   .hb-week {
@@ -583,14 +550,14 @@ import { Button, IconButton, Field, TextInput, Chip, EmptyState, Icon } from '..
     width: 8px;
     height: 8px;
     border-radius: var(--k-radius-pill, 999px);
-    background: var(--k-line-strong, #cfcdc7);
+    background: var(--k-line-strong);
   }
   .hb-dot--on {
-    background: var(--k-brand, #025bff);
+    background: var(--k-brand);
   }
   .hb-dot--skip {
     background: transparent;
-    box-shadow: inset 0 0 0 1.5px var(--k-line, #e0ded9);
+    box-shadow: inset 0 0 0 1.5px var(--k-line);
   }
   @media (max-width: 520px) {
     .hb-week {

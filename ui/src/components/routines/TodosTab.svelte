@@ -21,7 +21,7 @@
   } from '../../lib/todos.js';
   import Composer from './Composer.svelte';
   import TodoCard from './TodoCard.svelte';
-import { Button, IconButton, EmptyState, Icon } from '../kit';
+import { Button, IconButton, EmptyState, Icon, Chip, TextInput } from '../kit';
   import Menu from '../Menu.svelte';
 
   let { api = defaultApi } = $props();
@@ -426,7 +426,7 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
         {#each subtasks as _, i (i)}
           <li class="td-sub-row">
             <input class="td-sub-input" type="text" maxlength="200" bind:value={subtasks[i]} placeholder={tr('Подзадача')} aria-label={tr('Подзадача {n}', { n: i + 1 })} />
-            <button type="button" class="td-x" aria-label={tr('Убрать подзадачу {n}', { n: i + 1 })} title={tr('Убрать')} onclick={() => (subtasks = subtasks.filter((_, at) => at !== i))}>×</button>
+            <IconButton class="td-x" name="close" size="sm" label={tr('Убрать подзадачу {n}', { n: i + 1 })} onclick={() => (subtasks = subtasks.filter((_, at) => at !== i))} />
           </li>
         {/each}
       </ul>
@@ -436,7 +436,7 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
         {#each files as file, i (i)}
           <li class="td-file">
             <span class="td-file-name">{file.name}</span>
-            <button type="button" class="td-x" aria-label={tr('Убрать: {what}', { what: file.name })} title={tr('Убрать')} onclick={() => (files = files.filter((_, at) => at !== i))}>×</button>
+            <IconButton class="td-x" name="close" size="sm" label={tr('Убрать: {what}', { what: file.name })} onclick={() => (files = files.filter((_, at) => at !== i))} />
           </li>
         {/each}
       </ul>
@@ -465,15 +465,15 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     {#if view === 'board'}
       <div class="td-filters" role="group" aria-label={tr('Фильтр по сроку')}>
         {#each FILTERS as f (f)}
-          <button type="button" class="k-chip" aria-pressed={filter === f} onclick={() => (filter = f)}>
+          <Chip selected={filter === f} onclick={() => (filter = f)}>
             {filterName(f)}{f === 'overdue' && counts.overdue ? ` (${counts.overdue})` : ''}
-          </button>
+          </Chip>
         {/each}
       </div>
     {:else}
       <h4 class="td-h">{tr('Архив')}</h4>
     {/if}
-    <input class="k-input td-search" type="search" bind:value={query} placeholder={tr('Поиск по задачам')} aria-label={tr('Поиск по задачам')} />
+    <TextInput class="td-search" type="search" bind:value={query} placeholder={tr('Поиск по задачам')} aria-label={tr('Поиск по задачам')} />
     <Button size="sm" variant="ghost" aria-pressed={view === 'archive'} onclick={() => showView(view === 'archive' ? 'board' : 'archive')}>
       {view === 'archive' ? tr('К задачам') : tr('Архив')}
     </Button>
@@ -526,10 +526,10 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
               <p class="td-empty">{dragId ? tr('Отпусти здесь') : tr('Пока пусто')}</p>
             {/if}
             {#if section.done.length}
-              <button type="button" class="td-done-toggle" aria-expanded={doneOpen[b]} onclick={() => (doneOpen[b] = !doneOpen[b])}>
+              <Button class="td-done-toggle" variant="ghost" size="sm" aria-expanded={doneOpen[b]} onclick={() => (doneOpen[b] = !doneOpen[b])}>
                 <Icon name="chevron-right" size={14} stroke={2.4} class={['td-caret', doneOpen[b] && 'td-caret--open']} />
                 {tr('Выполнено ({n})', { n: section.done.length })}
-              </button>
+              </Button>
               {#if doneOpen[b]}
                 <ul class="td-list">
                   {#each section.done as t (t.id)}{@render row(t)}{/each}
@@ -560,7 +560,7 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
   }
   .td-error {
     margin: 0;
-    color: var(--k-attention-text, #b4321b);
+    color: var(--k-danger-text);
     font: 600 var(--k-text-sm, 13px) / 1.45 var(--k-font-body, system-ui);
   }
   .td-form {
@@ -568,9 +568,9 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     flex-direction: column;
     gap: var(--k-space-2, 8px);
     padding: var(--k-space-3, 12px) var(--k-space-4, 16px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-lg, 26px);
-    background: var(--k-surface-2, #f1f0ec);
+    background: var(--k-surface-2);
   }
   .td-form-bar {
     display: flex;
@@ -601,19 +601,19 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     border: 0;
     border-radius: var(--k-radius-pill, 999px);
     background: transparent;
-    color: var(--k-text-2, #5c5f66);
+    color: var(--k-text-2);
     cursor: pointer;
   }
   .td-mic:hover {
-    background: color-mix(in srgb, var(--k-text, #262931) 10%, transparent);
-    color: var(--k-text, #262931);
+    background: color-mix(in srgb, var(--k-text) 10%, transparent);
+    color: var(--k-text);
   }
   .td-mic:focus-visible {
     outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
+    box-shadow: var(--k-focus);
   }
   .td-mic:global([data-state='listening']) {
-    background: var(--k-attention, #ff4f3a);
+    background: var(--k-attention);
     color: #fff;
   }
   .td-mic:global([data-state='working']),
@@ -646,10 +646,10 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
   .td-file {
     padding: 3px 4px 3px 10px;
     border-radius: var(--k-radius-pill, 999px);
-    background: var(--k-surface, #fff);
-    border: 1px solid var(--k-line, #e0ded9);
+    background: var(--k-surface);
+    border: 1px solid var(--k-line);
     font: 600 var(--k-text-sm, 13px) / 1.2 var(--k-font-body, system-ui);
-    color: var(--k-text, #262931);
+    color: var(--k-text);
   }
   .td-file-name {
     max-width: 200px;
@@ -661,34 +661,16 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     flex: 1;
     min-width: 0;
     padding: 6px 10px;
-    border: 1px solid var(--k-line-strong, #cfcdc7);
+    border: 1px solid var(--k-line-strong);
     border-radius: var(--k-radius-sm, 12px);
-    background: var(--k-surface, #fff);
-    color: var(--k-text, #262931);
+    background: var(--k-surface);
+    color: var(--k-text);
     font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .td-sub-input:focus {
     outline: none;
-    border-color: var(--k-brand, #025bff);
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-  }
-  .td-x {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--k-radius-pill, 999px);
-    background: transparent;
-    color: var(--k-text-2, #5c5f66);
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .td-x:hover {
-    background: color-mix(in srgb, var(--k-text, #262931) 12%, transparent);
-    color: var(--k-text, #262931);
+    border-color: var(--k-brand);
+    box-shadow: var(--k-focus);
   }
   .td-bar {
     display: flex;
@@ -702,10 +684,6 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     flex: 1 1 auto;
     gap: 6px;
   }
-  .td-search {
-    flex: 0 1 200px;
-    min-width: 120px;
-  }
   .td-carry {
     display: flex;
     flex-wrap: wrap;
@@ -714,8 +692,8 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     gap: var(--k-space-2, 8px);
     padding: var(--k-space-2, 8px) var(--k-space-4, 16px);
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-attention-tint, #ffe8e2);
-    color: var(--k-attention-text, #b4321b);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
     font: 600 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .td-body {
@@ -746,26 +724,26 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     border-radius: var(--k-radius-lg, 26px);
   }
   .td-section--over {
-    border-color: var(--k-brand, #025bff);
-    background: var(--k-brand-tint, #e7efff);
+    border-color: var(--k-brand);
+    background: var(--k-brand-tint);
   }
   .td-h {
     display: flex;
     align-items: center;
     gap: 8px;
     margin: 0;
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 700 var(--k-text-md, 15px) / 1.3 var(--k-font-body, system-ui);
   }
   .td-count {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font-size: var(--k-text-sm, 13px);
     font-weight: 600;
   }
   .td-empty {
     margin: 0;
     padding: 4px var(--k-space-2, 8px);
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     font: 400 var(--k-text-sm, 13px) / 1.4 var(--k-font-body, system-ui);
   }
   .td-list {
@@ -782,21 +760,21 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     align-items: center;
     gap: var(--k-space-3, 12px);
     padding: 8px var(--k-space-3, 12px);
-    border: 1px solid var(--k-line, #e0ded9);
+    border: 1px solid var(--k-line);
     border-radius: var(--k-radius-md, 18px);
-    background: var(--k-surface, #fff);
+    background: var(--k-surface);
   }
   .td-row[draggable='true'] {
     cursor: grab;
   }
   .td-row--picked {
-    border-color: var(--k-brand, #025bff);
+    border-color: var(--k-brand);
   }
   .td-row--drag {
     opacity: 0.5;
   }
   .td-row--done .td-title {
-    color: var(--k-text-3, #8d8f94);
+    color: var(--k-text-3);
     text-decoration: line-through;
   }
   .td-check {
@@ -806,7 +784,7 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     width: 26px;
     height: 26px;
     padding: 0;
-    border: 2px solid var(--k-line-strong, #cfcdc7);
+    border: 2px solid var(--k-line-strong);
     border-radius: var(--k-radius-pill, 999px);
     background: transparent;
     color: transparent;
@@ -814,19 +792,15 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     transition: background 160ms var(--k-ease-out, ease), border-color 160ms var(--k-ease-out, ease), color 160ms var(--k-ease-out, ease);
   }
   .td-check:hover {
-    border-color: var(--k-brand, #025bff);
+    border-color: var(--k-brand);
   }
   .td-check--on {
-    border-color: var(--k-brand, #025bff);
-    background: var(--k-brand, #025bff);
-    color: var(--k-on-brand, #fff);
+    border-color: var(--k-brand);
+    background: var(--k-brand);
+    color: var(--k-on-brand);
   }
   .td-check:focus-visible,
   .td-main:focus-visible,
-  .td-done-toggle:focus-visible {
-    outline: none;
-    box-shadow: var(--k-focus, 0 0 0 3px rgba(2, 91, 255, 0.28));
-  }
   .td-main {
     display: flex;
     flex: 1;
@@ -845,7 +819,7 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     cursor: default;
   }
   .td-title {
-    color: var(--k-text, #262931);
+    color: var(--k-text);
     font: 600 var(--k-text-md, 15px) / 1.35 var(--k-font-body, system-ui);
     overflow-wrap: anywhere;
   }
@@ -857,17 +831,17 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
   .td-chip {
     padding: 1px 8px;
     border-radius: var(--k-radius-pill, 999px);
-    background: var(--k-surface-2, #f1f0ec);
-    color: var(--k-text-2, #5c5f66);
+    background: var(--k-surface-2);
+    color: var(--k-text-2);
     font: 500 var(--k-text-xs, 12px) / 1.5 var(--k-font-body, system-ui);
   }
   .td-chip--late {
-    background: var(--k-attention-tint, #ffe8e2);
-    color: var(--k-attention-text, #b4321b);
+    background: var(--k-danger-tint);
+    color: var(--k-danger-text);
   }
   .td-chip--repeat {
-    background: var(--k-ai-tint, #eeebff);
-    color: var(--k-text-2, #5c5f66);
+    background: var(--k-ai-tint);
+    color: var(--k-text-2);
   }
   .td-more {
     position: relative;
@@ -881,19 +855,6 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     width: 230px;
     margin-top: 4px;
   }
-  .td-done-toggle {
-    display: inline-flex;
-    align-items: center;
-    align-self: flex-start;
-    gap: 4px;
-    padding: 4px 8px;
-    border: 0;
-    border-radius: var(--k-radius-xs, 6px);
-    background: none;
-    color: var(--k-text-2, #5c5f66);
-    font: 600 var(--k-text-sm, 13px) / 1.3 var(--k-font-body, system-ui);
-    cursor: pointer;
-  }
   :global(.td-caret) {
     transition: transform 160ms var(--k-ease-out, ease);
   }
@@ -905,5 +866,13 @@ import { Button, IconButton, EmptyState, Icon } from '../kit';
     :global(.td-caret) {
       transition: none;
     }
+  }
+  .td-bar :global(.td-search) {
+    flex: 0 1 200px;
+    min-width: 120px;
+    width: auto;
+  }
+  :global(.td-done-toggle) {
+    align-self: flex-start;
   }
 </style>

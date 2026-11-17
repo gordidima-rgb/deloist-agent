@@ -51,6 +51,7 @@ import InstaboxRing from './components/sidebar/InstaboxRing.svelte';
 import { instaboxFeed } from './lib/instabox.js';
 import UsageScreen from './components/usage/UsageScreen.svelte';
 import RemindersTab from './components/routines/RemindersTab.svelte';
+import RoutinesPane from './components/routines/RoutinesPane.svelte';
 import TodosTab from './components/routines/TodosTab.svelte';
 import HabitsTab from './components/routines/HabitsTab.svelte';
 import Report from './components/report/Report.svelte';
@@ -157,6 +158,7 @@ window.DeloistUI = {
   mountUsageScreen: (target, props) => mountComponent(UsageScreen, target, props),
   // Окно «Рутины»: вкладки «Напоминания», «Задачи» и «Привычки».
   mountRemindersTab: (target, props) => mountComponent(RemindersTab, target, props),
+  mountRoutinesPane: (target, props) => mountComponent(RoutinesPane, target, props),
   mountHabitsTab: (target, props) => mountComponent(HabitsTab, target, props),
   mountReport: (target, props) => mountComponent(Report, target, props),
   mountTodosTab: (target, props) => mountComponent(TodosTab, target, props),
