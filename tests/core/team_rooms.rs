@@ -1,6 +1,7 @@
 //! Общие папки и навыки команды (в коде и в API это `room`): проверка при записи.
 
-use crate::common::{temp_data_dir, Crew};
+use crate::common::{temp_data_dir, wait_until, Crew};
+use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 async fn room_with_bot(crew: &Crew) -> (String, String) {
@@ -86,6 +87,146 @@ async fn the_window_is_told_when_a_team_is_created_changed_or_deleted() {
     crew.clear_events();
     crew.ok("DELETE", &format!("/api/rooms/{room}"), None).await;
     crew.wait_event("команда удалена", |e| e["type"] == "state_changed").await;
+}
+
+/// Мельчайший настоящий png: восемь байт подписи и пустой хвост хватает для проверки по первым байтам.
+fn tiny_png() -> Vec<u8> {
+    let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    v.extend_from_slice(&[0u8; 32]);
+    v
+}
+
+fn b64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+async fn put_picture(crew: &Crew, room: &str, bytes: Vec<u8>) -> (u16, Value) {
+    let data = b64(&bytes);
+    let res = crew
+        .client
+        .post(format!("{}/api/rooms/{room}/picture", crew.base))
+        .header("cookie", &crew.cookie)
+        .json(&json!({ "data": data }))
+        .send()
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    (status, res.json().await.unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn a_team_picture_is_checked_by_magic_bytes_served_and_removed_with_the_team() {
+    let crew = Crew::start("team-picture").await;
+    let (_bot, room) = room_with_bot(&crew).await;
+
+    // Нет картинки: пусто и в данных, и в выдаче.
+    let (status, _) = crew.send("GET", &format!("/api/rooms/{room}/picture"), None).await;
+    assert_eq!(status, 404);
+
+    // Не картинка (текст под видом png) отклоняется по первым байтам.
+    let (status, _) = put_picture(&crew, &room, b"<html>not an image</html>".to_vec()).await;
+    assert_eq!(status, 400);
+    // Слишком большая — отказ, ничего не записано.
+    let mut big = tiny_png();
+    big.resize(4 * 1024 * 1024 + 1, 0);
+    let (status, _) = put_picture(&crew, &room, big).await;
+    assert!(status == 400 || status == 413, "большая картинка принята: {status}");
+
+    let (status, body) = put_picture(&crew, &room, tiny_png()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["room"]["picture"], "png");
+    assert!(body["room"]["pictureAt"].as_i64().unwrap() > 0);
+
+    let res = crew.client.get(format!("{}/api/rooms/{room}/picture", crew.base)).header("cookie", &crew.cookie).send().await.unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(res.headers()["content-type"], "image/png");
+    assert_eq!(res.headers()["cache-control"], "no-cache");
+    assert_eq!(res.bytes().await.unwrap().to_vec(), tiny_png());
+    let file = crew.data_dir.join("rooms").join(&room).join("picture.png");
+    assert!(file.exists());
+
+    // Состояние отдаёт картинку вместе с командой.
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["rooms"][0]["picture"], "png");
+
+    // Убрать: файл и поле уходят.
+    crew.ok("DELETE", &format!("/api/rooms/{room}/picture"), None).await;
+    assert!(!file.exists());
+    let (status, _) = crew.send("GET", &format!("/api/rooms/{room}/picture"), None).await;
+    assert_eq!(status, 404);
+
+    // Удаление команды убирает и папку с картинкой.
+    put_picture(&crew, &room, tiny_png()).await;
+    assert!(file.exists());
+    crew.ok("DELETE", &format!("/api/rooms/{room}"), None).await;
+    assert!(!crew.data_dir.join("rooms").join(&room).exists());
+
+    // Без настроенного сервиса «нарисовать заново» отказывает понятно и ничего не тратит.
+    let (_bot2, room2) = room_with_bot(&crew).await;
+    let (status, _) = crew.send("POST", &format!("/api/rooms/{room2}/picture/generate"), None).await;
+    assert_eq!(status, 400);
+}
+
+#[derive(Clone, Default)]
+struct FakeImages {
+    calls: Arc<Mutex<Vec<Value>>>,
+}
+
+async fn images_reply(axum::extract::State(fake): axum::extract::State<FakeImages>, axum::Json(body): axum::Json<Value>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    fake.calls.lock().unwrap().push(body);
+    axum::Json(json!({ "data": [{ "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" }] })).into_response()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_team_gets_a_picture_in_the_background_when_images_are_ready() {
+    let fake = FakeImages::default();
+    let router = axum::Router::new().route("/v1/images/generations", axum::routing::post(images_reply)).with_state(fake.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let crew = Crew::start("team-auto-picture").await;
+    let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Рен", "role": "Редактор" }))).await["bot"]["id"].as_str().unwrap().to_string();
+
+    // Сервис не настроен: команда создаётся, картинки нет, сервис не вызывали.
+    assert_eq!(crew.ok("GET", "/api/state", None).await["imageReady"], false);
+    let quiet = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Без картинки", "botIds": [bot] }))).await["room"]["id"].as_str().unwrap().to_string();
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert_eq!(crew.ok("GET", "/api/state", None).await["rooms"][0]["picture"], "");
+    assert!(fake.calls.lock().unwrap().is_empty());
+    crew.ok("DELETE", &format!("/api/rooms/{quiet}"), None).await;
+
+    crew.ok("PUT", "/api/settings", Some(json!({ "imageBaseUrl": format!("http://127.0.0.1:{port}/v1"), "imageModel": "fake-image", "imageApiKey": "k", "imageDaily": 5 }))).await;
+    assert_eq!(crew.ok("GET", "/api/state", None).await["imageReady"], true);
+    let room = crew
+        .ok("POST", "/api/rooms", Some(json!({ "name": "Кофейня", "botIds": [bot], "instructions": "Печём булочки" })))
+        .await["room"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_until("автокартинка", 10, || async { crew.ok("GET", "/api/state", None).await["rooms"][0]["picture"] == "png" }).await;
+    let sent = fake.calls.lock().unwrap()[0].clone();
+    let prompt = sent["prompt"].as_str().unwrap();
+    assert!(prompt.contains("Кофейня") && prompt.contains("Печём булочки") && prompt.contains("Редактор") && prompt.contains("No text"), "{prompt}");
+    assert_eq!(sent["size"], "1024x1024");
+
+    // «Нарисовать заново» заменяет картинку и тратит ещё один рисунок.
+    crew.ok("DELETE", &format!("/api/rooms/{room}/picture"), None).await;
+    let again = crew.ok("POST", &format!("/api/rooms/{room}/picture/generate"), None).await;
+    assert_eq!(again["room"]["picture"], "png");
+    assert_eq!(fake.calls.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]

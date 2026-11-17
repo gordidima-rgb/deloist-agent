@@ -853,3 +853,66 @@ fn room_messages(app: &App, room: &Room, bot: &Bot, history: &[Value], memory: &
     }
     messages
 }
+
+// --- Картинка команды -------------------------------------------------------
+
+/// Описание для рисунка: название, дело и роли участников, без текста и чужих марок.
+pub fn picture_prompt(app: &App, room: &Room) -> String {
+    let bots = app.store.bots();
+    let roles: Vec<String> = room
+        .bot_ids
+        .iter()
+        .filter_map(|id| bots.iter().find(|b| &b.id == id))
+        .map(|b| b.role.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .take(6)
+        .collect();
+    let about: String = room.instructions.trim().chars().take(300).collect();
+    let mut prompt = format!(
+        "A single centered emblem illustration for a team called \"{}\". Plain soft background, one simple memorable subject, clean modern flat style, balanced composition, square format. No text, no letters, no numbers, no logos of real brands.",
+        room.name.trim()
+    );
+    if !about.is_empty() {
+        prompt.push_str(&format!(" What the team does: {about}."));
+    }
+    if !roles.is_empty() {
+        prompt.push_str(&format!(" Members' roles: {}.", roles.join(", ")));
+    }
+    prompt
+}
+
+/// Нарисовать картинку команды и сохранить. Ошибка — короткая строка без тела ответа сервиса.
+/// `replace = false` (автокартинка новой команды): если пока рисовалось, человек загрузил свою, она остаётся.
+pub async fn draw_picture(app: &Arc<App>, room_id: &str, replace: bool) -> Result<Room, String> {
+    let room = app.store.room(room_id).ok_or_else(|| "команда не найдена".to_string())?;
+    let prompt = picture_prompt(app, &room);
+    let bytes = crate::image::generate_bytes(app, &prompt, Some("1024x1024")).await?;
+    if !replace {
+        if let Some(now) = app.store.room(room_id).filter(|r| !r.picture.is_empty()) {
+            return Ok(now);
+        }
+    }
+    match app.store.set_room_picture(room_id, &bytes).await? {
+        Some(room) => {
+            app.turns.emit(json!({ "type": "state_changed" }));
+            Ok(room)
+        }
+        None => Err("команду удалили, пока рисовалась картинка".into()),
+    }
+}
+
+/// Новой команде — картинка в фоне. Сервис не настроен или картинка уже есть — ничего не делаем.
+/// Создание команды не ждёт и не падает из-за рисунка. Пока оркестратор расспрашивает (`interview`),
+/// у команды только временное имя: картинку рисуем, когда он её соберёт (`team_proposal::build`).
+pub fn spawn_picture(app: &Arc<App>, room_id: &str) {
+    let skip = |r: crate::store::Room| !r.picture.is_empty() || r.stage == crate::store::STAGE_INTERVIEW;
+    if !crate::image::ready(app) || app.store.room(room_id).is_none_or(skip) {
+        return;
+    }
+    let (app, id) = (app.clone(), room_id.to_string());
+    tokio::spawn(async move {
+        if let Err(message) = draw_picture(&app, &id, false).await {
+            eprintln!("картинка команды {id}: {}", message.chars().take(160).collect::<String>());
+        }
+    });
+}

@@ -147,6 +147,8 @@
           <div class="head-pop" id="head-split-pop" hidden></div>
         </header>
 
+        <div id="room-screen" class="room-screen" hidden></div>
+
         <div id="messages" class="messages">
         </div>
         <div id="orch-stage" class="orch-stage" hidden></div>
@@ -243,6 +245,19 @@
           <span>Название</span>
           <input name="name" required placeholder="Например, Запуск" />
         </label>
+        <div class="field room-picture">
+          <span>Картинка команды</span>
+          <div class="room-picture-row">
+            <span class="room-picture-preview" id="room-picture-preview" aria-hidden="true"></span>
+            <div class="room-picture-actions">
+              <button type="button" class="ghost" id="room-picture-upload">Загрузить картинку</button>
+              <button type="button" class="ghost" id="room-picture-draw" hidden>Нарисовать заново</button>
+              <button type="button" class="ghost" id="room-picture-clear" hidden>Убрать</button>
+            </div>
+            <input type="file" id="room-picture-file" accept="image/png,image/jpeg,image/webp" hidden />
+          </div>
+          <small class="room-picture-hint" id="room-picture-hint"></small>
+        </div>
         <div class="field">
           <span>Кто в команде</span>
           <div class="skills-list" id="room-members"></div>

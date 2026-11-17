@@ -602,6 +602,22 @@ impl Default for Skill {
 /// Сколько прошлых версий навыка хранить для отмены.
 const SKILL_VERSIONS: usize = 5;
 
+/// Предел картинки команды, байт.
+pub const ROOM_PICTURE_MAX: usize = 4 * 1024 * 1024;
+
+/// Расширение по первым байтам: png, jpeg или webp; иначе `None`.
+pub fn picture_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        Some("png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("jpg")
+    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
 /// Группа: несколько ботов в одном треде со своими правилами, кто отвечает.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -627,6 +643,10 @@ pub struct Room {
     pub program_folders: Vec<String>,
     /// Навыки, которые получает каждый бот группы, но только внутри этой группы.
     pub skills: Vec<String>,
+    /// Расширение файла картинки команды (`png`, `jpg`, `webp`) или пусто. Сам файл — `rooms/<id>/picture.<ext>`.
+    pub picture: String,
+    /// Когда картинку сменили: для адреса с версией, чтобы окно не держало старую.
+    pub picture_at: i64,
     /// `interview` — оркестратор расспрашивает человека, `ready` — команда собрана (по умолчанию, у старых команд так).
     pub stage: String,
     pub created_at: i64,
@@ -647,6 +667,8 @@ impl Default for Room {
             folders: Vec::new(),
             program_folders: Vec::new(),
             skills: Vec::new(),
+            picture: String::new(),
+            picture_at: 0,
             stage: STAGE_READY.into(),
             created_at: 0,
         }
@@ -3140,6 +3162,8 @@ impl Store {
             folders: Vec::new(),
             program_folders: Vec::new(),
             skills: Vec::new(),
+            picture: String::new(),
+            picture_at: 0,
             stage: STAGE_READY.into(),
             created_at: now(),
         };
@@ -3285,7 +3309,70 @@ impl Store {
         }
         self.persist().await?;
         let _ = tokio::fs::remove_file(self.room_file(id)).await;
+        let _ = tokio::fs::remove_dir_all(self.room_dir(id)).await;
         Ok(true)
+    }
+
+    /// Папка файлов команды. Имя берётся только из id существующей команды, не из запроса.
+    fn room_dir(&self, room_id: &str) -> PathBuf {
+        self.data_dir.join("rooms").join(room_id)
+    }
+
+    /// Положить картинку команды. Формат узнаётся по первым байтам, а не по имени или заголовку.
+    pub async fn set_room_picture(&self, id: &str, bytes: &[u8]) -> Result<Option<Room>, String> {
+        let Some(ext) = picture_ext(bytes) else {
+            return Err("нужна картинка png, jpeg или webp".into());
+        };
+        if bytes.len() > ROOM_PICTURE_MAX {
+            return Err("картинка больше 4 МБ".into());
+        }
+        if self.room(id).is_none() {
+            return Ok(None);
+        }
+        let dir = self.room_dir(id);
+        tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+        for other in ["png", "jpg", "webp"] {
+            let _ = tokio::fs::remove_file(dir.join(format!("picture.{other}"))).await;
+        }
+        tokio::fs::write(dir.join(format!("picture.{ext}")), bytes).await.map_err(|e| e.to_string())?;
+        let room = {
+            let mut state = self.state.lock().unwrap();
+            let Some(room) = state.rooms.iter_mut().find(|r| r.id == id) else { return Ok(None) };
+            room.picture = ext.into();
+            room.picture_at = now();
+            room.clone()
+        };
+        self.persist().await.map_err(|e| e.to_string())?;
+        Ok(Some(room))
+    }
+
+    pub async fn clear_room_picture(&self, id: &str) -> std::io::Result<Option<Room>> {
+        let room = {
+            let mut state = self.state.lock().unwrap();
+            let Some(room) = state.rooms.iter_mut().find(|r| r.id == id) else { return Ok(None) };
+            room.picture.clear();
+            room.picture_at = now();
+            room.clone()
+        };
+        let dir = self.room_dir(id);
+        for ext in ["png", "jpg", "webp"] {
+            let _ = tokio::fs::remove_file(dir.join(format!("picture.{ext}"))).await;
+        }
+        self.persist().await?;
+        Ok(Some(room))
+    }
+
+    /// Файл картинки команды и его тип.
+    pub async fn room_picture(&self, id: &str) -> Option<(Vec<u8>, &'static str)> {
+        let room = self.room(id)?;
+        let (ext, mime) = match room.picture.as_str() {
+            "png" => ("png", "image/png"),
+            "jpg" => ("jpg", "image/jpeg"),
+            "webp" => ("webp", "image/webp"),
+            _ => return None,
+        };
+        let bytes = tokio::fs::read(self.room_dir(id).join(format!("picture.{ext}"))).await.ok()?;
+        Some((bytes, mime))
     }
 
     fn room_file(&self, room_id: &str) -> PathBuf {

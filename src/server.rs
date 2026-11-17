@@ -629,6 +629,8 @@ async fn state(State(app): Shared) -> Response {
         "goals": app.goals.list(),
         "checkins": app.goals.checkins(),
         "settings": settings_json(&app),
+        // Сервис картинок настроен (адрес, модель и ключ): окно команды показывает «Нарисовать заново».
+        "imageReady": crate::image::ready(&app),
         "plan": crate::account::plan_json(),
         // Таблица «провайдер → сильная / обычная / быстрая»: профиль бота показывает выбранную модель.
         "levels": crate::providers::levels_json(),
@@ -2914,6 +2916,8 @@ async fn add_room(State(app): Shared, body: axum::body::Bytes) -> Response {
         Ok(room) => {
             // Окно и док узнают о новой команде сразу, а не после перезагрузки.
             app.turns.emit(json!({ "type": "state_changed" }));
+            // Картинка рисуется в фоне и только если сервис картинок настроен.
+            crate::rooms::spawn_picture(&app, &room.id);
             created(json!({ "room": room }))
         }
         Err(e) => io_fail(e),
@@ -3017,6 +3021,43 @@ async fn remove_room(State(app): Shared, Path(id): Path<String>) -> Response {
     }
 }
 
+/// Картинка команды: JSON `{ "data": "<base64>" }` (как у вложений: охрана принимает тела только JSON),
+/// png, jpeg или webp до 4 МБ. Тип определяется по первым байтам, а не по имени или заголовку.
+async fn put_room_picture(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let data = body.get("data").and_then(Value::as_str).unwrap_or_default();
+    // Размер проверяем до разбора: base64 длиннее исходных байт на треть.
+    if data.len() > crate::store::ROOM_PICTURE_MAX / 3 * 4 + 8 {
+        return fail(StatusCode::PAYLOAD_TOO_LARGE, "картинка больше 4 МБ");
+    }
+    if data.is_empty() || !data.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'\r' | b'\n')) {
+        return fail(StatusCode::BAD_REQUEST, "пустой файл или не base64");
+    }
+    let bytes = crate::browser_tools::base64_decode(data);
+    match app.store.set_room_picture(&id, &bytes).await {
+        Ok(Some(room)) => {
+            app.turns.emit(json!({ "type": "state_changed" }));
+            ok(json!({ "room": room }))
+        }
+        Ok(None) => fail(StatusCode::NOT_FOUND, "команда не найдена"),
+        Err(message) => fail(StatusCode::BAD_REQUEST, message),
+    }
+}
+
+async fn delete_room_picture(State(app): Shared, Path(id): Path<String>) -> Response {
+    match app.store.clear_room_picture(&id).await {
+        Ok(Some(room)) => {
+            app.turns.emit(json!({ "type": "state_changed" }));
+            ok(json!({ "room": room }))
+        }
+        Ok(None) => fail(StatusCode::NOT_FOUND, "команда не найдена"),
+        Err(e) => io_fail(e),
+    }
+}
+
 /// «Перестроить команду»: расспрос оркестратора заново. Решает человек в окне (`guard::human_only`).
 async fn rebuild_room(State(app): Shared, Path(id): Path<String>) -> Response {
     let _ = crate::rooms::stop(&app, &id);
@@ -3027,6 +3068,36 @@ async fn rebuild_room(State(app): Shared, Path(id): Path<String>) -> Response {
         }
         Ok(None) => fail(StatusCode::NOT_FOUND, "команда не найдена"),
         Err(e) => io_fail(e),
+    }
+}
+
+async fn get_room_picture(State(app): Shared, Path(id): Path<String>) -> Response {
+    match app.store.room_picture(&id).await {
+        Some((bytes, mime)) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static(mime)),
+                (header::CACHE_CONTROL, HeaderValue::from_static("no-cache")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => fail(StatusCode::NOT_FOUND, "у команды нет картинки"),
+    }
+}
+
+/// «Нарисовать заново»: тратит картинки по дневному пределу, поэтому только из окна (`guard::human_only`).
+async fn generate_room_picture(State(app): Shared, Path(id): Path<String>) -> Response {
+    if app.store.room(&id).is_none() {
+        return fail(StatusCode::NOT_FOUND, "команда не найдена");
+    }
+    if !crate::image::ready(&app) {
+        return fail(StatusCode::BAD_REQUEST, "сервис картинок не настроен: Настройки → Картинки");
+    }
+    match crate::rooms::draw_picture(&app, &id, true).await {
+        Ok(room) => ok(json!({ "room": room })),
+        Err(message) => fail(StatusCode::BAD_GATEWAY, message),
     }
 }
 
@@ -4035,6 +4106,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/rooms", post(add_room))
         .route("/api/rooms/{id}", axum::routing::patch(patch_room).delete(remove_room))
         .route("/api/rooms/{id}/thread", get(room_thread))
+        .route(
+            "/api/rooms/{id}/picture",
+            get(get_room_picture).post(put_room_picture).delete(delete_room_picture).layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route("/api/rooms/{id}/picture/generate", post(generate_room_picture))
         .route("/api/rooms/{id}/messages", post(room_message))
         // Вложение тяжелее обычного JSON: у этих маршрутов свой потолок размера.
         .route("/api/bots/{id}/attach", post(attach).layer(DefaultBodyLimit::max(16 * 1024 * 1024)))

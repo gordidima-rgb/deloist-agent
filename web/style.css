@@ -1545,6 +1545,26 @@ body.side-collapsed .update-plaque-host { display: none; }
   border-color: var(--color-border-default);
 }
 .avatar.room-icon .i { width: 20px; height: 20px; }
+.avatar.room-icon { overflow: hidden; }
+.avatar.room-icon img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
+
+/* Экран команды: вкладки под шапкой; на вкладке «Структура» чат и поле ввода уступают место схеме. */
+.room-screen { flex: none; display: flex; flex-direction: column; min-height: 0; }
+.room-screen[hidden] { display: none; }
+#chat.room-structure .room-screen { flex: 1; }
+#chat.room-structure #messages,
+#chat.room-structure #toc-btn,
+#chat.room-structure #toc-pop,
+#chat.room-structure #queue,
+#chat.room-structure .composer-card { display: none; }
+
+/* Картинка команды в окне «Команда». */
+.room-picture-row { display: flex; align-items: center; gap: var(--space-3, 12px); flex-wrap: wrap; }
+.room-picture-preview { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 18px; overflow: hidden; background: var(--k-surface-2); color: var(--k-text-2); font-size: 24px; }
+.room-picture-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.room-picture-preview .i { width: 24px; height: 24px; }
+.room-picture-actions { display: flex; gap: var(--space-2, 8px); flex-wrap: wrap; }
+.room-picture-hint { color: var(--k-text-3); }
 
 /* Имя автора в общем треде группы: видно, кто именно отвечает. */
 .msg-author {

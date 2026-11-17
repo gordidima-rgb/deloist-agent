@@ -270,7 +270,7 @@
           </button>
         {/if}
         <span class="avatar sb-avatar room-icon" style={room.color ? `--team-color: ${room.color}` : undefined}>
-          {#if room.emoji}{room.emoji}{:else}{@html roomIcon}{/if}
+          {#if room.pictureUrl}<img class="sb-teampic" src={room.pictureUrl} alt="" />{:else if room.emoji}{room.emoji}{:else}{@html roomIcon}{/if}
         </span>
       </span>
     {/snippet}

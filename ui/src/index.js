@@ -26,6 +26,7 @@ import ProviderList from './components/providers/ProviderList.svelte';
 import AgentCard from './components/providers/AgentCard.svelte';
 import RoomMembers from './components/rooms/RoomMembers.svelte';
 import RoomResources from './components/rooms/RoomResources.svelte';
+import TeamScreen from './components/rooms/TeamScreen.svelte';
 import OrchestratorStage from './components/orchestrator/Stage.svelte';
 import SettingsLink from './components/settings/SettingsLink.svelte';
 import SettingsHint from './components/settings/SettingsHint.svelte';
@@ -195,6 +196,8 @@ window.DeloistUI = {
   mountRoomMembers: (target, props) => mountComponent(RoomMembers, target, props),
   // Общие папки и навыки команды в том же окне.
   mountRoomResources: (target, props) => mountComponent(RoomResources, target, props),
+  // Экран команды: вкладки «Структура» и «Чат», схема «Ты → ведущий → участники».
+  mountTeamScreen: (target, props) => mountComponent(TeamScreen, target, props),
   // Сцена оркестратора: большой шар и разговор пузырями, пока команда собирается.
   mountOrchestratorStage: (target, props) => mountComponent(OrchestratorStage, target, props),
   providerIconSvg: (provider) => iconSvg({ id: provider?.id, driver: provider?.driver }),

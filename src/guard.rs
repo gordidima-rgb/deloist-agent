@@ -485,7 +485,7 @@ fn verdict(guard: &Guard, peer: std::net::IpAddr, method: &Method, path: &str, q
     if !session && norm.starts_with("/api/") && guard.has_agent(peer, headers) {
         // Ответы человека и правила — только из окна. Ключ лежит в паспорте копии, его может
         // прочитать скрипт бота в своей папке и выдать себе вечные разрешения.
-        if human_only(&norm) || catalog_write(method, &norm) || config_write(method, &norm) || habit_write(method, &norm) || todo_write(method, &norm) || room_write(method, &norm) || bot_room_create(method, &norm) || bot_room_delete(method, &norm) || routine_write(method, &norm) {
+        if human_only(&norm) || catalog_write(method, &norm) || config_write(method, &norm) || habit_write(method, &norm) || todo_write(method, &norm) || room_write(method, &norm) || room_picture_write(method, &norm) || bot_room_create(method, &norm) || bot_room_delete(method, &norm) || routine_write(method, &norm) {
             return Some(refuse(StatusCode::FORBIDDEN, "это решает человек в окне приложения"));
         }
         return None;
@@ -667,6 +667,18 @@ fn catalog_write(method: &Method, path: &str) -> bool {
 /// скрипт бота с ключом программы не должен ни открыть папку, ни вписать бота в команду с папками.
 fn room_write(method: &Method, path: &str) -> bool {
     method == Method::PATCH && path.strip_prefix("/api/rooms/").is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+}
+
+/// Картинка команды: загрузка и удаление меняют данные, «нарисовать» тратит дневной предел картинок.
+/// Читать (GET) ключу можно, как остальное о команде.
+fn room_picture_write(method: &Method, path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/api/rooms/") else { return false };
+    let rest = rest.trim_end_matches('/');
+    match rest.split_once('/') {
+        Some((id, "picture/generate")) => !id.is_empty(),
+        Some((id, "picture")) => !id.is_empty() && method != Method::GET && method != Method::HEAD,
+        _ => false,
+    }
 }
 
 /// Создание бота и команды (`POST /api/bots`, `POST /api/rooms`) принимает `approval`, сайты, папки и навыки:

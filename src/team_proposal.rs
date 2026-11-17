@@ -517,6 +517,7 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
                 input["lead"] = json!(lead);
             }
             let room = app.store.add_room(&input).await.map_err(|e| fail(&made, e.to_string()))?;
+            crate::rooms::spawn_picture(app, &room.id);
             room_text = format!(" Команда «{}» создана ({}).", room.name, room.id);
         } else {
             // Только состав и ведущий: папки и навыки команды не трогаем.
@@ -527,6 +528,8 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<String, String> {
             app.store.update_room(&room_plan.id, &patch).await.map_err(|e| fail(&made, e.to_string()))?;
             if plan.host_orchestrator {
                 app.store.set_room_stage(&room_plan.id, crate::store::STAGE_READY).await.map_err(|e| fail(&made, e.to_string()))?;
+                // Оркестратор собрал команду: теперь известны её дело и состав — пора рисовать картинку.
+                crate::rooms::spawn_picture(app, &room_plan.id);
             }
             room_text = format!(" Команда «{}» обновлена.", room_plan.name);
         }

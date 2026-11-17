@@ -665,6 +665,7 @@ function renderSidebar() {
         id: room.id,
         name: room.name,
         emoji: room.emoji || '',
+        pictureUrl: roomPictureUrl(room),
         color: room.color || '',
         memberIds: room.botIds || [],
         lead: room.lead || '',
@@ -677,6 +678,7 @@ function renderSidebar() {
       };
     }),
   };
+  if (inRoom()) renderRoomScreen();
   if (botListView) botListView.update(props);
   else botListView = window.DeloistUI.mountBotList(list, { ...props, paint: paintSideAvatar, onselect: pickBot, onselectroom: pickRoom, onpin: pinBot, onmenu: openBotMenu });
   // Вид бота мог поменяться: строки Svelte живут дольше одной отрисовки, перерисовываем аватары на месте.
@@ -759,7 +761,8 @@ function pickBot(id) {
 
 function pickRoom(id) {
   Split.beforeSelect('room', id);
-  selectRoom(id);
+  // Из списка слева команда открывается схемой; идёт ход или есть непрочитанное — сразу чат.
+  selectRoom(id, S.roomsBusy.has(id) || S.roomsUnread.has(id) ? 'chat' : 'structure');
   $('#sidebar').classList.remove('open');
 }
 
@@ -2123,6 +2126,92 @@ function showIntro(botId) {
 // Группы
 // ---------------------------------------------------------------------------
 
+// Картинка команды: адрес с версией, чтобы окно не держало старую после замены.
+const roomPictureUrl = (room) => (room?.picture ? `/api/rooms/${room.id}/picture?v=${room.pictureAt || 0}` : '');
+
+function paintRoomHeadAvatar(room) {
+  const head = $('#head-avatar');
+  const url = roomPictureUrl(room);
+  roomHeadPicture = url;
+  head.innerHTML = url ? `<img class="head-teampic" src="${escapeHtml(url)}" alt="" />` : ICONS.group;
+}
+
+let roomScreenView = null;
+let roomScreenRoom = '';
+let roomHeadPicture = null;
+
+// Вкладки «Структура» и «Чат» под шапкой команды. В чате остаётся одна полоса вкладок.
+function renderRoomScreen() {
+  const box = $('#room-screen');
+  const room = inRoom() ? roomById(S.view.id) : null;
+  const chat = $('#chat');
+  // Команда ещё собирается: чат занимает сцена оркестратора, схемы пока нет.
+  if (!room || interviewBot(room)) {
+    box.hidden = true;
+    chat.classList.remove('room-structure');
+    return;
+  }
+  const tab = S.roomTab === 'structure' ? 'structure' : 'chat';
+  box.hidden = false;
+  // Картинку могли поменять в окне команды, пока эта команда открыта.
+  const picture = roomPictureUrl(room);
+  if (picture !== roomHeadPicture) {
+    roomHeadPicture = picture;
+    paintRoomHeadAvatar(room);
+  }
+  chat.classList.toggle('room-structure', tab === 'structure');
+  const props = {
+    room: {
+      id: room.id,
+      name: room.name,
+      emoji: room.emoji || '',
+      color: room.color || '',
+      lead: room.lead || '',
+      mode: room.mode || 'lead',
+      instructions: room.instructions || '',
+      pictureUrl: roomPictureUrl(room),
+    },
+    members: (room.botIds || [])
+      .map((id) => botById(id))
+      .filter(Boolean)
+      .map((bot) => ({
+        id: bot.id,
+        name: bot.name,
+        role: bot.role || '',
+        busy: S.busy.has(bot.id),
+        needs: Boolean(S.waiting.get(bot.id)?.size),
+        error: Boolean(bot.preview?.error && !S.busy.has(bot.id)),
+      })),
+    tab,
+    roomIcon: ICONS.group,
+  };
+  if (roomScreenView && roomScreenRoom === room.id) {
+    roomScreenView.update(props);
+    return;
+  }
+  // Другая команда: аватары в схеме привязаны к её месту, поэтому собираем заново.
+  roomScreenView?.destroy();
+  box.textContent = '';
+  roomScreenRoom = room.id;
+  roomScreenView = window.DeloistUI.mountTeamScreen(box, {
+    ...props,
+    paint: paintSideAvatar,
+    ontab: (next) => {
+      S.roomTab = next;
+      renderRoomScreen();
+      if (next === 'chat') {
+        scrollBottom(true);
+        $('#input').focus();
+      }
+    },
+    onopenbot: (botId) => pickBot(botId),
+    onedit: () => {
+      const current = roomById(S.view.id);
+      if (current) openRoomModal(current);
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Сцена оркестратора: пока у команды stage = interview, вместо чата — большой шар и разговор пузырями.
 // Это тот же чат бота-оркестратора (ведущего команды): события и карточки те же, меняется только вид.
@@ -2267,7 +2356,9 @@ function syncOrchStage() {
   paintRebuild();
 }
 
-async function selectRoom(id) {
+async function selectRoom(id, tab) {
+  // Явная вкладка — только когда её просят (список слева, новая команда); перерисовка той же команды её не меняет.
+  S.roomTab = tab || (inRoom() && S.view.id === id ? S.roomTab : 'chat');
   leaveTeam();
   if (!$('#drawer').hidden) closeDrawer();
   S.queueEdit = null;
@@ -2286,7 +2377,7 @@ async function selectRoom(id) {
   S.avatars.delete('head');
   const head = $('#head-avatar');
   head.classList.add('room-icon');
-  head.innerHTML = ICONS.group;
+  paintRoomHeadAvatar(room);
   setPanelTitle(tr('Настройки команды: состав, папки, навыки'));
   $('#head-name').textContent = room.name;
   const members = room.botIds.map((b) => botById(b)?.name).filter(Boolean);
@@ -2311,6 +2402,7 @@ async function selectRoom(id) {
       : tr('Добавь в команду хотя бы одного бота');
 
   renderSidebar();
+  renderRoomScreen();
   clearMessages();
   paintRebuild();
   // Команда ещё собирается: вместо чата — сцена оркестратора.
@@ -2351,7 +2443,7 @@ async function selectRoom(id) {
   if (S.roomsBusy.has(id)) appendTyping();
   setSendState();
   refreshGrantsLine();
-  input.focus();
+  if (S.roomTab !== 'structure') input.focus();
 }
 
 function renderRoomThread(messages) {
@@ -2544,6 +2636,87 @@ function openRoomModal(room = null, { members: preset = [] } = {}) {
   fillLead();
   members.onchange = fillLead;
 
+  // Картинка команды. У готовой команды кнопки работают сразу; у новой файл ждёт создания,
+  // а без файла картинка нарисуется сама, если настроен сервис картинок.
+  let pendingPicture = null;
+  let pendingUrl = '';
+  const pic = {
+    preview: $('#room-picture-preview'),
+    file: $('#room-picture-file'),
+    up: $('#room-picture-upload'),
+    draw: $('#room-picture-draw'),
+    clear: $('#room-picture-clear'),
+    hint: $('#room-picture-hint'),
+  };
+  const showPicture = () => {
+    const current = room ? roomById(room.id) || room : null;
+    const url = pendingUrl || roomPictureUrl(current);
+    pic.preview.innerHTML = url ? `<img src="${escapeHtml(url)}" alt="" />` : current?.emoji ? escapeHtml(current.emoji) : ICONS.group;
+    pic.clear.hidden = !url;
+    pic.draw.hidden = !room || !S.imageReady;
+    pic.hint.textContent = room || pendingUrl ? '' : S.imageReady ? tr('Не загрузишь свою, картинка нарисуется сама.') : '';
+  };
+  const readPicture = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error(tr('Не удалось прочитать файл')));
+      reader.readAsDataURL(file);
+    });
+  const uploadPicture = async (roomId, file) => {
+    if (file.size > 4 * 1024 * 1024) throw new Error(tr('Картинка больше 4 МБ'));
+    await api(`/api/rooms/${roomId}/picture`, { method: 'POST', body: { data: await readPicture(file) } });
+  };
+  const busyPicture = async (work) => {
+    for (const el of [pic.up, pic.draw, pic.clear]) el.disabled = true;
+    try {
+      await work();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      for (const el of [pic.up, pic.draw, pic.clear]) el.disabled = false;
+      showPicture();
+    }
+  };
+  pic.up.onclick = () => pic.file.click();
+  pic.file.onchange = () => {
+    const file = pic.file.files?.[0];
+    pic.file.value = '';
+    if (!file) return;
+    if (room) {
+      busyPicture(async () => {
+        await uploadPicture(room.id, file);
+        await refreshState();
+      });
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) return toast(tr('Картинка больше 4 МБ'));
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    pendingPicture = file;
+    pendingUrl = URL.createObjectURL(file);
+    showPicture();
+  };
+  pic.clear.onclick = () => {
+    if (!room) {
+      if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+      pendingPicture = null;
+      pendingUrl = '';
+      showPicture();
+      return;
+    }
+    busyPicture(async () => {
+      await api(`/api/rooms/${room.id}/picture`, { method: 'DELETE' });
+      await refreshState();
+    });
+  };
+  pic.draw.onclick = () =>
+    busyPicture(async () => {
+      pic.hint.textContent = tr('Рисую…');
+      await api(`/api/rooms/${room.id}/picture/generate`, { method: 'POST', body: {} });
+      await refreshState();
+    });
+  showPicture();
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     const botIds = $$('#room-members input:checked').map((el) => el.value);
@@ -2579,9 +2752,16 @@ function openRoomModal(room = null, { members: preset = [] } = {}) {
       if (!room && hasResources && (resources.folders.length || resources.skills.length)) {
         await api(`/api/rooms/${saved.id}`, { method: 'PATCH', body: resources });
       }
+      if (!room && pendingPicture) {
+        try {
+          await uploadPicture(saved.id, pendingPicture);
+        } catch (err) {
+          toast(err.message);
+        }
+      }
       $('#modal-room').close();
       await refreshState();
-      selectRoom(saved.id);
+      selectRoom(saved.id, room ? undefined : 'structure');
       toast(room ? tr('Команда сохранена') : tr('Команда «{name}» создана', { name: saved.name }));
     } catch (err) {
       toast(err.message);
@@ -4449,6 +4629,7 @@ async function refreshState() {
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
+    S.imageReady = data.imageReady === true;
     S.platform = data.platform || S.platform || {};
     S.levels = data.levels || S.levels || {};
     S.dataDir = data.dataDir;
@@ -4951,6 +5132,7 @@ async function selectBot(id) {
   S.view = { kind: 'bot', id };
   attachFollowView();
   S.roomLive = null;
+  renderRoomScreen();
   $('#head-avatar').classList.remove('room-icon');
   setPanelTitle(tr('Профиль, память, файлы'));
   $('#btn-browser').hidden = false;
@@ -7940,6 +8122,7 @@ function clearChatView() {
   S.currentId = null;
   S.live = null;
   S.roomLive = null;
+  renderRoomScreen();
   $('#head-avatar').classList.remove('room-icon');
   setPanelTitle(tr('Профиль, память, файлы'));
   $('#head-reassign').hidden = true;
@@ -9397,6 +9580,7 @@ async function boot() {
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
+    S.imageReady = data.imageReady === true;
     S.platform = data.platform || S.platform || {};
     S.levels = data.levels || S.levels || {};
     S.dataDir = data.dataDir;

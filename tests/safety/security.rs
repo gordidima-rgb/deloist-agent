@@ -3891,6 +3891,39 @@ async fn instabox_routes_are_closed_inside_the_cloud_even_with_a_session() {
 }
 
 #[tokio::test]
+async fn the_program_key_cannot_change_or_draw_a_team_picture() {
+    let crew = Crew::start("security-room-picture").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    let room = crew
+        .ok("POST", "/api/rooms", Some(json!({ "name": "Совет", "botIds": [bot], "lead": bot })))
+        .await["room"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let client = reqwest::Client::new();
+    // iVBORw0KGgo = подпись png; хватает для проверки по первым байтам.
+    let png = json!({ "data": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+
+    let upload = client.post(format!("{}/api/rooms/{room}/picture", crew.base)).bearer_auth(&token).json(&png).send().await.unwrap();
+    assert_eq!(upload.status().as_u16(), 403, "ключ программы загрузил картинку команды");
+    let draw = client.post(format!("{}/api/rooms/{room}/picture/generate", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(draw.status().as_u16(), 403, "ключ программы запустил рисование картинки (тратит предел)");
+    let remove = client.delete(format!("{}/api/rooms/{room}/picture", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(remove.status().as_u16(), 403, "ключ программы убрал картинку команды");
+    // Читать можно, как остальное о команде: картинки нет — 404, а не 403.
+    let read = client.get(format!("{}/api/rooms/{room}/picture", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(read.status().as_u16(), 404);
+
+    // Отказы ничего не записали.
+    let after = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(after["rooms"][0]["picture"], "");
+    assert!(!crew.data_dir.join("rooms").join(&room).join("picture.png").exists());
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_rebuild_a_team_or_make_one_with_an_orchestrator() {
     let crew = Crew::start("security-rebuild").await;
     let state = crew.ok("GET", "/api/state", None).await;
