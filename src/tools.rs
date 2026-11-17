@@ -657,8 +657,126 @@ pub(crate) fn acp_title_command_is_read_only(app: &App, bot: &Bot, title: &str) 
     if wrapped {
         !crate::reach::command_needs_approval_in(title, &places)
     } else {
-        !crate::reach::ps_command_needs_approval_in(title, &places)
+        !crate::reach::ps_command_needs_approval_in(title, &places) || unix_read_only_in(title, &workspace)
     }
+}
+
+/// Читающие утилиты в привычном для агентов виде (`wc -l x.csv && head x.csv | cut -d, -f1`): PowerShell-разбор их
+/// не знает, и каждая такая проверка CSV шла с карточкой. Разрешаем только цепочки `&&`, `;`, `|` из утилит,
+/// которые ничего не пишут, с относительными путями внутри своей папки. Подстановки, переадресация, `..`,
+/// `~`, скобки и программа `awk` с запуском команд, чтением или записью — «спросить».
+pub(crate) fn unix_read_only_in(title: &str, workspace: &std::path::Path) -> bool {
+    const VERBS: [&str; 14] = ["wc", "cut", "head", "tail", "sort", "uniq", "cat", "ls", "echo", "grep", "tr", "nl", "awk", "pwd"];
+    // Разбор по сегментам вне кавычек; в кавычках бывают `;`, `|`, `$1`, `{}` (программа awk).
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let chars: Vec<char> = title.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match quote {
+            Some(q) if c == q => {
+                quote = None;
+                current.push(c);
+            }
+            Some(_) => current.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                current.push(c);
+            }
+            None if c == '&' => {
+                // Только `&&`: одиночный `&` запускает в фоне.
+                if chars.get(i + 1) != Some(&'&') {
+                    return false;
+                }
+                i += 1;
+                segments.push(std::mem::take(&mut current));
+            }
+            None if c == '|' || c == ';' => {
+                if c == '|' && chars.get(i + 1) == Some(&'|') {
+                    return false;
+                }
+                segments.push(std::mem::take(&mut current));
+            }
+            None if matches!(c, '$' | '`' | '>' | '<' | '(' | ')' | '{' | '}' | '\\' | '~' | '%' | '^') => return false,
+            None => current.push(c),
+        }
+        i += 1;
+    }
+    if quote.is_some() {
+        return false;
+    }
+    segments.push(current);
+    let segments: Vec<&str> = segments.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return false;
+    }
+    let ws = workspace.to_string_lossy().replace('\\', "/").to_lowercase();
+    for segment in segments {
+        let mut words: Vec<String> = Vec::new();
+        let mut word = String::new();
+        let mut q: Option<char> = None;
+        let mut had_quote = false;
+        let mut quoted: Vec<bool> = Vec::new();
+        for c in segment.chars() {
+            match q {
+                Some(open) if c == open => q = None,
+                Some(_) => word.push(c),
+                None if c == '"' || c == '\'' => {
+                    q = Some(c);
+                    had_quote = true;
+                }
+                None if c.is_whitespace() => {
+                    if !word.is_empty() || had_quote {
+                        words.push(std::mem::take(&mut word));
+                        quoted.push(had_quote);
+                        had_quote = false;
+                    }
+                }
+                None => word.push(c),
+            }
+        }
+        if !word.is_empty() || had_quote {
+            words.push(word);
+            quoted.push(had_quote);
+        }
+        let Some(verb) = words.first().map(|w| w.to_lowercase()) else { return false };
+        if !VERBS.contains(&verb.as_str()) {
+            return false;
+        }
+        for (idx, w) in words.iter().enumerate().skip(1) {
+            let lw = w.to_lowercase();
+            if verb == "awk" && quoted[idx] && w.contains('{') {
+                // Текст программы: без запуска команд, чтения и записи файлов.
+                if ["system", "getline", "close", "print >", "printf >", "|", ">", "`", "$("].iter().any(|bad| lw.contains(bad)) {
+                    return false;
+                }
+                continue;
+            }
+            // Ключи, которые заставляют читающую утилиту писать файл или читать программу из файла.
+            if (verb == "sort" && (lw == "-o" || lw.starts_with("--output") || (lw.starts_with("-o") && !lw.starts_with("--"))))
+                || (verb == "awk" && (lw == "-f" || lw.starts_with("-f") && !lw.starts_with("-f,")))
+            {
+                return false;
+            }
+            // `uniq вход выход` пишет во второй файл: у неё допустим один файл.
+            if verb == "uniq" && !w.starts_with('-') && words.iter().skip(1).filter(|x| !x.starts_with('-')).count() > 1 {
+                return false;
+            }
+            if w.starts_with('-') || w.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            // Остальное — имя файла или текст для поиска: относительный путь без `..` либо путь внутри своей папки.
+            if w.contains("..") || w.contains(':') && !lw.replace('\\', "/").starts_with(&ws) {
+                return false;
+            }
+            if lw.starts_with('/') && !lw.starts_with(&ws) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Папки, где бот хозяин: checkout режима разработки и общие папки команды (только в её разговоре).
@@ -1462,5 +1580,29 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
         browser if browser.starts_with("browser_") => crate::browser_tools::exec(app, bot, browser, args).await,
 
         other => Err(format!("неизвестный инструмент: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod unix_read_only_tests {
+    use super::unix_read_only_in;
+    use std::path::Path;
+
+    #[test]
+    fn csv_inspection_chain_needs_no_card_but_writes_and_escapes_do() {
+        let ws = Path::new(r"C:\Users\Public\Deloist\data\workspaces\bot_1");
+        assert!(unix_read_only_in(r#"wc -l x-*.csv && cut -d, -f1-3,7- x-posts.csv | head -30 | cut -c1-200; echo; awk -F, '{print $1,$2,$3,$4}' x-metrics.csv | tail -40; head -1 x-posts.csv"#, ws));
+        assert!(!unix_read_only_in("cat >> x-metrics.csv <<'EOF'", ws), "запись и heredoc — карточка");
+        assert!(!unix_read_only_in("cat ../secret.txt", ws));
+        assert!(!unix_read_only_in("cat /etc/passwd", ws));
+        assert!(!unix_read_only_in(r"cat C:\Users\Dmitry\.ssh\id_rsa", ws));
+        assert!(!unix_read_only_in("cat $(whoami)", ws));
+        assert!(!unix_read_only_in("head x.csv & rm x.csv", ws));
+        assert!(!unix_read_only_in("head x.csv | sh", ws));
+        assert!(!unix_read_only_in("awk 'BEGIN{system(\"calc\")}' x.csv", ws));
+        assert!(!unix_read_only_in("awk '{print > \"y.csv\"}' x.csv", ws));
+        assert!(!unix_read_only_in("sort x.csv -o x.csv", ws));
+        assert!(!unix_read_only_in("uniq x.csv y.csv", ws));
+        assert!(unix_read_only_in("sort x.csv | uniq -c", ws));
     }
 }

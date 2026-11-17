@@ -615,8 +615,8 @@ impl Parser<'_> {
                 }
                 self.plan.ops.push(Op { kind: OpKind::Append, paths: vec![args.path?] });
             }
-            "get-content" | "test-path" => {
-                if piped.is_some() {
+            "get-content" | "test-path" | "get-childitem" | "ls" | "dir" | "gci" => {
+                if piped.is_some() || (args.recurse && !matches!(lower.as_str(), "get-content" | "test-path")) {
                     return None;
                 }
                 self.plan.ops.push(Op { kind: OpKind::Read, paths: vec![args.path?] });
@@ -674,6 +674,8 @@ impl Parser<'_> {
                             args.item_type = Some(t);
                         }
                         "-nonewline" | "-force" | "-raw" => {}
+                        // Ключи просмотра папки: только вид списка, ничего не меняют. `-la` — привычка из bash.
+                        "-name" | "-file" | "-directory" | "-la" | "-l" | "-a" if matches!(cmdlet, "get-childitem" | "ls" | "dir" | "gci") => {}
                         "-append" => args.append = true,
                         "-recurse" => args.recurse = true,
                         _ => return None,
@@ -745,7 +747,7 @@ fn is_cmdlet(lower: &str) -> bool {
     matches!(
         lower,
         "set-content" | "out-file" | "add-content" | "get-content" | "test-path" | "remove-item" | "new-item" | "copy-item" | "move-item"
-            | "write-output" | "write-host"
+            | "write-output" | "write-host" | "get-childitem" | "ls" | "dir" | "gci"
     )
 }
 
@@ -870,11 +872,29 @@ pub fn script_from_cmdline_for(command: &str, windows: bool) -> Option<String> {
     None
 }
 
+/// Полный путь к настоящему `pwsh`/`powershell`: только фиксированные места установки, не папки бота.
+fn is_installed_shell(exe: &str) -> bool {
+    let norm = exe.replace('/', "\\").replace("\\\\", "\\").to_lowercase();
+    if suspicious_path(&norm) {
+        return false;
+    }
+    let mut known: Vec<String> = vec![
+        r"c:\program files\powershell\7\pwsh.exe".into(),
+        r"c:\windows\system32\windowspowershell\v1.0\powershell.exe".into(),
+    ];
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        known.push(format!(r"{}\microsoft\windowsapps\pwsh.exe", local.to_lowercase().trim_end_matches('\\')));
+    }
+    known.iter().any(|k| *k == norm)
+}
+
 /// Скрипт из аргументов процесса (так запускает ACP-агент): `[pwsh, ключи…, -Command, скрипт]`.
+
 pub fn script_from_argv(argv: &[String]) -> Option<String> {
     let exe = argv.first()?;
     // Только имя без пути (`pwsh`, `powershell.exe`): путь к подложенному файлу не принимаем.
-    if !matches!(exe.to_lowercase().as_str(), "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe") {
+    // Исключение — установленные оболочки по их настоящим адресам (агенты вроде Codex запускают именно их).
+    if !matches!(exe.to_lowercase().as_str(), "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe") && !is_installed_shell(exe) {
         return None;
     }
     let mut i = 1;
@@ -1139,5 +1159,16 @@ mod tests {
         assert!(s.deletes.contains(&"old.txt".to_string()));
         assert!(scan("pwsh -EncodedCommand AAAA").encoded);
         assert!(scan("npm install left-pad").installs.contains(&"npm".to_string()));
+    }
+
+    #[test]
+    fn installed_shell_by_full_path_and_folder_listing_are_understood() {
+        let argv = |exe: &str| vec![exe.to_string(), "-Command".to_string(), "Copy-Item -LiteralPath 'C:\\a\\x.png' -Destination 'C:\\b\\y.png'".to_string()];
+        assert!(script_from_argv(&argv(r"C:\Program Files\PowerShell\7\pwsh.exe")).is_some());
+        assert!(script_from_argv(&argv(r"C:\Users\bot\workspace\pwsh.exe")).is_none(), "подложенный файл не принимаем");
+        assert!(script_from_argv(&argv(r"C:\Program Files\PowerShell\7\..\..\x\pwsh.exe")).is_none());
+        assert!(ps_plan(r#"ls -la "C:/Users/Public/Deloist/data/workspaces/b/x.png""#).is_some());
+        assert!(ps_plan(r"Get-ChildItem -Force -Path C:\b").is_some());
+        assert!(ps_plan(r"ls -Recurse C:\b").is_none(), "рекурсия по-прежнему не разбирается");
     }
 }
