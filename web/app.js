@@ -785,8 +785,41 @@ function closeBotMenu(refocus = false) {
   if (refocus) trigger?.focus({ preventScroll: true });
 }
 
-function openBotMenu(id, { x, y, trigger }) {
-  const reopen = botMenu?.id === id && trigger && botMenu.trigger === trigger;
+function botMenuItems(bot) {
+  return [
+    { id: 'profile', label: tr('Настройки бота'), icon: 'gear-simple' },
+    { id: 'memory', label: tr('Память'), icon: 'brain-halves' },
+    { id: 'files', label: tr('Файлы'), icon: 'file-lines' },
+    { id: 'routines', label: tr('Рутины'), icon: 'repeat' },
+    { kind: 'sep' },
+    { id: 'move', label: tr('Перенести в команду'), icon: 'users', hint: '›' },
+    { id: 'pin', label: bot.pinned ? tr('Открепить') : tr('Закрепить'), icon: 'pin' },
+    { id: 'unread', label: S.unread.has(bot.id) ? tr('Отметить прочитанным') : tr('Отметить непрочитанным'), icon: 'eye' },
+    { id: 'dock', label: bot.dock !== false ? tr('Убрать из дока') : tr('Показать в доке'), icon: 'dock-hide' },
+    { id: 'compact', label: tr('Сжать историю'), icon: 'compact' },
+    { kind: 'sep' },
+    { id: 'delete', label: tr('Удалить бота'), icon: 'trash', danger: true },
+  ];
+}
+
+// Второй экран меню: команды. Уже состоящий в команде бот видит её отмеченной; «Без команды» — только из ветки команды.
+function botMoveItems(bot, from) {
+  const live = S.rooms.filter((room) => !room.archived);
+  return [
+    { id: 'back', label: tr('Назад'), icon: 'chevron-left' },
+    { kind: 'sep' },
+    ...live.map((room) => {
+      const inside = room.botIds.includes(bot.id);
+      return { id: `room:${room.id}`, label: room.name, icon: inside ? 'check' : 'users', disabled: inside, tip: tr('Уже в этой команде') };
+    }),
+    ...(live.length ? [{ kind: 'sep' }] : []),
+    ...(from ? [{ id: 'loose', label: tr('Без команды'), icon: 'close' }] : []),
+    { id: 'new-team', label: tr('Новая команда…'), icon: 'plus' },
+  ];
+}
+
+function openBotMenu(id, { x, y, trigger, from = '' }, page = 'main') {
+  const reopen = page === 'main' && botMenu?.id === id && trigger && botMenu.trigger === trigger;
   closeBotMenu();
   if (reopen) return;
   const bot = botById(id);
@@ -795,24 +828,14 @@ function openBotMenu(id, { x, y, trigger }) {
   pop.className = 'bot-menu-pop';
   document.body.append(pop);
   trigger?.setAttribute('aria-expanded', 'true');
+  const at = { x, y, trigger, from };
   const view = window.DeloistUI.mountMenu(pop, {
-    items: [
-      { id: 'profile', label: tr('Настройки бота'), icon: 'gear-simple' },
-      { id: 'memory', label: tr('Память'), icon: 'brain-halves' },
-      { id: 'files', label: tr('Файлы'), icon: 'file-lines' },
-      { id: 'routines', label: tr('Рутины'), icon: 'repeat' },
-      { kind: 'sep' },
-      { id: 'pin', label: bot.pinned ? tr('Открепить') : tr('Закрепить'), icon: 'pin' },
-      { id: 'unread', label: S.unread.has(id) ? tr('Отметить прочитанным') : tr('Отметить непрочитанным'), icon: 'eye' },
-      { id: 'dock', label: bot.dock !== false ? tr('Убрать из дока') : tr('Показать в доке'), icon: 'dock-hide' },
-      { id: 'compact', label: tr('Сжать историю'), icon: 'compact' },
-      { kind: 'sep' },
-      { id: 'delete', label: tr('Удалить бота'), icon: 'trash', danger: true },
-    ],
-    label: tr('Бот «{name}»', { name: bot.name }),
+    items: page === 'move' ? botMoveItems(bot, from) : botMenuItems(bot),
+    label: page === 'move' ? tr('Перенести в команду') : tr('Бот «{name}»', { name: bot.name }),
     onpick: (pick) => {
+      if (pick === 'move' || pick === 'back') return openBotMenu(id, at, pick === 'move' ? 'move' : 'main');
       closeBotMenu();
-      botMenuPick(bot, pick);
+      botMenuPick(bot, pick, from);
     },
     onclose: (focus) => closeBotMenu(focus),
   });
@@ -824,8 +847,12 @@ function openBotMenu(id, { x, y, trigger }) {
   pop.style.top = `${Math.max(8, Math.min(y + 4, innerHeight - box.height - 8))}px`;
 }
 
-async function botMenuPick(bot, pick) {
+async function botMenuPick(bot, pick, from = '') {
   const id = bot.id;
+  // Перенос как перетаскивание: из команды строки — переезд, из «Без команды» — добавление.
+  if (pick.startsWith('room:')) return moveBotToTeam(id, pick.slice(5), from);
+  if (pick === 'loose') return moveBotToTeam(id, '', from);
+  if (pick === 'new-team') return openRoomModal(null, { members: [id] });
   if (['profile', 'memory', 'files', 'routines'].includes(pick)) {
     if (S.currentId !== id || inRoom()) pickBot(id);
     openDrawer(pick);
@@ -2242,7 +2269,7 @@ async function pickReassign(botId) {
 }
 
 /** Создание или правка группы: состав, ведущий, правила. */
-function openRoomModal(room = null) {
+function openRoomModal(room = null, { members: preset = [] } = {}) {
   const form = $('#form-room');
   $('#room-title').textContent = room ? tr('Команда') : tr('Новая команда');
   form.name.value = room?.name || '';
@@ -2257,7 +2284,7 @@ function openRoomModal(room = null) {
   roomMembersView?.destroy();
   roomMembersView = DeloistUI.mountRoomMembers(members, {
     bots: S.bots,
-    selected: room ? room.botIds : [],
+    selected: room ? room.botIds : preset,
     empty: tr('Сначала создай хотя бы одного бота.'),
   });
 

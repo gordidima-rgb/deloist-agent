@@ -76,7 +76,7 @@ describe('BotList', () => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 });
     host.querySelector('.k-list-item__main').dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    expect(onmenu).toHaveBeenLastCalledWith('a', { x: 40, y: 50, trigger: null });
+    expect(onmenu).toHaveBeenLastCalledWith('a', { x: 40, y: 50, trigger: null, from: '' });
     expect(onselect).not.toHaveBeenCalled();
   });
 

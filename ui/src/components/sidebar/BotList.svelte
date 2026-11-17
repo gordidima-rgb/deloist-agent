@@ -23,12 +23,13 @@
     onmenu,
   } = $props();
 
-  function openMenu(event, id) {
+  // from — команда, в ветке которой стоит строка: «Перенести» уводит бота именно из неё.
+  function openMenu(event, id, from = '') {
     event.preventDefault();
     event.stopPropagation();
     const trigger = event.type === 'contextmenu' ? null : event.currentTarget;
     const box = trigger?.getBoundingClientRect();
-    onmenu?.(id, box ? { x: box.right, y: box.bottom, trigger } : { x: event.clientX, y: event.clientY, trigger: null });
+    onmenu?.(id, box ? { x: box.right, y: box.bottom, trigger, from } : { x: event.clientX, y: event.clientY, trigger: null, from });
   }
 
   const RESERVE_KEY = 'deloist:sidebar-reserve-open';
@@ -185,7 +186,7 @@
     active={bot.id === currentId}
     unread={bot.unread}
     onclick={() => onselect?.(bot.id)}
-    oncontextmenu={onmenu ? (event) => openMenu(event, bot.id) : undefined}
+    oncontextmenu={onmenu ? (event) => openMenu(event, bot.id, opts.parent) : undefined}
   >
     {#snippet avatar()}<span class="avatar sb-avatar" data-slot={slot} {@attach avatarOf(bot.id, slot)}></span>{/snippet}
     {#snippet context()}
@@ -197,7 +198,7 @@
           aria-label={tr('Настройки бота «{name}»', { name: bot.name })}
           aria-haspopup="menu"
           data-menu-trigger
-          onclick={(event) => openMenu(event, bot.id)}
+          onclick={(event) => openMenu(event, bot.id, opts.parent)}
         >
           <Icon name="gear-simple" size={15} />
         </button>
