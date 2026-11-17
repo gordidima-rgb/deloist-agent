@@ -291,10 +291,22 @@ fn temp_exe(exe: &Path) -> PathBuf {
 
 /// Хвосты прошлого обновления: старый файл можно удалить, только когда прежняя копия закрылась.
 pub fn clean_leftovers() {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = std::fs::remove_file(old_exe(&exe));
-        let _ = std::fs::remove_file(temp_exe(&exe));
+    let Ok(exe) = std::env::current_exe() else { return };
+    let _ = std::fs::remove_file(temp_exe(&exe));
+    let old = old_exe(&exe);
+    if std::fs::remove_file(&old).is_ok() || !old.exists() {
+        return;
     }
+    // После перезапуска старая копия ещё закрывается и держит свой файл: Windows не даёт его удалить.
+    // Пробуем в фоне, пока она не выйдет, но не дольше минуты.
+    std::thread::spawn(move || {
+        for _ in 0..120 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if std::fs::remove_file(&old).is_ok() || !old.exists() {
+                return;
+            }
+        }
+    });
 }
 
 async fn download(app: &App, manifest: &Manifest, target: &Path) -> Result<(), String> {
