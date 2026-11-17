@@ -463,7 +463,7 @@ async fn the_extractor_remembers_after_a_task_and_one_click_undoes_it() {
         { "op": "remember", "title": "Отчёты Ozon сдаёт по понедельникам", "kind": "project", "scope": "S", "entities": ["Ozon"] },
         { "op": "remember", "title": "Пароль Ozon", "body": "пароль: Qwerty123", "scope": "S" },
         { "op": "remember", "title": "Телефон бухгалтера Оли", "body": "+7 913 123-45-67", "kind": "reference", "scope": "S" },
-        { "op": "profile", "text": "Ваня, селлер на Ozon." },
+        { "op": "profile", "text": "Ваня, селлер на Ozon.", "quote": "сдаю по понедельникам" },
         { "op": "episode", "id": "e1", "title": "Недельный отчёт Ozon", "body": "Собрали продажи за неделю, сдали в понедельник." },
     ] })
     .to_string();
@@ -593,7 +593,7 @@ async fn extractions_at_the_same_time_do_not_overrun_the_daily_cap() {
 async fn an_agent_bot_is_extracted_by_the_deloist_model() {
     let (fake, crew, bots) = setup_with("memory-extract-agent", json!({ "cliCommand": "crew-no-such-agent" }), &[QUIET], true).await;
     crew.ok("PATCH", &format!("/api/bots/{}", bots[0]), Some(json!({ "driver": "cli" }))).await;
-    *fake.extractor.lock().unwrap() = json!({ "ops": [{ "op": "remember", "title": "Работает со складом в Новосибирске", "scope": "S" }] }).to_string();
+    *fake.extractor.lock().unwrap() = json!({ "ops": [{ "op": "remember", "title": "Работает со складом в Новосибирске", "scope": "S", "quote": "остатки склада в Новосибирске" }] }).to_string();
     task(&crew, &bots[0], &["проверь остатки склада в Новосибирске", "и сверь с прошлой неделей"]).await;
     crew.wait_event("извлечение", |e| e["type"] == "memory_learned").await;
     let call = fake.extracts.lock().unwrap()[0].clone();
@@ -609,7 +609,7 @@ async fn an_agent_bot_is_extracted_by_the_deloist_model() {
 async fn a_failing_proxy_falls_back_to_the_bots_model() {
     let (fake, crew, bots) = setup_with("memory-extract-fallback", json!({}), &[QUIET], true).await;
     fake.proxy_down.store(true, Ordering::SeqCst);
-    *fake.extractor.lock().unwrap() = json!({ "ops": [{ "op": "remember", "title": "Склад в Новосибирске", "scope": "S" }] }).to_string();
+    *fake.extractor.lock().unwrap() = json!({ "ops": [{ "op": "remember", "title": "Склад в Новосибирске", "scope": "S", "quote": "склад в Новосибирске" }] }).to_string();
     task(&crew, &bots[0], &["проверь склад в Новосибирске", "и остатки"]).await;
     crew.wait_event("извлечение", |e| e["type"] == "memory_learned").await;
     let calls = fake.extracts.lock().unwrap().clone();
@@ -624,7 +624,7 @@ async fn an_extraction_between_turns_keeps_the_prompt_prefix() {
     let bot = &bots[0];
     *fake.extractor.lock().unwrap() = json!({ "ops": [
         { "op": "remember", "title": "Отчёты Ozon — по понедельникам", "body": "к 10:00, шаблон в reports", "kind": "project", "scope": "S" },
-        { "op": "profile", "text": "Ваня, селлер на Ozon." },
+        { "op": "profile", "text": "Ваня, селлер на Ozon.", "quote": "сдаю по понедельникам" },
     ] })
     .to_string();
     task(&crew, bot, &["сделай отчёт Ozon", "сдаю по понедельникам"]).await;
@@ -889,31 +889,33 @@ async fn a_hand_edit_in_the_files_reaches_the_bots_and_can_be_undone() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_memory_doctor_tidies_facts_and_turns_procedures_into_skills() {
     let (fake, crew, bots) = setup("memory-doctor", json!({}), &[]).await;
+    // Рабочие факты пишет внешний агент: записи человека доктор не трогает (их проверяем отдельно, m5).
     for title in ["Человека зовут Ваня", "Любит кофе", "Любит кофе по утрам"] {
-        crew.ok("POST", "/api/memory/facts", Some(json!({ "title": title }))).await;
+        crew.ok("POST", "/api/memory/remember", Some(json!({ "title": title }))).await;
     }
-    crew.ok("POST", "/api/memory/facts", Some(json!({ "title": "Отчёт: выгрузить продажи, сравнить с прошлой неделей", "scope": bots[0], "kind": "feedback" }))).await;
+    crew.ok("POST", "/api/memory/remember", Some(json!({ "title": "Отчёт: выгрузить продажи, сравнить с прошлой неделей", "kind": "feedback" }))).await;
+    crew.ok("POST", "/api/memory/facts", Some(json!({ "title": "Человек живёт в Ханое" }))).await;
     *fake.doctor.lock().unwrap() = json!({
         "ops": [
             { "op": "merge", "ids": ["m2", "m3"], "title": "Пьёт кофе по утрам" },
             { "op": "edit", "id": "m1", "entities": ["Ваня"] },
             { "op": "skill", "ids": ["m4"], "bot": "B1", "name": "Еженедельный отчёт", "body": "1. Выгрузи продажи. 2. Сравни с прошлой неделей." },
+            { "op": "drop", "id": "m5" },
         ],
     })
     .to_string();
     let report = crew.ok("POST", "/api/memory/doctor", None).await["report"].clone();
     assert_eq!(report["merged"], 1, "{report}");
     assert_eq!(report["skills"], 1);
+    assert_eq!(report["removed"], 0, "запись человека доктор не удаляет: {report}");
     let doctor_saw = fake.service.lock().unwrap().last().cloned().unwrap();
     let input = doctor_saw["messages"][1]["content"].as_str().unwrap();
-    assert!(input.contains("B1 — ") && input.contains("[m4] B1 · feedback"), "доктор видит факты с номерами и владельцами: {input}");
+    assert!(input.contains("B1 — ") && input.contains("[m4] S · feedback"), "доктор видит факты с номерами и владельцами: {input}");
 
     let memory = crew.ok("GET", "/api/memory", None).await;
     let titles: Vec<&str> = memory["facts"].as_array().unwrap().iter().filter_map(|f| f["title"].as_str()).collect();
-    assert_eq!(titles, vec!["Человека зовут Ваня", "Пьёт кофе по утрам"]);
+    assert_eq!(titles, vec!["Человека зовут Ваня", "Пьёт кофе по утрам", "Человек живёт в Ханое"]);
     assert_eq!(memory["facts"][0]["entities"], json!(["Ваня"]));
-    let own = crew.ok("GET", &format!("/api/bots/{}/memory", bots[0]), None).await;
-    assert_eq!(own["facts"], json!([]), "процедура ушла из памяти");
     let state = crew.ok("GET", "/api/state", None).await;
     let skill = state["skills"].as_array().unwrap().iter().find(|s| s["name"] == "Еженедельный отчёт").cloned().expect("навык создан");
     let me = state["bots"].as_array().unwrap().iter().find(|b| b["id"] == bots[0].as_str()).unwrap();
@@ -924,7 +926,7 @@ async fn the_memory_doctor_tidies_facts_and_turns_procedures_into_skills() {
     assert_eq!(entry["undoable"], true);
     crew.ok("POST", &format!("/api/memory/undo/{}", entry["id"].as_str().unwrap()), None).await;
     let back = crew.ok("GET", "/api/memory", None).await;
-    assert_eq!(back["facts"].as_array().unwrap().len(), 3);
+    assert_eq!(back["facts"].as_array().unwrap().len(), 5);
 }
 
 // Бот сам сохраняет навык, навык подключается ему, а отмена его убирает.

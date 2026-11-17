@@ -1046,6 +1046,10 @@ fn launch_exit(code: Option<i32>) -> Result<(), String> {
 fn blocked_url_patterns() -> Vec<String> {
     let mut hosts: Vec<String> = ["localhost", "127.", "0.", "10.", "192.168.", "169.254.", "[::1]", "[fc", "[fd", "[fe80"].iter().map(|h| h.to_string()).collect();
     hosts.extend((16..=31).map(|n| format!("172.{n}.")));
+    // Как и в `address_allowed`: тесты с локальной страницей открывают loopback, и только в отладочной сборке.
+    if cfg!(debug_assertions) && std::env::var_os("CREW_TEST_ALLOW_LOOPBACK").is_some() {
+        hosts.retain(|h| !matches!(h.as_str(), "localhost" | "127." | "[::1]"));
+    }
     let mut out = Vec::new();
     for scheme in ["http", "https", "ws", "wss"] {
         for host in &hosts {

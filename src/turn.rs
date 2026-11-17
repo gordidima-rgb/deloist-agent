@@ -2520,15 +2520,19 @@ fn run_turn_body(
             eprintln!("[turn] не смог записать активность: {e}");
         }
 
-        let quiet = opts.routine.is_some()
-            && opts.quiet
-            && failure.is_none()
-            && !aborted
-            && missed.is_empty()
-            && fallback_model.is_none()
-            // Человек написал боту прямо в этот ход: его сообщение нельзя прятать вместе с ходом.
-            && !steered
-            && is_quiet_answer(&final_text);
+        // Размышление о памяти после задачи (extract.rs) прячется целиком, даже если бот не ответил «Тихо» или ход не удался:
+        // человеку об этом скажет отдельное уведомление раз в сутки.
+        let reflection = opts.routine.is_some() && opts.source.as_deref() == Some(crate::extract::REFLECTION_SOURCE);
+        let quiet = (reflection && !steered)
+            || (opts.routine.is_some()
+                && opts.quiet
+                && failure.is_none()
+                && !aborted
+                && missed.is_empty()
+                && fallback_model.is_none()
+                // Человек написал боту прямо в этот ход: его сообщение нельзя прятать вместе с ходом.
+                && !steered
+                && is_quiet_answer(&final_text));
 
         for mut entry in saved {
             if opts.routine.is_some() {

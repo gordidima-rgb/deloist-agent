@@ -3988,3 +3988,22 @@ async fn the_program_key_cannot_edit_memory_facts_by_hand() {
         assert_eq!(response.status().as_u16(), 403, "ключ программы правит память руками: {method} {path}");
     }
 }
+
+#[tokio::test]
+async fn the_program_key_cannot_rewrite_the_profile_or_run_the_memory_doctor() {
+    let crew = Crew::start("memory-profile-doctor-agent").await;
+    let token = agent_token(&crew);
+    for (method, path) in [("PUT", "/api/memory/profile"), ("POST", "/api/memory/doctor")] {
+        let response = reqwest::Client::new()
+            .request(method.parse().unwrap(), format!("{}{path}", crew.base))
+            .bearer_auth(&token)
+            .header("content-type", "application/json")
+            .body(json!({ "text": "Чужой профиль" }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "ключ программы дошёл до {method} {path}");
+    }
+    // Окно по-прежнему может.
+    crew.ok("PUT", "/api/memory/profile", Some(json!({ "text": "Свой профиль" }))).await;
+}

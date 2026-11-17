@@ -57,6 +57,7 @@ mod icon_art;
 mod image;
 mod intro;
 mod keys;
+mod learn_rules;
 mod know_me;
 mod ledger;
 mod limit;

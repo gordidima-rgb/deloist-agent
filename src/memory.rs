@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
 
 use crate::episodes;
+use crate::learn_rules::{self, Policy};
 use crate::sensitive::{contact_in, secret_in};
 use crate::service;
 use crate::store::{now, uid, Bot, Room};
@@ -38,7 +39,7 @@ pub const PIN_TEAM_LIMIT: usize = 1_500;
 const OWN_INDEX_LIMIT: usize = 3_000;
 const HARD_PERCENT: usize = 125;
 pub(crate) const TITLE_LIMIT: usize = 150;
-const BODY_LIMIT: usize = 1_500;
+pub(crate) const BODY_LIMIT: usize = 1_500;
 const ENTITY_LIMIT: usize = 8;
 const JOURNAL_KEEP: usize = 300;
 const OVERFLOW_PAUSE_MS: i64 = 15 * 60 * 1000;
@@ -503,7 +504,12 @@ async fn undo_locked(app: &Arc<App>, entry_id: &str) -> Result<Vec<String>, Stri
         scopes.push(SHARED.to_string());
     }
     let mut changes = Vec::new();
+    // Отменили удаление — факт вернулся, запрет на повторное выучивание его заголовка снимаем.
+    let mut restored: Vec<String> = Vec::new();
     for change in entry_changes(&entry) {
+        if let (Some(old), None) = (&change.0, &change.1) {
+            restored.push(old.title.clone());
+        }
         for fact in [&change.0, &change.1].into_iter().flatten() {
             if !scopes.contains(&fact.scope) {
                 scopes.push(fact.scope.clone());
@@ -519,6 +525,9 @@ async fn undo_locked(app: &Arc<App>, entry_id: &str) -> Result<Vec<String>, Stri
     book.facts.sort_by_key(|f| number(&f.id));
     let note = format!("Отменено: {}", entry["note"].as_str().unwrap_or("правка"));
     commit(app, &book, who_human(), "undo", &note, changes, extra).await.map_err(|e| e.to_string())?;
+    for title in restored {
+        learn_rules::unforget_title(app, &title).await;
+    }
     Ok(scopes)
 }
 
@@ -585,6 +594,7 @@ fn who_is_human(who: &Value) -> bool {
 /// Правило боту: память устаревает, и поправить её — его дело.
 pub const PRACTICE_RULE: &str = "Память — подсказки, а не истина: если запомненное перестало работать, а ты нашёл, что работает, исправь этот же факт сразу (тот же заголовок или id), а не только рабочие заметки; ошибку записывай вместе с обходом.";
 
+pub const FORGOTTEN_REFUSAL: &str = "человек удалил этот факт: заново его не записывают, вернуть его может только сам человек";
 pub const SECRET_REFUSAL: &str = "пароли, коды, данные карт и токены в память не пишутся";
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1135,8 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
     }
     let rooms = app.store.rooms();
     let wanted_scope = target_scope(&draft, actor, &rooms)?;
+    // Человек удалил такой факт: бот и извлекатель заново его не записывают (сам человек — может).
+    let forgotten = if human { Vec::new() } else { learn_rules::forgotten(app).await };
     let (fact, created, size, entry) = {
         let _gate = GATE.lock().await;
         let mut book = load(app).await;
@@ -1146,6 +1158,7 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
                         return Err(if is_room_scope(&before.scope) { "это память другой команды: ты в ней не состоишь" } else { "это личный факт другого бота" }.into());
                     }
                 }
+                refuse_human_fact_edit(&before, human)?;
                 // Программа (внешний агент, извлекатель) правит только общую память: личное — боту и человеку.
                 if matches!(writer, Writer::Program { .. }) && before.scope != SHARED {
                     return Err("это личный факт бота: править его можно только в общей памяти".into());
@@ -1188,6 +1201,9 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
             None => {
                 if title.is_empty() {
                     return Err("нечего запоминать: нужен заголовок факта".into());
+                }
+                if learn_rules::is_forgotten(&forgotten, &title) {
+                    return Err(FORGOTTEN_REFUSAL.into());
                 }
                 book.next += 1;
                 let fact = Fact {
@@ -1238,11 +1254,56 @@ async fn write(app: &Arc<App>, writer: &Writer<'_>, draft: Draft) -> Result<(Fac
     Ok((fact, created, entry))
 }
 
+/// Факт, который написал человек, бот и программа не правят (ни `remember` с `id`, ни по заголовку): устарел — пусть скажут человеку.
+fn refuse_human_fact_edit(before: &Fact, writer_is_human: bool) -> Result<(), String> {
+    if !writer_is_human && before.author == "human" {
+        return Err(format!("факт [{}] записал человек: его правит только он сам; если он устарел, скажи об этом человеку в ответе", before.id));
+    }
+    Ok(())
+}
+
 /// Инструмент `remember`.
 pub async fn remember(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
-    let (fact, created, entry) = write(app, &Writer::Bot(bot), Draft::from_args(args)).await?;
+    let mut draft = Draft::from_args(args);
+    reflective_checks(app, bot, args, &mut draft).await?;
+    let (fact, created, entry) = write(app, &Writer::Bot(bot), draft).await?;
     let team = if is_room_scope(&fact.scope) { app.store.room(&fact.scope[ROOM_PREFIX.len()..]).map(|r| r.name) } else { None };
     Ok(remember_reply(&fact, created, entry.as_deref(), now(), team.as_deref()))
+}
+
+/// Пока бот размышляет о памяти после задачи, его `remember` идёт по тем же правилам, что и извлечение:
+/// факт о человеке — с дословной цитатой, факты человека не правятся, правок не больше четверти, правила — не память.
+async fn reflective_checks(app: &Arc<App>, bot: &Bot, args: &Value, draft: &mut Draft) -> Result<(), String> {
+    if !learn_rules::is_reflecting(&bot.id) {
+        return Ok(());
+    }
+    let book = load(app).await;
+    let teams = team_scopes(app, &bot.id);
+    let seen = |f: &&Fact| f.scope == SHARED || f.scope == bot.id || teams.contains(&f.scope);
+    let existing = if !draft.id.is_empty() {
+        book.facts.iter().filter(seen).find(|f| f.id == draft.id)
+    } else {
+        let wanted = one_line(&draft.title).to_lowercase();
+        // Новый факт попадёт в память по умолчанию «self», а явный shared — в общую: заголовок ищем в выбранной.
+        let scope = match draft.scope.trim() {
+            "shared" => SHARED.to_string(),
+            "team" => String::new(),
+            _ => bot.id.clone(),
+        };
+        book.facts.iter().filter(seen).find(|f| (scope.is_empty() || f.scope == scope) && f.title.to_lowercase() == wanted)
+    };
+    let scope_of_new = if draft.scope.trim() == "shared" { SHARED } else { bot.id.as_str() };
+    let kind = match existing {
+        Some(f) if draft.kind.trim().is_empty() => f.kind.clone(),
+        _ => clean_kind(&draft.kind, scope_of_new),
+    };
+    let existing_view = existing.map(|f| learn_rules::Existing { author: &f.author, kind: &f.kind });
+    let quote = args.get("quote").and_then(Value::as_str).map(str::trim).filter(|q| !q.is_empty());
+    let body = draft.body.clone().unwrap_or_default();
+    if let Some(q) = learn_rules::check_reflective_write(&bot.id, &draft.title, &body, &kind, quote, existing_view)? {
+        draft.body = Some(learn_rules::with_quote(&body, &q));
+    }
+    Ok(())
 }
 
 /// Ответ боту на `remember`. Чат разбирает его же для строки шага: номер «[m18]», место (общая, команды, личная)
@@ -1299,6 +1360,16 @@ pub struct Extracted {
     pub secrets: usize,
     /// Переписан ли профиль.
     pub profile: bool,
+    /// Постоянные правила («всегда…», «пропиши в правила»): не память, а предложения для `propose_rule`.
+    pub rules: Vec<String>,
+    /// Операции без цитаты человека или с цитатой, которой в его словах нет.
+    pub unquoted: usize,
+    /// Операции с тем, что человек удалил.
+    pub forgotten: usize,
+    /// Правки фактов, которые написал человек.
+    pub protected: usize,
+    /// Правки сверх четверти фактов за проход.
+    pub capped: usize,
 }
 
 fn op_text(op: &Value, key: &str) -> Option<String> {
@@ -1332,16 +1403,35 @@ fn contacts_said(text: &str, said: &[String]) -> bool {
 
 /// Применить операции к книге. `own` — личная память бота этого чата (у группы её нет).
 /// `snapshot` — когда менялся каждый факт, пока модель думала: изменённое за это время не трогаем.
-/// Без диска: так это проверяется тестами.
-fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: Consent<'_>, snapshot: Option<&HashMap<String, i64>>, at: i64) -> (Extracted, Option<String>) {
+/// `policy` — слова человека (цитаты) и забытое. Без диска: так это проверяется тестами.
+fn plan_extraction_with(book: &mut Book, ops: &[Value], own: Option<&str>, consent: Consent<'_>, snapshot: Option<&HashMap<String, i64>>, at: i64, policy: &Policy<'_>) -> (Extracted, Option<String>) {
     let mut out = Extracted::default();
     let mut profile = None;
     // Факт можно править, если он общий или личный этого бота и не менялся, пока модель думала.
     let editable = |fact: &Fact| (fact.scope == SHARED || Some(fact.scope.as_str()) == own) && snapshot.is_none_or(|s| s.get(&fact.id) == Some(&fact.updated_at));
+    // За один проход правится не больше четверти фактов, которые извлекатель видит.
+    let cap = learn_rules::edit_cap(book.facts.iter().filter(|f| f.scope == SHARED || Some(f.scope.as_str()) == own).count());
+    let mut edits = 0usize;
     for op in ops {
         let title = op_text(op, "title").map(|t| service::take_chars(&one_line(&t), TITLE_LIMIT));
         let body = op_text(op, "body").map(|b| service::take_chars(&b, BODY_LIMIT));
         let kind = op["op"].as_str().unwrap_or_default();
+        let quote = op_text(op, "quote");
+        // Цитата нужна там, где факт о человеке: она есть в его словах дословно, иначе операция отброшена.
+        let quote_ok = |needed: bool| !needed || policy.said.is_none_or(|said| quote.as_deref().is_some_and(|q| learn_rules::quote_found(q, said)));
+        // Постоянное правило — не память: предложение для `propose_rule`, и только с цитатой человека.
+        let as_rule = kind == "rule" || (matches!(kind, "remember" | "edit" | "supersede") && learn_rules::looks_like_rule(title.as_deref().unwrap_or_default(), body.as_deref().unwrap_or_default()));
+        if as_rule {
+            let Some(rule) = (if kind == "rule" { op_text(op, "text").or_else(|| title.clone()) } else { title.clone() }) else { continue };
+            if secret_in(&rule).is_some() {
+                out.secrets += 1;
+            } else if !quote_ok(true) {
+                out.unquoted += 1;
+            } else {
+                out.rules.push(service::take_chars(&one_line(&rule), 200));
+            }
+            continue;
+        }
         let text = match kind {
             "profile" => op_text(op, "text").unwrap_or_default(),
             _ => format!("{}\n{}\n{}", title.as_deref().unwrap_or_default(), body.as_deref().unwrap_or_default(), strings(&op["entities"]).join(", ")),
@@ -1368,25 +1458,64 @@ fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: C
                     _ => SHARED.to_string(),
                 };
                 let entities = normalize_entities(&strings(&op["entities"]));
+                let fact_kind = clean_kind(op["kind"].as_str().unwrap_or_default(), &scope);
                 // Тот же заголовок в той же памяти — правка, а не второй факт.
-                if let Some(fact) = book.facts.iter_mut().find(|f| f.scope == scope && f.title.to_lowercase() == title.to_lowercase()) {
+                if let Some(index) = book.facts.iter().position(|f| f.scope == scope && f.title.to_lowercase() == title.to_lowercase()) {
+                    let fact = &mut book.facts[index];
+                    if fact.author == "human" {
+                        // Написанное человеком извлекатель не правит.
+                        out.protected += 1;
+                        continue;
+                    }
                     if !editable(fact) {
                         continue;
                     }
+                    let about_human = fact.kind == "user";
+                    if !quote_ok(about_human) {
+                        out.unquoted += 1;
+                        continue;
+                    }
+                    let mut next = fact.clone();
                     if let Some(body) = body {
-                        fact.body = body;
+                        next.body = body;
                     }
                     if !entities.is_empty() {
-                        fact.entities = entities;
+                        next.entities = entities;
+                    }
+                    if about_human {
+                        if let Some(q) = quote.as_deref() {
+                            next.body = learn_rules::with_quote(&next.body, q);
+                        }
+                    }
+                    if next != *fact {
+                        if edits >= cap {
+                            out.capped += 1;
+                            continue;
+                        }
+                        edits += 1;
+                        *fact = next;
                     }
                 } else {
+                    if learn_rules::is_forgotten(policy.forgotten, &title) {
+                        out.forgotten += 1;
+                        continue;
+                    }
+                    let about_human = fact_kind == "user";
+                    if !quote_ok(about_human) {
+                        out.unquoted += 1;
+                        continue;
+                    }
+                    let mut body = body.unwrap_or_default();
+                    if let (true, Some(q)) = (about_human, quote.as_deref()) {
+                        body = learn_rules::with_quote(&body, q);
+                    }
                     book.next += 1;
                     book.facts.push(Fact {
                         id: format!("m{}", book.next),
-                        kind: clean_kind(op["kind"].as_str().unwrap_or_default(), &scope),
+                        kind: fact_kind,
                         scope,
                         title: title.clone(),
-                        body: body.unwrap_or_default(),
+                        body,
                         entities,
                         links: Vec::new(),
                         author: "extractor".into(),
@@ -1400,34 +1529,63 @@ fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: C
             "edit" | "supersede" => {
                 let id = bare_id(op["id"].as_str().unwrap_or_default());
                 let Some(fact) = book.facts.iter_mut().find(|f| f.id == id) else { continue };
+                if fact.author == "human" {
+                    out.protected += 1;
+                    continue;
+                }
                 if !editable(fact) {
                     continue;
                 }
                 let old = fact.clone();
+                let mut next = old.clone();
                 if let Some(title) = title {
-                    fact.title = title;
+                    next.title = title;
                 }
                 if let Some(body) = body {
-                    fact.body = body;
+                    next.body = body;
                 }
                 if let Some(k) = op["kind"].as_str().filter(|k| KINDS.contains(k)) {
-                    fact.kind = k.to_string();
+                    next.kind = k.to_string();
                 }
                 if !op["entities"].is_null() {
-                    fact.entities = normalize_entities(&strings(&op["entities"]));
+                    next.entities = normalize_entities(&strings(&op["entities"]));
                 }
                 // Замена хранит, как было: «было → стало» с датой, а не тихая перезапись.
-                if kind == "supersede" && old.title != fact.title {
+                if kind == "supersede" && old.title != next.title {
                     let was = format!("Было до {}: {}", day_label(at), old.title);
-                    fact.body = service::take_chars(&[fact.body.trim(), &was].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("\n"), BODY_LIMIT);
+                    next.body = service::take_chars(&[next.body.trim(), &was].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("\n"), BODY_LIMIT);
                 }
-                if *fact != old {
-                    out.fixed.push(fact.title.clone());
-                    out.learned.push(fact.title.clone());
+                if next == old {
+                    continue;
                 }
+                // Переименовать в то, что человек уже удалил, нельзя.
+                if next.title != old.title && learn_rules::is_forgotten(policy.forgotten, &next.title) {
+                    out.forgotten += 1;
+                    continue;
+                }
+                let about_human = next.kind == "user";
+                if !quote_ok(about_human) {
+                    out.unquoted += 1;
+                    continue;
+                }
+                if let (true, Some(q)) = (about_human, quote.as_deref()) {
+                    next.body = learn_rules::with_quote(&next.body, q);
+                }
+                if edits >= cap {
+                    out.capped += 1;
+                    continue;
+                }
+                edits += 1;
+                out.fixed.push(next.title.clone());
+                out.learned.push(next.title.clone());
+                *fact = next;
             }
             "profile" => {
                 if !text.is_empty() {
+                    if !quote_ok(true) {
+                        out.unquoted += 1;
+                        continue;
+                    }
                     profile = Some(service::take_chars(&text, PROFILE_LIMIT));
                 }
             }
@@ -1444,14 +1602,22 @@ fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: C
     (out, profile)
 }
 
+#[cfg(test)]
+fn plan_extraction(book: &mut Book, ops: &[Value], own: Option<&str>, consent: Consent<'_>, snapshot: Option<&HashMap<String, i64>>, at: i64) -> (Extracted, Option<String>) {
+    plan_extraction_with(book, ops, own, consent, snapshot, at, &Policy::none())
+}
+
 /// Применить операции извлекателя: факты и профиль — одной записью журнала, чтобы
 /// «Отменить» в чате убирало всё, что запомнилось после задачи.
-pub async fn apply_extraction(app: &Arc<App>, ops: &[Value], own: Option<&str>, consent: Consent<'_>, snapshot: Option<&HashMap<String, i64>>) -> Result<Extracted, String> {
+/// `said` — реплики человека этой задачи: цитаты из операций проверяются по ним; `None` — карточка контакта, одобренная человеком.
+pub async fn apply_extraction(app: &Arc<App>, ops: &[Value], own: Option<&str>, consent: Consent<'_>, snapshot: Option<&HashMap<String, i64>>, said: Option<&[String]>) -> Result<Extracted, String> {
+    let forgotten = learn_rules::forgotten(app).await;
+    let policy = Policy { said, forgotten: &forgotten };
     let (out, over) = {
         let _gate = GATE.lock().await;
         let mut book = load(app).await;
         let before: HashMap<String, Fact> = book.facts.iter().map(|f| (f.id.clone(), f.clone())).collect();
-        let (mut out, profile) = plan_extraction(&mut book, ops, own, consent, snapshot, now());
+        let (mut out, profile) = plan_extraction_with(&mut book, ops, own, consent, snapshot, now(), &policy);
         for fact in &mut book.facts {
             if before.get(&fact.id).is_some_and(|old| old != fact) {
                 fact.updated_at = now();
@@ -1489,7 +1655,8 @@ pub async fn extraction_context(app: &App, own: Option<&str>) -> (String, HashMa
     facts.sort_by_key(|f| (kind_rank(&f.kind), number(&f.id)));
     for fact in facts {
         let owner = if fact.scope == SHARED { "S" } else { "B" };
-        let mut line = format!("[{}] {owner} · {} · {}", fact.id, fact.kind, fact.title);
+        let human = if fact.author == "human" { " · от человека" } else { "" };
+        let mut line = format!("[{}] {owner} · {}{human} · {}", fact.id, fact.kind, fact.title);
         if !fact.body.trim().is_empty() {
             line.push_str(&format!(" — {}", one_line(&service::take_chars(&fact.body, 200))));
         }
@@ -1520,6 +1687,7 @@ pub async fn human_write(app: &Arc<App>, input: &Value, id: Option<&str>) -> Res
         }
     }
     let fact = write(app, &Writer::Human, draft).await.map(|(fact, _, _)| fact)?;
+    learn_rules::unforget_title(app, &fact.title).await;
     scopes.push(fact.scope.clone());
     forget_prompts_for(app, &scopes).await;
     Ok(fact)
@@ -1553,6 +1721,8 @@ async fn human_delete_locked(app: &Arc<App>, id: &str) -> Result<String, String>
         "память бота"
     };
     commit(app, &book, who_human(), "remove", &format!("Удалено вручную — {place}"), changes, json!({})).await.map_err(|e| e.to_string())?;
+    // Забытое не выучивается заново: извлекатель и `remember` пропустят этот заголовок.
+    learn_rules::forget_title(app, &removed.title).await;
     Ok(removed.scope)
 }
 
@@ -1770,9 +1940,11 @@ fn ids_of(op: &Value) -> Vec<String> {
 /// Применить операции доктора. Факты, изменившиеся за время его работы, он не трогает:
 /// правка поверх свежей записи бота её бы потеряла.
 fn apply_ops(book: &mut Book, snapshot: &HashMap<String, i64>, targets: &HashMap<String, String>, ops: &[Value]) -> (Counts, Vec<SkillOut>) {
+    // Факты, которые записал человек, доктор не трогает: ни удалить, ни переписать, ни склеить (как у Codync и OpenMausBot).
     let fresh = |book: &Book, id: &str| -> Option<usize> {
         let index = book.facts.iter().position(|f| f.id == id)?;
-        (snapshot.get(id) == Some(&book.facts[index].updated_at)).then_some(index)
+        let fact = &book.facts[index];
+        (fact.author != "human" && snapshot.get(id) == Some(&fact.updated_at)).then_some(index)
     };
     let mut counts = Counts::default();
     let mut skills = Vec::new();
@@ -2135,6 +2307,28 @@ mod tests {
     }
 
     #[test]
+    fn the_doctor_leaves_human_written_facts_alone() {
+        let mut book = book();
+        book.facts[0].author = "human".into();
+        book.facts[1].author = "human".into();
+        let snapshot: HashMap<String, i64> = book.facts.iter().map(|f| (f.id.clone(), f.updated_at)).collect();
+        let targets = HashMap::from([("S".to_string(), SHARED.to_string())]);
+        let before: Vec<Fact> = book.facts[..2].to_vec();
+        let (counts, _) = apply_ops(
+            &mut book,
+            &snapshot,
+            &targets,
+            &[
+                json!({ "op": "drop", "id": "m1" }),
+                json!({ "op": "edit", "id": "m2", "title": "Не любит кофе" }),
+                json!({ "op": "merge", "ids": ["m2", "m3"], "title": "Пьёт кофе" }),
+            ],
+        );
+        assert_eq!((counts.removed, counts.edited, counts.merged), (0, 0, 0), "{counts:?}");
+        assert_eq!(&book.facts[..2], &before[..], "записи человека как были");
+    }
+
+    #[test]
     fn the_doctor_works_by_fact_numbers_and_keeps_links_whole() {
         let mut book = book();
         book.facts[0].links = vec!["m3".into()];
@@ -2374,5 +2568,99 @@ mod tests {
         assert_eq!(text, "Любит кофе");
         assert!(at.is_some());
         assert_eq!(old_line("просто строка").0, "просто строка");
+    }
+
+    fn learn_policy<'a>(said: &'a [String], forgotten: &'a [String]) -> Policy<'a> {
+        Policy { said: Some(said), forgotten }
+    }
+
+    #[test]
+    fn a_fact_about_the_human_needs_his_exact_words() {
+        let said = vec!["Меня зовут Аркадий, кабинет на Ozon называется Рога и Копыта".to_string()];
+        let ops = [
+            json!({ "op": "remember", "title": "Зовут Аркадий", "kind": "user", "quote": "меня зовут Аркадий" }),
+            json!({ "op": "remember", "title": "Живёт в Омске", "kind": "user", "quote": "я живу в Омске" }),
+            json!({ "op": "remember", "title": "Любит чай", "kind": "user" }),
+            json!({ "op": "remember", "title": "Выгрузка Ozon за 7 дней", "kind": "feedback", "scope": "B" }),
+            json!({ "op": "profile", "text": "Аркадий, селлер", "quote": "придумано мной" }),
+        ];
+        let mut book = book();
+        let (out, profile) = plan_extraction_with(&mut book, &ops, Some("b1"), Consent::Said(&[]), None, 1, &learn_policy(&said, &[]));
+        assert_eq!(out.learned, vec!["Зовут Аркадий", "Выгрузка Ozon за 7 дней"], "пересказ и выдуманная цитата отброшены, рабочая заметка идёт без цитаты");
+        assert_eq!(out.unquoted, 3, "нет цитаты, чужая цитата, профиль без настоящей цитаты");
+        assert_eq!(profile, None);
+        let added = book.facts.iter().find(|f| f.title == "Зовут Аркадий").unwrap();
+        assert!(added.body.contains("Слова человека: «меня зовут Аркадий»"), "цитата остаётся в факте: {}", added.body);
+    }
+
+    #[test]
+    fn what_the_human_deleted_is_not_learned_again() {
+        let forgotten = vec![learn_rules::title_key("Живёт в Омске")];
+        let ops = [
+            json!({ "op": "remember", "title": "живёт в омске!", "kind": "project", "scope": "B" }),
+            json!({ "op": "remember", "title": "Живёт в Томске", "kind": "project", "scope": "B" }),
+            json!({ "op": "supersede", "id": "m5", "title": "Живёт в Омске" }),
+        ];
+        let mut book = book();
+        let (out, _) = plan_extraction_with(&mut book, &ops, Some("b1"), Consent::Said(&[]), None, 1, &learn_policy(&[], &forgotten));
+        assert_eq!(out.learned, vec!["Живёт в Томске"]);
+        assert_eq!(out.forgotten, 2, "и новый факт, и переименование в удалённое");
+        assert_eq!(book.facts.iter().find(|f| f.id == "m5").unwrap().title, "Живёт в Новосибирске");
+    }
+
+    #[test]
+    fn facts_written_by_the_human_are_never_edited_by_the_extractor() {
+        let mut book = book();
+        book.facts[1].author = "human".into(); // m2 «Любит кофе»
+        let ops = [
+            json!({ "op": "edit", "id": "m2", "title": "Не любит кофе" }),
+            json!({ "op": "supersede", "id": "m2", "title": "Пьёт чай" }),
+            json!({ "op": "remember", "title": "Любит кофе", "body": "поверх" }),
+            json!({ "op": "edit", "id": "m3", "title": "Любит очень крепкий кофе", "quote": "обожаю очень крепкий кофе" }),
+        ];
+        let said = vec!["Обожаю очень крепкий кофе".to_string()];
+        let (out, _) = plan_extraction_with(&mut book, &ops, None, Consent::Said(&[]), None, 1, &learn_policy(&said, &[]));
+        assert_eq!(out.protected, 3);
+        assert_eq!((book.facts[1].title.as_str(), book.facts[1].body.as_str()), ("Любит кофе", ""));
+        assert_eq!(out.fixed, vec!["Любит очень крепкий кофе"], "факт без метки человека правится");
+    }
+
+    #[test]
+    fn one_pass_edits_at_most_a_quarter_of_the_facts() {
+        // В общей памяти четыре факта: правка одна.
+        let mut book = Book { next: 4, facts: (1..=4).map(|n| fact(&format!("m{n}"), SHARED, "project", &format!("Заметка {n}"))).collect(), ..Book::default() };
+        let ops: Vec<Value> = (1..=4).map(|n| json!({ "op": "edit", "id": format!("m{n}"), "title": format!("Новая заметка {n}") })).collect();
+        let (out, _) = plan_extraction_with(&mut book, &ops, None, Consent::Said(&[]), None, 1, &Policy::none());
+        assert_eq!((out.fixed.len(), out.capped), (1, 3));
+        assert_eq!(book.facts.iter().filter(|f| f.title.starts_with("Новая")).count(), 1);
+        // Новые факты в предел не входят.
+        let adds: Vec<Value> = (1..=5).map(|n| json!({ "op": "remember", "title": format!("Совсем новое {n}"), "kind": "project" })).collect();
+        let (out, _) = plan_extraction_with(&mut book, &adds, None, Consent::Said(&[]), None, 1, &Policy::none());
+        assert_eq!((out.learned.len(), out.capped), (5, 0));
+    }
+
+    #[test]
+    fn a_standing_rule_becomes_a_proposal_not_a_fact() {
+        let said = vec!["Всегда присылай отчёт в телеграм, пропиши в правила".to_string()];
+        let ops = [
+            json!({ "op": "remember", "title": "Всегда присылать отчёт в телеграм", "kind": "feedback", "quote": "всегда присылай отчёт в телеграм" }),
+            json!({ "op": "rule", "text": "Никогда не удалять файлы", "quote": "я такого не говорил" }),
+            json!({ "op": "remember", "title": "Пропиши в правила: без вступлений", "quote": "нет такого в словах" }),
+        ];
+        let mut book = book();
+        let before = book.facts.len();
+        let (out, _) = plan_extraction_with(&mut book, &ops, None, Consent::Said(&[]), None, 1, &learn_policy(&said, &[]));
+        assert_eq!(book.facts.len(), before, "правила в память не пишутся");
+        assert_eq!(out.rules, vec!["Всегда присылать отчёт в телеграм"], "нужна цитата человека, остальное отброшено");
+        assert_eq!(out.unquoted, 2);
+    }
+
+    #[test]
+    fn bots_and_the_program_do_not_edit_facts_the_human_wrote() {
+        let mine = Fact { author: "human".into(), ..fact("m1", SHARED, "user", "Любит кофе") };
+        let theirs = Fact { author: "b1".into(), ..fact("m2", SHARED, "user", "Любит чай") };
+        assert!(refuse_human_fact_edit(&mine, false).unwrap_err().contains("[m1]"));
+        assert!(refuse_human_fact_edit(&mine, true).is_ok(), "человек правит своё сам");
+        assert!(refuse_human_fact_edit(&theirs, false).is_ok());
     }
 }
