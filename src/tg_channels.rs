@@ -197,7 +197,7 @@ mod tests {
 
     /// Живой t.me: `cargo test --bin deloist tg_channels::tests::live -- --ignored --nocapture`.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "ходит в интернет (t.me)"]
     async fn live_channel_search_and_chat() {
         let public = crate::fetch::is_public_ip;
         let page = crate::fetch::fetch_page(&preview_url("unity_gamedev_unreal", "steam", None), &public).await.unwrap();

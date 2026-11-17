@@ -725,10 +725,6 @@ struct KnownCall {
     safe: bool,
 }
 
-/// Команда ACP-агента массивом аргументов, которую строгий разбор признал правкой своих файлов, идёт без карточки (наша ветка).
-/// `false`: на main действует более строгое правило «карточка всегда» (тесты `acp_shell_requests_…_requires_a_card`).
-const ACP_OWN_SCRIPT_WITHOUT_CARD: bool = false;
-
 /// Сводка разговора для новой сессии агента. Сжимаем тред той же кнопкой, что «Сжать историю»,
 /// и берём сводку так же, как её берёт системный промпт. Сводки нет — сессия всё равно новая.
 async fn fresh_session_summary(app: &Arc<App>, bot: &Bot, writer: &Bot, thread: &str) -> Option<String> {
@@ -1805,20 +1801,6 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
         && crate::tools::acp_title_command_is_own_data_write(req.app, bot, title_command)
     {
         ask = false;
-    }
-    // Правка своего файла командой PowerShell: если строгий разбор доказал, что она только пишет в своих папках, карточка не нужна.
-    // Выключено слиянием с main (91e808d): его тесты требуют карточку и для массива аргументов, пока владелец не решит иначе.
-    if ACP_OWN_SCRIPT_WITHOUT_CARD && ask && !releases && touch.is_none() && !conflicting_known && kind == "execute" && bot.approval == "ask" && call["rawInput"]["shell_command"].is_null() {
-        // Только массив аргументов: строка уходит в оболочку агента (bash, cmd), где `$(…)`, обратные кавычки и `$VAR` раскрываются
-        // до PowerShell, и разбор по тексту ей не верит. Любая строковая форма спрашивает.
-        let argv: Vec<String> = match &call["rawInput"]["command"] {
-            Value::Array(parts) => parts.iter().filter_map(Value::as_str).map(str::to_string).collect(),
-            _ => Vec::new(),
-        };
-        let script = crate::shellplan::script_from_argv(&argv);
-        if script.is_some_and(|script| crate::describe::own_space_script(req.app, &bot.id, &script)) {
-            ask = false;
-        }
     }
     let allowed = if !ask {
         true

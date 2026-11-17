@@ -85,6 +85,10 @@ async fn demo_turns_go_through_the_whole_loop() {
     crew.ok("POST", "/api/memory/facts", Some(json!({ "scope": bot, "title": "тестовая заметка" }))).await;
     let memory = crew.ok("GET", &format!("/api/bots/{bot}/memory"), None).await;
     assert_eq!(memory["facts"][0]["title"], "тестовая заметка");
+    // Личная память бота — файл memory.md в его папке.
+    assert!(memory["file"].as_str().unwrap().contains("- тестовая заметка"), "{memory}");
+    let file = std::fs::read_to_string(crew.data_dir.join("workspaces").join(&bot).join("memory.md")).unwrap();
+    assert!(file.contains("- тестовая заметка"), "{file}");
 
     // Файл бота виден через API, выход из воркспейса — нет.
     crew.clear_events();

@@ -672,7 +672,7 @@ pub(crate) fn key_file_target(store: &crate::store::Store, bot_id: &str, raw: &s
 /// те же правила, что у своего `run_command` (`reach::analyze`), плюс запрет переводов строк.
 /// Секреты, ключи, выпуск и всё, что меняет файлы или не разобрано, — карточка, как раньше.
 pub(crate) fn acp_title_command_is_read_only(app: &App, bot: &Bot, title: &str) -> bool {
-    // `>` пишет даже у читающей команды; для ACP правка своих файлов идёт с карточкой (см. `ACP_OWN_SCRIPT_WITHOUT_CARD`).
+    // `>` пишет даже у читающей команды; для ACP правка своих файлов идёт с карточкой.
     if bot.approval != "ask" || title.trim().is_empty() || title.contains(['\n', '\r', '\0', '>']) {
         return false;
     }

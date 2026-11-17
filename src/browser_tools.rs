@@ -2507,20 +2507,6 @@ mod tests {
         assert_eq!(with_site_tip("https://x.com/a", "https://x.com/b", Ok("снимок".into())).unwrap(), "снимок");
     }
 
-    /// Снимок настоящей страницы из дампа CDP: `AX_DUMP=<файл со списком nodes по фреймам>`.
-    #[test]
-    #[ignore]
-    fn print_snapshot_of_a_dump() {
-        let path = std::env::var("AX_DUMP").expect("AX_DUMP");
-        let frames: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let (mut lines, mut refs, mut next) = (Vec::new(), HashMap::new(), 1);
-        for nodes in frames.as_array().unwrap() {
-            render_tree(nodes, &mut lines, &mut refs, &mut next, false, &HashSet::new());
-        }
-        let text = lines.join("\n");
-        println!("СТРОК {} ЗНАКОВ {} НОМЕРОВ {}\n{text}", lines.len(), text.chars().count(), refs.len());
-    }
-
     #[test]
     fn snapshot_gives_numbers_only_to_controls() {
         let nodes = json!([
