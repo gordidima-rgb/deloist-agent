@@ -2385,7 +2385,6 @@ impl Store {
         }
         self.persist().await?;
         let _ = tokio::fs::remove_file(self.thread_file(id)).await;
-        let _ = tokio::fs::remove_file(self.memory_file(id)).await;
         // Бота нет, и входы в его кабинеты хранить незачем.
         let _ = tokio::fs::remove_dir_all(self.browser_profile(id)).await;
         let _ = tokio::fs::remove_dir_all(self.obscura_profile(id)).await;
@@ -2397,10 +2396,6 @@ impl Store {
 
     fn thread_file(&self, bot_id: &str) -> PathBuf {
         self.data_dir.join("threads").join(format!("{bot_id}.jsonl"))
-    }
-
-    fn memory_file(&self, bot_id: &str) -> PathBuf {
-        self.data_dir.join("memory").join(format!("{bot_id}.md"))
     }
 
     pub async fn append_message(&self, bot_id: &str, msg: Value) -> std::io::Result<Value> {
@@ -2551,31 +2546,6 @@ impl Store {
             }
         }
         Value::Null
-    }
-
-    // --- память и воркспейс ------------------------------------------------
-
-    pub async fn read_memory(&self, bot_id: &str) -> String {
-        tokio::fs::read_to_string(self.memory_file(bot_id)).await.unwrap_or_default()
-    }
-
-    pub async fn write_memory(&self, bot_id: &str, text: &str) -> std::io::Result<()> {
-        tokio::fs::write(self.memory_file(bot_id), text).await
-    }
-
-    pub async fn append_memory(&self, bot_id: &str, text: &str) -> std::io::Result<()> {
-        let clean = text.trim();
-        if clean.is_empty() {
-            return Ok(());
-        }
-        let stamp = chrono::Utc::now().format("%Y-%m-%d %H:%M");
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.memory_file(bot_id))
-            .await?;
-        file.write_all(format!("- [{stamp}] {clean}\n").as_bytes()).await?;
-        file.flush().await
     }
 
     pub fn workspace(&self, bot_id: &str) -> PathBuf {

@@ -180,10 +180,6 @@ fn dir(app: &App) -> PathBuf {
     app.store.data_dir().join("memory")
 }
 
-fn book_path(app: &App) -> PathBuf {
-    dir(app).join("facts.json")
-}
-
 fn limit_of(scope: &str) -> usize {
     if scope == SHARED {
         SHARED_LIMIT
@@ -218,69 +214,8 @@ fn bare_id(id: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Книга фактов на диске и переезд со старых файлов
+// Книга фактов на диске
 // ---------------------------------------------------------------------------
-
-/// Текст строки старой памяти без маркера и даты, и дата, если была.
-fn old_line(line: &str) -> (String, Option<i64>) {
-    let line = line.trim().trim_start_matches(['-', '*', '•']).trim_start();
-    if let Some((inside, rest)) = line.strip_prefix('[').and_then(|r| r.split_once(']')) {
-        if let Ok(at) = chrono::NaiveDateTime::parse_from_str(inside, "%Y-%m-%d %H:%M") {
-            return (one_line(rest), Some(at.and_utc().timestamp_millis()));
-        }
-    }
-    (one_line(line), None)
-}
-
-fn fact_from_text(book: &mut Book, scope: &str, kind: &str, text: &str, at: i64, author: &str) -> Fact {
-    book.next += 1;
-    let (title, body) = if chars(text) > TITLE_LIMIT {
-        (service::take_chars(text, TITLE_LIMIT), text.to_string())
-    } else {
-        (text.to_string(), String::new())
-    };
-    Fact {
-        id: format!("m{}", book.next),
-        scope: scope.into(),
-        kind: kind.into(),
-        title,
-        body: service::take_chars(&body, BODY_LIMIT),
-        author: author.into(),
-        created_at: at,
-        updated_at: at,
-        ..Fact::default()
-    }
-}
-
-/// Прежняя память — строки в `memory/{bot}.md` и `_shared.md`. Каждая строка становится фактом,
-/// старые файлы остаются рядом с припиской `.old`.
-async fn migrate(app: &App) -> Book {
-    let mut book = Book::default();
-    let mut sources: Vec<(String, PathBuf, &str)> = vec![(SHARED.into(), dir(app).join("_shared.md"), "user")];
-    for bot in app.store.bots() {
-        sources.push((bot.id.clone(), dir(app).join(format!("{}.md", bot.id)), "project"));
-    }
-    for (scope, path, kind) in sources {
-        let Ok(text) = tokio::fs::read_to_string(&path).await else {
-            continue;
-        };
-        for line in text.lines().filter(|l| !l.trim().is_empty()) {
-            let (body, at) = old_line(line);
-            if body.is_empty() || body.starts_with('#') {
-                continue;
-            }
-            let fact = fact_from_text(&mut book, &scope, kind, &body, at.unwrap_or_else(now), "migrated");
-            book.facts.push(fact);
-        }
-        let mut aside = path.clone().into_os_string();
-        aside.push(".old");
-        let _ = tokio::fs::rename(&path, PathBuf::from(aside)).await;
-    }
-    for name in ["_shared.brief.md", "_shared.basis.md"] {
-        let _ = tokio::fs::remove_file(dir(app).join(name)).await;
-    }
-    book
-}
 
 /// Индекс папки памяти лежит рядом с ней, а не внутри: в Obsidian его не видно.
 fn index_path(app: &App) -> PathBuf {
@@ -289,17 +224,6 @@ fn index_path(app: &App) -> PathBuf {
 
 fn bot_refs(app: &App) -> Vec<vault::BotRef> {
     app.store.bots().into_iter().map(|b| vault::BotRef { id: b.id, name: b.name }).collect()
-}
-
-/// Память до папки Markdown: `facts.json`, а ещё раньше — строки в `memory/*.md`.
-async fn legacy(app: &App) -> Book {
-    match tokio::fs::read_to_string(book_path(app)).await {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-            eprintln!("[memory] facts.json не разобрался ({e}), переезжаю со старых файлов");
-            Book::default()
-        }),
-        Err(_) => migrate(app).await,
-    }
 }
 
 async fn read_vault(app: &App) -> Result<Option<Book>, String> {
@@ -399,26 +323,12 @@ async fn load_vault(app: &App) -> Book {
         eprintln!("[memory] память не прочиталась: {e}");
         Book { broken: true, ..Book::default() }
     };
+    // Папки памяти ещё нет — память пустая; появится при первой записи.
     match read_vault(app).await {
-        Ok(Some(book)) => return book,
-        Ok(None) => {}
-        Err(e) => return broken(e),
+        Ok(Some(book)) => book,
+        Ok(None) => Book::default(),
+        Err(e) => broken(e),
     }
-    // Переезд один раз, даже если первыми память читают сразу несколько ботов.
-    let _gate = MIGRATION.lock().await;
-    match read_vault(app).await {
-        Ok(Some(book)) => return book,
-        Ok(None) => {}
-        Err(e) => return broken(e),
-    }
-    let book = legacy(app).await;
-    if let Err(e) = save(app, &book).await {
-        return broken(e.to_string());
-    }
-    let mut aside = book_path(app).into_os_string();
-    aside.push(".old");
-    let _ = tokio::fs::rename(book_path(app), PathBuf::from(aside)).await;
-    book
 }
 
 static MIGRATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -1946,7 +1856,7 @@ pub async fn usage(app: &App, scope: &str) -> usize {
     scope_size(&load(app).await, scope)
 }
 
-/// После входа в аккаунт: в пустой общей памяти появляется, как зовут человека.
+/// После входа в аккаунт (`private/src/account.rs`): в пустой общей памяти появляется, как зовут человека.
 pub async fn seed_name(app: &App, name: &str) {
     let name = one_line(name);
     if name.is_empty() || name.contains('@') || chars(&name) > 60 {
@@ -1957,11 +1867,23 @@ pub async fn seed_name(app: &App, name: &str) {
     if book.facts.iter().any(|f| f.scope == SHARED) {
         return;
     }
-    let mut fact = fact_from_text(&mut book, SHARED, "user", &format!("Человека зовут {name}"), now(), "account");
-    fact.entities = vec![name.clone()];
+    book.next += 1;
+    let at = now();
+    let fact = Fact {
+        id: format!("m{}", book.next),
+        scope: SHARED.into(),
+        kind: "user".into(),
+        title: format!("Человека зовут {name}"),
+        entities: vec![name.clone()],
+        author: "account".into(),
+        created_at: at,
+        updated_at: at,
+        ..Fact::default()
+    };
     book.facts.push(fact.clone());
     let _ = commit(app, &book, json!({ "kind": "account" }), "add", "Имя из аккаунта — общая память", vec![(None, Some(fact))], json!({})).await;
 }
+
 
 // ---------------------------------------------------------------------------
 // Доктор памяти
@@ -2758,14 +2680,6 @@ mod tests {
         assert_eq!(out.learned, vec!["Свой личный — можно", "Общий — можно"]);
         assert_eq!(book.facts[6].title, "Чужой личный факт");
         assert_eq!((book.facts[1].title.as_str(), book.facts[1].body.as_str()), ("Любит кофе", ""));
-    }
-
-    #[test]
-    fn old_memory_lines_keep_their_dates() {
-        let (text, at) = old_line("- [2026-11-01 10:00] Любит   кофе");
-        assert_eq!(text, "Любит кофе");
-        assert!(at.is_some());
-        assert_eq!(old_line("просто строка").0, "просто строка");
     }
 
     fn learn_policy<'a>(said: &'a [String], forgotten: &'a [String]) -> Policy<'a> {

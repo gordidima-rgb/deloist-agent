@@ -806,51 +806,6 @@ async fn recall_walks_the_memory_graph() {
     assert_eq!(memory["facts"].as_array().unwrap().len(), 4);
 }
 
-// Старая память — строки в файлах — переезжает в факты при первом чтении.
-#[tokio::test(flavor = "multi_thread")]
-async fn old_line_memory_moves_into_facts() {
-    let dir = common::temp_data_dir("memory-migrate");
-    let mut first = Crew::start_at(dir.clone(), &[]).await;
-    first.keep_data();
-    let state = first.ok("GET", "/api/state", None).await;
-    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
-    drop(first);
-    std::fs::write(dir.join("memory").join(format!("{bot}.md")), "- [2026-11-01 10:00] Отчёт по пятницам\n- Шаблон в Excel\n").unwrap();
-    let crew = Crew::start_at(dir.clone(), &[]).await;
-    let own = crew.ok("GET", &format!("/api/bots/{bot}/memory"), None).await;
-    let titles: Vec<&str> = own["facts"].as_array().unwrap().iter().filter_map(|f| f["title"].as_str()).collect();
-    assert_eq!(titles, vec!["Отчёт по пятницам", "Шаблон в Excel"]);
-    assert_eq!(own["facts"][0]["kind"], "project");
-    assert!(dir.join("memory").join(format!("{bot}.md.old")).exists(), "старый файл отложен, а не стёрт");
-}
-
-// Память v1 (`facts.json`) переезжает в папку Markdown: по файлу на факт, сам файл откладывается.
-#[tokio::test(flavor = "multi_thread")]
-async fn facts_json_moves_into_markdown_files() {
-    let dir = common::temp_data_dir("memory-vault-migrate");
-    std::fs::create_dir_all(dir.join("memory")).unwrap();
-    let book = json!({ "next": 2, "facts": [
-        { "id": "m1", "scope": "shared", "kind": "user", "title": "Человека зовут Ваня", "entities": ["Ваня"], "links": ["m2"], "author": "human", "createdAt": 1, "updatedAt": 2 },
-        { "id": "m2", "scope": "shared", "kind": "reference", "title": "Кабинет Ozon: вход через Яндекс ID", "body": "Логин — рабочая почта", "author": "human", "createdAt": 3, "updatedAt": 4 },
-    ] });
-    std::fs::write(dir.join("memory").join("facts.json"), book.to_string()).unwrap();
-    let crew = Crew::start_at(dir.clone(), &[]).await;
-    let memory = crew.ok("GET", "/api/memory", None).await;
-    let facts = memory["facts"].as_array().unwrap();
-    assert_eq!(facts.len(), 2, "{memory}");
-    assert_eq!(facts[0]["links"], json!(["m2"]));
-    assert_eq!(facts[1]["body"], "Логин — рабочая почта");
-    let shared = dir.join("memory").join("shared");
-    assert!(shared.join("Человека зовут Ваня.md").exists());
-    let cabinet = std::fs::read_to_string(shared.join("Кабинет Ozon вход через Яндекс ID.md")).unwrap();
-    assert!(cabinet.starts_with("---\nid: m2\n") && cabinet.contains("\nЛогин — рабочая почта\n"), "{cabinet}");
-    assert!(dir.join("memory").join("facts.json.old").exists(), "старая книга отложена");
-    assert!(!dir.join("memory").join("facts.json").exists());
-    // Новый факт получает следующий номер, а не повторяет старый.
-    let added = crew.ok("POST", "/api/memory/facts", Some(json!({ "title": "Любит кофе" }))).await;
-    assert_eq!(added["fact"]["id"], "m3");
-}
-
 // Человек правит файл в Obsidian — боты видят правку, она в журнале и отменяется.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hand_edit_in_the_files_reaches_the_bots_and_can_be_undone() {
