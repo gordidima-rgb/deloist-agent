@@ -306,8 +306,14 @@ impl Ledger {
         })
     }
 
+    /// Расход ботов за сегодня для дневного лимита рутин. Служебная память (`_memory`: извлечение и разбор после
+    /// задачи) сюда не входит: её траты не должны останавливать рутины; в отчёте она видна отдельной строкой.
     pub fn tokens_today(&self) -> i64 {
-        self.usage.lock().unwrap().get(&today()).map_or(0, |bots| bots.values().map(|d| d.prompt + d.completion).sum())
+        self.usage
+            .lock()
+            .unwrap()
+            .get(&today())
+            .map_or(0, |bots| bots.iter().filter(|(id, _)| id.as_str() != crate::extract::LEDGER_ID).map(|(_, d)| d.prompt + d.completion).sum())
     }
 
     /// Для интерфейса: всего за сегодня, по ботам и доля кэша.
@@ -401,5 +407,22 @@ impl Ledger {
     pub fn tokens_in_month(&self, bot_id: &str, month: &str) -> i64 {
         let usage = self.usage.lock().unwrap();
         usage.iter().filter(|(day, _)| day.starts_with(month)).filter_map(|(_, bots)| bots.get(bot_id)).map(|d| d.prompt + d.completion).sum()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ledger;
+
+    #[tokio::test]
+    async fn memory_housekeeping_does_not_count_toward_the_daily_limit() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("test-tmp").join(crate::store::uid("ledger"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ledger = Ledger::open(dir.clone()).await;
+        ledger.add_tokens("bot_a", 100, 20, 0, false).await;
+        ledger.add_tokens(crate::extract::LEDGER_ID, 5_000, 500, 0, false).await;
+        assert_eq!(ledger.tokens_today(), 120);
+        assert_eq!(ledger.today_json()["tokens"], 5_620, "в отчёте служебная память видна");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
