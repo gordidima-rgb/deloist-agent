@@ -19,7 +19,17 @@
     onselect,
     onselectroom,
     onpin,
+    // Меню бота: кнопка «Настройки» в строке и правый щелчок. (id, { x, y, trigger }) — точка, где открыть.
+    onmenu,
   } = $props();
+
+  function openMenu(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    const trigger = event.type === 'contextmenu' ? null : event.currentTarget;
+    const box = trigger?.getBoundingClientRect();
+    onmenu?.(id, box ? { x: box.right, y: box.bottom, trigger } : { x: event.clientX, y: event.clientY, trigger: null });
+  }
 
   const RESERVE_KEY = 'deloist:sidebar-reserve-open';
   const ARCHIVE_KEY = 'deloist:sidebar-archive-open';
@@ -175,9 +185,23 @@
     active={bot.id === currentId}
     unread={bot.unread}
     onclick={() => onselect?.(bot.id)}
+    oncontextmenu={onmenu ? (event) => openMenu(event, bot.id) : undefined}
   >
     {#snippet avatar()}<span class="avatar sb-avatar" data-slot={slot} {@attach avatarOf(bot.id, slot)}></span>{/snippet}
     {#snippet context()}
+      {#if onmenu}
+        <button
+          type="button"
+          class="sb-pin sb-gear"
+          title={tr('Настройки бота')}
+          aria-label={tr('Настройки бота «{name}»', { name: bot.name })}
+          aria-haspopup="menu"
+          data-menu-trigger
+          onclick={(event) => openMenu(event, bot.id)}
+        >
+          <Icon name="gear-simple" size={15} />
+        </button>
+      {/if}
       <button
         type="button"
         class="sb-pin"
@@ -450,6 +474,8 @@
   .sb-pin:hover { background: var(--k-surface-3); color: var(--k-text); }
   .sb-pin:focus-visible { outline: none; box-shadow: var(--k-focus); }
   .sb-pin.is-on { opacity: 1; color: var(--k-brand-text); }
+  .sb-gear[aria-expanded='true'] { opacity: 1; background: var(--k-surface-3); color: var(--k-text); }
+  :global(body.side-collapsed) .sb-gear { display: none; }
 
   /* Узкая панель: только аватары, без линий и стрелок; закрытая команда остаётся закрытой. */
   :global(body.side-collapsed) .sb-group { margin-left: 0; border-left: 0; }

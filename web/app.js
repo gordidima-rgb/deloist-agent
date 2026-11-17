@@ -678,7 +678,7 @@ function renderSidebar() {
     }),
   };
   if (botListView) botListView.update(props);
-  else botListView = window.DeloistUI.mountBotList(list, { ...props, paint: paintSideAvatar, onselect: pickBot, onselectroom: pickRoom, onpin: pinBot });
+  else botListView = window.DeloistUI.mountBotList(list, { ...props, paint: paintSideAvatar, onselect: pickBot, onselectroom: pickRoom, onpin: pinBot, onmenu: openBotMenu });
   // Вид бота мог поменяться: строки Svelte живут дольше одной отрисовки, перерисовываем аватары на месте.
   setTimeout(() => {
     for (const el of $$('#bot-list .sb-row[data-id] .sb-avatar:not(.room-icon)')) {
@@ -769,6 +769,88 @@ async function pinBot(id, pinned) {
     await refreshState();
   } catch (err) {
     toast(err.message);
+  }
+}
+
+// Меню бота в списке: кнопка «Настройки» в строке и правый щелчок. Меню кита, у курсора или под кнопкой.
+let botMenu = null;
+
+function closeBotMenu(refocus = false) {
+  if (!botMenu) return;
+  const { view, pop, trigger } = botMenu;
+  botMenu = null;
+  view.destroy();
+  pop.remove();
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (refocus) trigger?.focus({ preventScroll: true });
+}
+
+function openBotMenu(id, { x, y, trigger }) {
+  const reopen = botMenu?.id === id && trigger && botMenu.trigger === trigger;
+  closeBotMenu();
+  if (reopen) return;
+  const bot = botById(id);
+  if (!bot) return;
+  const pop = document.createElement('div');
+  pop.className = 'bot-menu-pop';
+  document.body.append(pop);
+  trigger?.setAttribute('aria-expanded', 'true');
+  const view = window.DeloistUI.mountMenu(pop, {
+    items: [
+      { id: 'profile', label: tr('Настройки бота'), icon: 'gear-simple' },
+      { id: 'memory', label: tr('Память'), icon: 'brain-halves' },
+      { id: 'files', label: tr('Файлы'), icon: 'file-lines' },
+      { id: 'routines', label: tr('Рутины'), icon: 'repeat' },
+      { kind: 'sep' },
+      { id: 'pin', label: bot.pinned ? tr('Открепить') : tr('Закрепить'), icon: 'pin' },
+      { id: 'unread', label: S.unread.has(id) ? tr('Отметить прочитанным') : tr('Отметить непрочитанным'), icon: 'eye' },
+      { id: 'dock', label: bot.dock !== false ? tr('Убрать из дока') : tr('Показать в доке'), icon: 'dock-hide' },
+      { id: 'compact', label: tr('Сжать историю'), icon: 'compact' },
+      { kind: 'sep' },
+      { id: 'delete', label: tr('Удалить бота'), icon: 'trash', danger: true },
+    ],
+    label: tr('Бот «{name}»', { name: bot.name }),
+    onpick: (pick) => {
+      closeBotMenu();
+      botMenuPick(bot, pick);
+    },
+    onclose: (focus) => closeBotMenu(focus),
+  });
+  botMenu = { id, view, pop, trigger };
+  // Меню не уходит за край окна: сначала ставим, потом сдвигаем по своему размеру.
+  const box = pop.getBoundingClientRect();
+  const left = trigger ? x - box.width : x;
+  pop.style.left = `${Math.max(8, Math.min(left, innerWidth - box.width - 8))}px`;
+  pop.style.top = `${Math.max(8, Math.min(y + 4, innerHeight - box.height - 8))}px`;
+}
+
+async function botMenuPick(bot, pick) {
+  const id = bot.id;
+  if (['profile', 'memory', 'files', 'routines'].includes(pick)) {
+    if (S.currentId !== id || inRoom()) pickBot(id);
+    openDrawer(pick);
+    return;
+  }
+  if (pick === 'pin') return pinBot(id, !bot.pinned);
+  if (pick === 'unread') {
+    if (S.unread.has(id)) S.unread.delete(id);
+    else S.unread.add(id);
+    renderSidebar();
+    return;
+  }
+  if (pick === 'dock') return setDockBot(id, bot.dock === false);
+  if (pick === 'compact') return compactBot(id);
+  if (pick === 'delete') {
+    if (!confirm(tr('Удалить «{name}» вместе с чатом и памятью?', { name: bot.name }))) return;
+    try {
+      await api(`/api/bots/${id}`, { method: 'DELETE' });
+      const wasOpen = !inRoom() && S.currentId === id;
+      await refreshState();
+      if (wasOpen) showTeam();
+      toast(tr('Бот удалён'));
+    } catch (err) {
+      toast(err.message);
+    }
   }
 }
 

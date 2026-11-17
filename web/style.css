@@ -1524,6 +1524,8 @@ body.drawer-open #chat { margin-right: min(430px, 40vw); }
 /* Меню «+»: меню кита растёт из своей кнопки. */
 .new-pop { position: absolute; top: calc(100% - 4px); right: var(--space-3); z-index: 40; }
 .new-pop[hidden] { display: none; }
+/* Меню бота в списке: у курсора или под кнопкой «Настройки», поверх всего окна. */
+.bot-menu-pop { position: fixed; z-index: 60; }
 
 /* У группы нет своего браузера, а display у кнопки иначе пересиливает атрибут hidden. */
 #btn-browser[hidden] { display: none; }

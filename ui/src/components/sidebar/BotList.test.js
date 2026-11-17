@@ -66,6 +66,25 @@ describe('BotList', () => {
     expect(onselect).toHaveBeenCalledWith('a');
   });
 
+  it('settings button and right click open the bot menu without selecting the bot', () => {
+    const onmenu = vi.fn();
+    const onselect = vi.fn();
+    render({ bots: [bot('a')], onmenu, onselect });
+    const gear = host.querySelector('.sb-gear');
+    gear.click();
+    expect(onmenu).toHaveBeenLastCalledWith('a', expect.objectContaining({ trigger: gear }));
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 });
+    host.querySelector('.k-list-item__main').dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(onmenu).toHaveBeenLastCalledWith('a', { x: 40, y: 50, trigger: null });
+    expect(onselect).not.toHaveBeenCalled();
+  });
+
+  it('shows no settings button without a menu handler', () => {
+    render({ bots: [bot('a')] });
+    expect(host.querySelector('.sb-gear')).toBeNull();
+  });
+
   it('paints each bot avatar once through the callback', () => {
     const paint = vi.fn();
     render({ bots: [bot('a'), bot('b')], paint });
