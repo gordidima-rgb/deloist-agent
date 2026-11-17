@@ -779,6 +779,10 @@ fn room_messages(app: &App, room: &Room, bot: &Bot, history: &[Value], memory: &
         room.name,
         names.join(", ")
     ));
+    // Ведущему и оркестратору — кто есть кто в этой команде, с ролями.
+    if let Some(block) = crate::turn::team_roster_block(std::slice::from_ref(room), &members, bot) {
+        prompt.push(block);
+    }
     if !room.instructions.trim().is_empty() {
         prompt.push(format!("# Правила группы\n{}", room.instructions.trim()));
     }

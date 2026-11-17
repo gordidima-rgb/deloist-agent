@@ -946,6 +946,39 @@ pub(crate) struct PromptParts<'a> {
     pub quiet: bool,
     /// Режим «Разработка Deloist»: где checkout, что закрыто и документы проекта. Меняется редко.
     pub project: Option<&'a str>,
+    /// Состав команд, которые ведёт бот (ведущий или оркестратор): кто у него работает. Меняется редко.
+    pub team: Option<&'a str>,
+}
+
+const TEAM_ROSTER_LIMIT: usize = 2_000;
+
+/// Блок «Твоя команда» для ведущего и оркестратора: каждый участник с ролью. Без него оркестратор в личном
+/// чате видел только общий список специалистов программы, а в чате команды — одни имена (владелец 17.11.2026).
+pub(crate) fn team_roster_block(rooms: &[crate::store::Room], bots: &[Bot], bot: &Bot) -> Option<String> {
+    let mut out = String::new();
+    for room in rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| *id == bot.id)) {
+        if room.lead != bot.id && !bot.orchestrator {
+            continue;
+        }
+        let mut block = format!("# Твоя команда «{}» — ты её ведёшь", one_line(&room.name, 60));
+        for id in room.bot_ids.iter().filter(|id| **id != bot.id) {
+            let Some(member) = bots.iter().find(|b| b.id == *id) else { continue };
+            let role = one_line(&member.role, 90);
+            block.push_str(&format!("\n@{} — {}", one_line(&member.name, 60), if role.is_empty() { "участник" } else { &role }));
+        }
+        if block.lines().count() == 1 {
+            block.push_str("\nпока никого, кроме тебя");
+        }
+        if out.chars().count() + block.chars().count() > TEAM_ROSTER_LIMIT {
+            out.push_str("\n…остальные команды — через team_status");
+            break;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&block);
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// Пока тела навыков короче этого, они идут в промпт целиком; длиннее — только названия.
@@ -1100,6 +1133,9 @@ fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>
         .join("\n"),
     );
     if let Some(block) = parts.project {
+        lines.push(block.to_string());
+    }
+    if let Some(block) = parts.team {
         lines.push(block.to_string());
     }
     if parts.learning {
@@ -1709,6 +1745,7 @@ async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool,
     let summary = if delegated { None } else { app.store.thread_summary(Thread::Bot(&bot.id)).await };
     let project = crate::selfdev::prompt_block(&app.store, bot);
     let specialists = app.store.bots();
+    let team = team_roster_block(&app.store.rooms(), &specialists, bot);
     let lang = if settings.ui_lang == "en" { "en" } else { "ru" };
     let parts = PromptParts {
         profile: &profile,
@@ -1722,6 +1759,7 @@ async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool,
         unattended,
         quiet,
         project: project.as_deref(),
+        team: team.as_deref(),
     };
     build_model_messages(app, bot, &history, &parts)
 }
@@ -2986,6 +3024,23 @@ mod tests {
         assert!(time_context_due(None, now).is_some(), "первый ход без часов");
         assert!(time_context_due(Some(now - 60_000), now).is_none(), "минуту назад часы уже были");
         assert!(time_context_due(Some(now - super::time_context_every() - 1), now).is_some());
+    }
+
+    #[test]
+    fn the_lead_sees_its_team_with_roles() {
+        let bot = |id: &str, name: &str, role: &str| -> crate::store::Bot { serde_json::from_value(json!({ "id": id, "name": name, "role": role })).unwrap() };
+        let (lead, artist, marketer, stranger) = (bot("l", "Оркестратор", "ведёт"), bot("a", "Художник", "рисует"), bot("m", "Маркетолог", "растит X"), bot("s", "Чужой", "другое"));
+        let bots = vec![lead.clone(), artist.clone(), marketer.clone(), stranger.clone()];
+        let room = crate::store::Room { id: "r".into(), name: "Лента X".into(), bot_ids: vec!["l".into(), "a".into(), "m".into()], lead: "l".into(), ..Default::default() };
+        let block = super::team_roster_block(std::slice::from_ref(&room), &bots, &lead).unwrap();
+        assert!(block.contains("«Лента X»") && block.contains("@Художник — рисует") && block.contains("@Маркетолог — растит X"), "{block}");
+        assert!(!block.contains("Чужой") && !block.contains("@Оркестратор"), "{block}");
+        assert!(super::team_roster_block(std::slice::from_ref(&room), &bots, &artist).is_none(), "рядовой участник блока не получает");
+        let mut orchestrator = artist.clone();
+        orchestrator.orchestrator = true;
+        assert!(super::team_roster_block(std::slice::from_ref(&room), &bots, &orchestrator).is_some(), "оркестратор получает, даже если ведущий другой");
+        let archived = crate::store::Room { archived: true, ..room };
+        assert!(super::team_roster_block(&[archived], &bots, &lead).is_none());
     }
 
     #[test]
