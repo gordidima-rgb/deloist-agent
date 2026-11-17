@@ -11,8 +11,8 @@
       },
       "tier": "verified",
       "version": "1.0.0",
-      "path": "agents/research-desk.json",
-      "hash": "1881b5989143b26d8f555b42ccb9db96299d92f06b3f8bb14ad78321ca493aa3"
+      "path": "agents/agent.research-desk.json",
+      "hash": "5495c632e760e18247068bfb85586f30905c38a467209304e883b3c4274c8136"
     },
     {
       "id": "agent.rust-developer",
@@ -37,7 +37,7 @@
       },
       "tier": "verified",
       "version": "1.0.0",
-      "path": "apps/gosuslugi.json",
+      "path": "apps/app.gosuslugi.json",
       "hash": "109fe1d5a1f7d70e5f8a23e178ed71c29d398f0b9e4dd9bdcae0ceb8428be12a"
     },
     {
@@ -50,8 +50,8 @@
       },
       "tier": "verified",
       "version": "1.0.0",
-      "path": "apps/yookassa.json",
-      "hash": "2e7aa95e9cb79a8e93a2616568c190524b5c3d6faae801a4168520d14266f4e1"
+      "path": "apps/app.yookassa.json",
+      "hash": "dbeab9e8342b5b123ecffd927b0e05fb8a7bb0111d08a6250012fa92611fded7"
     },
     {
       "id": "skill.check-a-claim",

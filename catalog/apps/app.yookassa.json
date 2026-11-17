@@ -16,10 +16,10 @@
   },
   "icon": "emoji:💳",
   "source": {
-    "name": "YooKassa",
+    "name": "Deloist",
     "url": "https://yookassa.ru/developers/using-api/mcp",
-    "license": "LicenseRef-YooKassa-Terms",
-    "notice": "Hosted service by YooMoney; the manifest is by Deloist",
+    "license": "MIT",
+    "notice": "Copyright (c) 2026 Deloist; the server is a hosted service by YooMoney",
     "modified": false
   },
   "app": {

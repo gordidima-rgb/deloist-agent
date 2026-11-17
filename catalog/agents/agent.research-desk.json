@@ -17,7 +17,9 @@
   "icon": "emoji:🧭",
   "source": {
     "name": "CopilotKit/OpenBot",
-    "url": "https://github.com/CopilotKit/OpenBot/blob/6149031/examples/fintech/catalog/research-desk.yaml",
+    "url": "https://github.com/CopilotKit/OpenBot",
+    "file": "examples/fintech/catalog/research-desk.yaml",
+    "commit": "6149031275cda6b71764dba57558e79ad21ef2e2",
     "license": "MIT",
     "notice": "Copyright (c) 2026 CopilotKit",
     "modified": true
