@@ -11,6 +11,8 @@ with a shared folder and browser; routines and tasks repeat like in the Deloist 
 
 ### Team
 
+- **Team list on one level.** In the sidebar a team's bots sit in one row under it, the lead first with a small
+  crown.
 - **One bot, one team.** A bot can't be added to a second team. A bot that was in several teams stays, after the
   update, in the one it leads (among equals, the larger one); the others get a line about the move. History search,
   team memory, folders and the roster see only that team. «Bring in a specialist» offers specialists of the own team
