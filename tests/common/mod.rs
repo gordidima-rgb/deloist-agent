@@ -125,9 +125,19 @@ impl Crew {
         let key = SigningKey::from_bytes(&seed);
         let pubkey = hex(key.verifying_key().as_bytes());
         // Вне Windows облако без ключа шифрования секретов не стартует (на Windows ключ даёт DPAPI); свой ключ теста важнее.
-        let mut master = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut master);
-        let master = hex(&master);
+        let master = env.iter().find(|(k, _)| *k == "CREW_SECRETS_KEY").map(|(_, v)| v.to_string()).unwrap_or_else(|| {
+            let mut bytes = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            hex(&bytes)
+        });
+        // `read_secrets` ищет ключ в файле рядом с папкой данных; облачный сервер берёт его из окружения.
+        #[cfg(not(windows))]
+        {
+            let bytes: Vec<u8> = (0..32).map(|i| u8::from_str_radix(&master[2 * i..2 * i + 2], 16).unwrap()).collect();
+            let file = key_file_for(&data_dir);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, bytes).unwrap();
+        }
         let mut vars: Vec<(&str, &str)> =
             vec![("CREW_GATEWAY_PUBKEY", pubkey.as_str()), ("CREW_USER_ID", USER), ("CREW_PUBLIC_ORIGIN", ORIGIN), ("CREW_SECRETS_KEY", master.as_str())];
         vars.extend(env.iter().copied());

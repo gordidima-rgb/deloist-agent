@@ -342,7 +342,7 @@ async fn files_are_copied_only_from_the_own_folder_under_the_rules() {
             ("share_file", json!({ "bot": "Бета", "path": "report.txt" })),
             ("share_file", json!({ "bot": "Бета", "path": absolute })),
             ("share_file", json!({ "bot": "Бета", "path": ".env" })),
-            ("share_file", json!({ "bot": "Бета", "path": "..\\other\\x.txt" })),
+            ("share_file", json!({ "bot": "Бета", "path": if cfg!(windows) { "..\\other\\x.txt" } else { "../other/x.txt" } })),
             ("share_file", json!({ "bot": "Бета", "path": "real/../../escape.txt" })),
             ("share_file", json!({ "bot": "Бета", "path": outside })),
             ("share_file", json!({ "bot": "Бета", "path": "big.bin" })),
