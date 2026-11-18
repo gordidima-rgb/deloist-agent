@@ -1272,6 +1272,8 @@ pub struct Store {
     /// `secrets.json` не удалось прочитать: в памяти пусто, запись ключей отказывает,
     /// пока файл не прочитается при следующем запуске.
     secrets_unavailable: std::sync::atomic::AtomicBool,
+    /// Команда → состав, для которого общая папка уже собрана (`build_team_folders`).
+    team_built: Mutex<HashMap<String, Vec<String>>>,
 }
 
 /// Временный файл рядом и замена: читатель видит либо старый файл, либо новый целиком.
@@ -1539,11 +1541,13 @@ impl Store {
             write_gate: tokio::sync::Mutex::new(()),
             secrets_gate: tokio::sync::Mutex::new(()),
             secrets_unavailable: std::sync::atomic::AtomicBool::new(secrets_unavailable),
+            team_built: Mutex::new(HashMap::new()),
         };
         if must_write {
             store.persist().await?;
         }
         store.migrate_one_bot_one_team().await;
+        store.build_team_folders().await;
         Ok(store)
     }
 
@@ -1578,7 +1582,9 @@ impl Store {
         let target = self.data_dir.join("state.json");
         let tmp = self.data_dir.join("state.json.tmp");
         tokio::fs::write(&tmp, text).await?;
-        tokio::fs::rename(&tmp, &target).await
+        tokio::fs::rename(&tmp, &target).await?;
+        self.build_team_folders().await;
+        Ok(())
     }
 
     /// `secrets.json` пишется только зашифрованным (DPAPI текущего пользователя Windows) и целиком
@@ -2610,43 +2616,56 @@ impl Store {
         self.data_dir.join("workspaces").join(bot_id)
     }
 
-    /// Общая папка команды. Файлы каждого участника попадают в неё один раз, при первом обращении после его
-    /// вступления: копией небольшого файла, без перезаписи и без жёстких ссылок (файл с несколькими ссылками
-    /// `tools::flagged_target` считает подозрительным, и каждая запись в него шла бы с карточкой).
+    /// Общая папка команды: только путь, без работы с диском. Папку и файлы участников готовит
+    /// `build_team_folders` при каждом изменении состава (в `persist`) и при запуске.
     fn team_workspace(&self, room: &Room) -> PathBuf {
-        static BUILD: Mutex<()> = Mutex::new(());
-        let root = self.data_dir.join("workspaces");
-        let dir = root.join(format!("team_{}", room.id));
-        // Участник попадает в список один раз: вышел и вернулся — файлы второй раз не переносятся.
-        let marker = root.join(format!("team_{}.members", room.id));
-        let merged = |text: &str| room.bot_ids.iter().all(|id| text.lines().any(|l| l == id));
-        if dir.is_dir() && merged(&std::fs::read_to_string(&marker).unwrap_or_default()) {
-            return dir;
+        self.data_dir.join("workspaces").join(format!("team_{}", room.id))
+    }
+
+    /// Собирает общие папки команд: файлы новых участников попадают в папку один раз (копией небольшого файла,
+    /// без перезаписи и без жёстких ссылок: файл с несколькими ссылками `tools::flagged_target` считает подозрительным).
+    /// Тяжёлая работа с диском идёт в отдельном потоке, и только если состав команды изменился.
+    pub async fn build_team_folders(&self) {
+        let jobs: Vec<(Room, Vec<(String, String)>)> = {
+            let state = self.state.lock().unwrap();
+            let mut built = self.team_built.lock().unwrap();
+            state
+                .rooms
+                .iter()
+                .filter(|r| !r.archived)
+                .filter_map(|r| {
+                    if built.get(&r.id) == Some(&r.bot_ids) {
+                        return None;
+                    }
+                    built.insert(r.id.clone(), r.bot_ids.clone());
+                    let names = r.bot_ids.iter().map(|id| (id.clone(), state.bots.iter().find(|b| &b.id == id).map(|b| b.name.clone()).unwrap_or_default())).collect();
+                    Some((r.clone(), names))
+                })
+                .collect()
+        };
+        for (room, names) in jobs {
+            let root = self.data_dir.join("workspaces");
+            let _ = tokio::task::spawn_blocking(move || build_team_folder(&root, &room, &names)).await;
         }
-        let _build = BUILD.lock().unwrap_or_else(|e| e.into_inner());
-        let mut done = std::fs::read_to_string(&marker).unwrap_or_default();
-        let _ = std::fs::create_dir_all(&dir);
-        let fresh: Vec<&String> = room.bot_ids.iter().filter(|id| !done.lines().any(|l| l == id.as_str())).collect();
-        for member in fresh {
-            let name = self.bot(member).map(|b| b.name).unwrap_or_default();
-            let tag: String = name.chars().filter(|c| c.is_alphanumeric()).take(16).collect();
-            merge_files(&self.personal_workspace(member), &dir, Path::new(""), &tag, &mut MergeBudget::default());
-            done.push_str(&format!("{member}\n"));
-        }
-        let _ = std::fs::write(&marker, done);
-        dir
     }
 
     /// Владелец браузера команды: бот, чей профиль держит общий браузер (там уже есть входы в кабинеты).
     /// Выбор запоминается в `browser/team_<id>.owner`, чтобы не менялся от того, кто сегодня активнее.
     /// Входы принадлежат команде: вышедший участник возвращается к своему профилю и общих входов не уносит.
     pub fn browser_owner(&self, bot_id: &str) -> String {
-        let Some(room) = self.team_of(bot_id) else { return bot_id.to_string() };
+        match self.team_of(bot_id) {
+            Some(room) => self.team_browser_owner(&room).unwrap_or_else(|| bot_id.to_string()),
+            None => bot_id.to_string(),
+        }
+    }
+
+    /// Владелец браузера команды. Вышел из команды (или удалён) — выбирается новый из оставшихся, файл переписывается.
+    pub fn team_browser_owner(&self, room: &Room) -> Option<String> {
         let marker = self.data_dir.join("browser").join(format!("team_{}.owner", room.id));
         if let Ok(text) = std::fs::read_to_string(&marker) {
             let id = text.trim();
             if room.bot_ids.iter().any(|b| b == id) && self.bot(id).is_some() {
-                return id.to_string();
+                return Some(id.to_string());
             }
         }
         // Первым берём профиль, которым пользовались последним: в нём свежие входы.
@@ -2654,16 +2673,12 @@ impl Store {
             .bot_ids
             .iter()
             .filter(|id| self.bot(id).is_some())
-            .filter_map(|id| {
-                let touched = std::fs::metadata(self.browser_profile(id).join("Default")).ok()?.modified().ok()?;
-                Some((touched, id.clone()))
-            })
+            .map(|id| (std::fs::metadata(self.browser_profile(id).join("Default")).and_then(|m| m.modified()).ok(), id.clone()))
             .max_by_key(|(touched, _)| *touched)
-            .map(|(_, id)| id)
-            .unwrap_or_else(|| bot_id.to_string());
+            .map(|(_, id)| id)?;
         let _ = std::fs::create_dir_all(self.data_dir.join("browser"));
         let _ = std::fs::write(&marker, &pick);
-        pick
+        Some(pick)
     }
 
     /// Путь внутри воркспейса бота. Всё, что пытается выйти наружу, — ошибка.
@@ -4435,6 +4450,14 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
+    impl Store {
+        /// Тест подложил файлы после запуска: забываем собранное и собираем снова.
+        async fn build_team_folders_again(&self) {
+            self.team_built.lock().unwrap().clear();
+            self.build_team_folders().await;
+        }
+    }
+
     async fn team_store(name: &str) -> (Store, PathBuf) {
         let dir = temp_dir(name);
         std::fs::create_dir_all(&dir).unwrap();
@@ -4462,6 +4485,13 @@ mod tests {
         std::fs::write(ws.join("b2").join("same.csv"), "from b2").unwrap();
         std::fs::write(ws.join("b2").join("dup.txt"), "d").unwrap();
         std::fs::write(ws.join("b1").join("dup.txt"), "d").unwrap();
+        // Собранные программой файлы (метка в начале) и временные файлы записи в общую папку не идут.
+        std::fs::write(ws.join("b1").join("AGENTS.md"), format!("{}\nСекрет-личной-памяти", crate::agents_md::MARK)).unwrap();
+        std::fs::write(ws.join("b1").join("CLAUDE.md"), "x").unwrap();
+        std::fs::write(ws.join("b1").join(".memory.md.tmp"), "x").unwrap();
+        std::fs::write(ws.join("b1").join("sub").join("copy.md"), format!("{}\nСекрет-личной-памяти", crate::agents_md::MARK)).unwrap();
+        std::fs::remove_file(ws.join("team_r1.members")).unwrap();
+        store.build_team_folders_again().await;
         let team = store.workspace("b1");
         assert_eq!(team, ws.join("team_r1"));
         assert_eq!(store.workspace("b2"), team, "оба участника в одной папке");
@@ -4469,15 +4499,63 @@ mod tests {
         assert_eq!(std::fs::read_to_string(team.join("same.csv")).unwrap(), "from b1");
         assert_eq!(std::fs::read_to_string(team.join("same__Редактор.csv")).unwrap(), "from b2");
         assert!(team.join("sub").join("x.txt").is_file() && team.join("dup.txt").is_file());
-        for private in ["memory.md", "brain.md", "run.bat"] {
+        for private in ["memory.md", "brain.md", "run.bat", "AGENTS.md", "CLAUDE.md", ".memory.md.tmp", "sub/copy.md"] {
             assert!(!team.join(private).exists(), "{private} в общую папку не идёт");
         }
         assert!(ws.join("b1").join("memory.md").is_file(), "личная папка осталась как была");
         // Повторный вызов ничего не меняет, а файл, дописанный в команде, не затирается.
         std::fs::write(team.join("same.csv"), "edited").unwrap();
-        let _ = store.workspace("b2");
+        store.build_team_folders_again().await;
         assert_eq!(std::fs::read_to_string(team.join("same.csv")).unwrap(), "edited");
         assert_eq!(std::fs::read_dir(&team).unwrap().count(), 4, "same, same__Редактор, sub, dup");
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn building_the_team_folder_does_not_follow_a_link_in_the_destination_or_go_deeper_than_the_limit() {
+        let (store, dir) = team_store("team-ws-links").await;
+        let ws = dir.join("workspaces");
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(ws.join("b1").join("sub")).unwrap();
+        std::fs::write(ws.join("b1").join("sub").join("x.txt"), "x").unwrap();
+        let mut deep = ws.join("b1");
+        for i in 0..25 {
+            deep.push(format!("d{i}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.txt"), "d").unwrap();
+        // В общей папке уже лежит junction с именем папки участника: он ведёт наружу.
+        let team = ws.join("team_r1");
+        let made = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(team.join("sub")).arg(&outside).output().map(|o| o.status.success()).unwrap_or(false);
+        std::fs::remove_file(ws.join("team_r1.members")).unwrap();
+        store.build_team_folders_again().await;
+        if made {
+            assert!(std::fs::read_dir(&outside).unwrap().next().is_none(), "через junction ничего не записано наружу");
+            let _ = std::process::Command::new("cmd").args(["/c", "rmdir"]).arg(team.join("sub")).output();
+        }
+        let mut seen = team.clone();
+        let mut levels = 0;
+        while let Some(next) = std::fs::read_dir(&seen).ok().and_then(|mut d| d.find_map(|e| e.ok()).filter(|e| e.path().is_dir()).map(|e| e.path())) {
+            seen = next;
+            levels += 1;
+        }
+        assert!(levels <= MERGE_DEPTH, "глубже {MERGE_DEPTH} уровней не переносится: {levels}");
+        assert!(!seen.join("deep.txt").exists());
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn when_the_browser_owner_leaves_the_team_another_member_takes_over_and_the_file_is_rewritten() {
+        let (store, dir) = team_store("team-owner-leaves").await;
+        std::fs::create_dir_all(store.browser_profile("b1").join("Default")).unwrap();
+        let room = store.room("r1").unwrap();
+        assert_eq!(store.team_browser_owner(&room).as_deref(), Some("b1"));
+        store.update_room("r1", &json!({ "botIds": ["b2"] })).await.unwrap();
+        let room = store.room("r1").unwrap();
+        assert_eq!(store.team_browser_owner(&room).as_deref(), Some("b2"), "владелец вышел: общий браузер у оставшегося");
+        assert_eq!(std::fs::read_to_string(dir.join("browser").join("team_r1.owner")).unwrap(), "b2");
+        assert_eq!(store.browser_owner("b1"), "b1", "вышедший снова со своим профилем");
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -4485,6 +4563,7 @@ mod tests {
     async fn a_member_leaving_the_team_returns_to_the_personal_folder_and_a_newcomer_adds_files() {
         let (store, dir) = team_store("team-ws-leave").await;
         let team = store.workspace("b2");
+        assert!(team.is_dir(), "папка собрана при запуске");
         std::fs::write(team.join("made-in-team.md"), "a").unwrap();
         store.update_room("r1", &json!({ "botIds": ["b1"] })).await.unwrap();
         assert_eq!(store.workspace("b2"), dir.join("workspaces").join("b2"));
@@ -4518,34 +4597,77 @@ fn valid_id(s: &str, max: usize, wide: bool) -> bool {
         && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-' || (wide && (c.is_ascii_uppercase() || c == '.')))
 }
 
-/// Сколько личной папки одного участника переносится в общую: файлов и байт.
+/// Готовит общую папку команды: файлы участников, которых в ней ещё нет (список — `team_<id>.members` рядом с папкой).
+/// Участник попадает в список один раз: вышел и вернулся — файлы второй раз не переносятся.
+fn build_team_folder(root: &Path, room: &Room, names: &[(String, String)]) {
+    static BUILD: Mutex<()> = Mutex::new(());
+    let _build = BUILD.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = root.join(format!("team_{}", room.id));
+    let marker = root.join(format!("team_{}.members", room.id));
+    let mut done = std::fs::read_to_string(&marker).unwrap_or_default();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let Ok(team_root) = std::fs::canonicalize(&dir) else { return };
+    let fresh: Vec<&(String, String)> = names.iter().filter(|(id, _)| !done.lines().any(|l| l == id)).collect();
+    for (member, name) in fresh {
+        let tag: String = name.chars().filter(|c| c.is_alphanumeric()).take(16).collect();
+        merge_files(&root.join(member), &dir, &team_root, Path::new(""), &tag, &mut MergeBudget::default());
+        done.push_str(&format!("{member}\n"));
+    }
+    let _ = std::fs::write(&marker, done);
+}
+
+/// Сколько личной папки одного участника переносится в общую: записей (файлов и папок), байт и глубина.
 struct MergeBudget {
-    files: usize,
+    entries: usize,
     bytes: u64,
 }
 
 impl Default for MergeBudget {
     fn default() -> Self {
-        Self { files: 5000, bytes: 500 * 1024 * 1024 }
+        Self { entries: 5000, bytes: 500 * 1024 * 1024 }
     }
 }
 
 const MERGE_FILE_LIMIT: u64 = 20 * 1024 * 1024;
+const MERGE_DEPTH: usize = 20;
 
-/// Файлы, которые у бота остаются своими и в общую папку не идут: память, правила от человека, старый MAIN.md.
+/// Файлы, которые у бота остаются своими и в общую папку не идут: память, правила от человека, старый MAIN.md,
+/// собранные программой `AGENTS.md` и `CLAUDE.md` (в команде их пишет программа сама), временные файлы записи
+/// с точкой в начале имени. Только в корне личной папки.
 fn private_file(rel: &Path, name: &str) -> bool {
-    let name = name.to_lowercase();
-    rel.as_os_str().is_empty() && [crate::memory::bot_file::FILE, crate::brain::FILE, crate::turn::MAIN_FILE].iter().any(|f| name.starts_with(&f.to_lowercase()))
+    let name = name.trim_start_matches('.').to_lowercase();
+    let private = [crate::memory::bot_file::FILE, crate::brain::FILE, crate::turn::MAIN_FILE, "AGENTS.md", "CLAUDE.md"];
+    rel.as_os_str().is_empty() && private.iter().any(|f| name.starts_with(&f.to_lowercase()))
+}
+
+/// Путь внутри общей папки, куда можно писать: ни один существующий кусок не ссылка и не junction,
+/// настоящий родитель лежит внутри папки команды.
+fn merge_dest(team_root: &Path, to_root: &Path, rel: &Path) -> Option<PathBuf> {
+    let mut walk = to_root.to_path_buf();
+    for part in rel.components() {
+        walk.push(part);
+        if crate::attach::is_link(&walk) {
+            return None;
+        }
+    }
+    let real_parent = std::fs::canonicalize(walk.parent()?).ok()?;
+    real_parent.starts_with(team_root).then_some(walk)
 }
 
 /// Копирует файлы личной папки бота в общую папку команды. Существующее имя не трогается: файл с тем же именем
-/// и другим содержимым получает метку с именем бота (одинаковый — пропускается). Ссылки, junction, личные файлы
-/// (`private_file`) и всё, что `tools::flagged_target` считает запускаемым или многоссылочным, не переносятся.
-/// Личная папка остаётся как была.
-fn merge_files(from: &Path, to_root: &Path, rel: &Path, tag: &str, budget: &mut MergeBudget) {
+/// и другим содержимым получает метку с именем бота (одинаковый — пропускается). Ссылки и junction (в источнике и
+/// в назначении), личные файлы (`private_file`), файлы, начинающиеся с метки сборки Deloist, и всё, что
+/// `tools::flagged_target` считает запускаемым или многоссылочным, не переносятся. Источник открывается один раз,
+/// и копия идёт из этого же открытого файла. Личная папка остаётся как была.
+fn merge_files(from: &Path, to_root: &Path, team_root: &Path, rel: &Path, tag: &str, budget: &mut MergeBudget) {
+    if rel.components().count() >= MERGE_DEPTH {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(from.join(rel)) else { return };
     for entry in entries.flatten() {
-        if budget.files == 0 || budget.bytes == 0 {
+        if budget.entries == 0 || budget.bytes == 0 {
             return;
         }
         let name = entry.file_name();
@@ -4556,28 +4678,60 @@ fn merge_files(from: &Path, to_root: &Path, rel: &Path, tag: &str, budget: &mut 
         }
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
-            let _ = std::fs::create_dir_all(to_root.join(&rel_path));
-            merge_files(from, to_root, &rel_path, tag, budget);
+            let Some(dest) = merge_dest(team_root, to_root, &rel_path) else { continue };
+            if (dest.is_dir() || std::fs::create_dir(&dest).is_ok()) && !crate::attach::is_link(&dest) {
+                budget.entries -= 1;
+                merge_files(from, to_root, team_root, &rel_path, tag, budget);
+            }
             continue;
         }
         if !meta.is_file() || meta.len() > MERGE_FILE_LIMIT || crate::tools::flagged_target(&source) {
             continue;
         }
-        let mut target = to_root.join(&rel_path);
-        if target.exists() {
-            if std::fs::read(&target).ok() == std::fs::read(&source).ok() {
+        let Some(mut target) = merge_dest(team_root, to_root, &rel_path) else { continue };
+        let Ok(mut file) = std::fs::File::open(&source) else { continue };
+        if !file.metadata().is_ok_and(|m| m.is_file()) || starts_with_mark(&mut file) {
+            continue;
+        }
+        if std::fs::symlink_metadata(&target).is_ok() {
+            if same_content(&mut file, &target) {
                 continue;
             }
             let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             let ext = Path::new(&name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
             target = to_root.join(rel).join(format!("{stem}__{tag}{ext}"));
-            if target.exists() {
+            if merge_dest(team_root, to_root, &rel.join(target.file_name().unwrap_or_default())).is_none() {
                 continue;
             }
         }
-        if std::fs::copy(&source, &target).is_ok() {
-            budget.files -= 1;
+        // `create_new`: существующее имя (в том числе ссылку) не открываем и не перезаписываем.
+        let Ok(mut out) = std::fs::OpenOptions::new().write(true).create_new(true).open(&target) else { continue };
+        use std::io::{Read as _, Seek as _};
+        if file.rewind().is_ok() && std::io::copy(&mut file.by_ref().take(MERGE_FILE_LIMIT), &mut out).is_ok() {
+            budget.entries -= 1;
             budget.bytes = budget.bytes.saturating_sub(meta.len());
         }
     }
+}
+
+/// Файл начинается с метки «собрано Deloist» (`agents_md::MARK`): такие файлы пишет программа для одного бота.
+fn starts_with_mark(file: &mut std::fs::File) -> bool {
+    use std::io::{Read as _, Seek as _};
+    let mark = crate::agents_md::MARK.as_bytes();
+    let mut head = vec![0u8; mark.len()];
+    let found = file.read_exact(&mut head).is_ok() && head == mark;
+    let _ = file.rewind();
+    found
+}
+
+/// Содержимое открытого файла совпадает с файлом `target` (обычным, не ссылкой).
+fn same_content(file: &mut std::fs::File, target: &Path) -> bool {
+    use std::io::{Read as _, Seek as _};
+    if crate::attach::is_link(target) {
+        return false;
+    }
+    let (mut mine, _) = (Vec::new(), file.rewind());
+    let read = file.by_ref().take(MERGE_FILE_LIMIT).read_to_end(&mut mine).is_ok();
+    let _ = file.rewind();
+    read && std::fs::read(target).is_ok_and(|theirs| theirs == mine)
 }
