@@ -586,10 +586,10 @@ async fn room_turn(s: &Setup, room: &str, text: &str) -> String {
     answer.and_then(|a| a["text"].as_str().map(str::to_string)).unwrap_or_default()
 }
 
-async fn new_room(s: &Setup, name: &str, instructions: &str) -> String {
+async fn new_room(s: &Setup, name: &str, instructions: &str, bot: &str) -> String {
     let room = s
         .crew
-        .ok("POST", "/api/rooms", Some(json!({ "name": name, "instructions": instructions, "botIds": [s.bot], "lead": s.bot, "mode": "lead" })))
+        .ok("POST", "/api/rooms", Some(json!({ "name": name, "instructions": instructions, "botIds": [bot], "lead": bot, "mode": "lead" })))
         .await;
     room["room"]["id"].as_str().unwrap().to_string()
 }
@@ -606,8 +606,11 @@ fn prompts_of(s: &Setup, session: &str) -> Vec<String> {
 #[tokio::test]
 async fn each_team_and_the_personal_chat_get_their_own_agent_session() {
     let s = Setup::new("acp-thread-sessions", json!({}), "ask").await;
-    let alpha = new_room(&s, "Альфа", "МЕТКА-АЛЬФА-ПРАВИЛО").await;
-    let beta = new_room(&s, "Бета", "МЕТКА-БЕТА-ПРАВИЛО").await;
+    // Бот состоит ровно в одной команде: у второй команды свой бот.
+    let second = s.crew.ok("POST", "/api/bots", Some(json!({ "name": "Второй", "role": "р" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    s.crew.ok("PATCH", &format!("/api/bots/{second}"), Some(json!({ "approval": "ask" }))).await;
+    let alpha = new_room(&s, "Альфа", "МЕТКА-АЛЬФА-ПРАВИЛО", &s.bot).await;
+    let beta = new_room(&s, "Бета", "МЕТКА-БЕТА-ПРАВИЛО", &second).await;
 
     let (_, personal) = s.turn("личное: секрет-личный").await;
     let a1 = room_turn(&s, &alpha, "в альфе: секрет-альфа").await;
@@ -622,9 +625,10 @@ async fn each_team_and_the_personal_chat_get_their_own_agent_session() {
     assert_ne!(sa, sb, "две команды делят сессию");
     assert_eq!(sa, session_of(&a2), "вторая реплика в той же команде не продолжила её сессию");
     assert_eq!(sp, session_of(&personal2), "личный чат потерял свою сессию");
-    // Один процесс агента на бота, три сессии.
-    assert_eq!(pid_of(&personal), pid_of(&b1));
-    assert_eq!(s.count("initialize"), 1);
+    // Один процесс агента на бота: личный чат и команда первого бота делят процесс, второй бот — свой.
+    assert_eq!(pid_of(&personal), pid_of(&a1));
+    assert_ne!(pid_of(&personal), pid_of(&b1));
+    assert_eq!(s.count("initialize"), 2);
     assert_eq!(s.count("session/new"), 3);
 
     // Каждая сессия получила свой текст и ничего чужого.

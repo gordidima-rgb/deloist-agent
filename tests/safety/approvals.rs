@@ -539,6 +539,11 @@ fn plain(path: &std::path::Path) -> String {
     std::fs::canonicalize(path).unwrap().display().to_string().trim_start_matches(r"\\?\").to_string()
 }
 
+/// Папка файлов бота в команде: общая `workspaces/team_<комната>`, а не личная `workspaces/<бот>`.
+fn team_workspace(crew: &Crew, room: &str) -> std::path::PathBuf {
+    crew.data_dir.join("workspaces").join(format!("team_{room}"))
+}
+
 async fn make_team(crew: &Crew, members: &[&str], folder: &std::path::Path) -> String {
     let room = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Редакция", "botIds": members }))).await["room"]["id"].as_str().unwrap().to_string();
     crew.ok("PATCH", &format!("/api/rooms/{room}"), Some(json!({ "folders": [plain(folder)] }))).await;
@@ -890,11 +895,11 @@ fn q(script: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn file_writes_guard_git_autorun_and_hard_links() {
     let (crew, fake, bot) = setup("ap-write-guard", &[]).await;
-    let ws = crew.data_dir.join("workspaces").join(&bot);
-    std::fs::create_dir_all(ws.join(".git")).unwrap();
     let dir = outside("write-guard");
     let team = dir.join("a");
-    make_team(&crew, &[bot.as_str()], &team).await;
+    let room = make_team(&crew, &[bot.as_str()], &team).await;
+    let ws = team_workspace(&crew, &room);
+    std::fs::create_dir_all(ws.join(".git")).unwrap();
     set_mode(&crew, &bot, "auto").await;
     for path in [".git/HEAD".to_string(), ws.join(".git/HEAD").to_string_lossy().to_string(), team.join(".git/HEAD").to_string_lossy().to_string(), ".mcp.json".to_string()] {
         let cards = turn_calls(&crew, &fake, &bot, vec![tool("write_file", json!({"path":path,"content":"x"}))]).await;
@@ -1153,14 +1158,14 @@ async fn invisible_and_direction_characters_are_not_shown_and_an_unparsed_comman
 #[tokio::test(flavor = "multi_thread")]
 async fn copying_or_moving_into_a_guarded_folder_asks_for_every_pair() {
     let (crew, fake, bot) = setup("ap-move-guard", &[]).await;
-    let ws = crew.data_dir.join("workspaces").join(&bot);
-    for dir in [".claude", ".cargo", ".vscode", ".git/hooks", "tools"] {
-        std::fs::create_dir_all(ws.join(dir.replace('/', "\\"))).unwrap();
-    }
     let dir = outside("move-guard");
     let team = dir.join("a");
     std::fs::create_dir_all(team.join("tools")).unwrap();
-    make_team(&crew, &[bot.as_str()], &team).await;
+    let room = make_team(&crew, &[bot.as_str()], &team).await;
+    let ws = team_workspace(&crew, &room);
+    for dir in [".claude", ".cargo", ".vscode", ".git/hooks", "tools"] {
+        std::fs::create_dir_all(ws.join(dir.replace('/', "\\"))).unwrap();
+    }
     let team_path = plain(&team);
     // (источник, назначение): назначение — существующая папка, слеш на конце или несуществующая папка с охраняемым именем файла.
     let pairs: Vec<(&str, String, &str)> = vec![

@@ -1302,10 +1302,16 @@ async fn the_program_key_gains_nothing_from_the_async_team_tools() {
     }
     let passport: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
     let key = passport["token"].as_str().unwrap();
-    for (method, path) in [("POST", "/api/tasks"), ("POST", "/api/team-tasks"), ("POST", "/api/assign_task"), ("POST", "/api/share_file")] {
+    for (method, path) in [("POST", "/api/team-tasks"), ("POST", "/api/assign_task"), ("POST", "/api/share_file")] {
         let request = crew.client.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), format!("{}{path}", crew.base)).bearer_auth(key).header("content-type", "application/json").body("{}");
         let status = request.send().await.unwrap().status().as_u16();
         assert!(status == 404 || status == 405, "{method} {path} → {status}: появился адрес для задач команды");
+    }
+    // Список и отмена заданий есть, но только для человека в окне: ключ программы получает 403.
+    for (method, path) in [("GET", "/api/tasks"), ("POST", "/api/tasks"), ("POST", "/api/tasks/task_1/cancel")] {
+        let request = crew.client.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), format!("{}{path}", crew.base)).bearer_auth(key).header("content-type", "application/json");
+        let status = request.body("{}").send().await.unwrap().status().as_u16();
+        assert_eq!(status, 403, "{method} {path} → {status}: ключу программы закрыто");
     }
 }
 
