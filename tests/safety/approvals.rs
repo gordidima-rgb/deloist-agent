@@ -1562,3 +1562,50 @@ async fn a_team_task_hears_a_late_deny_and_does_not_ask_again() {
     assert_eq!(t.crew.count_events(|e| e["type"] == "approval"), 0);
     let _ = std::fs::remove_dir_all(&t.dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_always_ask_list_beats_the_mode_and_stored_rules() {
+    let (crew, fake, bot) = setup("ap-always-ask", &[]).await;
+    let dir = outside("always-ask");
+    let at = dir.join("a").display().to_string();
+    let add = tool("run_command", json!({ "command": format!("git -C \"{at}\" add .") }));
+
+    // Правило «всегда» для этой команды (режим «спрашивать»), потом «Свобода действий».
+    turn(&crew, &fake, &bot, add.clone(), Some("always")).await.expect("первая команда спрашивает");
+    assert!(turn(&crew, &fake, &bot, add.clone(), None).await.is_none(), "по правилу без карточки");
+    set_mode(&crew, &bot, "auto").await;
+    assert!(turn(&crew, &fake, &bot, add.clone(), None).await.is_none(), "список пуст: «решай сам» не спрашивает");
+
+    // Список «команды»: карточка при «решай сам», правило не пропускает, «запомнить» не предлагается.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["command"] }))).await;
+    let card = turn(&crew, &fake, &bot, add.clone(), None).await.expect("список сильнее режима и правила");
+    assert_eq!(card["grantable"], false, "{card}");
+    assert_eq!(card["always"], false, "{card}");
+    assert_eq!(card["conversation"], false, "{card}");
+
+    // Другой вид в списке команду не трогает.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["send"] }))).await;
+    assert!(turn(&crew, &fake, &bot, add, None).await.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_rights_summary_follows_the_mode() {
+    let (crew, _fake, bot) = setup("ap-rights", &[]).await;
+    for (mode, writes_free) in [("strict", false), ("ask", true), ("auto", true)] {
+        set_mode(&crew, &bot, mode).await;
+        let rights = crew.ok("GET", &format!("/api/bots/{bot}/rights"), None).await;
+        assert_eq!(rights["mode"], mode, "{rights}");
+        assert!(rights["modeText"].as_str().unwrap().len() > 10, "{rights}");
+        let free = rights["allowed"].as_array().unwrap().iter().any(|s| s == "писать файлы в своей папке");
+        assert_eq!(free, writes_free, "{mode}: {rights}");
+        assert!(rights["allowed"].as_array().unwrap().iter().any(|s| s == "читать файлы и искать"), "{mode}: чтение свободно");
+        assert!(rights["asks"].as_array().unwrap().iter().any(|s| s.as_str().unwrap().contains("выпуск наружу")), "{mode}: {rights}");
+        assert_eq!(rights["alwaysAsk"].as_array().unwrap().len(), 7);
+        assert!(rights["alwaysAsk"].as_array().unwrap().iter().all(|k| k["on"] == false));
+    }
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["pay"] }))).await;
+    let rights = crew.ok("GET", &format!("/api/bots/{bot}/rights"), None).await;
+    let pay = rights["alwaysAsk"].as_array().unwrap().iter().find(|k| k["id"] == "pay").unwrap().clone();
+    assert_eq!(pay["on"], true, "{rights}");
+}

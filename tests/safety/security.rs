@@ -4052,3 +4052,33 @@ async fn the_program_key_cannot_rewrite_the_profile_or_run_the_memory_doctor() {
     // Окно по-прежнему может.
     crew.ok("PUT", "/api/memory/profile", Some(json!({ "text": "Свой профиль" }))).await;
 }
+
+#[tokio::test]
+async fn always_ask_is_changed_and_read_only_by_the_window() {
+    let (crew, bot, calls) = crew_with_steps("always-ask-guard").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+
+    // Ключ программы (скрипт бота) не снимает «Всегда спрашивать», как и режим; сводку прав не читает.
+    let patch = crew.client.patch(format!("{}/api/bots/{bot}", crew.base)).bearer_auth(&token).json(&json!({ "alwaysAsk": [] })).send().await.unwrap();
+    assert_eq!(patch.status().as_u16(), 403, "ключ программы правит alwaysAsk");
+    let rights = crew.client.get(format!("{}/api/bots/{bot}/rights", crew.base)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(rights.status().as_u16(), 403, "ключ программы читает права");
+
+    // Окно ставит список; неизвестный вид — отказ.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["command", "pay"] }))).await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["bots"][0]["alwaysAsk"], json!(["command", "pay"]));
+    let (status, _) = crew.send("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["everything"] }))).await;
+    assert_eq!(status, 400);
+
+    // Инструмент update_bot поле не меняет.
+    *calls.lock().unwrap() = vec![json!({ "name": "update_bot", "args": { "bot_id": bot, "always_ask": [] } })];
+    crew.say(&bot, "сними список").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    let tool = crew.wait_event("результат", |e| e["type"] == "tool_update" && e["status"] != "running").await;
+    assert_eq!(tool["status"], "error", "{tool}");
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert_eq!(state["bots"][0]["alwaysAsk"], json!(["command", "pay"]));
+}
