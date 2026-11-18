@@ -1,4 +1,4 @@
-//! Запасная модель: лимит у основной, память о сбое на 15 минут, секрет запасной и переход
+//! Запасная модель: лимит у основной, общий «отдых» после лимита, секрет запасной и переход
 //! посреди хода с уже выполненными инструментами.
 
 use crate::common;
@@ -184,12 +184,12 @@ async fn a_bad_request_does_not_switch_the_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn without_a_fallback_the_turn_fails_as_before() {
+async fn without_a_fallback_a_limit_pauses_the_turn_instead_of_failing() {
     let (crew, main, spare, bot) = setup("fallback-none", &[], false).await;
     *main.script.lock().unwrap() = vec![Step::Fail(429, "usage limit".into())];
 
     let entry = run_routine(&crew, &bot).await;
-    assert_eq!(entry["status"], "failed", "{entry}");
+    assert_eq!(entry["status"], "paused", "{entry}");
     assert!(entry.get("fallback").is_none(), "{entry}");
     assert_eq!(main.requests.lock().unwrap().len(), 1);
     assert!(spare.requests.lock().unwrap().is_empty());
@@ -234,14 +234,14 @@ async fn stopping_a_turn_is_not_an_error_on_the_bot() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn when_the_fallback_fails_too_the_turn_stops_with_its_error() {
+async fn when_the_fallback_fails_too_the_turn_waits_for_the_reset() {
     let (crew, main, spare, bot) = setup("fallback-both", &[], true).await;
     *main.script.lock().unwrap() = vec![Step::Fail(429, "main is out of balance".into())];
     *spare.script.lock().unwrap() = vec![Step::Fail(429, "backup also out of balance".into())];
 
     let entry = run_routine(&crew, &bot).await;
-    assert_eq!(entry["status"], "failed", "{entry}");
-    assert!(entry["text"].as_str().unwrap().contains("backup also out of balance"), "{entry}");
+    assert_eq!(entry["status"], "paused", "{entry}");
+    assert!(entry["text"].as_str().unwrap().contains("продолжу в"), "{entry}");
     assert_eq!(main.requests.lock().unwrap().len(), 1, "по кругу не повторяем");
     assert_eq!(spare.requests.lock().unwrap().len(), 1, "запасная спрошена один раз");
 }
@@ -249,7 +249,7 @@ async fn when_the_fallback_fails_too_the_turn_stops_with_its_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recent_limit_sends_new_turns_straight_to_the_fallback() {
     let (crew, main, spare, bot) =
-        setup("fallback-cooldown", &[("CREW_TEST_FALLBACK_COOLDOWN_MS", "700")], true).await;
+        setup("fallback-cooldown", &[("CREW_TEST_PAUSE_BASE_MS", "700")], true).await;
     *main.script.lock().unwrap() = vec![Step::Fail(429, "usage limit".into())];
     *spare.script.lock().unwrap() = vec![Step::Say("первый".into())];
 
