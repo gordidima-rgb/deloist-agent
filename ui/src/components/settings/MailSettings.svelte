@@ -46,7 +46,7 @@
 
   // Редактирование ящика: открыта одна карточка за раз.
   let editId = $state('');
-  let draft = $state({ bots: [], autoBots: [], allow: '', trusted: '', password: '' });
+  let draft = $state({ bots: [], autoBots: [], allow: '', trusted: '', authserv: '', password: '' });
   let saving = $state(false);
   let editError = $state('');
   let busyId = $state('');
@@ -140,10 +140,10 @@
         preset: 'custom',
         imapHost: imapHost.trim(),
         imapPort: Number(imapPort) || 993,
-        imapTls: imapSec === 'tls',
+        imapTls: imapSec,
         smtpHost: smtpHost.trim(),
         smtpPort: Number(smtpPort) || 465,
-        smtpTls: smtpSec === 'tls',
+        smtpTls: smtpSec,
       });
     } else {
       body.preset = presetId;
@@ -206,6 +206,7 @@
       autoBots: [...(account.autoBots || [])],
       allow: (account.allow || []).join('\n'),
       trusted: (account.trusted || []).join('\n'),
+      authserv: (account.authserv || []).join('\n'),
       password: '',
     };
   }
@@ -229,6 +230,8 @@
     if (!same(allow, account.allow || [])) body.allow = allow;
     const trusted = lines(draft.trusted);
     if (!same(trusted, account.trusted || [])) body.trusted = trusted;
+    const authserv = lines(draft.authserv);
+    if (!same(authserv, account.authserv || [])) body.authserv = authserv;
     if (draft.password) body.password = draft.password;
     if (!Object.keys(body).length) {
       editId = '';
@@ -361,7 +364,7 @@
               <div class="ml-group">
                 <span class="ml-group-title">{tr('Автоматическая работа')}</span>
                 <p class="ml-note">
-                  {tr('Выключено: каждое письмо бот отправляет только после вашего согласия. Включено: без вопроса — только адресатам из белого списка и тем, чьё письмо бот прочитал в этом же запуске; новому адресату — всё равно карточка.')}
+                  {tr('Выключено: каждое письмо бот отправляет только после вашего согласия. Включено: без вопроса — только адресатам из белого списка и доверенным отправителям, чьё подписанное письмо бот прочитал в этом же запуске; новому адресату — всё равно карточка. Не больше 20 писем в час.')}
                 </p>
                 {#each draft.bots as id (id)}
                   <Switch
@@ -383,10 +386,18 @@
             </Field>
             <Field
               label={tr('Доверенные отправители')}
-              hint={tr('Письмо от них бот выполняет как поручение, только если почтовый сервер подтвердил адрес подписью (DKIM или DMARC). Остальные письма — просто данные.')}
+              hint={tr('Письмо от них бот выполняет как поручение, только если почтовый сервер подтвердил адрес подписью (DKIM или DMARC). Остальные письма — просто данные. Остаток риска: если подтверждается только домен, любой ящик этого домена может писать от имени доверенного адреса.')}
             >
               {#snippet children(f)}
                 <TextArea id={f.id} describedby={f.describedby} rows={3} bind:value={draft.trusted} />
+              {/snippet}
+            </Field>
+            <Field
+              label={tr('Серверы, которым верим')}
+              hint={tr('Имена почтовых серверов получателя (например yandex.net), по одному в строке. Подпись письма засчитывается, только если её записал такой сервер. У Яндекса, Mail и Gmail заполнено само; у своего сервера пусто — письма не считаются подписанными, пока вы не впишете имя из заголовка Authentication-Results.')}
+            >
+              {#snippet children(f)}
+                <TextArea id={f.id} describedby={f.describedby} rows={2} bind:value={draft.authserv} />
               {/snippet}
             </Field>
             <Field label={tr('Новый пароль приложения')} hint={tr('Оставьте пустым, чтобы не менять.')}>

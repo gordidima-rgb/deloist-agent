@@ -163,6 +163,20 @@ describe('MailSettings', () => {
     });
   });
 
+  it('sends the trusted receiving servers as a list', async () => {
+    const api = makeApi({ 'PATCH /api/mail/accounts/a1': () => ({ account }) });
+    render(api);
+    await drain();
+    button('Настроить').click();
+    flushSync();
+    // Белый список, доверенные, серверы, которым верим.
+    type(host.querySelectorAll('textarea')[2], 'mx.corp.ru\nmail.corp.ru');
+    flushSync();
+    button('Сохранить').click();
+    await drain();
+    expect(api).toHaveBeenCalledWith('/api/mail/accounts/a1', { method: 'PATCH', body: { authserv: ['mx.corp.ru', 'mail.corp.ru'] } });
+  });
+
   it('offers only routines with a mailbox for their bot and saves a trigger', async () => {
     const api = makeApi({ 'PUT /api/mail/triggers/r1': () => ({ trigger: {} }) });
     render(api);
