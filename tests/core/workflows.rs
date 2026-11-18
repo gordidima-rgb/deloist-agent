@@ -1238,3 +1238,25 @@ async fn the_assets_of_one_workflow_have_a_total_quota() {
     }
     assert_eq!(upload(&crew, &id, "one-more.bin", &chunk).await.0, 413, "больше 200 МБ на процесс нельзя");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_creates_a_workflow_after_a_card_and_stops_only_a_real_run() {
+    let (crew, s, bot) = scripted_crew("wf-create", "auto").await;
+
+    *s.script.lock().unwrap() = vec![call("create_workflow", json!({ "name": "Из чата" })), say("ок")];
+    ask(&crew, &bot).await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "create_workflow", "даже в режиме «решай сам»");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let list = crew.ok("GET", "/api/workflows", None).await;
+    assert_eq!(list["workflows"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["workflows"][0]["title"], "Из чата");
+
+    *s.script.lock().unwrap() = vec![call("stop_workflow_run", json!({ "run_id": "нет-такого" })), say("не вышло")];
+    ask(&crew, &bot).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let (status, _) = tool_done(&crew);
+    assert_ne!(status, "ok");
+    assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "остановка в режиме «решай сам» без карточки");
+}

@@ -113,17 +113,7 @@ async fn create(State(app): Shared, bytes: Bytes) -> Response {
         },
         None => Graph::default(),
     };
-    let mut stored = wf::new_workflow(&title, graph);
-    wf::refresh_slots(&mut stored, now());
-    let (id, view) = (stored.wf.id.clone(), stored.wf.clone());
-    {
-        let mut guard = app.workflows.lock();
-        guard.items.push(stored);
-        guard.runs.insert(id.clone(), Vec::new());
-        guard.save_wf(&id);
-    }
-    changed(&app, &id);
-    reply(StatusCode::OK, json!({ "workflow": view }))
+    reply(StatusCode::OK, json!({ "workflow": run::create_workflow(&app, &title, graph) }))
 }
 
 async fn read(State(app): Shared, Path(id): Path<String>) -> Response {

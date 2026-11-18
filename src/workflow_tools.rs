@@ -13,12 +13,12 @@ use crate::App;
 const MAX_OPS: usize = 30;
 
 pub fn is_tool(name: &str) -> bool {
-    matches!(name, "list_workflows" | "read_workflow" | "read_workflow_runs" | "edit_workflow" | "run_workflow" | "delete_workflow")
+    matches!(name, "list_workflows" | "read_workflow" | "read_workflow_runs" | "create_workflow" | "edit_workflow" | "run_workflow" | "stop_workflow_run" | "delete_workflow")
 }
 
-/// Правка, запуск и удаление: карточка всегда, даже в режиме «решай сам».
+/// Создание, правка, запуск и удаление: карточка всегда, даже в режиме «решай сам». Остановка запуска — по режиму бота.
 pub fn is_mutating(name: &str) -> bool {
-    matches!(name, "edit_workflow" | "run_workflow" | "delete_workflow")
+    matches!(name, "create_workflow" | "edit_workflow" | "run_workflow" | "delete_workflow")
 }
 
 pub fn defs() -> Vec<Value> {
@@ -40,6 +40,12 @@ pub fn defs() -> Vec<Value> {
             &["workflow_id"],
         ),
         function(
+            "create_workflow",
+            "Создать пустой рабочий процесс (без шагов) и вернуть его номер; шаги добавляй через edit_workflow. Человек подтверждает карточкой.",
+            json!({ "name": { "type": "string", "description": "Название процесса, до 200 символов." } }),
+            &["name"],
+        ),
+        function(
             "edit_workflow",
             "Изменить граф процесса списком операций. Человек подтверждает каждую правку карточкой. Операции: \
              {op:'add_node', kind, id?, fields?, schedule?, x?, y?}, {op:'update_node', id, fields?, schedule?}, {op:'move_node', id, x, y}, \
@@ -49,6 +55,12 @@ pub fn defs() -> Vec<Value> {
             &["workflow_id", "ops"],
         ),
         function("run_workflow", "Запустить процесс сейчас. Человек подтверждает карточкой.", id.clone(), &["workflow_id"]),
+        function(
+            "stop_workflow_run",
+            "Остановить идущий запуск процесса. Номер запуска — из read_workflow_runs.",
+            json!({ "run_id": { "type": "string", "description": "Номер запуска из read_workflow_runs." } }),
+            &["run_id"],
+        ),
         function("delete_workflow", "Удалить процесс со всеми запусками. Человек подтверждает карточкой.", id, &["workflow_id"]),
     ]
 }
@@ -165,6 +177,9 @@ fn edge_line(app: &App, graph: &Graph, verb: &str, from: &str, to: &str) -> Stri
 
 /// Описание вызова: `limit` — сколько знаков показывать у каждого значения (в карточке 300, в подробностях без предела).
 fn render(app: &App, name: &str, args: &Value, limit: usize) -> String {
+    if name == "create_workflow" {
+        return format!("Создать рабочий процесс «{}»", clip(text(args, "name"), limit));
+    }
     let id = text(args, "workflow_id");
     let title = app.workflows.lock().get(id).map(|s| s.wf.title.clone());
     let Some(title) = title else { return format!("Процесс «{id}» не найден") };
@@ -409,6 +424,18 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             };
             app.turns.emit(json!({ "type": "workflows", "workflow_id": id }));
             Ok(format!("Готово: процесс изменён, ревизия {revision}."))
+        }
+        "create_workflow" => {
+            let title: String = text(args, "name").chars().take(200).collect();
+            if title.is_empty() {
+                return Err("нужно название процесса (name)".into());
+            }
+            let made = run::create_workflow(app, &title, Graph::default());
+            Ok(format!("Процесс «{}» создан, номер {}. Шаги добавь через edit_workflow.", made.title, made.id))
+        }
+        "stop_workflow_run" => {
+            let stopped = run::stop_run(app, text(args, "run_id")).map_err(|e| e.message)?;
+            Ok(format!("Запуск {} остановлен, статус: {}.", stopped.id, stopped.status))
         }
         "run_workflow" => {
             let id = find_id(app, args)?;

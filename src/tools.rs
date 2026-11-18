@@ -36,7 +36,7 @@ pub fn clamp(s: &str, limit: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// Командные инструменты, которые получает и агент ACP через MCP-сервер своего бота.
-pub const TEAM_TOOLS: [&str; 15] = ["delegate", "offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "finish_turn", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule"];
+pub const TEAM_TOOLS: [&str; 16] = ["delegate", "offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "finish_turn", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule", "read_help"];
 
 /// Всё, что MCP-процесс агента ACP вправе просить у приложения: браузер бота, команда и рутины.
 /// Рутины идут теми же правилами, что у API-ботов: создание и правка спрашивают человека по режиму бота, удаление всегда.
@@ -52,6 +52,7 @@ pub fn team_tool_defs() -> Vec<Value> {
     defs.extend(crate::routine_tools::defs());
     defs.extend(crate::memory::team_review::defs());
     defs.push(crate::runs::wait_def());
+    defs.push(crate::help::tool_def());
     defs
 }
 
@@ -68,6 +69,7 @@ pub fn tool_defs() -> Value {
         list.extend(crate::scripts::defs());
         list.extend(crate::habits::bot_tool_defs());
         list.extend(crate::todos::bot_tool_defs());
+        list.push(crate::help::tool_def());
         // В облаке у ботов нет консоли: инструмент не предлагается модели.
         if crate::cloud::active() {
             list.retain(|def| def["function"]["name"] != "run_command");
@@ -358,11 +360,11 @@ fn base_tool_defs() -> Value {
 /// Инструменты, на которые нельзя отвечать «разрешить на этот разговор» или «всегда»: каждый вызов — отдельное решение.
 /// Ход самопроверки и ход без человека спрашивают инструменты рутин и целей каждый раз (`grants::scope_for`).
 pub fn never_remember(tool: &str) -> bool {
-    tool == "delete_routine" || crate::workflow_tools::is_mutating(tool)
+    matches!(tool, "delete_routine" | "delete_todo" | "archive_habit" | "delete_goal") || crate::workflow_tools::is_mutating(tool)
 }
 
 pub fn is_high_risk(name: &str) -> bool {
-    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_routine" | "update_routine" | "delete_routine" | "edit_workflow" | "run_workflow" | "delete_workflow")
+    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_routine" | "update_routine" | "run_routine" | "delete_routine" | "create_workflow" | "edit_workflow" | "run_workflow" | "delete_workflow" | "delete_todo" | "archive_habit" | "delete_goal")
 }
 
 /// Инструменты, которые только читают: их не спрашиваем даже в строгом режиме.
@@ -370,7 +372,7 @@ pub fn is_read_only(name: &str) -> bool {
     // `ask_user` и так обращается к человеку. `remember` меняет память бота, это уже запись.
     // `save_script` и `run_script` сами ничего не делают: сохранять можно только под согласие человека, а каждый шаг
     // скрипта идёт через обычную проверку и карточки (`turn::execute_call_in`).
-    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "finish_turn" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "save_script" | "run_script" | "await_event")
+    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "finish_turn" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "read_help" | "save_script" | "run_script" | "await_event")
 }
 
 /// Какой из двух режимов осторожнее. Передача задачи не должна снижать осторожность:
@@ -436,10 +438,9 @@ pub fn needs_approval(app: &App, bot: &Bot, name: &str) -> bool {
     if name == "delegate" || crate::team_tasks::is_tool(name) {
         return false;
     }
-    // Привычки: бот читает их и отмечает своим инструментом без карточки (см. `habits::exec_bot_tool`).
-    // Задачи человека — то же самое: бот по просьбе человека добавляет и отмечает их (см. `todos::exec_bot_tool`).
+    // Привычки и задачи человека: бот по его просьбе ведёт их без карточки, но удаление спрашивается всегда.
     if crate::habits::is_bot_tool(name) || crate::todos::is_bot_tool(name) {
-        return false;
+        return is_high_risk(name);
     }
     // Картинка тратит деньги у платного сервиса: спрашиваем, если человек не сказал «решай сам».
     if name == "generate_image" {
@@ -470,7 +471,7 @@ pub fn needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> boo
         return false;
     }
     if crate::habits::is_bot_tool(name) || crate::todos::is_bot_tool(name) {
-        return false;
+        return is_high_risk(name);
     }
     // Вход сохранённым паролем спрашивает сам инструмент (карточка с сайтом и именем входа).
     // Общая карточка поверх неё спросила бы второй раз.
@@ -508,9 +509,10 @@ pub fn needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> boo
     if crate::routine_tools::is_routine_tool(name) {
         return crate::routine_tools::needs_approval(app, bot, name, args);
     }
-    // Рабочие процессы: чтение свободно, правка, запуск и удаление спрашивают всегда, в любом режиме.
+    // Рабочие процессы: чтение свободно, создание, правка, запуск и удаление спрашивают всегда, в любом режиме;
+    // остановка запуска — по режиму бота.
     if crate::workflow_tools::is_tool(name) {
-        return crate::workflow_tools::is_mutating(name);
+        return crate::workflow_tools::is_mutating(name) || (!is_read_only(name) && policy_needs_approval(&bot.approval, name, false, false));
     }
     if crate::goal_tools::is_goal_tool(name) {
         return crate::goal_tools::needs_approval(app, bot, name, args);
@@ -1150,18 +1152,27 @@ pub fn label(name: &str) -> &str {
         "list_workflows" => "просмотр процессов",
         "read_workflow" => "чтение процесса",
         "read_workflow_runs" => "запуски процесса",
+        "create_workflow" => "создание процесса",
         "edit_workflow" => "правка процесса",
+        "stop_workflow_run" => "остановка запуска процесса",
         "run_workflow" => "запуск процесса",
         "delete_workflow" => "удаление процесса",
+        "read_help" => "справка по программе",
         "list_habits" => "просмотр привычек",
+        "create_habit" => "новая привычка",
+        "update_habit" => "изменение привычки",
+        "archive_habit" => "удаление привычки",
         "save_script" => "сохранение скрипта",
         "run_script" => "запуск скрипта",
         "check_habit" => "отметка привычки",
         "list_todos" => "просмотр задач",
         "add_todo" => "новая задача",
+        "update_todo" => "изменение задачи",
         "complete_todo" => "задача выполнена",
+        "delete_todo" => "удаление задачи",
         "create_routine" => "создание рутины",
         "update_routine" => "изменение рутины",
+        "run_routine" => "запуск рутины",
         "delete_routine" => "удаление рутины",
         "create_goal" => "новая цель",
         "list_goals" => "просмотр целей",
@@ -1170,6 +1181,7 @@ pub fn label(name: &str) -> &str {
         "pause_goal" => "пауза цели",
         "resume_goal" => "возобновление цели",
         "complete_goal" => "завершение цели",
+        "delete_goal" => "удаление цели",
         "report_goal_progress" => "запись прогресса цели",
         "generate_image" => "платная картинка",
         "browser_nav" => "браузер: адрес и вкладки",
@@ -1834,9 +1846,11 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
 
         "search_catalog" => crate::team_proposal::search_catalog(app, args).await,
 
-        "list_habits" | "check_habit" => crate::habits::exec_bot_tool(app, name, args),
+        habit if crate::habits::is_bot_tool(habit) => crate::habits::exec_bot_tool(app, habit, args),
 
-        "list_todos" | "add_todo" | "complete_todo" => crate::todos::exec_bot_tool(app, name, args),
+        todo if crate::todos::is_bot_tool(todo) => crate::todos::exec_bot_tool(app, todo, args),
+
+        "read_help" => Ok(crate::help::read(arg(args, "topic"))),
 
         script if crate::scripts::is_script_tool(script) => crate::scripts::exec(app, bot, script, args, depth, cancel).await,
 

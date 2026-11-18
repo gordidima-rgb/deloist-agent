@@ -15,7 +15,7 @@ pub(crate) const MAX_TITLE: usize = 80;
 const MIN_EVERY_MINUTES: i64 = 5;
 
 pub fn is_routine_tool(name: &str) -> bool {
-    matches!(name, "list_routines" | "create_routine" | "update_routine" | "delete_routine")
+    matches!(name, "list_routines" | "create_routine" | "update_routine" | "run_routine" | "delete_routine")
 }
 
 /// Схемы для модели.
@@ -81,6 +81,12 @@ pub fn defs() -> Vec<Value> {
                 "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» или «skip»." },
                 "hook_events": { "type": "array", "items": { "type": "string" }, "description": "Для вебхука: события GitHub, на которые реагировать (push, pull_request.opened). Пусто — любое." },
             })),
+            &["routine_id"],
+        ),
+        function(
+            "run_routine",
+            "Запустить рутину сейчас, вне расписания: бот рутины выполнит её prompt как обычный запуск. Человек подтверждает карточкой. Напоминания так не запускаются.",
+            json!({ "routine_id": { "type": "string", "description": "Номер рутины из list_routines." } }),
             &["routine_id"],
         ),
         function(
@@ -346,6 +352,12 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 .ok_or("рутина уже удалена")?;
             app.turns.emit(json!({ "type": "state_changed" }));
             Ok(format!("Рутина изменена.\n{}", line(app, &updated)))
+        }
+
+        "run_routine" => {
+            let routine = find(app, args)?;
+            let started = crate::scheduler::run_now(app, &routine.id, app.turns.is_unattended(&bot.id)).await.map_err(|e| e.message)?;
+            Ok(format!("Рутина «{}» запущена.", started.title))
         }
 
         "delete_routine" => {

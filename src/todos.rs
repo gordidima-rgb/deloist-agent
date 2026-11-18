@@ -828,11 +828,16 @@ async fn create_route(State(app): Shared, body: Bytes) -> Response {
     respond(create(&app, &body))
 }
 
-fn edit(app: &App, id: &str, bytes: &Bytes) -> Reply {
-    let body = json_body(bytes)?;
-    let updated = app.todos.update(id, |todo| apply(app, todo, &body))?;
+fn edit(app: &App, id: &str, body: &Value) -> Reply {
+    let updated = app.todos.update(id, |todo| apply(app, todo, body))?;
     changed(app);
     Ok((StatusCode::OK, view(&updated, crate::store::now())))
+}
+
+fn archive(app: &App, id: &str) -> Result<(), TodoError> {
+    app.todos.archive(id)?;
+    changed(app);
+    Ok(())
 }
 
 /// Файл к задаче приходит в base64 (сторож пускает только JSON): те же проверки имени и размера, что у вложений чата.
@@ -866,15 +871,12 @@ async fn file_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> 
 }
 
 async fn patch_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> Response {
-    respond(edit(&app, &id, &body))
+    respond(json_body(&body).and_then(|body| edit(&app, &id, &body)))
 }
 
 async fn archive_route(State(app): Shared, Path(id): Path<String>) -> Response {
-    match app.todos.archive(&id) {
-        Ok(()) => {
-            changed(&app);
-            StatusCode::NO_CONTENT.into_response()
-        }
+    match archive(&app, &id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => respond(Err(error)),
     }
 }
@@ -938,10 +940,10 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/todos/{id}/restore", post(restore_route))
 }
 
-/// Инструменты бота: список, добавление и отметка задач человека. Подтверждения не нужны:
-/// человек сам попросил бота и задачи идут в его собственный список.
+/// Инструменты бота: список, добавление, правка и отметка задач человека. Карточки нет: человек сам попросил бота,
+/// задачи идут в его собственный список. Исключение — удаление (`tools::is_high_risk`): спрашивается всегда.
 pub fn is_bot_tool(name: &str) -> bool {
-    matches!(name, "list_todos" | "add_todo" | "complete_todo")
+    matches!(name, "list_todos" | "add_todo" | "update_todo" | "complete_todo" | "delete_todo")
 }
 
 pub fn bot_tool_defs() -> Vec<Value> {
@@ -977,12 +979,47 @@ pub fn bot_tool_defs() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "update_todo",
+                "description": "Изменить задачу человека: передавай только то, что меняется. null очищает срок или время. Подтверждение не нужно.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "todo_id": { "type": "string", "description": "Номер задачи из list_todos или её название." },
+                        "title": { "type": "string", "description": "Новое название." },
+                        "due_date": { "type": "string", "description": "Срок ГГГГ-ММ-ДД." },
+                        "due_time": { "type": "string", "description": "Время ЧЧ:ММ." },
+                        "bucket": { "type": "string", "enum": ["key", "active", "someday"] },
+                        "notes": { "type": "string", "description": "Заметка к задаче." },
+                        "recurrence": { "type": "object", "description": "Повтор: {freq: daily|weekly|monthly|yearly, interval, weekdays, monthday}; null снимает повтор." },
+                        "items": { "type": "array", "items": { "type": "object" }, "description": "Чек-лист целиком: [{text, done?}], до 30 пунктов; null очищает." },
+                        "assignee": { "type": "string", "description": "ID бота-исполнителя из list_bots; null снимает." },
+                        "auto_close_after_min": { "type": "integer", "description": "Автозакрытие повторяющейся задачи через столько минут после срока." },
+                    },
+                    "required": ["todo_id"],
+                },
+            },
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "complete_todo",
                 "description": "Отметить задачу человека выполненной. Повторяющаяся задача сама создаст следующий срок. Подтверждение не нужно.",
                 "parameters": {
                     "type": "object",
                     "properties": { "id": { "type": "string", "description": "Номер задачи из list_todos или её название." } },
                     "required": ["id"],
+                },
+            },
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_todo",
+                "description": "Убрать задачу человека в архив (из списка она исчезает). Человек подтверждает каждое удаление.",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "todo_id": { "type": "string", "description": "Номер задачи из list_todos или её название." } },
+                    "required": ["todo_id"],
                 },
             },
         }),
@@ -1018,18 +1055,30 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
             Ok(format!("Добавил задачу «{}»{}. Номер: {}.", made.title, made.due_date.as_deref().map(|d| format!(", срок {d}")).unwrap_or_default(), made.id))
         }
         _ => {
-            let key = crate::routine_tools::text(args, "id");
+            let key = crate::routine_tools::text(args, if name == "complete_todo" { "id" } else { "todo_id" });
             if key.is_empty() {
                 return Err("нужен номер или название задачи (list_todos)".into());
             }
             let todo = app.todos.resolve(key).map_err(|e| e.message())?;
-            let (done, next) = app.todos.complete(&todo.id, now.date_naive(), crate::store::now()).map_err(|e| e.message())?;
-            changed(app);
-            let tail = match next.and_then(|n| n.due_date) {
-                Some(day) => format!(" Следующий срок: {day}."),
-                None => String::new(),
-            };
-            Ok(format!("Отметил «{}» выполненной.{tail}", done.title))
+            match name {
+                "update_todo" => {
+                    edit(app, &todo.id, args).map_err(|e| e.message())?;
+                    Ok(format!("Изменил задачу «{}».", todo.title))
+                }
+                "delete_todo" => {
+                    archive(app, &todo.id).map_err(|e| e.message())?;
+                    Ok(format!("Убрал задачу «{}» в архив.", todo.title))
+                }
+                _ => {
+                    let (done, next) = app.todos.complete(&todo.id, now.date_naive(), crate::store::now()).map_err(|e| e.message())?;
+                    changed(app);
+                    let tail = match next.and_then(|n| n.due_date) {
+                        Some(day) => format!(" Следующий срок: {day}."),
+                        None => String::new(),
+                    };
+                    Ok(format!("Отметил «{}» выполненной.{tail}", done.title))
+                }
+            }
         }
     }
 }

@@ -236,3 +236,38 @@ async fn a_habit_reminder_fires_once_and_only_when_due() {
     let cleared = crew.ok("PATCH", &format!("/api/habits/{due_id}"), Some(json!({ "remind_at": "" }))).await;
     assert_eq!(cleared["remind_at"], Value::Null);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_manages_a_habit_freely_but_archiving_it_always_asks() {
+    let (crew, fake, bot) = setup("habits-manage").await;
+
+    *fake.script.lock().unwrap() = vec![tool("create_habit", json!({ "title": "Вода", "icon": "drop", "days_mask": 31 })), say("Завёл")];
+    let (status, result) = ask_and_result(&crew, &bot, "заведи привычку").await;
+    assert_eq!(status, "ok", "{result}");
+    let list = crew.ok("GET", "/api/habits", None).await;
+    assert_eq!(list[0]["days_mask"], 31);
+    let id = list[0]["id"].as_str().unwrap().to_string();
+
+    *fake.script.lock().unwrap() = vec![tool("create_habit", json!({ "title": "Без значка" })), say("Не вышло")];
+    let (status, _) = ask_and_result(&crew, &bot, "заведи привычку без значка").await;
+    assert_ne!(status, "ok", "значок обязателен, как и у кнопки в окне");
+
+    *fake.script.lock().unwrap() = vec![tool("update_habit", json!({ "habit": "Вода", "title": "Стакан воды", "remind_at": "12:00" })), say("Изменил")];
+    let (status, result) = ask_and_result(&crew, &bot, "переименуй").await;
+    assert_eq!(status, "ok", "{result}");
+    let list = crew.ok("GET", "/api/habits", None).await;
+    assert_eq!(list[0]["title"], "Стакан воды");
+
+    *fake.script.lock().unwrap() = vec![tool("update_habit", json!({ "habit": "нет-такой", "title": "x" })), say("Не вышло")];
+    let (status, _) = ask_and_result(&crew, &bot, "измени несуществующую").await;
+    assert_ne!(status, "ok");
+
+    *fake.script.lock().unwrap() = vec![tool("archive_habit", json!({ "habit": id })), say("Убрал")];
+    crew.clear_events();
+    crew.say(&bot, "убери привычку").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "archive_habit");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert!(crew.ok("GET", "/api/habits", None).await.as_array().unwrap().is_empty());
+}

@@ -2667,19 +2667,10 @@ async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum:
             Err(r) => return r,
         }
     };
-    let Some(routine) = app.store.routine(&id) else {
-        return fail(StatusCode::NOT_FOUND, "рутина не найдена");
-    };
-    if crate::reminders::is_reminder(&routine) {
-        return fail(StatusCode::BAD_REQUEST, "напоминание шлёт таймер, бота у него нет: для проверки есть «проверить напоминание»");
-    }
-    if app.store.bot(&routine.bot_id).is_none() {
-        return fail(StatusCode::BAD_REQUEST, "бота этой рутины уже нет");
-    }
     // Кнопку нажал человек, он и ответит на карточки. Без него запускает только расписание.
     let attended = body.get("attended").and_then(Value::as_bool).unwrap_or(true);
-    match crate::scheduler::run_routine(&app, &routine, !attended).await {
-        Ok(()) => ok(json!({ "ok": true, "routine": app.store.routine(&id) })),
+    match crate::scheduler::run_now(&app, &id, !attended).await {
+        Ok(routine) => ok(json!({ "ok": true, "routine": routine })),
         Err(e) => fail(StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), &e.message),
     }
 }
@@ -2910,9 +2901,7 @@ async fn patch_goal(State(app): Shared, Path(id): Path<String>, body: axum::body
 }
 
 async fn remove_goal(State(app): Shared, Path(id): Path<String>) -> Response {
-    if app.goals.remove(&id).await {
-        crate::goals::release_routines(&app, &id).await;
-        app.turns.emit(json!({ "type": "state_changed" }));
+    if crate::goals::delete(&app, &id).await {
         ok(json!({ "ok": true }))
     } else {
         fail(StatusCode::NOT_FOUND, "цель не найдена")

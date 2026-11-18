@@ -559,13 +559,12 @@ fn changed(app: &App) {
     app.turns.emit(json!({ "type": "habits_changed" }));
 }
 
-fn create(app: &App, bytes: &Bytes) -> Result<(StatusCode, Value), HabitError> {
-    let body = json_body(bytes)?;
-    let title = clean_title(&text_field(&body, "title")?.unwrap_or_default())?;
-    let icon = clean_icon(&text_field(&body, "icon")?.ok_or_else(|| HabitError::Invalid("нужна иконка".into()))?)?;
-    let caption = clean_caption(&text_field(&body, "caption")?.unwrap_or_default())?;
-    let days_mask = clean_mask(number_field(&body, "days_mask")?.unwrap_or(i64::from(EVERY_DAY)))?;
-    let remind_at = clean_remind_at(&text_field(&body, "remind_at")?.unwrap_or_default())?;
+fn create(app: &App, body: &Value) -> Result<(StatusCode, Value), HabitError> {
+    let title = clean_title(&text_field(body, "title")?.unwrap_or_default())?;
+    let icon = clean_icon(&text_field(body, "icon")?.ok_or_else(|| HabitError::Invalid("нужна иконка".into()))?)?;
+    let caption = clean_caption(&text_field(body, "caption")?.unwrap_or_default())?;
+    let days_mask = clean_mask(number_field(body, "days_mask")?.unwrap_or(i64::from(EVERY_DAY)))?;
+    let remind_at = clean_remind_at(&text_field(body, "remind_at")?.unwrap_or_default())?;
     let remind_channels = match body.get("remind_channels") {
         None | Some(Value::Null) => crate::reminders::or_windows(Vec::new()),
         Some(list) => clean_remind_channels(list)?,
@@ -575,14 +574,13 @@ fn create(app: &App, bytes: &Bytes) -> Result<(StatusCode, Value), HabitError> {
     Ok((StatusCode::CREATED, app.habits.view_one(&habit.id, today())?))
 }
 
-fn edit(app: &App, id: &str, bytes: &Bytes) -> Result<(StatusCode, Value), HabitError> {
-    let body = json_body(bytes)?;
-    let title = text_field(&body, "title")?.map(|t| clean_title(&t)).transpose()?;
-    let caption = text_field(&body, "caption")?.map(|t| clean_caption(&t)).transpose()?;
-    let icon = text_field(&body, "icon")?.map(|t| clean_icon(&t)).transpose()?;
-    let days_mask = number_field(&body, "days_mask")?.map(clean_mask).transpose()?;
+fn edit(app: &App, id: &str, body: &Value) -> Result<(StatusCode, Value), HabitError> {
+    let title = text_field(body, "title")?.map(|t| clean_title(&t)).transpose()?;
+    let caption = text_field(body, "caption")?.map(|t| clean_caption(&t)).transpose()?;
+    let icon = text_field(body, "icon")?.map(|t| clean_icon(&t)).transpose()?;
+    let days_mask = number_field(body, "days_mask")?.map(clean_mask).transpose()?;
     // Пустая строка снимает напоминание; отсутствующее поле оставляет как есть.
-    let remind_at = text_field(&body, "remind_at")?.map(|t| clean_remind_at(&t)).transpose()?;
+    let remind_at = text_field(body, "remind_at")?.map(|t| clean_remind_at(&t)).transpose()?;
     let remind_channels = match body.get("remind_channels") {
         None | Some(Value::Null) => None,
         Some(list) => Some(clean_remind_channels(list)?),
@@ -616,6 +614,12 @@ fn edit(app: &App, id: &str, bytes: &Bytes) -> Result<(StatusCode, Value), Habit
     Ok((StatusCode::OK, app.habits.view_one(id, today())?))
 }
 
+fn archive(app: &App, id: &str) -> Result<(), HabitError> {
+    app.habits.archive(id)?;
+    changed(app);
+    Ok(())
+}
+
 fn check(app: &App, id: &str, bytes: &Bytes) -> Result<(StatusCode, Value), HabitError> {
     let body = json_body(bytes)?;
     let day = day_or_today(text_field(&body, "date")?.as_deref())?;
@@ -642,19 +646,16 @@ async fn templates_route() -> Response {
 }
 
 async fn create_route(State(app): Shared, body: Bytes) -> Response {
-    respond(create(&app, &body))
+    respond(json_body(&body).and_then(|body| create(&app, &body)))
 }
 
 async fn patch_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> Response {
-    respond(edit(&app, &id, &body))
+    respond(json_body(&body).and_then(|body| edit(&app, &id, &body)))
 }
 
 async fn archive_route(State(app): Shared, Path(id): Path<String>) -> Response {
-    match app.habits.archive(&id) {
-        Ok(()) => {
-            changed(&app);
-            StatusCode::NO_CONTENT.into_response()
-        }
+    match archive(&app, &id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => respond(Err(error)),
     }
 }
@@ -693,13 +694,55 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/habits/{id}/check", post(check_route).delete(uncheck_route))
 }
 
-/// Инструменты бота: список и отметка собственной привычки человека. Подтверждения не нужны.
+/// Инструменты бота: список, создание, правка, отметка и архив привычек человека. Карточки нет, кроме архива
+/// (`tools::is_high_risk`): он спрашивается всегда.
 pub fn is_bot_tool(name: &str) -> bool {
-    matches!(name, "list_habits" | "check_habit")
+    matches!(name, "list_habits" | "create_habit" | "update_habit" | "check_habit" | "archive_habit")
 }
 
 pub fn bot_tool_defs() -> Vec<Value> {
+    let fields = || {
+        json!({
+            "title": { "type": "string", "description": "Название, до 80 символов." },
+            "icon": { "type": "string", "description": "Имя значка (drop, sun, moon, book, pen, leaf, coffee, heart, brain, check, star, home, bed, apple, dumbbell, run, music, phone) или один эмодзи." },
+            "caption": { "type": "string", "description": "Подпись, до 200 символов." },
+            "days_mask": { "type": "integer", "description": "Дни недели битами: 1 — пн, 2 — вт, 4 — ср, 8 — чт, 16 — пт, 32 — сб, 64 — вс; сумма. 127 (по умолчанию) — каждый день, 31 — будни." },
+            "remind_at": { "type": "string", "description": "Время напоминания ЧЧ:ММ; пустая строка снимает." },
+            "remind_channels": { "type": "array", "items": { "type": "string" }, "description": "Каналы напоминания: windows, telegram." },
+        })
+    };
+    let with_habit = |extra: Value| {
+        let mut all = json!({ "habit": { "type": "string", "description": "Номер привычки из list_habits или её название." } });
+        if let (Some(all), Some(extra)) = (all.as_object_mut(), extra.as_object()) {
+            all.extend(extra.clone());
+        }
+        all
+    };
     vec![
+        json!({
+            "type": "function",
+            "function": {
+                "name": "create_habit",
+                "description": "Завести привычку человека. Нужны title и icon. Привычек не больше 50. Подтверждение не нужно.",
+                "parameters": { "type": "object", "properties": fields(), "required": ["title", "icon"] },
+            },
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "update_habit",
+                "description": "Изменить привычку человека: передавай только то, что меняется. Подтверждение не нужно.",
+                "parameters": { "type": "object", "properties": with_habit(fields()), "required": ["habit"] },
+            },
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "archive_habit",
+                "description": "Убрать привычку человека в архив (из списка она исчезает). Человек подтверждает каждое удаление.",
+                "parameters": { "type": "object", "properties": with_habit(json!({})), "required": ["habit"] },
+            },
+        }),
         json!({
             "type": "function",
             "function": {
@@ -754,11 +797,26 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
         }
         return Ok(views.iter().map(bot_line).collect::<Vec<_>>().join("\n"));
     }
+    if name == "create_habit" {
+        let (_, view) = create(app, args).map_err(|e| e.message())?;
+        return Ok(format!("Завёл привычку «{}». Номер: {}.", view["title"].as_str().unwrap_or_default(), view["id"].as_str().unwrap_or_default()));
+    }
     let key = crate::routine_tools::text(args, "habit");
     if key.is_empty() {
         return Err("нужен номер или название привычки (list_habits)".into());
     }
     let habit = app.habits.resolve(key).map_err(|e| e.message())?;
+    match name {
+        "update_habit" => {
+            edit(app, &habit.id, args).map_err(|e| e.message())?;
+            return Ok(format!("Изменил привычку «{}».", habit.title));
+        }
+        "archive_habit" => {
+            archive(app, &habit.id).map_err(|e| e.message())?;
+            return Ok(format!("Убрал привычку «{}» в архив.", habit.title));
+        }
+        _ => {}
+    }
     let raw = crate::routine_tools::text(args, "date");
     let day = day_or_today(Some(raw)).map_err(|e| e.message())?;
     if day != now && Some(day) != now.pred_opt() {

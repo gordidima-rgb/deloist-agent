@@ -17,7 +17,7 @@ const MAX_DESCRIPTION: usize = 5_000;
 pub fn is_goal_tool(name: &str) -> bool {
     matches!(
         name,
-        "create_goal" | "list_goals" | "update_goal" | "run_goal" | "pause_goal" | "resume_goal" | "complete_goal" | "report_goal_progress"
+        "create_goal" | "list_goals" | "update_goal" | "run_goal" | "pause_goal" | "resume_goal" | "complete_goal" | "delete_goal" | "report_goal_progress"
     )
 }
 
@@ -66,6 +66,12 @@ pub fn defs() -> Vec<Value> {
         function(
             "complete_goal",
             "Завершить цель, когда она достигнута. Повторяющуюся цель запуск завершить не может: это решает человек.",
+            goal_id.clone(),
+            &["goal_id"],
+        ),
+        function(
+            "delete_goal",
+            "Удалить цель насовсем; рутины, привязанные к ней, выключаются. Человек подтверждает каждое удаление. Чтобы просто остановить, поставь на паузу (pause_goal).",
             goal_id,
             &["goal_id"],
         ),
@@ -96,6 +102,7 @@ pub fn needs_approval(app: &App, bot: &Bot, name: &str, args: &Value) -> bool {
     };
     match name {
         "list_goals" | "report_goal_progress" => false,
+        "delete_goal" => true,
         "complete_goal" => match &goal {
             // Запуск цели и самопроверка повторяющуюся цель не завершают: отказ придёт сам, карточка не нужна.
             Some(g) if g.recurring && current_run(&bot.id).is_some() => false,
@@ -267,6 +274,12 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             }
             changed(app);
             Ok(format!("Разговор бота занят, запуск цели «{}» стоит в очереди и начнётся, как он освободится.", goal.title))
+        }
+
+        "delete_goal" => {
+            let goal = find(app, args)?;
+            crate::goals::delete(app, &goal.id).await;
+            Ok(format!("Цель «{}» удалена.", goal.title))
         }
 
         "pause_goal" | "resume_goal" => {

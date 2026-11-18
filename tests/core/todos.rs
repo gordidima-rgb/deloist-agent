@@ -305,3 +305,39 @@ async fn plus_name_in_a_phrase_assigns_the_bot_without_a_model() {
     assert_eq!(task["due_time"], "10:00", "{made}");
     assert!(!task["title"].as_str().unwrap().contains("Бета"), "{made}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_edits_a_task_freely_but_deleting_it_always_asks() {
+    let (crew, fake, bot) = setup("todos-edit").await;
+    let made = crew.ok("POST", "/api/todos", Some(json!({ "title": "Купить хлеб" }))).await;
+    let id = made["id"].as_str().unwrap().to_string();
+
+    *fake.script.lock().unwrap() = vec![tool("update_todo", json!({ "todo_id": id, "due_date": day_offset(2), "notes": "ржаной" })), say("Изменил")];
+    let (status, result) = ask_and_result(&crew, &bot, "перенеси хлеб").await;
+    assert_eq!(status, "ok", "{result}");
+    let list = crew.ok("GET", "/api/todos", None).await;
+    assert_eq!(list[0]["due_date"], day_offset(2).as_str());
+    assert_eq!(list[0]["notes"], "ржаной");
+
+    *fake.script.lock().unwrap() = vec![tool("update_todo", json!({ "todo_id": "нет-такой", "title": "x" })), say("Не вышло")];
+    let (status, _) = ask_and_result(&crew, &bot, "измени несуществующую").await;
+    assert_ne!(status, "ok");
+
+    *fake.script.lock().unwrap() = vec![tool("delete_todo", json!({ "todo_id": id })), say("Не вышло")];
+    crew.clear_events();
+    crew.say(&bot, "удали хлеб").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "delete_todo");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(crew.ok("GET", "/api/todos", None).await.as_array().unwrap().len(), 1, "отказ оставляет задачу");
+
+    *fake.script.lock().unwrap() = vec![tool("delete_todo", json!({ "todo_id": id })), say("Убрал")];
+    crew.clear_events();
+    crew.say(&bot, "удали хлеб").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert!(crew.ok("GET", "/api/todos", None).await.as_array().unwrap().is_empty());
+    assert_eq!(crew.ok("GET", "/api/todos/archive", None).await.as_array().unwrap().len(), 1, "задача в архиве");
+}

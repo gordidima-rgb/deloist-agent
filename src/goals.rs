@@ -400,6 +400,16 @@ pub async fn finished(app: &Arc<App>, bot_id: &str, run: &Option<Run>, status: &
 }
 
 /// Цель завершена или удалена: рутины, которые её запускали, выключаем, а не даём им вечно пропускать срок.
+/// Удалить цель и выключить её рутины. `false` — такой цели нет.
+pub async fn delete(app: &Arc<App>, id: &str) -> bool {
+    if !app.goals.remove(id).await {
+        return false;
+    }
+    release_routines(app, id).await;
+    app.turns.emit(json!({ "type": "state_changed" }));
+    true
+}
+
 pub async fn release_routines(app: &Arc<App>, goal_id: &str) {
     for routine in app.store.routines().into_iter().filter(|r| r.goal_id == goal_id && r.enabled) {
         let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;

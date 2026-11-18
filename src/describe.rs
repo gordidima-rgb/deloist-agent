@@ -468,20 +468,28 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
                 format!("{me} wants to change a bot’s settings (fields: {})", fields.join(", "))
             );
         }
-        "create_routine" | "update_routine" | "delete_routine" => {
+        "create_routine" | "update_routine" | "run_routine" | "delete_routine" => {
             let n = arg(args, "name");
             let (ru, en, class) = match name {
                 "create_routine" => ("создать рутину", "create a routine", "create"),
                 "update_routine" => ("изменить рутину", "change a routine", "change"),
+                "run_routine" => ("запустить рутину", "run a routine", "run"),
                 _ => ("удалить рутину", "delete a routine", "delete"),
             };
             d.class = class;
             d.risk = "high";
             d.text = ph!(format!("{me} хочет {ru} «{n}»"), format!("{me} wants to {en} “{n}”"));
         }
-        "edit_workflow" | "run_workflow" | "delete_workflow" => {
+        "delete_todo" | "archive_habit" | "delete_goal" => {
+            let label = crate::tools::label(name);
+            d.class = "delete";
+            d.risk = "high";
+            d.text = ph!(format!("{me} просит разрешение: {label}"), format!("{me} asks permission: {label}"));
+        }
+        "create_workflow" | "edit_workflow" | "run_workflow" | "delete_workflow" => {
             let summary = crate::workflow_tools::summary(app, name, args);
             d.class = match name {
+                "create_workflow" => "create",
                 "edit_workflow" => "change",
                 "run_workflow" => "run",
                 _ => "delete",

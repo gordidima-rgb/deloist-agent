@@ -55,6 +55,20 @@ pub fn over_limit(app: &App) -> bool {
     over
 }
 
+/// Запуск по просьбе («Запустить» в окне, инструмент бота): те же проверки, что и перед ходом по расписанию.
+pub async fn run_now(app: &Arc<App>, id: &str, unattended: bool) -> Result<Routine, crate::turn::StartError> {
+    let refuse = |status: u16, message: &str| crate::turn::StartError { status, message: message.into() };
+    let routine = app.store.routine(id).ok_or_else(|| refuse(404, "рутина не найдена"))?;
+    if crate::reminders::is_reminder(&routine) {
+        return Err(refuse(400, "напоминание шлёт таймер, бота у него нет: для проверки есть «проверить напоминание»"));
+    }
+    if app.store.bot(&routine.bot_id).is_none() {
+        return Err(refuse(400, "бота этой рутины уже нет"));
+    }
+    run_routine(app, &routine, unattended).await?;
+    Ok(app.store.routine(id).unwrap_or(routine))
+}
+
 /// Запустить рутину. `unattended` значит, что человека рядом нет и решать за него нельзя.
 pub async fn run_routine(app: &Arc<App>, routine: &Routine, unattended: bool) -> Result<(), crate::turn::StartError> {
     run_routine_as(app, routine, unattended, "routine", 0).await

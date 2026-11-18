@@ -49,6 +49,7 @@ mod goal_tools;
 mod goals;
 mod grants;
 mod habits;
+mod help;
 mod graph;
 mod guard;
 mod headless;

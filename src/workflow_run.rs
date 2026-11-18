@@ -632,6 +632,21 @@ pub fn decide(app: &Arc<App>, step_id: &str, approved: bool) -> Result<Run, RunE
     snapshot(app, &run_id)
 }
 
+/// Новый процесс: в список, на диск, событие окну.
+pub fn create_workflow(app: &Arc<App>, title: &str, graph: crate::workflows::Graph) -> crate::workflows::Workflow {
+    let mut stored = crate::workflows::new_workflow(title, graph);
+    crate::workflows::refresh_slots(&mut stored, now());
+    let view = stored.wf.clone();
+    {
+        let mut guard = app.workflows.lock();
+        guard.items.push(stored);
+        guard.runs.insert(view.id.clone(), Vec::new());
+        guard.save_wf(&view.id);
+    }
+    change_event(app, &view.id, None);
+    view
+}
+
 /// Остановить открытые запуски процесса, убрать его файлы. `false` — такого процесса нет.
 pub fn delete_workflow(app: &Arc<App>, wf_id: &str) -> bool {
     let open: Vec<String> = {

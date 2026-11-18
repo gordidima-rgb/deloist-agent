@@ -701,3 +701,65 @@ async fn a_refused_check_in_setting_leaves_nothing_behind() {
     assert_eq!(status, 400);
     assert!(crew.ok("GET", "/api/state", None).await["checkins"].as_array().unwrap().is_empty());
 }
+
+// ---------------------------------------------------------------- запуск рутины и удаление цели
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_runs_a_routine_of_another_bot_after_a_card_and_an_unknown_id_is_refused() {
+    let (crew, fake, bot) = setup("rt-run", "ask", &[]).await;
+    let other = crew.ok("POST", "/api/bots", Some(json!({ "name": "Второй" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let id = seed(&crew, &other, json!({})).await;
+
+    *fake.script.lock().unwrap() = vec![tool("run_routine", json!({ "routine_id": "нет-такой" })), say("Не вышло")];
+    crew.clear_events();
+    crew.say(&bot, "запусти рутину").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "run_routine");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let (status, result) = tool_result(&crew);
+    assert_ne!(status, "ok", "{result}");
+
+    *fake.script.lock().unwrap() = vec![tool("run_routine", json!({ "routine_id": id })), say("Запустил")];
+    crew.clear_events();
+    crew.say(&bot, "запусти рутину").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let (status, result) = tool_result(&crew);
+    assert_eq!(status, "ok", "{result}");
+    assert!(result.contains("запущена"), "{result}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_goal_always_asks_and_an_unknown_goal_is_refused() {
+    let (crew, fake, bot) = setup("goal-delete", "auto", &[]).await;
+    let id = goal(&crew, &bot, false).await;
+
+    *fake.script.lock().unwrap() = vec![tool("delete_goal", json!({ "goal_id": id })), say("Не вышло")];
+    crew.clear_events();
+    crew.say(&bot, "удали цель").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "delete_goal", "даже в режиме «решай сам»");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(goal_of(&crew, &id).await["status"], "active", "отказ оставляет цель");
+
+    *fake.script.lock().unwrap() = vec![tool("delete_goal", json!({ "goal_id": id })), say("Удалил")];
+    crew.clear_events();
+    crew.say(&bot, "удали цель").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let goals = crew.ok("GET", "/api/state", None).await["goals"].as_array().cloned().unwrap_or_default();
+    assert!(goals.iter().all(|g| g["id"] != id.as_str()), "цель удалена");
+
+    *fake.script.lock().unwrap() = vec![tool("delete_goal", json!({ "goal_id": id })), say("Нет такой")];
+    crew.clear_events();
+    crew.say(&bot, "удали цель ещё раз").await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    let (status, result) = tool_result(&crew);
+    assert_ne!(status, "ok", "{result}");
+}
