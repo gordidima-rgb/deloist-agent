@@ -571,6 +571,113 @@ fn offscreen_position() -> (i64, i64) {
     (-4000, -4000)
 }
 
+/// Окно своего Chrome бота стоит за экраном, но Windows всё равно давала ему кнопку в панели задач
+/// и в Alt+Tab: клик по ней разворачивал окно туда же, за экран, и ничего не показывал (владелец,
+/// 18.11.2026). Пока окно спрятано, у него стиль служебного окна (`WS_EX_TOOLWINDOW`) — без кнопки.
+/// Смотреть работу бота — экраном бота в программе; «Показать окно» возвращает кнопку.
+/// Касается только процесса браузера бота (pid из CDP), браузер человека не трогается.
+#[cfg(windows)]
+mod taskbar {
+    use std::collections::HashSet;
+    use std::sync::{LazyLock, Mutex, Once};
+
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetAncestor, GetMessageW, GetWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible,
+        SetWindowLongPtrW, ShowWindow, CHILDID_SELF, EVENT_OBJECT_SHOW, GA_ROOT, GWL_EXSTYLE, GW_OWNER, MSG, OBJID_WINDOW,
+        SW_HIDE, SW_SHOWNA, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+
+    /// Процессы браузеров ботов, чьи окна сейчас спрятаны.
+    static HIDDEN: LazyLock<Mutex<HashSet<u32>>> = LazyLock::new(Default::default);
+    static HOOK: Once = Once::new();
+
+    /// Главное окно процесса: верхнего уровня, без владельца, видимое.
+    fn main_window_pid(hwnd: HWND) -> Option<u32> {
+        unsafe {
+            if GetAncestor(hwnd, GA_ROOT) != hwnd || !GetWindow(hwnd, GW_OWNER).is_null() || IsWindowVisible(hwnd) == 0 {
+                return None;
+            }
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            Some(pid)
+        }
+    }
+
+    fn set_tool(hwnd: HWND, tool: bool) {
+        let (tool_bit, app_bit) = (WS_EX_TOOLWINDOW as isize, WS_EX_APPWINDOW as isize);
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let want = if tool { (ex | tool_bit) & !app_bit } else { ex & !tool_bit };
+            if want == ex {
+                return;
+            }
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want);
+            // Панель задач перечитывает стиль, только когда окно заново показано.
+            ShowWindow(hwnd, SW_HIDE);
+            ShowWindow(hwnd, SW_SHOWNA);
+        }
+    }
+
+    /// Новое окно браузера бота (Chrome показывает его после запуска, всплывающие окна сайтов)
+    /// сразу уходит из панели задач.
+    unsafe extern "system" fn on_show(_hook: HWINEVENTHOOK, _event: u32, hwnd: HWND, object: i32, child: i32, _thread: u32, _time: u32) {
+        if object != OBJID_WINDOW || child != CHILDID_SELF as i32 {
+            return;
+        }
+        if main_window_pid(hwnd).is_some_and(|pid| HIDDEN.lock().unwrap().contains(&pid)) {
+            set_tool(hwnd, true);
+        }
+    }
+
+    unsafe extern "system" fn collect(hwnd: HWND, found: LPARAM) -> i32 {
+        let found = unsafe { &mut *(found as *mut Vec<(HWND, u32)>) };
+        if let Some(pid) = main_window_pid(hwnd) {
+            found.push((hwnd, pid));
+        }
+        1
+    }
+
+    /// `hidden`: окна процесса `pid` без кнопки в панели задач; иначе — обычные окна.
+    pub fn set(pid: u32, hidden: bool) {
+        {
+            let mut set = HIDDEN.lock().unwrap();
+            if hidden {
+                set.insert(pid);
+            } else {
+                set.remove(&pid);
+            }
+        }
+        if hidden {
+            HOOK.call_once(|| {
+                std::thread::spawn(|| unsafe {
+                    // Вне контекста: вызовы приходят в этот поток, пока он ждёт сообщений.
+                    SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, std::ptr::null_mut(), Some(on_show), 0, 0, WINEVENT_OUTOFCONTEXT);
+                    let mut msg: MSG = std::mem::zeroed();
+                    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
+                });
+            });
+        }
+        let mut found: Vec<(HWND, u32)> = Vec::new();
+        unsafe { EnumWindows(Some(collect), &mut found as *mut _ as LPARAM) };
+        for (hwnd, _) in found.into_iter().filter(|(_, p)| *p == pid) {
+            set_tool(hwnd, hidden);
+        }
+    }
+
+    /// Браузер закрыт: его номер процесса может достаться чужой программе.
+    pub fn forget(pid: u32) {
+        HIDDEN.lock().unwrap().remove(&pid);
+    }
+}
+
+#[cfg(not(windows))]
+mod taskbar {
+    pub fn set(_pid: u32, _hidden: bool) {}
+    pub fn forget(_pid: u32) {}
+}
+
 // ---------------------------------------------------------------------------
 // Сессия
 // ---------------------------------------------------------------------------
@@ -583,6 +690,8 @@ pub struct Session {
     backend: Backend,
     last_used: AtomicI64,
     pub shown: AtomicBool,
+    /// Процесс своего Chrome/Edge бота: его окна прячутся из панели задач (`taskbar`).
+    browser_pid: Option<u32>,
     /// Только у «моего Chrome»: фильтр и согласия этой сессии.
     pub relay: Option<Arc<crate::user_chrome::BotRelay>>,
     /// Один вызов бота за раз: см. `lease`.
@@ -771,6 +880,12 @@ impl Session {
         cdp.call(None, "Target.setDiscoverTargets", json!({ "discover": true })).await?;
         cdp.call(None, "Target.setAutoAttach", json!({ "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true })).await?;
 
+        // Pid из CDP, а не от запуска: Edge перезапускает себя, а после перезапуска программы браузер уже чужой child.
+        let browser_pid = if matches!(backend, Backend::Chrome | Backend::Edge) { browser_process(&cdp).await } else { None };
+        if let Some(pid) = browser_pid {
+            taskbar::set(pid, true);
+        }
+
         Ok(Arc::new(Self {
             cdp,
             tabs,
@@ -779,6 +894,7 @@ impl Session {
             backend,
             last_used: AtomicI64::new(now()),
             shown: AtomicBool::new(false),
+            browser_pid,
             relay,
             lock: LeaseLock::default(),
         }))
@@ -954,6 +1070,9 @@ impl Session {
         if self.backend == Backend::UserChrome {
             return self.call("Page.bringToFront", json!({})).await.map(|_| ());
         }
+        if let Some(pid) = self.browser_pid {
+            taskbar::set(pid, false);
+        }
         if let Ok(window) = self.window().await {
             let bounds = json!({ "left": 80, "top": 60, "width": WINDOW_WIDTH, "height": WINDOW_HEIGHT });
             let _ = self.cdp.call(None, "Browser.setWindowBounds", json!({ "windowId": window, "bounds": bounds })).await;
@@ -975,10 +1094,16 @@ impl Session {
             let bounds = json!({ "left": left, "top": top });
             let _ = self.cdp.call(None, "Browser.setWindowBounds", json!({ "windowId": window, "bounds": bounds })).await;
         }
+        if let Some(pid) = self.browser_pid {
+            taskbar::set(pid, true);
+        }
     }
 
     /// Закрытие штатное: браузер успевает записать cookies на диск.
     async fn close(&self) {
+        if let Some(pid) = self.browser_pid {
+            taskbar::forget(pid);
+        }
         // У «моего Chrome» Browser.close только отпускает вкладки бота: браузер человека не закрывается.
         let _ = tokio::time::timeout(Duration::from_secs(3), self.cdp.call(None, "Browser.close", json!({}))).await;
         if let Some(relay) = &self.relay {
@@ -1087,6 +1212,8 @@ fn external_args(profile: &Path, headless: bool) -> Vec<String> {
         // «Восстановить страницы? Работа Chrome была завершена некорректно» (владелец, 12.11.2026).
         "--hide-crash-restore-bubble".into(),
         "--disable-blink-features=AutomationControlled".into(),
+        // Пузырь «Перевести страницу?» вылезал на экран человека, хотя окно за экраном (владелец, 18.11.2026).
+        "--disable-features=Translate".into(),
         // Окно за пределами экрана и без фокуса: страницы при этом должны работать как обычно.
         "--disable-backgrounding-occluded-windows".into(),
         "--disable-renderer-backgrounding".into(),
@@ -1113,6 +1240,14 @@ fn external_args(profile: &Path, headless: bool) -> Vec<String> {
     }
     args.push("about:blank".into());
     args
+}
+
+/// Номер процесса браузера (тип `browser` в `SystemInfo.getProcessInfo`).
+async fn browser_process(cdp: &Cdp) -> Option<u32> {
+    let info = cdp.call(None, "SystemInfo.getProcessInfo", json!({})).await.ok()?;
+    let list = info["processInfo"].as_array()?;
+    let browser = list.iter().find(|p| p["type"] == "browser")?;
+    browser["id"].as_u64().and_then(|id| u32::try_from(id).ok())
 }
 
 /// Профиль бота закрывается вместе с программой, часто без «нормального» выхода Chrome.
@@ -1905,6 +2040,7 @@ mod tests {
         assert!(!args.iter().any(|a| a.contains("enable-automation") || a.contains("headless") || a.contains("proxy")), "{args:?}");
         assert!(args.iter().any(|a| a == r"--user-data-dir=C:\p"), "постоянный профиль бота");
         assert!(args.iter().any(|a| a == "--hide-crash-restore-bubble"), "без «Восстановить страницы?»");
+        assert!(args.iter().any(|a| a == "--disable-features=Translate"), "без пузыря переводчика на экране человека");
         // Edge передаёт запуск новому процессу и выходит с кодом 0: это не сбой.
         assert!(launch_exit(Some(0)).is_ok());
         assert!(launch_exit(Some(-2147483645)).unwrap_err().contains("-2147483645"));
