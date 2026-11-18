@@ -1279,7 +1279,7 @@
   function applyLook() {
     const theme = settings.uiTheme;
     const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    window.switchTheme(dark ? 'dark' : 'light');
     if (settings.uiFont && settings.uiFont !== 'system') document.documentElement.dataset.font = settings.uiFont;
     else delete document.documentElement.dataset.font;
     if (!press) document.body.classList.toggle('left', !right());
