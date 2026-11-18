@@ -2107,7 +2107,7 @@
     'Ошибка у участника': 'A member has an error',
     'Непрочитанных ботов: {n}': 'Bots with unread messages: {n}',
     'Участников: {n}': 'Members: {n}',
-    'есть и в другой команде': 'also in another team',
+    'Ведущий команды': 'Team lead',
     'Без команды': 'No team',
     'Папки команды': 'Team folders',
     'Каждый бот команды работает в этих папках без вопросов, но только внутри этой команды.': 'Every bot of the team works in these folders without asking, but only inside this team.',

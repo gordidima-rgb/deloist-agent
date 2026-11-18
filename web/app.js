@@ -829,7 +829,7 @@ function renderSidebar() {
     // Names as tooltips: in the collapsed rail only the avatar is left.
     for (const row of $$('#bot-list .sb-row[data-id]')) {
       const name = row.querySelector('.k-list-item__title')?.textContent || '';
-      row.title = row.classList.contains('is-repeat') ? `${name} · ${tr('есть и в другой команде')}` : name;
+      row.title = name;
     }
     Split.decorate();
   }, 0);

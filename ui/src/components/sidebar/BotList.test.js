@@ -133,22 +133,22 @@ describe('BotList', () => {
     const rowEls = () => [...host.querySelectorAll('.sb-tree li[role="treeitem"]')];
     const level = (el) => Number(el.getAttribute('aria-level'));
 
-    it('puts the lead under the team and the rest one level deeper; free bots go under "Без команды"', () => {
+    it('puts all bots of a team one level under it; free bots go under "Без команды"', () => {
       render(tree());
       const rows = rowEls().map((el) => [el.dataset.id, level(el)]);
-      expect(rows).toEqual([['t1', 1], ['lead', 2], ['a', 3], ['both', 3], ['t2', 1], ['both', 2], ['b', 3]]);
+      expect(rows).toEqual([['t1', 1], ['lead', 2], ['a', 2], ['both', 2], ['t2', 1], ['both', 2], ['b', 2]]);
       expect(heads()).toEqual(['Команды', 'Без команды']);
       expect([...host.querySelectorAll('.sb-list:not(.sb-tree) .sb-row')].map((el) => el.dataset.id)).toEqual(['solo']);
       expect(host.querySelector('.sb-tree').getAttribute('role')).toBe('tree');
     });
 
-    it('marks a bot that is in a second team as a repeat and gives it its own avatar slot', () => {
-      const paint = vi.fn();
-      render(tree({ paint }));
-      const both = [...host.querySelectorAll('.sb-row[data-id="both"]')];
-      expect(both.map((el) => el.classList.contains('is-repeat'))).toEqual([false, true]);
-      const slots = paint.mock.calls.filter((c) => c[1] === 'both').map((c) => c[2]);
-      expect(new Set(slots).size).toBe(2);
+    it('lists the bots of a team on one level, the lead first and crowned', () => {
+      render(tree());
+      const rows = [...host.querySelectorAll('li[data-team="t1"] + .sb-branch .sb-row')];
+      expect(rows.map((el) => el.dataset.id)).toEqual(['lead', 'a', 'both']);
+      expect(rows.map((el) => el.getAttribute('aria-level'))).toEqual(['2', '2', '2']);
+      expect(rows.map((el) => !!el.querySelector('.sb-crown'))).toEqual([true, false, false]);
+      expect(host.querySelector('.sb-sub')).toBeNull();
     });
 
     it('collapses and expands with the chevron, remembers it, and keeps the chat click', () => {

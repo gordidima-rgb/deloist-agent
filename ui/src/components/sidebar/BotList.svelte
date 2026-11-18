@@ -88,35 +88,27 @@ import { ListItem, Icon, Badge } from '../kit';
   const liveRooms = $derived(rooms.filter((room) => !room.archived));
   const archivedRooms = $derived(rooms.filter((room) => room.archived));
 
-  // Дерево: команда → ведущий (Room.lead, иначе первый участник) → остальные на уровень ниже.
-  // Бот не повторяется в одной команде; во второй и далее он помечен как повтор.
-  const teams = $derived.by(() => {
-    const seen = new Set();
-    return liveRooms.map((room) => {
+  // Дерево: команда → её боты одним уровнем; ведущий (Room.lead, иначе первый участник) первым, с короной.
+  // Бот состоит только в одной команде, повторов нет.
+  const teams = $derived(
+    liveRooms.map((room) => {
       const ids = [...new Set((room.memberIds ?? []).filter((id) => byId.has(id)))];
       const leadId = ids.includes(room.lead) ? room.lead : ids[0];
-      const mark = (id) => {
-        const repeat = seen.has(id);
-        seen.add(id);
-        return { bot: byId.get(id), repeat };
-      };
-      const lead = leadId ? mark(leadId) : null;
-      const others = ids.filter((id) => id !== leadId).map(mark);
-      const members = ids.map((id) => byId.get(id));
+      const members = [leadId, ...ids.filter((id) => id !== leadId)].filter(Boolean).map((id) => byId.get(id));
       return {
         room,
-        lead,
-        others,
+        leadId,
+        members,
         count: members.length,
         subtitle: teamSubtitle(room.preview, members.map((b) => b.name), tr('пока пусто')),
         needs: members.filter((b) => b.needs).length,
         errors: members.filter((b) => b.error).length,
         unread: members.filter((b) => b.unread).length,
       };
-    });
-  });
+    }),
+  );
   const roomSubtitle = (room) => teamSubtitle(room.preview, (room.memberIds ?? []).map((id) => byId.get(id)?.name), tr('пока пусто'));
-  const inTeam = $derived(new Set(teams.flatMap((t) => [t.lead?.bot.id, ...t.others.map((o) => o.bot.id)].filter(Boolean))));
+  const inTeam = $derived(new Set(teams.flatMap((t) => t.members.map((b) => b.id))));
 
   const pinned = $derived(searching ? [] : bots.filter((b) => b.pinned));
   const free = $derived(bots.filter((b) => !inTeam.has(b.id)));
@@ -171,13 +163,13 @@ import { ListItem, Icon, Badge } from '../kit';
 {#snippet botRow(bot, opts = {})}
   {@const slot = opts.slot ?? `side:${bot.id}`}
   <ListItem
-    class={opts.repeat ? 'sb-row is-repeat' : 'sb-row'}
+    class="sb-row"
     data-id={bot.id}
     data-parent={opts.parent}
     role={opts.level ? 'treeitem' : undefined}
     aria-level={opts.level}
     title={bot.name}
-    aria-description={opts.repeat ? tr('есть и в другой команде') : undefined}
+    aria-description={opts.lead ? tr('Ведущий команды') : undefined}
     subtitle={plainPreview(bot.preview)}
     meta={bot.time}
     alignMeta
@@ -187,7 +179,12 @@ import { ListItem, Icon, Badge } from '../kit';
     onclick={() => onselect?.(bot.id)}
     oncontextmenu={onmenu ? (event) => openMenu(event, bot.id, opts.parent) : undefined}
   >
-    {#snippet avatar()}<span class="avatar sb-avatar" data-slot={slot} {@attach avatarOf(bot.id, slot)}></span>{/snippet}
+    {#snippet avatar()}
+      <span class="sb-face">
+        <span class="avatar sb-avatar" data-slot={slot} {@attach avatarOf(bot.id, slot)}></span>
+        {#if opts.lead}<span class="sb-crown" title={tr('Ведущий команды')}><Icon name="crown" size={10} /></span>{/if}
+      </span>
+    {/snippet}
     {#snippet context()}
       {#if onmenu}
         <button
@@ -302,20 +299,13 @@ import { ListItem, Icon, Badge } from '../kit';
     <ul class="k-list sb-list sb-tree" role="tree" aria-label={tr('Команды')} onkeydown={onTreeKey}>
       {#each teams as team (team.room.id)}
         {@render teamRow(team)}
-        {#if team.lead}
+        {#if team.count}
           {@const open = isOpen(team.room.id)}
           <li class="sb-branch" class:is-open={open} role="none" {...(open ? {} : { inert: true })}>
             <ul class="sb-group" role="group">
-              {@render botRow(team.lead.bot, { level: 2, parent: team.room.id, slot: `side:${team.lead.bot.id}:${team.room.id}`, repeat: team.lead.repeat })}
-              {#if team.others.length}
-                <li class="sb-branch is-open" role="none">
-                  <ul class="sb-group sb-sub" role="group">
-                    {#each team.others as other (other.bot.id)}
-                      {@render botRow(other.bot, { level: 3, parent: team.room.id, slot: `side:${other.bot.id}:${team.room.id}`, repeat: other.repeat })}
-                    {/each}
-                  </ul>
-                </li>
-              {/if}
+              {#each team.members as member (member.id)}
+                {@render botRow(member, { level: 2, parent: team.room.id, slot: `side:${member.id}:${team.room.id}`, lead: member.id === team.leadId })}
+              {/each}
             </ul>
           </li>
         {/if}
@@ -416,7 +406,6 @@ import { ListItem, Icon, Badge } from '../kit';
     list-style: none;
     border-left: 1px solid color-mix(in srgb, var(--k-brand) 30%, var(--k-line));
   }
-  .sb-sub { margin-left: 24px; }
   /* Свёрнутая ветка не держит фокус и не читается (inert), но и не мигает при раскрытии. */
   .sb-branch:not(.is-open) { visibility: hidden; transition: grid-template-rows var(--k-dur-base) var(--k-ease-out), visibility 0s linear var(--k-dur-base); }
   .sb-branch.is-open { visibility: visible; }
@@ -437,7 +426,11 @@ import { ListItem, Icon, Badge } from '../kit';
   .sb-chev-btn:hover { color: var(--k-text); background: var(--k-surface-2); }
   .sb-chev-btn:focus-visible { outline: none; box-shadow: var(--k-focus); }
   :global(.sb-row.sb-team .avatar.room-icon) { color: var(--team-color, var(--k-text-2)); }
-  :global(.sb-row.is-repeat .k-list-item__title) { color: var(--k-text-2); font-style: italic; }
+  .sb-face { position: relative; display: inline-flex; }
+  .sb-crown {
+    position: absolute; top: -4px; left: -4px; display: inline-flex; padding: 2px;
+    border-radius: var(--k-radius-pill); background: var(--k-surface); color: var(--k-brand); box-shadow: 0 0 0 1px var(--k-brand-tint);
+  }
   :global(.sb-members), :global(.sb-roll) { margin-left: 4px; }
 
   /* Булавка видна при наведении и у закреплённых; работает с клавиатуры. */
