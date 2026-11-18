@@ -732,6 +732,7 @@ async fn the_agent_key_reads_todos_but_cannot_change_them() {
     let id = created["id"].as_str().unwrap().to_string();
     let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
     let token = runtime["token"].as_str().unwrap().to_string();
+    let bot = crew.ok("GET", "/api/state", None).await["bots"][0]["id"].as_str().unwrap().to_string();
     let call = |method: reqwest::Method, path: String, body: Option<Value>| {
         let mut req = crew.client.request(method, format!("{}{path}", crew.base)).bearer_auth(&token);
         if let Some(body) = body {
@@ -743,6 +744,10 @@ async fn the_agent_key_reads_todos_but_cannot_change_them() {
         call(reqwest::Method::POST, "/api/todos".into(), Some(json!({ "title": "чужая" }))).await.unwrap(),
         call(reqwest::Method::POST, "/api/todos".into(), Some(json!({ "text": "чужая завтра в 10" }))).await.unwrap(),
         call(reqwest::Method::PATCH, format!("/api/todos/{id}"), Some(json!({ "title": "чужая" }))).await.unwrap(),
+        // Исполнитель с передачей боту — тоже только из окна: ключ не заставит бота работать от имени человека.
+        call(reqwest::Method::POST, "/api/todos".into(), Some(json!({ "title": "чужая", "assignee": bot }))).await.unwrap(),
+        call(reqwest::Method::PATCH, format!("/api/todos/{id}"), Some(json!({ "assignee": bot }))).await.unwrap(),
+        call(reqwest::Method::POST, "/api/todos/from-text".into(), Some(json!({ "text": "чужая", "assignee": bot }))).await.unwrap(),
         call(reqwest::Method::DELETE, format!("/api/todos/{id}"), None).await.unwrap(),
         call(reqwest::Method::POST, format!("/api/todos/{id}/done"), None).await.unwrap(),
         call(reqwest::Method::DELETE, format!("/api/todos/{id}/done"), None).await.unwrap(),

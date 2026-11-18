@@ -218,6 +218,7 @@ async fn tick(app: &Arc<App>) {
     crate::memory::team_review::ensure_routines(app).await;
     crate::optimizer::tick(app);
     crate::todos::tick(app);
+    crate::todos::hand_over_due(app);
     crate::team_tasks::check_deadlines(app).await;
     crate::habits::remind_tick(app).await;
     crate::goals::tick(app).await;

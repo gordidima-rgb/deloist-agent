@@ -2885,6 +2885,7 @@ fn run_turn_body(
         app.turns.emit(json!({
             "type": "turn_end", "botId": bot_id, "turnId": turn_id,
             "text": if quiet { "" } else { &final_text }, "failed": failure.is_some(), "quiet": quiet,
+            "ok": failure.is_none() && pause.is_none() && waiting.is_none() && !aborted,
             "usage": usage_json(turn_usage), "steps": steps_run, "ms": now() - started_at,
         }));
 

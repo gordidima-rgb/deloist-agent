@@ -249,13 +249,17 @@ async fn completions(State(fake): State<Fake>, _body: Bytes) -> Response {
 }
 
 async fn setup(name: &str) -> (Crew, Fake, String) {
+    setup_with(name, &[]).await
+}
+
+async fn setup_with(name: &str, env: &[(&str, &str)]) -> (Crew, Fake, String) {
     let fake = Fake::default();
     let router = Router::new().route("/v1/chat/completions", post(completions)).with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
-    let crew = Crew::start_with_env(name, &[]).await;
+    let crew = Crew::start_with_env(name, env).await;
     crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "k" }))).await;
     crew.listen().await;
     let state = crew.ok("GET", "/api/state", None).await;
@@ -340,4 +344,55 @@ async fn a_bot_edits_a_task_freely_but_deleting_it_always_asks() {
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     assert!(crew.ok("GET", "/api/todos", None).await.as_array().unwrap().is_empty());
     assert_eq!(crew.ok("GET", "/api/todos/archive", None).await.as_array().unwrap().len(), 1, "задача в архиве");
+}
+
+// --- Задачи для ботов: исполнитель, передача по сроку, итог бота ---
+
+fn handovers(crew: &Crew) -> usize {
+    crew.count_events(|e| e["type"] == "turn_start" && e["source"].as_str().is_some_and(|s| s.starts_with("todo:")))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_human_task_for_a_bot_is_handed_over_once_and_closed_with_its_result() {
+    let (crew, fake, bot) = setup_with("todos-handover", &[("CREW_TEST_TICK_MS", "300")]).await;
+    *fake.script.lock().unwrap() = vec![say("Отчёт собран, файл в папке")];
+
+    let made = crew.ok("POST", "/api/todos", Some(json!({ "title": "Собрать отчёт", "notes": "за неделю", "assignee": bot }))).await;
+    let id = made["id"].as_str().unwrap().to_string();
+    assert!(made["handed_at"].is_null(), "сразу после сохранения ещё не передана: запас на файлы");
+
+    crew.wait_event("конец хода-передачи", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+    let started = crew.find_event(|e| e["type"] == "turn_start").unwrap();
+    assert_eq!(started["source"], format!("todo:{id}"));
+    common::wait_until("итог бота на задаче", 10, || async {
+        let list = crew.ok("GET", "/api/todos", None).await;
+        list[0]["done"] == true && list[0]["bot_result"] == "Отчёт собран, файл в папке"
+    })
+    .await;
+    let list = crew.ok("GET", "/api/todos", None).await;
+    assert!(list[0]["handed_at"].is_number());
+    // Следующие тики её не передают снова.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    assert_eq!(handovers(&crew), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_cannot_hand_a_todo_to_another_bot_or_start_a_handover() {
+    let (crew, fake, bot) = setup_with("todos-no-bypass", &[("CREW_TEST_TICK_MS", "300")]).await;
+    let other = crew.ok("POST", "/api/bots", Some(json!({ "name": "Бета", "role": "младший" }))).await["bot"]["id"].as_str().unwrap().to_string();
+
+    *fake.script.lock().unwrap() = vec![tool("add_todo", json!({ "title": "чужому", "assignee": other })), say("Не вышло")];
+    let (status, result) = ask_and_result(&crew, &bot, "поручи Бете").await;
+    assert_ne!(status, "ok");
+    assert!(result.contains("assign_task"), "{result}");
+    assert!(crew.ok("GET", "/api/todos", None).await.as_array().unwrap().is_empty(), "задача не создана");
+
+    // Себе — можно, но это метка, а не передача.
+    *fake.script.lock().unwrap() = vec![tool("add_todo", json!({ "title": "себе", "assignee": bot })), say("Записал")];
+    let (status, result) = ask_and_result(&crew, &bot, "напомни себе").await;
+    assert_eq!(status, "ok", "{result}");
+    let list = crew.ok("GET", "/api/todos", None).await;
+    assert_eq!(list[0]["assignee"], bot.as_str());
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    assert_eq!(handovers(&crew), 0, "задачу, поставленную ботом, программа ему не передаёт");
 }

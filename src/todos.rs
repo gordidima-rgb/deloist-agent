@@ -87,6 +87,12 @@ pub struct Todo {
     pub items: Vec<Item>,
     /// Исполнитель — только бот (решение владельца 13.11.2026).
     pub assignee: Option<String>,
+    /// Исполнителя выставил человек из окна: только такую задачу программа сама передаёт боту (`hand_over_due`).
+    /// Бот поставить это не может: свой исполнитель у бота — просто метка.
+    pub handover: bool,
+    /// Когда задача ушла боту сообщением (мс) и что он ответил. Пока ход идёт, `bot_result` пуст.
+    pub handed_at: Option<i64>,
+    pub bot_result: Option<String>,
     pub auto_close_after_min: Option<u32>,
     /// Адрес места и телефон, которые разбор фразы вынес из названия (0.3.5).
     pub address: Option<String>,
@@ -559,6 +565,8 @@ fn complete_in(saved: &mut Saved, index: usize, today: NaiveDate, now: i64) -> O
         archived: false,
         created_at: now,
         items,
+        handed_at: None,
+        bot_result: None,
         ..template
     };
     saved.todos.push(next.clone());
@@ -573,6 +581,174 @@ pub fn tick(app: &App) {
     let closed = app.todos.auto_close(day, now);
     if swept || closed > 0 {
         changed(app);
+    }
+}
+
+/// Метка хода, начатого задачей: `todo:<id задачи>` (так `turn_start` говорит, чей это ход).
+const SOURCE: &str = "todo:";
+/// Срок без времени наступает в 9 утра; задача без срока — сразу после сохранения (с запасом на приложенные файлы).
+const DEFAULT_TIME: &str = "09:00";
+const SAVE_GRACE_MS: i64 = 5_000;
+/// Компьютер был выключен дольше: задача уже не по делу, как и у напоминаний.
+const MISSED_AFTER_MS: i64 = 12 * 3600 * 1000;
+const MISSED: &str = "пропущено, компьютер был выключен";
+const INTERRUPTED: &str = "программа закрылась посреди задачи";
+const RESULT_CHARS: usize = 300;
+/// Ход, о котором программа забыла (перезапуск), считается оборванным не раньше чем через минуту после передачи.
+const LOST_AFTER_MS: i64 = 60_000;
+
+/// Идущие ходы-передачи: id хода -> id задачи.
+static TURNS: std::sync::LazyLock<Mutex<std::collections::HashMap<String, String>>> = std::sync::LazyLock::new(Mutex::default);
+
+#[derive(Debug, PartialEq, Eq)]
+enum Handover {
+    Wait,
+    Go,
+    Missed,
+}
+
+/// Пора ли передавать задачу боту: срок наступил (и прошло время на файлы после создания), но не прошёл больше чем на 12 часов.
+fn handover_state(todo: &Todo, now: i64) -> Handover {
+    let planned = todo.due_date.as_deref().and_then(|day| deadline_ms(day, todo.due_time.as_deref().unwrap_or(DEFAULT_TIME)));
+    let due = planned.unwrap_or(0).max(todo.created_at + SAVE_GRACE_MS);
+    if now < due {
+        Handover::Wait
+    } else if now - due > MISSED_AFTER_MS {
+        Handover::Missed
+    } else {
+        Handover::Go
+    }
+}
+
+fn handover_text(app: &App, todo: &Todo) -> String {
+    let mut text = format!("Задача из списка дел: {}", todo.title);
+    if !todo.notes.is_empty() {
+        text.push_str(&format!("
+
+{}", todo.notes));
+    }
+    if !todo.items.is_empty() {
+        text.push_str("
+
+Чек-лист:");
+        for item in &todo.items {
+            text.push_str(&format!("
+- [{}] {}", if item.done { "x" } else { " " }, item.text));
+        }
+    }
+    if !todo.files.is_empty() {
+        let dir = app.store.data_dir().join("todo-files").join(&todo.id);
+        text.push_str("
+
+Файлы:");
+        for file in &todo.files {
+            text.push_str(&format!("
+- {}: {}", file.name, dir.join(&file.path).display()));
+        }
+    }
+    if let Some(day) = &todo.due_date {
+        text.push_str(&format!("
+
+Срок: {day}{}", todo.due_time.as_deref().map(|t| format!(" {t}")).unwrap_or_default()));
+    }
+    text
+}
+
+fn settle(app: &App, id: &str, change: impl FnOnce(&mut Todo)) {
+    let _ = app.todos.update(id, |todo| {
+        change(todo);
+        Ok(())
+    });
+    changed(app);
+}
+
+/// Задачи человека с исполнителем-ботом, срок которых пришёл, уходят боту обычным сообщением человека (тем же
+/// запуском хода, что и из чата). Раз передав, не передаёт снова; итог дописывает `on_event`. Зовёт тик планировщика.
+pub fn hand_over_due(app: &Arc<App>) {
+    let now = crate::store::now();
+    for todo in app.todos.list(today()).into_iter().filter(|t| t.handover && !t.done) {
+        let Some(bot_id) = todo.assignee.clone() else { continue };
+        if let Some(handed) = todo.handed_at {
+            // Ход пропал при перезапуске программы: итога не будет, задача остаётся открытой с причиной.
+            let known = TURNS.lock().unwrap().values().any(|id| *id == todo.id);
+            if todo.bot_result.is_none() && !known && now - handed > LOST_AFTER_MS && !app.turns.is_busy(&bot_id) {
+                settle(app, &todo.id, |t| t.bot_result = Some(INTERRUPTED.into()));
+            }
+            continue;
+        }
+        match handover_state(&todo, now) {
+            Handover::Wait => continue,
+            Handover::Go => {}
+            Handover::Missed => {
+                settle(app, &todo.id, |t| {
+                    t.handed_at = Some(now);
+                    t.bot_result = Some(MISSED.into());
+                });
+                continue;
+            }
+        }
+        if app.store.bot(&bot_id).is_none() {
+            settle(app, &todo.id, |t| {
+                t.handed_at = Some(now);
+                t.bot_result = Some("бота больше нет в команде".into());
+            });
+            continue;
+        }
+        if app.turns.is_busy(&bot_id) {
+            continue;
+        }
+        listen(app);
+        let opts = crate::turn::TurnOptions { source: Some(format!("{SOURCE}{}", todo.id)), window: true, ..Default::default() };
+        match crate::turn::start_turn(app, &bot_id, &handover_text(app, &todo), opts) {
+            Ok(()) => settle(app, &todo.id, |t| t.handed_at = Some(now)),
+            Err(e) if e.status == 409 => {}
+            Err(e) => settle(app, &todo.id, |t| {
+                t.handed_at = Some(now);
+                t.bot_result = Some(e.message);
+            }),
+        }
+    }
+}
+
+/// Слушатель событий ходов: запускается один раз, до первой передачи.
+fn listen(app: &Arc<App>) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let mut events = app.turns.subscribe();
+        let app = app.clone();
+        tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(event) => on_event(&app, &event),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+    });
+}
+
+/// Начало хода-передачи запоминает его; конец — пишет задаче итог бота и закрывает её, если ход дошёл до конца.
+fn on_event(app: &App, event: &Value) {
+    let Some(turn) = event["turnId"].as_str() else { return };
+    match event["type"].as_str() {
+        Some("turn_start") => {
+            if let Some(id) = event["source"].as_str().and_then(|s| s.strip_prefix(SOURCE)) {
+                TURNS.lock().unwrap().insert(turn.to_string(), id.to_string());
+            }
+        }
+        Some("turn_end") => {
+            let Some(id) = TURNS.lock().unwrap().remove(turn) else { return };
+            let ok = event["ok"].as_bool().unwrap_or(false);
+            let said = event["text"].as_str().unwrap_or_default().trim();
+            let result = if said.is_empty() { if ok { "готово".to_string() } else { "бот не закончил задачу".to_string() } } else { said.chars().take(RESULT_CHARS).collect() };
+            settle(app, id.as_str(), |t| t.bot_result = Some(result));
+            if ok {
+                let _ = app.todos.complete(&id, today(), crate::store::now());
+                changed(app);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -662,8 +838,8 @@ fn assignee_field(app: &App, id: &str) -> Result<String, TodoError> {
     }
 }
 
-/// Поля из тела запроса. Ключа, которого нет в теле, не касается; null очищает поле.
-fn apply(app: &App, todo: &mut Todo, body: &Value) -> Result<(), TodoError> {
+/// Поля из тела запроса. Ключа, которого нет в теле, не касается; null очищает поле. `human` — запрос из окна, не инструмент бота.
+fn apply(app: &App, todo: &mut Todo, body: &Value, human: bool) -> Result<(), TodoError> {
     if let Some(title) = text_field(body, "title")? {
         todo.title = clean_title(&title)?;
     }
@@ -690,7 +866,14 @@ fn apply(app: &App, todo: &mut Todo, body: &Value) -> Result<(), TodoError> {
         todo.items = items_field(value)?;
     }
     if body.get("assignee").is_some() {
-        todo.assignee = text_field(body, "assignee")?.map(|id| assignee_field(app, &id)).transpose()?;
+        let assignee = text_field(body, "assignee")?.map(|id| assignee_field(app, &id)).transpose()?;
+        // Другой исполнитель — другая передача: старый итог и отметка «передано» к нему не относятся.
+        if assignee != todo.assignee {
+            todo.handed_at = None;
+            todo.bot_result = None;
+        }
+        todo.handover = human && assignee.is_some();
+        todo.assignee = assignee;
     }
     if body.get("auto_close_after_min").is_some() {
         todo.auto_close_after_min = match number_field(body, "auto_close_after_min")? {
@@ -718,13 +901,13 @@ fn phrase_todo(text: &str, today: NaiveDate, now: NaiveTime) -> Result<Todo, Tod
 }
 
 /// Новая задача из тела запроса: либо `text` (фраза), либо поля. Поля из тела поверх фразы.
-fn build_new(app: &App, body: &Value) -> Result<Todo, TodoError> {
+fn build_new(app: &App, body: &Value, human: bool) -> Result<Todo, TodoError> {
     let now = Local::now();
     let mut todo = match text_field(body, "text")? {
         Some(text) if !text.trim().is_empty() => phrase_todo(&text, now.date_naive(), now.time())?,
         _ => Todo::default(),
     };
-    apply(app, &mut todo, body)?;
+    apply(app, &mut todo, body, human)?;
     if todo.title.is_empty() {
         return Err(TodoError::Invalid("нужно название задачи или текст".into()));
     }
@@ -743,6 +926,8 @@ pub fn view(todo: &Todo, now: i64) -> Value {
         "recurrence": todo.recurrence,
         "items": todo.items,
         "assignee": todo.assignee,
+        "handed_at": todo.handed_at,
+        "bot_result": todo.bot_result,
         "auto_close_after_min": todo.auto_close_after_min,
         "address": todo.address,
         "phone": todo.phone,
@@ -818,7 +1003,7 @@ async fn archive_list_route(State(app): Shared, Query(query): Query<ArchiveQuery
 }
 
 fn create(app: &App, bytes: &Bytes) -> Reply {
-    let todo = build_new(app, &json_body(bytes)?)?;
+    let todo = build_new(app, &json_body(bytes)?, true)?;
     let made = app.todos.add(todo)?;
     changed(app);
     Ok((StatusCode::CREATED, view(&made, crate::store::now())))
@@ -828,8 +1013,8 @@ async fn create_route(State(app): Shared, body: Bytes) -> Response {
     respond(create(&app, &body))
 }
 
-fn edit(app: &App, id: &str, body: &Value) -> Reply {
-    let updated = app.todos.update(id, |todo| apply(app, todo, body))?;
+fn edit(app: &App, id: &str, body: &Value, human: bool) -> Reply {
+    let updated = app.todos.update(id, |todo| apply(app, todo, body, human))?;
     changed(app);
     Ok((StatusCode::OK, view(&updated, crate::store::now())))
 }
@@ -871,7 +1056,7 @@ async fn file_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> 
 }
 
 async fn patch_route(State(app): Shared, Path(id): Path<String>, body: Bytes) -> Response {
-    respond(json_body(&body).and_then(|body| edit(&app, &id, &body)))
+    respond(json_body(&body).and_then(|body| edit(&app, &id, &body, true)))
 }
 
 async fn archive_route(State(app): Shared, Path(id): Path<String>) -> Response {
@@ -992,7 +1177,7 @@ pub fn bot_tool_defs() -> Vec<Value> {
                         "notes": { "type": "string", "description": "Заметка к задаче." },
                         "recurrence": { "type": "object", "description": "Повтор: {freq: daily|weekly|monthly|yearly, interval, weekdays, monthday}; null снимает повтор." },
                         "items": { "type": "array", "items": { "type": "object" }, "description": "Чек-лист целиком: [{text, done?}], до 30 пунктов; null очищает." },
-                        "assignee": { "type": "string", "description": "ID бота-исполнителя из list_bots; null снимает." },
+                        "assignee": { "type": "string", "description": "Только свой ID (напоминание себе); null снимает. Другому боту — через assign_task." },
                         "auto_close_after_min": { "type": "integer", "description": "Автозакрытие повторяющейся задачи через столько минут после срока." },
                     },
                     "required": ["todo_id"],
@@ -1036,9 +1221,13 @@ fn bot_line(todo: &Todo) -> String {
     format!("{} · {}{due}{state}", todo.id, todo.title)
 }
 
-/// Выполнить инструмент бота. Ошибки — текстом для модели.
-pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, String> {
+/// Выполнить инструмент бота `bot_id`. Ошибки — текстом для модели.
+pub fn exec_bot_tool(app: &App, bot_id: &str, name: &str, args: &Value) -> Result<String, String> {
     let now = Local::now();
+    // Чужому боту задачу отдают только через `assign_task` (с его правилами передачи): здесь исполнитель — лишь свой.
+    if matches!(name, "add_todo" | "update_todo") && args.get("assignee").and_then(Value::as_str).is_some_and(|id| id != bot_id) {
+        return Err("поручить другому боту — через assign_task".into());
+    }
     match name {
         "list_todos" => {
             let filter = Filter::parse(crate::routine_tools::text(args, "filter")).map_err(|e| e.message())?;
@@ -1049,7 +1238,7 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
             Ok(items.iter().map(bot_line).collect::<Vec<_>>().join("\n"))
         }
         "add_todo" => {
-            let todo = build_new(app, args).map_err(|e| e.message())?;
+            let todo = build_new(app, args, false).map_err(|e| e.message())?;
             let made = app.todos.add(todo).map_err(|e| e.message())?;
             changed(app);
             Ok(format!("Добавил задачу «{}»{}. Номер: {}.", made.title, made.due_date.as_deref().map(|d| format!(", срок {d}")).unwrap_or_default(), made.id))
@@ -1062,7 +1251,7 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
             let todo = app.todos.resolve(key).map_err(|e| e.message())?;
             match name {
                 "update_todo" => {
-                    edit(app, &todo.id, args).map_err(|e| e.message())?;
+                    edit(app, &todo.id, args, false).map_err(|e| e.message())?;
                     Ok(format!("Изменил задачу «{}».", todo.title))
                 }
                 "delete_todo" => {
@@ -1323,6 +1512,44 @@ mod tests {
         assert_eq!(store.resolve("купить ХЛЕБ").unwrap().title, "Купить хлеб");
         assert!(matches!(store.resolve("Позвонить маме"), Err(TodoError::Invalid(_))));
         assert!(matches!(store.resolve("нет такой"), Err(TodoError::NotFound)));
+    }
+
+    fn assigned(due_date: Option<&str>, due_time: Option<&str>) -> Todo {
+        Todo { handover: true, assignee: Some("b1".into()), due_date: due_date.map(Into::into), due_time: due_time.map(Into::into), created_at: at(8, 0), ..task("отчёт") }
+    }
+
+    #[test]
+    fn handover_waits_for_the_deadline_and_defaults_to_nine() {
+        let todo = assigned(Some("2026-06-19"), None);
+        assert_eq!(handover_state(&todo, at(8, 59)), Handover::Wait);
+        assert_eq!(handover_state(&todo, at(9, 0)), Handover::Go);
+        let timed = assigned(Some("2026-06-19"), Some("14:30"));
+        assert_eq!(handover_state(&timed, at(14, 29)), Handover::Wait);
+        assert_eq!(handover_state(&timed, at(14, 30)), Handover::Go);
+    }
+
+    #[test]
+    fn handover_without_a_date_goes_right_after_saving() {
+        let todo = assigned(None, None);
+        assert_eq!(handover_state(&todo, todo.created_at + 1_000), Handover::Wait, "запас на приложенные файлы");
+        assert_eq!(handover_state(&todo, todo.created_at + SAVE_GRACE_MS), Handover::Go);
+    }
+
+    #[test]
+    fn handover_missed_after_twelve_hours_of_a_closed_computer() {
+        let todo = assigned(Some("2026-06-19"), Some("10:00"));
+        assert_eq!(handover_state(&todo, at(10, 0) + MISSED_AFTER_MS), Handover::Go, "ровно 12 часов — ещё передаём");
+        assert_eq!(handover_state(&todo, at(10, 0) + MISSED_AFTER_MS + 1), Handover::Missed);
+        let late = Todo { created_at: at(23, 0), ..assigned(Some("2026-06-19"), Some("10:00")) };
+        assert_eq!(handover_state(&late, at(23, 1)), Handover::Go, "задача, созданная уже после срока, не «пропущена»");
+    }
+
+    #[test]
+    fn a_repeat_instance_starts_a_fresh_handover() {
+        let mut saved = Saved { todos: vec![Todo { handed_at: Some(1), bot_result: Some("готово".into()), recurrence: weekly(vec![3]), due_date: Some("2026-09-09".into()), handover: true, assignee: Some("b1".into()), ..task("зал") }] };
+        let next = complete_in(&mut saved, 0, day("2026-09-09"), at_ms(2026, 9, 9)).unwrap();
+        assert!(next.handover && next.assignee.as_deref() == Some("b1"), "исполнитель переходит в следующий экземпляр");
+        assert!(next.handed_at.is_none() && next.bot_result.is_none(), "а прошлый итог — нет");
     }
 
     #[test]

@@ -1881,7 +1881,7 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
 
         habit if crate::habits::is_bot_tool(habit) => crate::habits::exec_bot_tool(app, habit, args),
 
-        todo if crate::todos::is_bot_tool(todo) => crate::todos::exec_bot_tool(app, todo, args),
+        todo if crate::todos::is_bot_tool(todo) => crate::todos::exec_bot_tool(app, &bot.id, todo, args),
 
         "read_help" => Ok(crate::help::read(arg(args, "topic"))),
 

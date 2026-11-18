@@ -359,7 +359,7 @@ pub fn assign_mentioned(draft: &mut Draft, bots: &[Bot]) {
     }
 }
 
-/// Задача из черновика: та же запись, что у ручной задачи.
+/// Задача из черновика человека из окна: та же запись, что у ручной задачи; исполнитель-бот получит её по сроку.
 pub fn to_todo(draft: Draft) -> Todo {
     Todo {
         title: draft.title,
@@ -369,6 +369,7 @@ pub fn to_todo(draft: Draft) -> Todo {
         notes: draft.notes,
         recurrence: draft.recurrence,
         items: draft.items.into_iter().map(|text| Item { id: uid("item"), text, done: false }).collect(),
+        handover: draft.assignee.is_some(),
         assignee: draft.assignee,
         auto_close_after_min: draft.auto_close_after_min,
         address: draft.address,
@@ -512,9 +513,16 @@ pub async fn from_text_route(State(app): State<Arc<App>>, bytes: Bytes) -> Respo
         Err(message) => return todos::respond(Err(TodoError::Invalid(message))),
     };
     let bots = app.store.bots();
+    // Исполнитель, выбранный в окне, достаётся задачам без «+Имя» в тексте.
+    let picked = match body.get("assignee").and_then(Value::as_str) {
+        Some(id) if bots.iter().any(|b| b.id == id) => Some(id.to_string()),
+        Some(_) => return todos::respond(Err(TodoError::Invalid("исполнитель — только бот из списка команды".into()))),
+        None => None,
+    };
     let mut made = Vec::with_capacity(parsed.tasks.len());
     for mut draft in parsed.tasks {
         assign_mentioned(&mut draft, &bots);
+        draft.assignee = draft.assignee.or_else(|| picked.clone());
         let mut todo = to_todo(draft);
         if let Some(bucket) = chosen {
             todo.bucket = bucket;
