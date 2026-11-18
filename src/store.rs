@@ -2617,6 +2617,7 @@ impl Store {
         static BUILD: Mutex<()> = Mutex::new(());
         let root = self.data_dir.join("workspaces");
         let dir = root.join(format!("team_{}", room.id));
+        // Участник попадает в список один раз: вышел и вернулся — файлы второй раз не переносятся.
         let marker = root.join(format!("team_{}.members", room.id));
         let merged = |text: &str| room.bot_ids.iter().all(|id| text.lines().any(|l| l == id));
         if dir.is_dir() && merged(&std::fs::read_to_string(&marker).unwrap_or_default()) {
@@ -2638,6 +2639,7 @@ impl Store {
 
     /// Владелец браузера команды: бот, чей профиль держит общий браузер (там уже есть входы в кабинеты).
     /// Выбор запоминается в `browser/team_<id>.owner`, чтобы не менялся от того, кто сегодня активнее.
+    /// Входы принадлежат команде: вышедший участник возвращается к своему профилю и общих входов не уносит.
     pub fn browser_owner(&self, bot_id: &str) -> String {
         let Some(room) = self.team_of(bot_id) else { return bot_id.to_string() };
         let marker = self.data_dir.join("browser").join(format!("team_{}.owner", room.id));

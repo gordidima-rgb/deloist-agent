@@ -1043,6 +1043,47 @@ async fn a_team_folder_is_not_open_to_a_task_from_a_bot_outside_that_team() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_bot_of_one_team_cannot_read_or_write_the_folder_of_another_team() {
+    let (crew, fake, _first) = setup("ap-team-x-y", &[]).await;
+    let mut ids = Vec::new();
+    for name in ["Икс-тест", "Игрек-тест"] {
+        ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "ask" }))).await["bot"]["id"].as_str().unwrap().to_string());
+    }
+    let mut rooms = Vec::new();
+    for (name, bot) in [("Команда X", &ids[0]), ("Команда Y", &ids[1])] {
+        let made = crew.ok("POST", "/api/rooms", Some(json!({ "name": name, "botIds": [bot], "lead": bot }))).await;
+        rooms.push(made["room"]["id"].as_str().unwrap().to_string());
+    }
+    let work = crew.data_dir.join("workspaces");
+    let (team_x, team_y) = (work.join(format!("team_{}", rooms[0])), work.join(format!("team_{}", rooms[1])));
+    std::fs::create_dir_all(&team_x).unwrap();
+    std::fs::create_dir_all(&team_y).unwrap();
+    let secret = team_y.join("secret.txt");
+    std::fs::write(&secret, "ВЕРХНИЙ-СЕКРЕТ-Y").unwrap();
+    let mut calls = vec![
+        tool("read_file", json!({ "path": secret.display().to_string() })),
+        tool("read_file", json!({ "path": format!("../team_{}/secret.txt", rooms[1]) })),
+        tool("write_file", json!({ "path": secret.display().to_string(), "content": "перезапись" })),
+        tool("write_file", json!({ "path": format!("../team_{}/new.txt", rooms[1]), "content": "x" })),
+    ];
+    // Junction из своей папки в чужую: путь выглядит своим, а ведёт наружу.
+    let link = team_x.join("door");
+    let made = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&team_y).output().map(|o| o.status.success()).unwrap_or(false);
+    if made {
+        calls.push(tool("read_file", json!({ "path": "door/secret.txt" })));
+        calls.push(tool("write_file", json!({ "path": "door/new.txt", "content": "x" })));
+    }
+    turn_calls(&crew, &fake, &ids[0], calls).await;
+    assert_eq!(std::fs::read_to_string(&secret).unwrap(), "ВЕРХНИЙ-СЕКРЕТ-Y", "чужой файл не перезаписан");
+    assert!(!team_y.join("new.txt").exists(), "в чужую папку ничего не записано");
+    let seen = serde_json::to_string(&*fake.requests.lock().unwrap()).unwrap();
+    assert!(!seen.contains("ВЕРХНИЙ-СЕКРЕТ-Y"), "содержимое чужой папки дошло до модели");
+    if made {
+        let _ = std::process::Command::new("cmd").args(["/c", "rmdir"]).arg(&link).output();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn invisible_and_direction_characters_are_not_shown_and_an_unparsed_command_is_always_high() {
     let (crew, fake, bot) = setup("ap-odd-chars", &[]).await;
     set_mode(&crew, &bot, "strict").await;
