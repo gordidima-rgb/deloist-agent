@@ -19,7 +19,13 @@
   const DRAW_TOOLS = new Set(['generate_image', 'image', 'image_edit', 'edit_image', 'draw']);
   // Рисование в любом виде: навык imagegen, сервисы картинок, чтение/правка картинок (образцы и готовые кадры).
   const DRAW_TEXT = /image[-_ ]?gen|gpt-image|generated_images|openrouter-image|polza-image|xai-imagine|chatgpt-image|grok.?imagine/i;
-  const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']);
+  // Модель рисования по навыку, команде или аргументу model -> значок из web/icons/apps.
+  const DRAW_MODELS = [
+    [/chatgpt-image|gpt-image|dall-?e/i, 'openai'],
+    [/gemini|imagen|nano.?banana/i, 'googlegemini'],
+    [/xai-imagine|grok/i, 'x'],
+  ];
+  const IMAGE_EXT =new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']);
   const SEARCH_TOOLS = new Set(['web_search', 'fetch', 'fetch_url', 'web_fetch']);
   // Сборка и компиляция: команды, которые строят программу.
   const BUILD = /\b(cargo\s+(build|check|test|clippy|run)|npm\s+(run\s+)?(build|test|ci|install|i)|pnpm\s+(build|install|test)|yarn\s+(build|install)|make|cmake|ninja|msbuild|dotnet\s+(build|publish|run|test)|gradlew?|mvn|tsc|vite\s+build|webpack|go\s+(build|test)|rustc|gcc|g\+\+|clang|javac|pip\s+install|pytest|vitest|jest)\b/i;
@@ -123,8 +129,12 @@
     const command = String(args.command || '');
     const path = String(args.path || args.file || args.filename || '');
 
-    if (DRAW_TOOLS.has(name) || /(^|_)image($|_)/.test(name) || kind === 'generate') return { act: 'draw' };
-    if (DRAW_TEXT.test(name) || DRAW_TEXT.test(command) || DRAW_TEXT.test(String(tool?.title || ''))) return { act: 'draw' };
+    const title = String(tool?.title || '');
+    if (DRAW_TOOLS.has(name) || /(^|_)image($|_)/.test(name) || kind === 'generate' || DRAW_TEXT.test(name) || DRAW_TEXT.test(command) || DRAW_TEXT.test(title)) {
+      // Через какую модель рисует: её значок на шаре чередуется со знаком рисования.
+      const model = DRAW_MODELS.find(([re]) => re.test(`${name} ${command} ${title} ${args.model || ''}`));
+      return model ? { act: 'draw', icon: `icons/apps/${model[1]}.svg` } : { act: 'draw' };
+    }
     // Просмотр или правка картинки — тоже рисование (но не браузерные инструменты: там знак сайта или поиска).
     if (!browserTool(name) && (IMAGE_EXT.has(extOf(path)) || (kind === 'read' && IMAGE_EXT.has(extOf(tool?.title))))) return { act: 'draw' };
     const icon = siteIcon(args.url);

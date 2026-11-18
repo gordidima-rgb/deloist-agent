@@ -20,6 +20,15 @@ describe('toolLook', () => {
     expect(S.toolLook({ name: 'image', args: {} })).toEqual({ act: 'draw' });
   });
 
+  it('рисует через модель: значок модели для чередования со знаком рисования', () => {
+    const openai = { act: 'draw', icon: 'icons/apps/openai.svg' };
+    expect(S.toolLook({ name: 'execute', kind: 'execute', args: { command: 'node scripts/chatgpt-image.mjs --out a.png' } })).toEqual(openai);
+    expect(S.toolLook({ name: 'generate_image', args: { prompt: 'кот', model: 'gpt-image-2.6' } })).toEqual(openai);
+    expect(S.toolLook({ name: 'generate_image', args: { model: 'google/gemini-3.1-flash-image' } })).toEqual({ act: 'draw', icon: 'icons/apps/googlegemini.svg' });
+    expect(S.toolLook({ name: 'execute', args: { command: 'python xai-imagine.py "кадр"' } })).toEqual({ act: 'draw', icon: 'icons/apps/x.svg' });
+    expect(S.toolLook({ name: 'read_file', args: { path: 'gemini.png' } })).toEqual({ act: 'draw' });
+  });
+
   it('рисует: навык imagegen и работа с картинками у внешнего агента', () => {
     expect(S.toolLook({ name: 'execute', kind: 'execute', args: { command: 'codex exec --skill imagegen "кадр"' } })).toEqual({ act: 'draw' });
     expect(S.toolLook({ name: 'read', kind: 'read', title: 'Читает файл Лавовый шар.png', args: {} })).toEqual({ act: 'draw' });
