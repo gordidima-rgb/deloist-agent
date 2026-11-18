@@ -185,7 +185,7 @@ pub fn check_reflective_write(bot_id: &str, title: &str, body: &str, kind: &str,
     let mut guard = REFLECTING.lock().unwrap();
     let Some(state) = guard.as_mut().and_then(|map| map.get_mut(bot_id)) else { return Ok(None) };
     if looks_like_rule(title, body) {
-        return Err("это постоянное правило, а не память: предложи его через propose_rule, человек решит сам".into());
+        return Err("это постоянное правило, а не память: добавь его через propose_rule".into());
     }
     if existing.as_ref().is_some_and(|e| e.author == "human") {
         return Err("этот факт записал человек: его не правят и не заменяют, скажи человеку, если он устарел".into());

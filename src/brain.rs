@@ -72,7 +72,7 @@ pub fn prompt_block(bot: &Bot) -> Option<String> {
         return None;
     }
     let body = text.strip_prefix(HEAD).map(str::trim_start).unwrap_or(&text);
-    Some(format!("# brain.md — правила от человека: следуй им всегда; новое правило предлагай через propose_rule\n{}", crate::service::take_chars(body, LIMIT)))
+    Some(format!("# brain.md — правила от человека: следуй им всегда; новое правило добавляй через propose_rule\n{}", crate::service::take_chars(body, LIMIT)))
 }
 
 fn file_text(text: &str) -> String {

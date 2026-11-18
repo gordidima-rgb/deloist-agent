@@ -3713,7 +3713,7 @@ function botChangeCard(ev, proposal) {
   if (rule) {
     if (rule.add) parts.push(`<p class="team-routine-title"><b>${escapeHtml(rule.add)}</b></p>`);
     if (rule.remove) parts.push(`<p class="note">${tr('Убрать правило: «{rule}»', { rule: escapeHtml(rule.remove) })}</p>`);
-    parts.push(`<p class="note">${tr('Попадёт в brain.md — правила от человека — и будет в каждом ходе.')}</p>`);
+    if (rule.add) parts.push(`<p class="note">${tr('Попадёт в brain.md — правила от человека — и будет в каждом ходе.')}</p>`);
     if (proposal.brain) {
       parts.push(`<details class="team-full"><summary>${tr('brain.md целиком')}</summary><pre class="team-full-text">${escapeHtml(proposal.brain.after || '')}</pre></details>`);
     }

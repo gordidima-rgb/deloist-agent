@@ -402,7 +402,7 @@ async fn crew_with_steps_seen(name: &str) -> (Crew, String, Arc<Mutex<Vec<Value>
 }
 
 #[tokio::test]
-async fn brain_md_changes_only_through_the_card_or_the_window() {
+async fn brain_md_adds_rules_at_once_but_changes_only_through_the_card() {
     // brain.md — правила от человека. Свою папку бот правит без карточки (в том числе командой), поэтому ход идёт
     // по одобренной копии, а правка файла мимо карточки даёт человеку карточку «применить?».
     let (crew, bot, calls, systems) = crew_with_steps_seen("brain-md").await;
@@ -445,6 +445,26 @@ async fn brain_md_changes_only_through_the_card_or_the_window() {
     let (status, _) = crew.send("POST", &format!("/api/bots/{bot}/offers/{id}/decline"), None).await;
     assert_eq!(status, 204);
     assert!(!std::fs::read_to_string(&file).unwrap().contains("без вопросов"), "файл вернулся к одобренному");
+
+    // Новое правило — сразу, без карточки (владелец, 18.11.2026); убрать старое — только карточкой.
+    // Модель берёт вызов по числу результатов инструментов во всей истории: два write_file выше уже там.
+    *calls.lock().unwrap() = vec![json!({}), json!({}), json!({ "name": "propose_rule", "args": { "rule": "Рисуй в светлом стиле" } })];
+    crew.clear_events();
+    crew.say(&bot, "всегда рисуй в светлом стиле").await;
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(crew.count_events(|e| e["type"] == "team_proposal"), 0, "добавление без карточки");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("- Рисуй в светлом стиле"));
+
+    calls.lock().unwrap().push(json!({ "name": "propose_rule", "args": { "remove": "Отвечай кратко" } }));
+    crew.clear_events();
+    crew.say(&bot, "убери правило про краткость").await;
+    let card = crew.wait_event("карточка об удалении правила", |e| e["type"] == "team_proposal" && e["proposal"]["rule"]["remove"] == "Отвечай кратко").await;
+    assert!(std::fs::read_to_string(&file).unwrap().contains("- Отвечай кратко"), "до «Применить» правило на месте");
+    let id = card["proposal"]["id"].as_str().unwrap();
+    let (status, _) = crew.send("POST", &format!("/api/bots/{bot}/offers/{id}/decline"), None).await;
+    assert_eq!(status, 204);
+    crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert!(std::fs::read_to_string(&file).unwrap().contains("- Отвечай кратко"), "«Не надо» — правило осталось");
 }
 
 #[tokio::test]

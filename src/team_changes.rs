@@ -228,50 +228,6 @@ pub fn plan_bot_change(app: &App, bot: &Bot, args: &Value) -> Result<BotChange, 
 // propose_rule: правило себе
 // ---------------------------------------------------------------------------
 
-/// Инструкция с добавленным и/или убранным правилом в разделе `RULES_HEAD`. Остальной текст не трогаем.
-pub fn with_rule(persona: &str, add: &str, remove: &str) -> Result<String, String> {
-    let mut lines: Vec<String> = persona.trim_end().lines().map(str::to_string).collect();
-    let head = lines.iter().position(|l| l.trim() == RULES_HEAD);
-    if !remove.is_empty() {
-        let start = head.ok_or("в инструкции ещё нет правил от человека: убирать нечего")?;
-        let wanted = remove.trim().trim_start_matches("- ").trim();
-        let found = lines.iter().skip(start + 1).position(|l| l.trim().trim_start_matches("- ").trim() == wanted).map(|i| i + start + 1);
-        let index = found.ok_or_else(|| format!("правила «{wanted}» в разделе «{RULES_HEAD}» нет: передай его текст точно"))?;
-        lines.remove(index);
-    }
-    if !add.is_empty() {
-        let exists = head.is_some_and(|start| lines.iter().skip(start + 1).any(|l| same(l.trim().trim_start_matches("- ").trim(), add)));
-        if exists {
-            return Err("такое правило уже есть".into());
-        }
-        match lines.iter().position(|l| l.trim() == RULES_HEAD) {
-            Some(start) => {
-                // В конец раздела: до первой пустой строки после заголовка.
-                let end = lines.iter().skip(start + 1).position(|l| l.trim().is_empty()).map(|i| i + start + 1).unwrap_or(lines.len());
-                lines.insert(end, format!("- {add}"));
-            }
-            None => {
-                if !lines.is_empty() {
-                    lines.push(String::new());
-                }
-                lines.push(RULES_HEAD.to_string());
-                lines.push(format!("- {add}"));
-            }
-        }
-    }
-    // Пустой раздел не оставляем.
-    if let Some(start) = lines.iter().position(|l| l.trim() == RULES_HEAD) {
-        let rest_empty = lines.get(start + 1).is_none_or(|l| l.trim().is_empty());
-        if rest_empty {
-            lines.remove(start);
-            while lines.last().is_some_and(|l| l.trim().is_empty()) {
-                lines.pop();
-            }
-        }
-    }
-    Ok(lines.join("\n"))
-}
-
 pub fn plan_rule(bot: &Bot, args: &Value) -> Result<BotChange, String> {
     let clean = |key: &str| -> Result<String, String> {
         let text = clean_line(&text_arg(args, key)?.unwrap_or_default());
@@ -307,6 +263,14 @@ pub async fn propose_rule(app: &Arc<App>, bot: &Bot, args: &Value, cancel: &Canc
     // Инструкцию берём из хранилища: у хода может быть копия с наложенным полом осторожности.
     let stored = app.store.bot(&bot.id).unwrap_or_else(|| bot.clone());
     let plan = plan_rule(&stored, args)?;
+    // Новое правило ложится в brain.md сразу (владелец, 18.11.2026); убрать или заменить старое — только карточкой.
+    if let (Some(rule), Some(brain)) = (&plan.rule, &plan.brain) {
+        if rule.remove.is_empty() {
+            crate::brain::set(app, &bot.id, &brain.after).await?;
+            app.turns.emit(json!({ "type": "state_changed" }));
+            return Ok(format!("Добавлено правило «{}» в brain.md. Убрать или изменить его можно только через карточку человеку (propose_rule с remove).", rule.add));
+        }
+    }
     propose(app, bot, Change::BotChange(plan), cancel).await
 }
 
@@ -551,27 +515,6 @@ mod tests {
             quiet: true,
             host_id: "h".into(),
         })
-    }
-
-    #[test]
-    fn rules_go_into_their_own_section() {
-        let first = with_rule("Ты замеряешь посты.", "Отчитывайся Редактору кратко", "").unwrap();
-        assert_eq!(first, "Ты замеряешь посты.\n\nПравила от человека:\n- Отчитывайся Редактору кратко");
-        let second = with_rule(&first, "Не комментируй посты про игры", "").unwrap();
-        assert!(second.ends_with("- Отчитывайся Редактору кратко\n- Не комментируй посты про игры"), "{second}");
-        assert!(with_rule(&second, "отчитывайся редактору кратко", "").is_err(), "повтор не добавляем");
-        let removed = with_rule(&second, "", "Отчитывайся Редактору кратко").unwrap();
-        assert_eq!(removed, "Ты замеряешь посты.\n\nПравила от человека:\n- Не комментируй посты про игры");
-        let empty = with_rule(&removed, "", "- Не комментируй посты про игры").unwrap();
-        assert_eq!(empty, "Ты замеряешь посты.", "пустой раздел убирается");
-        assert!(with_rule("Текст", "", "нет такого").is_err());
-    }
-
-    #[test]
-    fn a_rule_keeps_text_after_the_section() {
-        let persona = "Начало.\n\nПравила от человека:\n- Первое\n\nХвост инструкции.";
-        let out = with_rule(persona, "Второе", "").unwrap();
-        assert_eq!(out, "Начало.\n\nПравила от человека:\n- Первое\n- Второе\n\nХвост инструкции.");
     }
 
     #[test]
