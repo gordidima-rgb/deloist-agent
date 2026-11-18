@@ -539,7 +539,11 @@ async fn run(app: Arc<App>, id: String) {
                 return;
             }
             Ok(text) => {
-                let files = fresh_files(&app.store, &target.id, started);
+                // Папка команды общая: «свежие файлы» там могут быть работой товарищей. Постороннему отправителю
+                // (не из команды получателя) отдаём только файлы, названные в итоге получателя.
+                let target_team = app.store.team_of(&target.id).map(|r| r.id);
+                let foreign = target_team.is_some() && app.store.team_of(&task.from).map(|r| r.id) != target_team;
+                let files = if foreign { named_files(&app.store, &target.id, &text) } else { fresh_files(&app.store, &target.id, started) };
                 let (state, summary) = if text.trim() == NO_REPLY { ("error", text) } else { ("done", text) };
                 finish(&app, &id, state, summary, files).await;
                 return;
@@ -630,6 +634,34 @@ pub(crate) fn render_closed(found: &[Task], fence: &str) -> String {
     }
     lines.push("Полный итог — task_status.".into());
     lines.join("\n")
+}
+
+/// Файлы папки получателя, которые он сам назвал в итоге задачи: путь относительно папки или полный внутри неё.
+/// Записи файлов программа по ботам не ведёт, поэтому для постороннего отправителя берётся только названное.
+/// Ссылки, скрытые и секретные пропускаем.
+fn named_files(store: &crate::store::Store, bot_id: &str, summary: &str) -> Vec<String> {
+    let workspace = store.workspace(bot_id);
+    let Ok(root) = std::fs::canonicalize(&workspace) else { return Vec::new() };
+    let mut out: Vec<String> = Vec::new();
+    for word in summary.split(|c: char| c.is_whitespace() || "\"'`()[]<>,;«»".contains(c)) {
+        let word = word.trim_end_matches(['.', ':', '!', '?']);
+        if word.is_empty() || word.contains('\0') || out.len() >= RESULT_FILES {
+            continue;
+        }
+        let candidate = if crate::reach::is_absolute_like(word) { PathBuf::from(word) } else { workspace.join(word) };
+        if candidate.components().any(|c| matches!(c, Component::ParentDir)) || crate::attach::is_link(&candidate) {
+            continue;
+        }
+        let Ok(real) = std::fs::canonicalize(&candidate) else { continue };
+        let hidden = real.strip_prefix(&root).is_ok_and(|rel| rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')));
+        if real.starts_with(&root) && !hidden && real.is_file() && crate::reach::secret_reason(&real, store.data_dir(), &root).is_none() && crate::reach::safe_read_links(&real) {
+            let shown = crate::reach::display(&real);
+            if !out.contains(&shown) {
+                out.push(shown);
+            }
+        }
+    }
+    out
 }
 
 /// Файлы, изменённые в папке получателя с начала задачи: пути результата. Ссылки, скрытые и секретные пропускаем.
@@ -953,6 +985,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[tokio::test]
+    async fn a_foreign_sender_gets_only_the_files_the_receiver_named() {
+        let dir = temp("named");
+        let store = crate::store::Store::open(dir.clone()).await.unwrap();
+        let bot = store.add_bot(&json!({ "name": "Получатель" })).await.unwrap();
+        let ws = store.workspace(&bot.id);
+        std::fs::create_dir_all(ws.join("out")).unwrap();
+        std::fs::write(ws.join("out").join("report.txt"), "x").unwrap();
+        std::fs::write(ws.join("teammate-draft.txt"), "x").unwrap();
+        std::fs::write(dir.join("outside.txt"), "x").unwrap();
+        let summary = format!("Готово: out/report.txt, ещё out\\missing.txt и ..\\..\\outside.txt ({}).", dir.join("outside.txt").display());
+        let files = named_files(&store, &bot.id, &summary);
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert!(files[0].ends_with("report.txt"), "{files:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

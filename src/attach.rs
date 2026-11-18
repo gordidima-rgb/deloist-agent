@@ -250,8 +250,17 @@ pub fn prune_copies(store: &Store, now_ms: i64) {
         .map(|d| d.date_naive())
         .unwrap_or_else(|| chrono::Local::now().date_naive());
     let cutoff = today - chrono::Duration::days(30);
+    // Копии могли лечь в личную папку бота до вступления в команду, а теперь он работает в общей: смотрим обе.
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
     for bot in store.bots() {
-        let attachments = store.workspace(&bot.id).join(DIR);
+        for dir in [store.workspace(&bot.id), store.personal_workspace(&bot.id)] {
+            if !roots.contains(&dir) {
+                roots.push(dir);
+            }
+        }
+    }
+    for root in roots {
+        let attachments = root.join(DIR);
         let Ok(entries) = std::fs::read_dir(&attachments) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -571,6 +580,29 @@ mod tests {
         assert_eq!(super::free_name(&dir, "noext").unwrap(), "noext");
         assert_eq!(super::free_name(&dir, "other.txt").unwrap(), "other.txt");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn prune_copies_also_cleans_the_personal_folder_of_a_team_member() {
+        use crate::store::Store;
+        use serde_json::json;
+        let data = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-tmp").join(format!("attach-prune-team-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(&data).unwrap();
+        let store = Store::open(data.clone()).await.unwrap();
+        let bot = store.add_bot(&json!({ "name": "Бот" })).await.unwrap();
+        store.add_room(&json!({ "name": "Команда", "botIds": [bot.id], "lead": bot.id })).await.unwrap();
+        assert_ne!(store.workspace(&bot.id), store.personal_workspace(&bot.id), "бот в команде работает в общей папке");
+        let old_date = (chrono::Local::now().date_naive() - chrono::Duration::days(31)).to_string();
+        let personal_copy = store.personal_workspace(&bot.id).join("attachments").join(&old_date).join("from-x");
+        let team_copy = store.workspace(&bot.id).join("attachments").join(&old_date).join("from-y");
+        for dir in [&personal_copy, &team_copy] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("file.txt"), "x").unwrap();
+        }
+        super::prune_copies(&store, chrono::Local::now().timestamp_millis());
+        assert!(!personal_copy.exists() && !team_copy.exists(), "старые копии убраны и в личной, и в общей папке");
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     #[tokio::test]
