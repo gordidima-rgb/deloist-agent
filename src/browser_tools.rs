@@ -276,7 +276,7 @@ async fn ask(app: &Arc<App>, bot: &Bot, tool: &str, title: &str, detail: &str, s
             remote = crate::grants::Remote::No;
         }
     }
-    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None };
+    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None, exact: None };
     if request_confirmation(app, &bot.id, question).await {
         Ok(())
     } else {
@@ -1843,6 +1843,7 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
             sensitive: false,
             remote: crate::grants::Remote::No,
             human: None,
+            exact: None,
         },
     )
     .await;
@@ -1912,6 +1913,7 @@ async fn capture_key(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value)
             sensitive: false,
             remote: crate::grants::Remote::No,
             human: None,
+            exact: None,
         },
     )
     .await;

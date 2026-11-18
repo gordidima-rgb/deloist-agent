@@ -18,7 +18,10 @@ use crate::App;
 
 // Работа в кабинете занимает десятки шагов: вход, переходы, клики.
 const MAX_STEPS: usize = 40;
+mod approvals;
 mod completion;
+pub use approvals::{call_key, decide_approval, remind_tick};
+use approvals::{settle_reply, Approval};
 const TOOL_RESULT_LIMIT: usize = 4_000;
 const BROWSER_RESULT_LIMIT: usize = 13_000;
 const OLD_BROWSER_RESULT_LIMIT: usize = 300;
@@ -65,6 +68,16 @@ pub fn is_quiet_answer(text: &str) -> bool {
     trimmed.to_lowercase() == "тихо"
 }
 
+/// Живое ожидание карточки. В отладочной сборке `CREW_TEST_APPROVAL_WAIT_MS` его сокращает.
+fn approval_wait(wait: Duration) -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_APPROVAL_WAIT_MS").ok().and_then(|v| v.parse().ok()) {
+            return Duration::from_millis(ms);
+        }
+    }
+    wait
+}
+
 fn unattended_wait() -> Duration {
     if cfg!(debug_assertions) {
         if let Some(ms) = std::env::var("CREW_TEST_UNATTENDED_WAIT_MS").ok().and_then(|v| v.parse().ok()) {
@@ -88,12 +101,6 @@ fn fallback_cooldown_ms() -> i64 {
 struct Unattended {
     absent: bool,
     missed: Vec<String>,
-}
-
-struct Approval {
-    bot_id: String,
-    payload: Value,
-    tx: oneshot::Sender<Reply>,
 }
 
 /// Ответ человека на карточку.
@@ -120,7 +127,8 @@ impl Reply {
 enum ApprovalResult {
     Allowed,
     Denied,
-    Timeout,
+    /// Человек не ответил за живое ожидание: карточка осталась, ход закончится.
+    Waiting(String),
 }
 
 /// Живой ход, который ждёт ответа на вопрос.
@@ -180,6 +188,11 @@ impl Drop for FloorGuard {
 pub struct Turns {
     events: broadcast::Sender<Value>,
     approvals: Mutex<HashMap<String, Approval>>,
+    approvals_path: Option<std::path::PathBuf>,
+    /// Бот → что ждёт его остановленный ход: после этого ход должен кончиться, а не идти дальше в обход.
+    waiting: Mutex<HashMap<String, String>>,
+    /// Разовые разрешения на один вызов после позднего «да».
+    once: Mutex<Vec<approvals::Once>>,
     questions: Mutex<HashMap<String, Question>>,
     busy: Mutex<HashMap<String, Busy>>,
     unattended: Mutex<HashMap<String, Unattended>>,
@@ -213,6 +226,9 @@ impl Default for Turns {
         Self {
             events: broadcast::channel(4096).0,
             approvals: Mutex::new(HashMap::new()),
+            approvals_path: None,
+            waiting: Mutex::new(HashMap::new()),
+            once: Mutex::new(Vec::new()),
             questions: Mutex::new(HashMap::new()),
             busy: Mutex::new(HashMap::new()),
             unattended: Mutex::new(HashMap::new()),
@@ -236,12 +252,15 @@ impl Turns {
     /// С разрешениями и вопросами из служебной папки.
     pub fn open(data_dir: &std::path::Path) -> Self {
         let asked_path = data_dir.join("questions.json");
+        let approvals_path = data_dir.join("approvals.json");
         let asked = std::fs::read_to_string(&asked_path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         Self {
             perms: crate::grants::Perms::open(data_dir),
             messengers: crate::messengers::Store::open(data_dir),
             asked: Mutex::new(asked),
             asked_path: Some(asked_path),
+            approvals: Mutex::new(approvals::load(&approvals_path)),
+            approvals_path: Some(approvals_path),
             ..Self::default()
         }
     }
@@ -490,34 +509,23 @@ impl Turns {
         out
     }
 
-    /// Ответ на карточку. Что именно разрешено, решает сервер по самой карточке: клиент
-    /// присылает только ответ, место и инструмент от него не принимаются.
-    pub fn resolve_approval(&self, id: &str, reply: Reply) -> bool {
-        let Some(item) = self.approvals.lock().unwrap().remove(id) else {
-            return false;
-        };
-        let status = if reply == Reply::Deny { "denied" } else { "allowed" };
-        self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": status }));
-        let _ = item.tx.send(reply);
-        true
-    }
-
     /// Чат очищен: открытые карточки этого разговора отклоняются, ответ на них уже не к месту.
     pub fn deny_conversation(&self, conv: &str) {
-        let closed: Vec<(String, Approval)> = {
-            let mut map = self.approvals.lock().unwrap();
-            let ids: Vec<String> = map.iter().filter(|(_, a)| a.payload["conv"] == conv).map(|(k, _)| k.clone()).collect();
-            ids.into_iter().filter_map(|id| map.remove(&id).map(|a| (id, a))).collect()
-        };
-        for (id, item) in closed {
-            self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": "denied" }));
-            let _ = item.tx.send(Reply::Deny);
+        let ids: Vec<String> = self.approvals.lock().unwrap().iter().filter(|(_, a)| a.payload["conv"] == conv).map(|(k, _)| k.clone()).collect();
+        for id in ids {
+            if let Some(item) = self.take_approval(&id) {
+                self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": "denied" }));
+                if let Some(tx) = item.tx {
+                    let _ = tx.send(Reply::Deny);
+                }
+            }
         }
     }
 
     /// Бот удалён: его вопросы больше никто не ждёт.
     pub fn forget_questions(&self, bot_id: &str) {
         self.close_questions(bot_id, "bot_removed");
+        self.forget_approvals(bot_id);
     }
 
     pub fn approval_tool(&self, id: &str) -> Option<String> {
@@ -533,7 +541,8 @@ impl Turns {
     #[cfg(test)]
     pub fn open_approval_for_test(&self, id: &str, bot_id: &str, payload: Value) -> oneshot::Receiver<Reply> {
         let (tx, rx) = oneshot::channel();
-        self.approvals.lock().unwrap().insert(id.to_string(), Approval { bot_id: bot_id.to_string(), payload, tx });
+        let item = Approval { bot_id: bot_id.to_string(), payload, tx: Some(tx), run: None, key: String::new(), conv: None, epoch: 0, scope: None, reminded: false };
+        self.add_approval(id.to_string(), item);
         rx
     }
 
@@ -565,15 +574,16 @@ impl Turns {
         }
     }
 
+    /// Живые карточки бота отклоняются: ждать их больше некому. Отложенные остаются.
     fn deny_all_for_bot(&self, bot_id: &str, reason: &str) {
-        let approvals: Vec<(String, Approval)> = {
-            let mut map = self.approvals.lock().unwrap();
-            let ids: Vec<String> = map.iter().filter(|(_, a)| a.bot_id == bot_id).map(|(k, _)| k.clone()).collect();
-            ids.into_iter().filter_map(|id| map.remove(&id).map(|a| (id, a))).collect()
-        };
-        for (id, item) in approvals {
-            self.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": reason }));
-            let _ = item.tx.send(Reply::Deny);
+        let ids: Vec<String> = self.approvals.lock().unwrap().iter().filter(|(_, a)| a.bot_id == bot_id && a.tx.is_some()).map(|(k, _)| k.clone()).collect();
+        for id in ids {
+            if let Some(item) = self.take_approval(&id) {
+                self.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": reason }));
+                if let Some(tx) = item.tx {
+                    let _ = tx.send(Reply::Deny);
+                }
+            }
         }
     }
 
@@ -594,6 +604,8 @@ impl Turns {
             return None;
         }
         let cancel = CancellationToken::new();
+        // Остаток прежнего хода (групповой ход его не разбирает): новый ход начинается с чистого.
+        self.waiting.lock().unwrap().remove(bot_id);
         busy.insert(bot_id.to_string(), Busy { cancel: cancel.clone(), browser_token: None, since: now() });
         Some(cancel)
     }
@@ -666,6 +678,8 @@ pub struct Confirmation<'a> {
     pub remote: crate::grants::Remote,
     /// Человеческое описание, собранное программой (`describe`). `None` — карточка со своими словами.
     pub human: Option<crate::describe::Described>,
+    /// Отпечаток вызова (`call_key`), если он известен точно. Иначе его берут из инструмента и подробностей карточки.
+    pub exact: Option<String>,
 }
 
 /// Да или нет от человека. Нет ответа — значит нет.
@@ -673,8 +687,8 @@ pub async fn request_confirmation(app: &Arc<App>, bot_id: &str, question: Confir
     matches!(ask_human(app, bot_id, question).await, ApprovalResult::Allowed)
 }
 
-async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote) -> ApprovalResult {
-    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human }).await
+async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote, exact: String) -> ApprovalResult {
+    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human, exact: Some(exact) }).await
 }
 
 /// Действие разрешено правилом, которое живёт вне `Perms` (старые разрешения сайта у бота).
@@ -717,16 +731,22 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
             None => {}
         }
     }
-    if unattended {
-        if app.turns.is_absent(bot_id) {
-            app.turns.note_missed(bot_id, question.title);
-            return ApprovalResult::Timeout;
+    // Позднее «да» разрешило ровно этот вызов один раз.
+    let key = question.exact.take().unwrap_or_else(|| call_key(question.tool, &json!(question.detail)));
+    let run = app.runs.active_id(bot_id);
+    if app.turns.take_once(bot_id, run.as_deref(), &key) {
+        if let Some(scope) = &question.scope {
+            log_decision(app, bot_id, scope, "once", "").await;
         }
+        return ApprovalResult::Allowed;
+    }
+    if unattended {
         question.timeout = question.timeout.min(unattended_wait());
     }
+    let timeout = approval_wait(question.timeout);
     let id = uid("ap");
     let (tx, rx) = oneshot::channel();
-    let expires_at = now() + question.timeout.as_millis() as i64;
+    let expires_at = now() + timeout.as_millis() as i64;
     let grantable = question.scope.as_ref().is_some_and(|s| s.grantable);
     let always = question.scope.as_ref().is_some_and(|s| s.always);
     // Эпоха разговора на момент показа: очистка чата делает эту карточку неспособной выдать разрешение.
@@ -749,52 +769,42 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
     if let Some(room) = question.room {
         payload["roomId"] = json!(room);
     }
-    app.turns.approvals.lock().unwrap().insert(
+    // Карточка на диске до показа: перезапуск её не теряет.
+    app.turns.add_approval(
         id.clone(),
-        Approval { bot_id: bot_id.to_string(), payload: payload.clone(), tx },
+        Approval {
+            bot_id: bot_id.to_string(), payload: payload.clone(), tx: Some(tx), run, key, conv: conv.clone(), epoch,
+            scope: question.scope.clone(), reminded: false,
+        },
     );
     let mut event = json!({ "type": "approval", "botId": bot_id, "id": id });
     if let (Some(event), Some(fields)) = (event.as_object_mut(), payload.as_object()) {
         event.extend(fields.clone());
     }
     app.turns.emit(event);
-    match tokio::time::timeout(question.timeout, rx).await {
-        Ok(Ok(reply)) => {
-            let Some(scope) = question.scope.as_ref() else {
-                return if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed };
-            };
-            // Запомнить можно только то, что можно запомнить; иначе «всегда» значит «один раз».
-            let (how, by) = match reply {
-                Reply::Deny => ("deny", String::new()),
-                Reply::Once => ("once", String::new()),
-                Reply::Conversation => match conv.as_deref().and_then(|c| app.turns.perms.add_grant(bot_id, c, epoch, scope)) {
-                    Some(grant) => ("conversation_new", grant.id),
-                    None => ("once", String::new()),
-                },
-                // Где «всегда» нельзя (удаление и пароли на сайте), «всегда» значит «в этом разговоре».
-                Reply::Always if !scope.always => match conv.as_deref().and_then(|c| app.turns.perms.add_grant(bot_id, c, epoch, scope)) {
-                    Some(grant) => ("conversation_new", grant.id),
-                    None => ("once", String::new()),
-                },
-                Reply::Always => match app.turns.perms.add_rule(bot_id, scope) {
-                    Some(rule) => ("always", rule.id),
-                    None => ("once", String::new()),
-                },
-            };
-            if !by.is_empty() {
-                app.turns.emit(json!({ "type": "permissions_changed", "botId": bot_id }));
-            }
-            log_decision(app, bot_id, scope, how, &by).await;
-            if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed }
-        }
-        Ok(Err(_)) => ApprovalResult::Denied,
+    let mut rx = rx;
+    let reply = match tokio::time::timeout(timeout, &mut rx).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(_)) => return ApprovalResult::Denied,
         Err(_) => {
-            app.turns.approvals.lock().unwrap().remove(&id);
-            app.turns.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": "timeout" }));
-            app.turns.note_missed(bot_id, question.title);
-            ApprovalResult::Timeout
+            // Карточка остаётся: ход закончится, а решение человека продолжит его позже.
+            if app.turns.detach_approval(&id) {
+                let text = crate::runs::waiting_text(question.title);
+                app.turns.set_waiting(bot_id, &text);
+                if let Some(cancel) = app.turns.cancel_of(bot_id) {
+                    cancel.cancel();
+                }
+                return ApprovalResult::Waiting(text);
+            }
+            // Человек ответил в ту же секунду: ответ уже в пути.
+            match tokio::time::timeout(Duration::from_secs(1), &mut rx).await {
+                Ok(Ok(reply)) => reply,
+                _ => return ApprovalResult::Denied,
+            }
         }
-    }
+    };
+    settle_reply(app, bot_id, conv.as_deref(), epoch, question.scope.as_ref(), reply).await;
+    if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed }
 }
 
 /// Вопрос человеку: текстом, кнопками-вариантами или простой формой. Вопрос сохраняется
@@ -2432,7 +2442,7 @@ fn run_turn_body(
                 let mut finished: Vec<Value> = Vec::new();
                 for call in &calls {
                     let (status, body) = if cancel.is_cancelled() {
-                        ("denied".to_string(), "Остановлено пользователем.".to_string())
+                        stopped(&app, &bot_id)
                     } else {
                         execute_call(&app, &bot, call, opts.depth, &cancel).await
                     };
@@ -2491,6 +2501,9 @@ fn run_turn_body(
         }
         .await;
 
+        // Ход упёрся в карточку без ответа: это не отмена и не ошибка, а ожидание человека.
+        let waiting = app.turns.take_waiting(&bot_id);
+        let result = if waiting.is_some() { Ok(()) } else { result };
         if let Err(message) = result {
             let aborted = cancel.is_cancelled();
             let english = app.store.settings().ui_lang == "en";
@@ -2510,7 +2523,7 @@ fn run_turn_body(
         }
 
         app.browsers.resume_paused(&bot_id).await;
-        let aborted = cancel.is_cancelled();
+        let aborted = cancel.is_cancelled() && waiting.is_none();
         // Эскалация уровня живёт в памяти: две неудачи подряд поднимают на ступень,
         // успешный ход возвращает к настроенному. Остановка человеком — не неудача модели.
         if !aborted {
@@ -2525,6 +2538,7 @@ fn run_turn_body(
         app.turns.finish(&bot_id);
         if journaled {
             let state = match (&failure, aborted) {
+                _ if waiting.is_some() => crate::runs::RunState::NeedsHuman { reason: crate::runs::StopReason::Human, text: waiting.clone().unwrap_or_default() },
                 (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
                 (Some(message), false) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Unknown, text: shorten(message, JOURNAL_TEXT_LIMIT) },
                 (None, false) => crate::runs::RunState::Done,
@@ -2548,6 +2562,7 @@ fn run_turn_body(
                 && fallback_model.is_none()
                 // Человек написал боту прямо в этот ход: его сообщение нельзя прятать вместе с ходом.
                 && !steered
+                && waiting.is_none()
                 && is_quiet_answer(&final_text));
 
         flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
@@ -2596,12 +2611,15 @@ fn run_turn_body(
                 _ if aborted => "stopped",
                 Some(LIMIT_REACHED) => "limit",
                 Some(_) => "failed",
+                None if waiting.is_some() => "needs",
                 None if quiet => "quiet",
                 None if !missed.is_empty() => "needs",
                 None => "ok",
             };
             let summary = if let Some(f) = failure.as_deref() {
                 shorten(f, JOURNAL_TEXT_LIMIT)
+            } else if let Some(text) = &waiting {
+                text.clone()
             } else if quiet {
                 String::new()
             } else if opts.quiet && is_quiet_answer(&final_text) {
@@ -2674,6 +2692,14 @@ pub(crate) fn merge_activity(rows: &mut Vec<Value>, update: Value) -> Value {
     rows[index].clone()
 }
 
+/// Ход остановлен: человеком, или карточка осталась без ответа и ход ждёт её решения.
+fn stopped(app: &Arc<App>, bot_id: &str) -> (String, String) {
+    match app.turns.waiting_text(bot_id) {
+        Some(text) => ("timeout".into(), text),
+        None => ("denied".into(), "Остановлено пользователем.".into()),
+    }
+}
+
 pub(crate) async fn execute_call(app: &Arc<App>, bot: &Bot, call: &ToolCall, depth: u32, cancel: &CancellationToken) -> (String, String) {
     execute_call_in(app, bot, call, depth, cancel, true).await
 }
@@ -2689,7 +2715,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
     crate::screen::wait_released(app, &bot.id, cancel).await;
     // Пока ждали, человек нажал «Стоп»: инструмент не запускаем, ни клик, ни команду.
     if cancel.is_cancelled() {
-        return ("denied".into(), "Остановлено пользователем.".into());
+        return stopped(app, &bot.id);
     }
 
     // Облако: консоли нет. Отказ до карточки: спрашивать человека о том, что всё равно не выполнится, незачем.
@@ -2719,10 +2745,10 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         };
         let scope = crate::grants::scope_for(app, bot, &call.name, &call.args);
         let remote = crate::grants::remote_ok(&call.name, &call.args, scope.as_ref(), touch.is_some(), false, &app.store.workspace(&bot.id));
-        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote).await {
+        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote, call_key(&call.name, &call.args)).await {
             ApprovalResult::Allowed => {}
             ApprovalResult::Denied => return ("denied".into(), "Человек не разрешил выполнение.".into()),
-            ApprovalResult::Timeout => return ("timeout".into(), "Человек не разрешил выполнение.".into()),
+            ApprovalResult::Waiting(text) => return ("timeout".into(), text),
         }
     }
 
@@ -2735,7 +2761,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
     };
     app.runs.step_end(&bot.id, &call.id, outcome.is_ok());
     if cancel.is_cancelled() {
-        return ("denied".into(), "Остановлено пользователем.".into());
+        return stopped(app, &bot.id);
     }
     match outcome {
         Ok(text) => ("ok".into(), text),

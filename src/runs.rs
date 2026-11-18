@@ -222,6 +222,11 @@ impl Runs {
         Some(copy)
     }
 
+    /// Запись хода, который идёт у бота сейчас.
+    pub fn active_id(&self, bot_id: &str) -> Option<String> {
+        self.inner.lock().unwrap().active.get(bot_id).cloned()
+    }
+
     pub fn get(&self, id: &str) -> Option<Run> {
         self.inner.lock().unwrap().items.iter().find(|r| r.id == id).cloned()
     }
@@ -407,14 +412,17 @@ pub async fn recover(app: &Arc<App>) {
         let Some(run) = app.runs.get(&id).filter(Run::is_running) else { continue };
         if app.store.bot(&run.bot_id).is_none() {
             close_stopped(app, &run, "бота больше нет").await;
+        } else if let Some((_, title)) = app.turns.card_for_run(&id) {
+            // Карточка переживает перезапуск: ход продолжит решение человека, а не заметка об обрыве.
+            needs_human(app, &run, StopReason::Human, &waiting_text(&title)).await;
         } else if let Some(step) = run.unknown_external() {
             let text = format!("Прервали во время: {}. Проверь, прошло ли, и нажми «Продолжить».", step.label);
-            needs_human(app, &run, &text).await;
+            needs_human(app, &run, StopReason::Unknown, &text).await;
         } else if run.attempts >= 1 {
-            needs_human(app, &run, "Ход прерывался дважды — нужен ты.").await;
+            needs_human(app, &run, StopReason::Unknown, "Ход прерывался дважды — нужен ты.").await;
         } else if let Some((_, claimed)) = app.runs.claim(&id, false) {
-            if let Err(e) = launch(app, &claimed) {
-                needs_human(app, &run, &format!("Не смог продолжить: {e}")).await;
+            if let Err(e) = launch(app, &claimed, &claimed.continuation_note()) {
+                needs_human(app, &run, StopReason::Unknown, &format!("Не смог продолжить: {e}")).await;
             }
         }
     }
@@ -425,35 +433,53 @@ pub async fn recover(app: &Arc<App>) {
 }
 
 /// Запустить ход продолжения. Командную задачу запускает её собственный путь (она ждёт в очереди задач).
-fn launch(app: &Arc<App>, run: &Run) -> Result<(), String> {
+fn launch(app: &Arc<App>, run: &Run, note: &str) -> Result<(), String> {
     if let Origin::Team { task_id } = &run.origin {
         return crate::team_tasks::requeue(app, task_id);
     }
-    crate::turn::start_turn(app, &run.bot_id, &run.continuation_note(), run.options()).map_err(|StartError { message, .. }| message)
+    crate::turn::start_turn(app, &run.bot_id, note, run.options()).map_err(|StartError { message, .. }| message)
 }
 
 /// Человек нажал «Продолжить» на карточке «Нужен ты». Два нажатия подряд: второе получает отказ и записи не касается.
+/// Запись, ждущая решения по карточке, так не продолжается: её продолжает само решение.
 pub async fn resume_by_human(app: &Arc<App>, id: &str) -> Result<(), String> {
+    if app.turns.card_for_run(id).is_some() {
+        return Err("ход ждёт решения по карточке".into());
+    }
+    let run = app.runs.get(id).ok_or("запись уже не ждёт человека")?;
+    resume(app, id, &run.continuation_note()).await
+}
+
+/// Продолжить ждущую запись с этим первым сообщением (решение человека или заметка об обрыве).
+pub async fn resume(app: &Arc<App>, id: &str, note: &str) -> Result<(), String> {
     let (held, run) = app.runs.claim(id, true).ok_or("запись уже не ждёт человека")?;
-    launch(app, &run).inspect_err(|_| app.runs.release(id, held))
+    launch(app, &run, note).inspect_err(|_| app.runs.release(id, held))
 }
 
 /// Человек отказался продолжать: запись закрыта.
 pub async fn dismiss(app: &Arc<App>, id: &str) -> Result<(), String> {
+    if app.turns.card_for_run(id).is_some() {
+        return Err("ход ждёт решения по карточке".into());
+    }
     let run = app.runs.get(id).filter(|r| matches!(r.state, RunState::NeedsHuman { .. })).ok_or("запись уже не ждёт человека")?;
     close_stopped(app, &run, "отменено человеком").await;
     Ok(())
 }
 
 /// Ход ждёт человека: строка в чате бота, запись в «Нужен ты», рутина и задача команды отмечены.
-async fn needs_human(app: &Arc<App>, run: &Run, text: &str) {
-    app.runs.update(&run.id, |r| r.state = RunState::NeedsHuman { reason: StopReason::Unknown, text: text.to_string() });
+async fn needs_human(app: &Arc<App>, run: &Run, reason: StopReason, text: &str) {
+    app.runs.update(&run.id, |r| r.state = RunState::NeedsHuman { reason, text: text.to_string() });
     let entry = json!({ "id": uid("msg"), "role": "assistant", "text": text, "at": now(), "runId": run.id });
     if let Ok(saved) = app.store.append_message(&run.bot_id, entry).await {
         app.turns.emit(json!({ "type": "message", "botId": run.bot_id, "message": saved }));
     }
     app.turns.emit(json!({ "type": "state_changed" }));
     settle_origin(app, run, "needs", text).await;
+}
+
+/// Что записано в запуске, который ждёт решения по карточке.
+pub fn waiting_text(title: &str) -> String {
+    format!("Ждёт решения человека по: {title}. Ход остановлен до ответа.")
 }
 
 /// Запись закрыта без продолжения.

@@ -1939,7 +1939,7 @@ async fn approval(State(app): Shared, Path(id): Path<String>, body: axum::body::
         }
         None => crate::turn::Reply::Deny,
     };
-    if app.turns.resolve_approval(&id, reply) {
+    if crate::turn::decide_approval(&app, &id, reply).await {
         ok(json!({ "ok": true }))
     } else {
         fail(StatusCode::NOT_FOUND, "подтверждение уже неактивно")
@@ -1988,7 +1988,8 @@ async fn needs(State(app): Shared) -> Response {
     let rooms: std::collections::HashMap<String, String> = app.store.rooms().into_iter().map(|r| (r.id, r.name)).collect();
     let bots: std::collections::HashMap<String, String> = app.store.bots().into_iter().map(|b| (b.id, b.name)).collect();
     // Ходы, которые оборвал перезапуск и которые ждут «Продолжить» (журнал запусков).
-    let interrupted = app.runs.needs().into_iter().filter_map(|run| match run.state {
+    // Запись, ждущая решения по карточке, отдельной строкой не идёт: у неё уже есть своя карточка.
+    let interrupted = app.runs.needs().into_iter().filter(|run| app.turns.card_for_run(&run.id).is_none()).filter_map(|run| match run.state {
         crate::runs::RunState::NeedsHuman { text, .. } => Some(json!({ "kind": "run", "id": run.id, "botId": run.bot_id, "text": text, "at": run.updated_ms })),
         _ => None,
     });

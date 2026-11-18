@@ -193,12 +193,12 @@ async fn nobody_answers_at_night_so_the_action_is_refused_and_left_for_morning()
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
     let entry = &event["entry"];
     assert_eq!(entry["status"], "needs", "{entry}");
-    let missed = entry["missed"].as_array().unwrap();
-    assert!(missed.iter().any(|m| m.as_str().unwrap().contains("какой отчёт")), "{entry}");
-    assert_eq!(missed.len(), 2, "одна и та же команда не дублируется: {entry}");
+    assert!(entry["text"].as_str().unwrap().starts_with("Ждёт решения человека по:"), "{entry}");
 
     let cards = crew.events.lock().unwrap().iter().filter(|e| e["type"] == "approval").count();
-    assert_eq!(cards, 1, "после первого молчания карточки больше не показываются");
+    assert_eq!(cards, 1, "после первого молчания ход останавливается: второй карточки и вопроса нет");
+    let list = crew.ok("GET", "/api/needs", None).await;
+    assert_eq!(list["count"], 1, "карточка осталась до утра: {list}");
     let ran = crew.events.lock().unwrap().iter().filter(|e| e["type"] == "tool_update" && e["status"] == "ok" && e["result"].as_str().unwrap_or("").contains("код выхода")).count();
     assert_eq!(ran, 0, "команда без разрешения не выполняется");
 }
@@ -401,8 +401,7 @@ async fn a_missed_decision_makes_a_quiet_answer_visible() {
 
     let entry = run_and_wait(&crew, &id, json!({ "attended": false })).await;
     assert_eq!(entry["status"], "needs", "{entry}");
-    assert_eq!(entry["text"], "Сообщать нечего.", "{entry}");
-    assert!(!entry["missed"].as_array().unwrap().is_empty(), "{entry}");
+    assert!(entry["text"].as_str().unwrap().starts_with("Ждёт решения человека по:"), "{entry}");
     let messages = thread(&crew, &bot, None).await;
     assert!(!messages.is_empty(), "ход с решением виден в треде: {messages:?}");
     assert!(messages.iter().any(|m| m["text"] == "[рутина] Проверка\nпроверь сайт"), "{messages:?}");

@@ -1828,6 +1828,7 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: touch.is_some(),
                 remote: crate::grants::Remote::No,
                 human: Some(human),
+                exact: None,
             },
         );
         tokio::select! {
@@ -1935,7 +1936,7 @@ async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, canc
         let detail = format!("Агент хочет прочитать файл с ключами: {}", touch.label);
         let question = crate::turn::request_confirmation(req.app, &req.bot.id, crate::turn::Confirmation {
             tool: "read_file", title: &title, detail: &detail, allow_label: None, deny_label: None,
-            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None,
+            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None, exact: None,
         });
         let allowed = tokio::select! {
             answer = question => answer,
@@ -2010,6 +2011,7 @@ async fn write_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: false,
                 remote: crate::grants::Remote::No,
                 human: Some(human),
+                exact: None,
             },
         );
         let allowed = tokio::select! {

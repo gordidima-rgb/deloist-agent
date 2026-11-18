@@ -288,7 +288,7 @@ async fn human_gone(app: Arc<App>, bot: String) {
     for card in app.turns.pending_for(&bot) {
         if card["kind"] == "approval" && card["tool"] == "browser_human" {
             if let Some(id) = card["id"].as_str() {
-                app.turns.resolve_approval(id, crate::turn::Reply::Deny);
+                crate::turn::decide_approval(&app, id, crate::turn::Reply::Deny).await;
             }
         }
     }
