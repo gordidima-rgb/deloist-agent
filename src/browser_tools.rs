@@ -566,8 +566,9 @@ fn collect_frames(tree: &Value, out: &mut Vec<String>) {
 
 fn header(session: &Session) -> String {
     let mut tabs = session.tabs.lock().unwrap();
-    let total = tabs.order.len();
-    let index = tabs.current.as_ref().and_then(|id| tabs.order.iter().position(|t| t == id)).map_or(0, |i| i + 1);
+    let mine = tabs.mine();
+    let total = mine.len();
+    let index = tabs.current.as_ref().and_then(|id| mine.iter().position(|t| t == id)).map_or(0, |i| i + 1);
     let mut lines = Vec::new();
     if let Some(page) = tabs.current.as_ref().and_then(|id| tabs.pages.get(id)) {
         lines.push(format!("Вкладка {index} из {total} · {} · {}", page.title, page.url));
@@ -800,8 +801,8 @@ async fn nav(session: &Session, args: &Value) -> Result<String, String> {
         }
         "tabs" => {
             let tabs = session.tabs.lock().unwrap();
-            let list: Vec<String> = tabs
-                .order
+            let mine = tabs.mine();
+            let list: Vec<String> = mine
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| {
@@ -830,7 +831,7 @@ async fn nav(session: &Session, args: &Value) -> Result<String, String> {
             let wanted = num(args, "tab").unwrap_or(0.0) as usize;
             {
                 let mut tabs = session.tabs.lock().unwrap();
-                let target = wanted.checked_sub(1).and_then(|i| tabs.order.get(i)).cloned().ok_or("нет такой вкладки")?;
+                let target = wanted.checked_sub(1).and_then(|i| tabs.mine().get(i).cloned()).ok_or("нет такой вкладки")?;
                 tabs.current = Some(target);
             }
             fresh_snapshot(session).await
@@ -839,7 +840,7 @@ async fn nav(session: &Session, args: &Value) -> Result<String, String> {
             let target = {
                 let tabs = session.tabs.lock().unwrap();
                 match num(args, "tab") {
-                    Some(tab) => (tab as usize).checked_sub(1).and_then(|i| tabs.order.get(i)).cloned(),
+                    Some(tab) => (tab as usize).checked_sub(1).and_then(|i| tabs.mine().get(i).cloned()),
                     None => tabs.current.clone(),
                 }
             }
@@ -2189,6 +2190,7 @@ async fn watch_sign_in(app: &Arc<App>, bot: &Bot, name: &str, output: &str) {
     if session.relay.is_some() || session.is_windowless() {
         return;
     }
+    let _lease = session.lease(&bot.id).await;
     let Ok((url, title)) = session.with_page(|page| (page.url.clone(), page.title.clone())) else { return };
     let messenger = crate::messengers::by_host(&host_of(&url));
     if !output.contains("[Содержимое страницы") {
@@ -2249,6 +2251,8 @@ async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Resul
         crate::user_chrome::check_unattended(app, &bot.id)?;
     }
     let session = app.browsers.session(&app.store, &bot.id).await?;
+    // Браузер команды общий, вкладки свои: на время вызова он принадлежит этому боту.
+    let _lease = session.lease(&bot.id).await;
     // Каждый сайт в Chrome человека — с его согласия: карточка до перехода.
     if let Some(relay) = &session.relay {
         let url = text(args, "url");

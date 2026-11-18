@@ -352,8 +352,8 @@ async fn quick(session: &Session, sid: &str, method: &str, params: Value) -> Res
 
 fn tabs_json(session: &Session) -> Value {
     let tabs = session.tabs.lock().unwrap();
-    let list: Vec<Value> = tabs
-        .order
+    let mine = tabs.mine();
+    let list: Vec<Value> = mine
         .iter()
         .filter_map(|id| {
             let page = tabs.pages.get(id)?;
@@ -453,6 +453,8 @@ async fn capture(app: Arc<App>, bot: String, stop: CancellationToken, generation
                     unavailable(&bot, "Браузер бота закрыт. Открой панель заново: он запустится снова.");
                     break;
                 }
+                // Браузер команды общий: человеку показываем вкладку этого бота, если им сейчас никто не работает.
+                session.view_as(&bot);
                 let now_sid = session.current_session();
                 if now_sid != current {
                     if let Some(old) = current.take() {
@@ -611,8 +613,14 @@ async fn held_session(app: &Arc<App>, id: &str) -> Result<Arc<Session>, Response
     if !is_held(id) {
         return Err(fail(StatusCode::CONFLICT, NOT_HELD));
     }
-    app.browsers.session(&app.store, id).await.map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, e))
+    let session = app.browsers.session(&app.store, id).await.map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    if !session.view_as(id) {
+        return Err(fail(StatusCode::CONFLICT, TEAM_BUSY));
+    }
+    Ok(session)
 }
+
+const TEAM_BUSY: &str = "Браузер команды сейчас занят другим ботом. Подожди, пока он закончит шаг.";
 
 /// Запись идёт: «Стоп» ещё не нажат.
 fn recording(bot: &str) -> bool {
@@ -790,7 +798,7 @@ async fn nav(State(app): State<Arc<App>>, Path(id): Path<String>, body: Bytes) -
     let done: Result<(), String> = async {
         if let Some(index) = body.get("tab").and_then(Value::as_u64) {
             let mut tabs = session.tabs.lock().unwrap();
-            let target = (index as usize).checked_sub(1).and_then(|i| tabs.order.get(i)).cloned().ok_or("нет такой вкладки")?;
+            let target = (index as usize).checked_sub(1).and_then(|i| tabs.mine().get(i).cloned()).ok_or("нет такой вкладки")?;
             tabs.current = Some(target);
             return Ok(());
         }
