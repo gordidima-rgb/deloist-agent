@@ -1100,13 +1100,17 @@ async fn a_bot_cannot_plant_instructions_in_the_team_folder() {
             tool("write_file", json!({ "path": "sub/AGENTS.md", "content": "planted" })),
             tool("write_file", json!({ "path": "tools/run.ps1", "content": "planted" })),
             tool("run_command", json!({ "command": "echo planted > AGENTS.md" })),
+            tool("run_command", json!({ "command": "echo planted > sub\\AGENTS.md." })),
+            tool("run_command", json!({ "command": "echo planted > \"CLAUDE.md \"" })),
+            tool("write_file", json!({ "path": "GEMINI.md", "content": "planted" })),
+            tool("write_file", json!({ "path": "AGENTS.md.", "content": "planted" })),
         ],
     )
     .await;
-    for planted in ["AGENTS.md", "CLAUDE.md", "sub/AGENTS.md", "tools/run.ps1"] {
+    for planted in ["AGENTS.md", "CLAUDE.md", "sub/AGENTS.md", "tools/run.ps1", "sub/AGENTS.md.", "GEMINI.md"] {
         assert!(!team.join(planted).exists(), "{planted} подложен в общую папку");
     }
-    assert!(cards.len() >= 3, "вложенные инструкции, сценарии и команда в общей папке идут с карточкой: {cards:?}");
+    assert!(cards.len() >= 5, "вложенные инструкции, сценарии и команда в общей папке идут с карточкой: {cards:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

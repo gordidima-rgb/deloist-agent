@@ -1574,15 +1574,18 @@ impl Store {
     }
 
     async fn persist(&self) -> std::io::Result<()> {
-        let _gate = self.write_gate.lock().await;
-        let text = {
-            let state = self.state.lock().unwrap();
-            serde_json::to_string_pretty(&*state).map_err(std::io::Error::other)?
-        };
-        let target = self.data_dir.join("state.json");
-        let tmp = self.data_dir.join("state.json.tmp");
-        tokio::fs::write(&tmp, text).await?;
-        tokio::fs::rename(&tmp, &target).await?;
+        {
+            let _gate = self.write_gate.lock().await;
+            let text = {
+                let state = self.state.lock().unwrap();
+                serde_json::to_string_pretty(&*state).map_err(std::io::Error::other)?
+            };
+            let target = self.data_dir.join("state.json");
+            let tmp = self.data_dir.join("state.json.tmp");
+            tokio::fs::write(&tmp, text).await?;
+            tokio::fs::rename(&tmp, &target).await?;
+        }
+        // Сборка общих папок идёт уже без замка записи: другие записи состояния не ждут копирования файлов.
         self.build_team_folders().await;
         Ok(())
     }
@@ -4673,7 +4676,7 @@ fn merge_files(from: &Path, to_root: &Path, team_root: &Path, rel: &Path, tag: &
         let name = entry.file_name();
         let rel_path = rel.join(&name);
         let source = entry.path();
-        if crate::attach::is_link(&source) || private_file(rel, &name.to_string_lossy()) {
+        if crate::attach::is_link(&source) || private_file(rel, &name.to_string_lossy()) || crate::reach::project_guard_reason(&rel_path).is_some() {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };

@@ -193,7 +193,7 @@ pub fn program_roots() -> Vec<PathBuf> {
 /// (`core.hooksPath`, фильтры), атрибуты фильтров, настройки и хуки Claude Code, задачи редактора, профили оболочек,
 /// конфиг cargo (`rustc-wrapper`). Запись туда — только после карточки.
 pub fn auto_exec_reason(path: &Path) -> Option<&'static str> {
-    let names: Vec<String> = path.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
+    let names: Vec<String> = clean_spelling(path).components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
     let last = names.last().map(String::as_str).unwrap_or_default();
     if names.iter().any(|n| n == ".git") {
         return Some("файл, который сам запускает программы при работе с git");
@@ -320,15 +320,47 @@ pub fn safe_read_links(path: &Path) -> bool {
     }
 }
 
+/// Файлы с указаниями для агентов (их читают как инструкции) в любой папке: имена в нижнем регистре.
+pub const INSTRUCTION_FILES: [&str; 10] = [
+    "agents.md",
+    "claude.md",
+    "gemini.md",
+    "agents.override.md",
+    "claude.local.md",
+    "qwen.md",
+    "copilot-instructions.md",
+    ".cursorrules",
+    ".windsurfrules",
+    ".clinerules",
+];
+
+/// Путь без потоков (`::$DATA`, `:поток`), хвостовых точек и пробелов в именах.
+pub fn clean_spelling(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(name) => {
+                let text = name.to_string_lossy();
+                let head = text.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']);
+                out.push(if head.is_empty() { text.as_ref() } else { head });
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Закрыто ли место в папке проекта или команды (не в своей папке бота): файлы автозапуска, документы для агентов
-/// (`AGENTS.md`, `CLAUDE.md`) и сценарии в `tools/` и `scripts/`.
+/// (`INSTRUCTION_FILES`, `.github/instructions/*`, папка `.clinerules`) и сценарии в `tools/` и `scripts/`.
+/// Имена приводятся к настоящему виду: `AGENTS.md.`, `CLAUDE.md ` и `AGENTS.md:поток` — те же файлы.
 pub fn project_guard_reason(path: &Path) -> Option<&'static str> {
     if let Some(reason) = auto_exec_reason(path) {
         return Some(reason);
     }
-    let names: Vec<String> = path.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
+    let names: Vec<String> = clean_spelling(path).components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
     let last = names.last().map(String::as_str).unwrap_or_default();
-    if matches!(last, "agents.md" | "claude.md") {
+    let in_instruction_dir = names.windows(2).any(|w| w[0] == ".github" && w[1] == "instructions") || names.iter().rev().skip(1).any(|n| n == ".clinerules");
+    if INSTRUCTION_FILES.contains(&last) || in_instruction_dir {
         return Some("инструкции для агентов: они читаются как указания");
     }
     let script = [".ps1", ".cmd", ".bat", ".sh"].iter().any(|ext| last.ends_with(ext));
@@ -336,6 +368,16 @@ pub fn project_guard_reason(path: &Path) -> Option<&'static str> {
         return Some("сценарии проекта: их запускает человек или сборка");
     }
     None
+}
+
+/// Имя файла, который сохраняется из чужих рук (передача между ботами, загрузка человека): если оно читается как
+/// указание или файл автозапуска, добавляется `.txt` — содержимое доступно, но как инструкция не сработает.
+pub fn defanged_name(name: &str) -> String {
+    if project_guard_reason(Path::new(name)).is_some() {
+        format!("{name}.txt")
+    } else {
+        name.to_string()
+    }
 }
 
 /// То же с папками проектов.
@@ -985,7 +1027,7 @@ fn classify(word: &Word, cwd: Option<&Path>, ctx: &Ctx) -> Place {
     let bytes = text.as_bytes();
     let starts_like_path = text.starts_with(['\\', '/', '~', '.'])
         || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':');
-    if word.quoted && text.contains(char::is_whitespace) && !starts_like_path {
+    if word.quoted && text.trim().contains(char::is_whitespace) && !starts_like_path {
         return Place::Home;
     }
     if let Some(found) = DRIVE.captures(text).and_then(|c| c.get(1)) {
@@ -1524,6 +1566,22 @@ mod guard_list_tests {
         for name in ["notes.md", "a.py", "data.json", "page.html", "readme.txt", "x.rs", "cmdline.md"] {
             assert!(!planted_executable(Path::new(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn instruction_files_are_guarded_under_every_spelling_and_by_every_agent_name() {
+        for path in [
+            r"sub\AGENTS.md.", "CLAUDE.md ", "AGENTS.md:stream", "AGENTS.md::$DATA", "GEMINI.md", "AGENTS.override.md", "CLAUDE.local.md", "QWEN.md",
+            r".github\copilot-instructions.md", r".github\instructions\ts.instructions.md", ".cursorrules", ".windsurfrules", ".clinerules", r".clinerules\rule.md",
+        ] {
+            assert!(project_guard_reason(Path::new(path)).is_some(), "{path}");
+        }
+        for path in ["notes.md", r"docs\agents-overview.md", "gemini.txt"] {
+            assert!(project_guard_reason(Path::new(path)).is_none(), "{path}");
+        }
+        assert!(auto_exec_reason(Path::new(r".git.\config")).is_some(), "хвостовая точка не прячет .git");
+        assert_eq!(defanged_name("AGENTS.md"), "AGENTS.md.txt");
+        assert_eq!(defanged_name("report.pdf"), "report.pdf");
     }
 
     #[test]

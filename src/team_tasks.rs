@@ -543,7 +543,7 @@ async fn run(app: Arc<App>, id: String) {
                 // (не из команды получателя) отдаём только файлы, названные в итоге получателя.
                 let target_team = app.store.team_of(&target.id).map(|r| r.id);
                 let foreign = target_team.is_some() && app.store.team_of(&task.from).map(|r| r.id) != target_team;
-                let files = if foreign { named_files(&app.store, &target.id, &text) } else { fresh_files(&app.store, &target.id, started) };
+                let files = if foreign { named_files(&app.store, &target.id, &text, started) } else { fresh_files(&app.store, &target.id, started) };
                 let (state, summary) = if text.trim() == NO_REPLY { ("error", text) } else { ("done", text) };
                 finish(&app, &id, state, summary, files).await;
                 return;
@@ -636,10 +636,11 @@ pub(crate) fn render_closed(found: &[Task], fence: &str) -> String {
     lines.join("\n")
 }
 
-/// Файлы папки получателя, которые он сам назвал в итоге задачи: путь относительно папки или полный внутри неё.
+/// Файлы папки получателя, которые он сам назвал в итоге задачи и которые изменены с её начала: путь относительно папки
+/// или полный внутри неё.
 /// Записи файлов программа по ботам не ведёт, поэтому для постороннего отправителя берётся только названное.
 /// Ссылки, скрытые и секретные пропускаем.
-fn named_files(store: &crate::store::Store, bot_id: &str, summary: &str) -> Vec<String> {
+fn named_files(store: &crate::store::Store, bot_id: &str, summary: &str, since_ms: i64) -> Vec<String> {
     let workspace = store.workspace(bot_id);
     let Ok(root) = std::fs::canonicalize(&workspace) else { return Vec::new() };
     let mut out: Vec<String> = Vec::new();
@@ -654,7 +655,8 @@ fn named_files(store: &crate::store::Store, bot_id: &str, summary: &str) -> Vec<
         }
         let Ok(real) = std::fs::canonicalize(&candidate) else { continue };
         let hidden = real.strip_prefix(&root).is_ok_and(|rel| rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')));
-        if real.starts_with(&root) && !hidden && real.is_file() && crate::reach::secret_reason(&real, store.data_dir(), &root).is_none() && crate::reach::safe_read_links(&real) {
+        let fresh = std::fs::metadata(&real).and_then(|m| m.modified()).ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).is_some_and(|m| m.as_millis() as i64 >= since_ms - 1_000);
+        if real.starts_with(&root) && !hidden && fresh && real.is_file() && crate::reach::secret_reason(&real, store.data_dir(), &root).is_none() && crate::reach::safe_read_links(&real) {
             let shown = crate::reach::display(&real);
             if !out.contains(&shown) {
                 out.push(shown);
@@ -998,7 +1000,8 @@ mod tests {
         std::fs::write(ws.join("teammate-draft.txt"), "x").unwrap();
         std::fs::write(dir.join("outside.txt"), "x").unwrap();
         let summary = format!("Готово: out/report.txt, ещё out\\missing.txt и ..\\..\\outside.txt ({}).", dir.join("outside.txt").display());
-        let files = named_files(&store, &bot.id, &summary);
+        let files = named_files(&store, &bot.id, &summary, 0);
+        assert!(named_files(&store, &bot.id, &summary, now() + 60_000).is_empty(), "файл старше начала задачи не отдаётся");
         assert_eq!(files.len(), 1, "{files:?}");
         assert!(files[0].ends_with("report.txt"), "{files:?}");
         let _ = std::fs::remove_dir_all(&dir);

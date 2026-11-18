@@ -962,7 +962,7 @@ pub(crate) fn homes(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
 /// Путь сначала приводится к настоящему виду: Windows читает `file::$DATA` и `file:поток` как тот же файл, короткие имена
 /// 8.3 (`GIT~1`, `CLAUDE~1`) как длинные, хвостовые точки и пробелы отбрасывает. Любое имя с `~цифра` подозрительно само.
 pub(crate) fn autorun_path(path: &Path) -> bool {
-    let cleaned = clean_spelling(path);
+    let cleaned = crate::reach::clean_spelling(path);
     // Короткое имя, которое не удалось раскрыть (файла ещё нет): прячет что угодно, спрашиваем. Существующие имена
     // сначала раскрываются до длинных: короткое имя папки данных в пути не должно считаться подозрительным.
     let resolved = crate::reach::real_path(&cleaned).unwrap_or_else(|| cleaned.clone());
@@ -987,22 +987,6 @@ pub(crate) fn autorun_path(path: &Path) -> bool {
 /// либо существующий файл с несколькими жёсткими ссылками (по имени его не опознать).
 pub(crate) fn flagged_target(path: &Path) -> bool {
     autorun_path(path) || !crate::reach::single_link_or_missing(&crate::reach::real_path(path).unwrap_or_else(|| path.to_path_buf()))
-}
-
-/// Путь без потоков (`::$DATA`, `:поток`), хвостовых точек и пробелов в именах.
-fn clean_spelling(path: &Path) -> std::path::PathBuf {
-    let mut out = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::Normal(name) => {
-                let text = name.to_string_lossy();
-                let head = text.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']);
-                out.push(if head.is_empty() { text.as_ref() } else { head });
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 /// Двоеточие вне префикса диска (потоки файла) и имена, которые Windows читает по-особому, в пути для записи не принимаются.
@@ -1032,8 +1016,9 @@ fn team_guarded(workspace: &Path, path: &Path) -> bool {
 pub(crate) fn memory_file_refusal(app: &App, path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_string_lossy().to_lowercase();
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    if matches!(name.as_str(), "agents.md" | "claude.md") && crate::reach::is_team_folder(&canon(path.parent()?)) {
-        return Some("AGENTS.md и CLAUDE.md общей папки команды собирает программа: их читают все боты как указания. Свои заметки клади в другой файл");
+    let cleaned = crate::reach::clean_spelling(Path::new(&name)).to_string_lossy().to_lowercase();
+    if crate::reach::INSTRUCTION_FILES.contains(&cleaned.as_str()) && crate::reach::is_team_folder(&canon(path.parent()?)) {
+        return Some("файлы с указаниями для агентов (AGENTS.md, CLAUDE.md и подобные) в общей папке команды собирает программа: их читают все боты как инструкции. Свои заметки клади в другой файл");
     }
     let message = match name.as_str() {
         "memory.md" => "memory.md — твоя память: пиши в неё через remember (forget — убрать запись), а не write_file",

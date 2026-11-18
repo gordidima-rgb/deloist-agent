@@ -207,6 +207,7 @@ pub async fn save(store: &Store, bot_ids: &[String], raw_name: &str, bytes: &[u8
 /// Свободное имя файла в каталоге `dir`: если `name` занят, пробуем `<stem>-2.<ext>`, `<stem>-3.<ext>` и т.д.
 /// (точно так же, как при загрузке в чат). Проверяем только этот каталог — вызывающий сам создаёт файл.
 pub fn free_name(dir: &Path, name: &str) -> Result<String, String> {
+    let name = &crate::reach::defanged_name(name);
     let (stem, extension) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
         _ => (name.to_string(), String::new()),
@@ -579,6 +580,7 @@ mod tests {
         assert_eq!(super::free_name(&dir, "report.txt").unwrap(), "report-3.txt");
         assert_eq!(super::free_name(&dir, "noext").unwrap(), "noext");
         assert_eq!(super::free_name(&dir, "other.txt").unwrap(), "other.txt");
+        assert_eq!(super::free_name(&dir, "AGENTS.md").unwrap(), "AGENTS.md.txt", "чужие указания сохраняются как текст");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
