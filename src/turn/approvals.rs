@@ -237,7 +237,7 @@ pub async fn decide_approval(app: &Arc<App>, id: &str, reply: Reply) -> bool {
         format!("Человек разрешил: {title}. Выполни это действие и продолжай задание.")
     };
     if let Some(run) = &item.run {
-        if crate::runs::resume(app, run, &text).await.is_ok() {
+        if crate::runs::continue_with(app, run, &text).await.is_ok() {
             return true;
         }
     }

@@ -30,6 +30,13 @@ fn tool(name: &str, args: Value) -> Value {
     json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": format!("c{}", rand_id()), "type": "function", "function": { "name": name, "arguments": args.to_string() } }] })
 }
 
+/// Ход без человека кончается вызовом `finish_turn`; текст рядом с вызовом — итог хода.
+fn finish(status: &str, text: &str) -> Value {
+    let mut message = tool("finish_turn", json!({ "status": status }));
+    message["content"] = json!(text);
+    message
+}
+
 fn rand_id() -> u128 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
 }
@@ -137,13 +144,14 @@ async fn schedule_fields_are_validated_and_saved() {
 async fn scheduled_run_lands_in_the_journal_with_tokens() {
     let (crew, fake, bot) = setup("night-run", &[("CREW_TEST_TICK_MS", "100")]).await;
     *fake.usage.lock().unwrap() = Some((1_000, 200));
+    *fake.script.lock().unwrap() = vec![finish("done", "готово")];
     let id = add_routine(&crew, &bot, json!({})).await;
     crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
 
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
     let entry = &event["entry"];
     assert_eq!(entry["status"], "ok", "{entry}");
-    assert_eq!(entry["tokens"], 1200);
+    assert_eq!(entry["tokens"], 1200, "после конечного finish_turn второго запроса нет");
     assert_eq!(entry["title"], "Проверка");
     assert_eq!(entry["text"], "готово");
     assert_eq!(entry["unattended"], true, "расписание работает без человека");
@@ -204,7 +212,7 @@ async fn nobody_answers_at_night_so_the_action_is_refused_and_left_for_morning()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_daily_limit_stops_routines_but_not_a_person() {
+async fn the_daily_limit_pauses_routines_until_midnight_but_not_a_person() {
     let (crew, fake, bot) = setup("night-limit", &[("CREW_TEST_TICK_MS", "100")]).await;
     *fake.usage.lock().unwrap() = Some((600, 100));
     crew.ok("PUT", "/api/settings", Some(json!({ "dailyTokenLimit": 1000 }))).await;
@@ -218,16 +226,23 @@ async fn the_daily_limit_stops_routines_but_not_a_person() {
     crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
 
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
-    assert_eq!(event["entry"]["status"], "limit", "{event}");
+    assert_eq!(event["entry"]["status"], "paused", "{event}");
     assert_eq!(event["entry"]["tokens"], 1400, "два шага и стоп");
     assert_eq!(fake.requests.lock().unwrap().len(), 2);
+    // Ход не провалился: запись журнала запусков ждёт ближайшей местной полуночи.
+    let runs: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runs.json")).unwrap()).unwrap();
+    let paused = &runs[0]["state"];
+    assert_eq!((paused["kind"].as_str(), paused["reason"].as_str()), (Some("paused"), Some("budget")), "{paused}");
+    let tomorrow = chrono::Local::now().date_naive().succ_opt().unwrap().and_time(chrono::NaiveTime::MIN);
+    let midnight = chrono::TimeZone::from_local_datetime(&chrono::Local, &tomorrow).earliest().unwrap().timestamp_millis();
+    assert_eq!(paused["until_ms"].as_i64(), Some(midnight), "{paused}");
 
     // Расписание больше не запускает: пропуск виден в журнале.
     crew.clear_events();
     fake.requests.lock().unwrap().clear();
     crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
-    let event = crew.wait_event("пропуск", |e| e["type"] == "journal").await;
-    assert_eq!(event["entry"]["status"], "limit");
+    let event = crew.wait_event("пауза", |e| e["type"] == "journal").await;
+    assert_eq!(event["entry"]["status"], "paused");
     assert_eq!(event["entry"]["tokens"], 0);
     assert!(fake.requests.lock().unwrap().is_empty(), "модель не вызывается");
 
@@ -269,13 +284,15 @@ async fn quiet_is_default_and_the_rule_is_only_in_quiet_routine_prompts() {
     assert_eq!(quiet["quiet"], true, "по умолчанию тихо");
     assert_eq!(loud["quiet"], false);
 
+    *fake.script.lock().unwrap() = vec![finish("nothing", ""), finish("done", "")];
     run_and_wait(&crew, &quiet_id, json!({})).await;
     run_and_wait(&crew, &loud_id, json!({})).await;
     let requests = fake.requests.lock().unwrap().clone();
     let quiet_prompt = requests[0]["messages"][0]["content"].as_str().unwrap();
     let loud_prompt = requests[1]["messages"][0]["content"].as_str().unwrap();
-    assert!(quiet_prompt.contains("[ТИХО]"), "нет правила в промпте рутины: {quiet_prompt}");
-    assert!(!loud_prompt.contains("[ТИХО]"), "правило попало в обычную рутину: {loud_prompt}");
+    assert!(quiet_prompt.contains("finish_turn со status nothing"), "нет правила в промпте рутины: {quiet_prompt}");
+    assert!(!quiet_prompt.contains("[ТИХО]"), "драйвер с инструментами маркер не получает: {quiet_prompt}");
+    assert!(!loud_prompt.contains("status nothing"), "правило попало в обычную рутину: {loud_prompt}");
 
     crew.clear_events();
     crew.say(&bot, "привет").await;
@@ -302,7 +319,7 @@ async fn a_run_started_by_a_person_is_never_hidden() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_steered_into_a_quiet_run_stays_visible() {
     let (crew, fake, bot) = setup("night-quiet-steer", &[]).await;
-    *fake.script.lock().unwrap() = vec![tool("run_command", json!({ "command": "echo ок > C:\\Windows\\deloist-probe.txt" })), say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![tool("run_command", json!({ "command": "echo ок > C:\\Windows\\deloist-probe.txt" })), finish("nothing", "")];
     let id = add_routine(&crew, &bot, json!({})).await;
 
     crew.clear_events();
@@ -324,7 +341,7 @@ async fn a_message_steered_into_a_quiet_run_stays_visible() {
 async fn a_marker_alone_hides_the_routine_turn_and_its_journal_is_quiet() {
     let (crew, fake, bot) = setup("night-quiet-turn", &[]).await;
     *fake.usage.lock().unwrap() = Some((1_000, 200));
-    *fake.script.lock().unwrap() = vec![say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![finish("nothing", "")];
     let id = add_routine(&crew, &bot, json!({})).await;
 
     let entry = run_and_wait(&crew, &id, json!({})).await;
@@ -351,36 +368,40 @@ async fn a_marker_alone_hides_the_routine_turn_and_its_journal_is_quiet() {
     assert!(!last.contains("[ТИХО]"), "маркер попал в следующий запрос: {last}");
 }
 
+/// Демо-драйвер не получает наши инструменты: «сообщать нечего» он говорит маркером [ТИХО], а не `finish_turn`.
 #[tokio::test(flavor = "multi_thread")]
-async fn without_quiet_the_marker_is_an_ordinary_answer() {
+async fn a_driver_without_tools_says_nothing_to_report_with_the_marker() {
+    let crew = Crew::start("night-quiet-marker").await;
+    crew.listen().await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    let (status, made) = crew.send("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Проверка", "prompt": "тихо", "everyMinutes": 60 }))).await;
+    assert_eq!(status, 201, "{made}");
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+
+    let entry = run_and_wait(&crew, &id, json!({})).await;
+    assert_eq!(entry["status"], "quiet", "{entry}");
+    assert_eq!(entry["text"], "", "{entry}");
+    assert!(thread(&crew, &bot, None).await.is_empty(), "сообщения тихого хода скрыты");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_quiet_a_nothing_to_report_run_stays_visible() {
     let (crew, fake, bot) = setup("night-quiet-off", &[]).await;
-    *fake.script.lock().unwrap() = vec![say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![finish("nothing", "всё спокойно")];
     let id = add_routine(&crew, &bot, json!({ "quiet": false })).await;
 
     let entry = run_and_wait(&crew, &id, json!({})).await;
     assert_eq!(entry["status"], "ok", "{entry}");
-    assert_eq!(entry["text"], "[ТИХО]", "{entry}");
+    assert_eq!(entry["text"], "всё спокойно", "{entry}");
     let messages = thread(&crew, &bot, None).await;
-    assert!(has_text(&messages, "[ТИХО]"), "ответ виден в треде: {messages:?}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_marker_followed_by_text_keeps_the_whole_answer() {
-    let (crew, fake, bot) = setup("night-quiet-long", &[]).await;
-    *fake.script.lock().unwrap() = vec![say("[ТИХО] но вот что нашёл")];
-    let id = add_routine(&crew, &bot, json!({})).await;
-
-    let entry = run_and_wait(&crew, &id, json!({})).await;
-    assert_eq!(entry["status"], "ok", "{entry}");
-    assert_eq!(entry["text"], "[ТИХО] но вот что нашёл");
-    let messages = thread(&crew, &bot, None).await;
-    assert!(has_text(&messages, "[ТИХО] но вот что нашёл"), "{messages:?}");
+    assert!(has_text(&messages, "всё спокойно"), "ответ виден в треде: {messages:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_quiet_answer_after_a_tool_still_hides_the_turn() {
     let (crew, fake, bot) = setup("night-quiet-tool", &[]).await;
-    *fake.script.lock().unwrap() = vec![tool("list_files", json!({})), say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![tool("list_files", json!({})), finish("nothing", "")];
     let id = add_routine(&crew, &bot, json!({})).await;
 
     let entry = run_and_wait(&crew, &id, json!({})).await;
@@ -396,7 +417,7 @@ async fn a_quiet_answer_after_a_tool_still_hides_the_turn() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_missed_decision_makes_a_quiet_answer_visible() {
     let (crew, fake, bot) = setup("night-quiet-needs", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
-    *fake.script.lock().unwrap() = vec![tool("run_command", json!({ "command": "echo один > C:\\Windows\\deloist-probe.txt" })), say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![tool("run_command", json!({ "command": "echo один > C:\\Windows\\deloist-probe.txt" })), finish("nothing", "")];
     let id = add_routine(&crew, &bot, json!({})).await;
 
     let entry = run_and_wait(&crew, &id, json!({ "attended": false })).await;
@@ -431,7 +452,7 @@ async fn a_fallback_turn_is_not_quiet() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
 
     *main.fail.lock().unwrap() = Some((429, "usage limit reached".into()));
-    *spare.script.lock().unwrap() = vec![say("[ТИХО]")];
+    *spare.script.lock().unwrap() = vec![finish("nothing", "запасная ничего не нашла")];
     let id = add_routine(&crew, &bot, json!({})).await;
 
     let entry = run_and_wait(&crew, &id, json!({})).await;
@@ -439,7 +460,7 @@ async fn a_fallback_turn_is_not_quiet() {
     assert_eq!(entry["fallback"], "backup-model", "{entry}");
     assert_eq!(entry["text"], "Сообщать нечего.", "{entry}");
     let messages = thread(&crew, &bot, None).await;
-    assert!(has_text(&messages, "[ТИХО]"), "после запасной ход виден: {messages:?}");
+    assert!(has_text(&messages, "запасная ничего не нашла"), "после запасной ход виден: {messages:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

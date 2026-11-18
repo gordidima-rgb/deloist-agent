@@ -248,6 +248,13 @@ fn main() {
 
 fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
     let mut cancelled = false;
+    if text.contains("finish_turn") || text.contains("итог хода") || text.starts_with("Продолжи незавершённую часть") {
+        let continuing = text.starts_with("Продолжи незавершённую часть");
+        let (status, note) = if continuing { ("nothing", "x") } else { ("continue", "") };
+        let answer = call_finish_turn(status, note);
+        chunk(io, session, &format!("finish_turn: {answer}"));
+        return "end_turn";
+    }
     if text.contains("тест незавершённости") || text.starts_with("Продолжи незавершённую часть") {
         let continuing = text.starts_with("Продолжи незавершённую часть");
         if !continuing || std::env::var("FAKE_ACP_CONTINUE_LOOP").is_ok() || std::env::var("FAKE_ACP_NO_PROGRESS").is_ok() {
@@ -293,6 +300,14 @@ fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
     if text.contains("покажи-env") {
         chunk(io, session, &format!("env: {}", std::env::var("NoDefaultCurrentDirectoryInExePath").unwrap_or_else(|_| "нет".into())));
         return "end_turn";
+    }
+    if text.contains("молчание") {
+        while let Some(message) = io.read() {
+            if message["method"] == "session/cancel" {
+                return "cancelled";
+            }
+        }
+        std::process::exit(0);
     }
     if text.contains("медленно") {
         chunk(io, session, "начал");
@@ -499,6 +514,23 @@ fn call_ask_user(text: &str) -> String {
         }
         reply_text(&ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": { "name": "ask_user", "arguments": { "question": question.trim(), "choices": choices } } })))
+    })
+}
+
+/// Зовёт `finish_turn` моста.
+fn call_finish_turn(status: &str, note: &str) -> String {
+    with_mcp(|ask| {
+        let names = tool_names(&ask(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })));
+        if !names.iter().any(|n| n == "finish_turn") {
+            return format!("в списке нет finish_turn: {names:?}");
+        }
+        let arguments = if note.is_empty() {
+            json!({ "status": status })
+        } else {
+            json!({ "status": status, "note": note })
+        };
+        reply_text(&ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": { "name": "finish_turn", "arguments": arguments } })))
     })
 }
 

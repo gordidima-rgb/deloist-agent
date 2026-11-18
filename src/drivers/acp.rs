@@ -40,6 +40,16 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// После отмены агент обязан закончить ход сам. Не закончил — гасим процесс.
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
+const SILENCE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
+fn silence_timeout() -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_ACP_SILENCE_MS").ok().and_then(|v| v.parse().ok()) {
+            return Duration::from_millis(ms);
+        }
+    }
+    SILENCE_TIMEOUT
+}
 const STDERR_LINES: usize = 30;
 /// Сколько прошлых сообщений пересказать новой сессии и сколько символов на каждое.
 const RECAP_MESSAGES: usize = 12;
@@ -642,6 +652,8 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
 
     let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, bot_id: bot_id.clone(), thread: req.thread.to_string() };
     let mut deadline: Option<tokio::time::Instant> = None;
+    let mut last_activity = tokio::time::Instant::now();
+    let mut silenced = false;
     let outcome = loop {
         if turn.cancelled && deadline.is_none() {
             deadline = Some(tokio::time::Instant::now() + CANCEL_GRACE);
@@ -665,6 +677,12 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
                     break Err(CallError::Closed);
                 };
                 handle_message(&agent, &req, &session_id, &message, &mut turn, cancel, sink).await;
+                last_activity = tokio::time::Instant::now();
+            }
+            _ = tokio::time::sleep_until(last_activity + silence_timeout()), if !turn.cancelled && !silenced => {
+                silenced = true;
+                turn.cancelled = true;
+                agent.notify("session/cancel", json!({ "sessionId": session_id })).await;
             }
             _ = tokio::time::sleep_until(grace), if deadline.is_some() => {
                 agent.kill();
@@ -682,14 +700,15 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         }
     }
 
+    let stopped = || Err(if silenced { "Агент молчал 20 минут — ход остановлен." } else { "остановлено" }.into());
     match outcome {
         Ok(result) => match result["stopReason"].as_str().unwrap_or("end_turn") {
-            "cancelled" => Err("остановлено".into()),
+            "cancelled" => stopped(),
             "refusal" => Err("агент отказался выполнять просьбу".into()),
-            _ if turn.cancelled => Err("остановлено".into()),
+            _ if turn.cancelled => stopped(),
             _ => Ok(()),
         },
-        Err(_) if turn.cancelled => Err("остановлено".into()),
+        Err(_) if turn.cancelled => stopped(),
         Err(CallError::Rpc(error)) => {
             if needs_auth(&error) {
                 sessions.remove(req.thread);

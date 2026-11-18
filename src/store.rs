@@ -496,6 +496,9 @@ pub struct Routine {
     /// Что делать с пропущенными запусками: "last" — выполнить последний, "skip" — пропустить.
     #[serde(default = "default_catch_up")]
     pub catch_up: String,
+    /// Заметка с прошлого запуска (finish_turn note), обрезанная до 8000 знаков, хранится хвост.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub progress_note: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -548,6 +551,7 @@ impl Default for Routine {
             retry_attempt: 0,
             retry_since: 0,
             catch_up: "last".to_string(),
+            progress_note: String::new(),
             extra: Map::new(),
         }
     }
@@ -2729,6 +2733,9 @@ impl Store {
             }
             if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
                 r.catch_up = as_string(v);
+            }
+            if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
+                r.progress_note = as_string(v);
             }
             if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
                 r.every_minutes = minutes(patch.get("everyMinutes"));

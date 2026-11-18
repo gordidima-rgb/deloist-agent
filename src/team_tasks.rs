@@ -492,6 +492,12 @@ async fn run(app: Arc<App>, id: String) {
                 finish(&app, &id, "error", e, Vec::new()).await;
                 return;
             }
+            // Ход встал на паузу (лимит, предел): задача не закрыта, её продолжит журнал запусков через `requeue`.
+            Ok(_) if app.runs.paused().iter().any(|r| matches!(&r.origin, crate::runs::Origin::Team { task_id } if *task_id == id)) => {
+                app.tasks.update(&id, |t| t.state = "paused".into());
+                app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": "paused" }));
+                return;
+            }
             Ok(_) if app.runs.waiting_for_task(&id).is_some() => {
                 // Исполнитель ждёт человека: задача не закончена, её продолжит решение по карточке.
                 let wait = app.runs.waiting_for_task(&id).map(|r| r.wait_text()).unwrap_or_default();

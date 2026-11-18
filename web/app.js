@@ -4378,7 +4378,15 @@ async function refreshNeeds() {
   renderNeeds();
 }
 
+// «на паузе до 14:00 (лимит)»: срок и причина паузы запуска из журнала.
+function pauseLabel(item) {
+  const time = new Date(item.until).toLocaleTimeString(window.LOCALE, { hour: '2-digit', minute: '2-digit' });
+  const why = { limit: tr('лимит'), budget: tr('предел токенов'), event: tr('ждёт события') }[item.reason] || '';
+  return tr('на паузе до {time} ({why})', { time, why });
+}
+
 function needTitle(item) {
+  if (item.paused) return pauseLabel(item);
   if (item.kind === 'question') return item.question || '';
   if (item.kind === 'handoff') return item.detail || tr('Нужна твоя помощь в браузере');
   if (item.kind === 'run') return item.text || '';
@@ -4386,7 +4394,7 @@ function needTitle(item) {
 }
 
 function needKind(item) {
-  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение'), run: tr('прервано') }[item.kind] || '';
+  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение'), run: item.paused ? tr('на паузе') : tr('прервано') }[item.kind] || '';
 }
 
 // Почему сообщение ждёт в очереди. Код приходит с сервера (`holdReason`), слова подбираем здесь.
@@ -4412,7 +4420,7 @@ function boardSections() {
   const where = (item) => (item.roomName ? `${item.botName || ''} · ${item.roomName}` : item.botName || '');
   const needs = needsItems.map((item) => ({
     id: item.id, ref: item, where: where(item), meta: needKind(item), title: needTitle(item).slice(0, 140),
-    actions: item.kind === 'run' ? [{ key: 'continue', label: tr('Продолжить') }, { key: 'dismiss', label: tr('Отменить ход') }] : undefined,
+    actions: item.kind === 'run' ? [{ key: item.paused ? 'resume' : 'continue', label: item.paused ? tr('Продолжить сейчас') : tr('Продолжить') }, { key: 'dismiss', label: tr('Отменить ход') }] : undefined,
   }));
   const working = boardWorking.map((item) => ({
     id: `${item.kind}:${item.id || item.botId}`, ref: item, where: where(item),
@@ -7986,6 +7994,7 @@ const STATUS_LABELS = {
   failed: tr('ошибка'),
   stopped: tr('остановлено'),
   limit: tr('упёрлось в предел токенов'),
+  paused: tr('на паузе'),
   skipped: tr('пропущено: компьютер спал'),
   error: tr('не запустилась'),
   running: tr('идёт'),
@@ -8128,8 +8137,10 @@ function routineCardModel(r) {
   const bot = botById(r.botId);
   const next = r.hook ? tr('вебхук') : r.enabled ? nextText(r.nextRun) : '';
   const last = STATUS_LABELS[r.lastStatus];
+  const wait = needsItems.find((item) => item.paused && item.routineId === r.id);
   return {
     id: r.id,
+    paused: wait ? { id: wait.id, label: pauseLabel(wait) } : null,
     title: r.title,
     gist: String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140),
     enabled: Boolean(r.enabled),
@@ -8166,6 +8177,10 @@ function renderRoutines() {
   const props = {
     routines: ordinaryRoutines().map(routineCardModel),
     onrun: (id) => runRoutine(id),
+    onresume: async (runId) => {
+      await runAction(runId, 'resume');
+      renderRoutines();
+    },
     onquiet: (id, value) => patch(id, { quiet: value }, (r, saved) => { r.quiet = saved ? saved.quiet : value; }),
     ontoggle: (id, value) => patch(id, { enabled: value }, (r) => { r.enabled = value; }),
     ondelete: async (id) => {

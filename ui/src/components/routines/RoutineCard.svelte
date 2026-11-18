@@ -2,13 +2,13 @@
   // Карточка рутины «Углей»: в одной строке название, описание с обрезкой и действия (колокольчик, запуск, переключатель, удаление);
   // ниже метки: бот, как часто, следующий запуск (оранжевым), прошлый запуск. Выключенная рутина бледнеет, а не исчезает.
   import { tr } from '../../lib/i18n.js';
-  import { IconButton, Switch, Tag, Icon } from '../kit';
+  import { Button, IconButton, Switch, Tag, Icon } from '../kit';
 
   /**
-   * routine: { id, title, gist, enabled, quiet, bot: { name, orb }, schedule, next, nextTitle, nextIcon, last, lastTitle, lastBad }
-   * (строки приходят готовыми из app.js: дата и расписание считает он). Действия: onrun(id), onquiet(id, value), ontoggle(id, value), ondelete(id).
+   * routine: { id, title, gist, enabled, quiet, bot: { name, orb }, schedule, next, nextTitle, nextIcon, last, lastTitle, lastBad, paused: { id, label } | null }
+   * (строки приходят готовыми из app.js: дата и расписание считает он). Действия: onrun(id), onquiet(id, value), ontoggle(id, value), ondelete(id), onresume(runId) для паузы по лимиту.
    */
-  let { routine, onrun, onquiet, ontoggle, ondelete } = $props();
+  let { routine, onrun, onresume, onquiet, ontoggle, ondelete } = $props();
 </script>
 
 <article class="rc" class:is-off={!routine.enabled} data-routine={routine.id}>
@@ -38,6 +38,10 @@
     {#if routine.schedule}<Tag title={tr('Когда')}><Icon name="repeat" size={13} />{routine.schedule}</Tag>{/if}
     {#if routine.next}<Tag tone="accent" title={routine.nextTitle || routine.next}><Icon name={routine.nextIcon || 'clock'} size={13} />{routine.next}</Tag>{/if}
     {#if routine.last}<Tag tone={routine.lastBad ? 'danger' : 'neutral'} title={routine.lastTitle || routine.last}><Icon name={routine.lastBad ? 'alert-circle' : 'check-long'} size={13} />{routine.last}</Tag>{/if}
+    {#if routine.paused}
+      <Tag tone="accent" title={routine.paused.label}><Icon name="clock" size={13} />{routine.paused.label}</Tag>
+      <Button class="rc-resume" size="sm" variant="ghost" onclick={() => onresume?.(routine.paused.id)}>{tr('Продолжить сейчас')}</Button>
+    {/if}
   </div>
 </article>
 
