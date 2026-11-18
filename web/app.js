@@ -5193,6 +5193,13 @@ function queueEditField(item) {
   return input;
 }
 
+// Внешний агент (ACP, CLI) ведёт ход сам и новое сообщение возьмёт только после его конца:
+// «Направить» в идущий ход ему не дойти, поэтому кнопки нет.
+function canSteer(id) {
+  const driver = botById(id)?.driver || S.settings.driver || '';
+  return !(S.busy.has(id) && (driver === 'cli' || driver === 'acp' || driver.startsWith('acp:')));
+}
+
 function queueRow(item, index, items) {
   const row = document.createElement('div');
   row.className = 'queue-item';
@@ -5214,9 +5221,11 @@ function queueRow(item, index, items) {
     row.append(text);
   }
 
-  row.append(
-    queueButton(tr('Направить'), () => queueAction(item.id, 'steer'), tr('Отправить сразу, не дожидаясь конца хода')),
-  );
+  if (canSteer(S.currentId)) {
+    row.append(
+      queueButton(tr('Направить'), () => queueAction(item.id, 'steer'), tr('Отправить сразу, не дожидаясь конца хода')),
+    );
+  }
 
   if (!single) {
     const prev = index > 0 ? items[index - 1].id : null;
@@ -5295,6 +5304,7 @@ function renderQueue(force = false) {
     paused: Boolean(data?.paused),
     pauseReason: data?.pauseReason,
     hold: S.currentId ? queueHold(S.currentId) : '',
+    steer: canSteer(S.currentId),
     edit: S.queueEdit?.id || null,
     items: items.map((item) => [item.id, item.text]),
   });
