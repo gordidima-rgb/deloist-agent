@@ -11,7 +11,9 @@ use axum::response::Response;
 use axum::routing::post;
 use axum::Router;
 use common::Crew;
+use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
+use sha2::Sha256;
 
 /// Бот с нужной политикой подтверждений.
 async fn bot_with(crew: &Crew, name: &str, approval: &str) -> String {
@@ -353,7 +355,318 @@ async fn team_file_round_trips_and_routines_arrive_disabled() {
     assert_eq!(skills.iter().filter(|s| s["name"] == "Разбор").count(), 1, "навык задвоился");
 }
 
-/// Заглушка MCP-сервера: один инструмент `echo`.
+#[tokio::test]
+async fn github_webhook_valid_push_starts_turn() {
+    let crew = Crew::start("gh-push").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
+        )
+        .await;
+    let routine = &made["routine"];
+    let id = routine["id"].as_str().unwrap().to_string();
+    let token = routine["hookToken"].as_str().unwrap().to_string();
+
+    let body = json!({
+        "ref": "refs/heads/main",
+        "repository": { "full_name": "org/repo" },
+        "sender": { "login": "dev" },
+        "commits": [{ "id": "abc1234567890", "message": "fix: hello world", "author": { "name": "dev" } }]
+    });
+    let raw = body.to_string();
+    let sig = github_sig(&token, raw.as_bytes());
+
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "push")
+        .header("x-hub-signature-256", sig)
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 202, "вебхук не принят");
+
+    crew.wait_event("ход по github", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{}/thread?limit=20", bot), None).await;
+    let texts: Vec<&str> = thread["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str())
+        .collect();
+    assert!(texts.iter().any(|t| t.starts_with("[GitHub: push]")), "нет префикса GitHub: {texts:?}");
+    assert!(texts.iter().any(|t| t.contains("hello world")), "нет сообщения коммита: {texts:?}");
+}
+
+#[tokio::test]
+async fn github_webhook_bad_signature_and_missing_signature() {
+    let crew = Crew::start("gh-bad").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
+        )
+        .await;
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+
+    let body = "{}";
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+
+    // wrong signature
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "push")
+        .header("x-hub-signature-256", "sha256=0000000000000000000000000000000000000000000000000000000000000000")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 401);
+
+    // event header without signature
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "push")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 401);
+
+    // no turn started
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{}/thread?limit=20", bot), None).await;
+    let has_gh = thread["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str())
+        .any(|t| t.contains("[GitHub"));
+    assert!(!has_gh, "ход по GitHub не должен был стартовать");
+}
+
+#[tokio::test]
+async fn github_webhook_ping_returns_pong() {
+    let crew = Crew::start("gh-ping").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
+        )
+        .await;
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+
+    let body = json!({ "zen": "test" });
+    let raw = body.to_string();
+    let sig = github_sig(&token, raw.as_bytes());
+
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "ping")
+        .header("x-hub-signature-256", sig)
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+    let data: Value = res.json().await.unwrap();
+    assert_eq!(data["ping"], true);
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{}/thread?limit=20", bot), None).await;
+    let has_gh = thread["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str())
+        .any(|t| t.contains("[GitHub"));
+    assert!(!has_gh, "ping не должен стартовать ход");
+}
+
+#[tokio::test]
+async fn github_webhook_hook_events_filter() {
+    let crew = Crew::start("gh-filter").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true, "hookEvents": ["pull_request.opened"] })),
+        )
+        .await;
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+
+    let body = json!({ "action": "closed", "pull_request": { "number": 1, "title": "t" } });
+    let raw = body.to_string();
+    let sig = github_sig(&token, raw.as_bytes());
+
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "pull_request")
+        .header("x-hub-signature-256", sig.clone())
+        .body(raw.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 202);
+    let data: Value = res.json().await.unwrap();
+    assert_eq!(data["skipped"], true);
+
+    // opened -> turn
+    let body2 = json!({ "action": "opened", "pull_request": { "number": 1, "title": "t" } });
+    let raw2 = body2.to_string();
+    let sig2 = github_sig(&token, raw2.as_bytes());
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "pull_request")
+        .header("x-hub-signature-256", sig2)
+        .body(raw2)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 202);
+    crew.wait_event("ход по pr", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+}
+
+#[tokio::test]
+async fn github_webhook_push_100_commits_truncated() {
+    let crew = Crew::start("gh-100").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
+        )
+        .await;
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+
+    let mut commits = Vec::new();
+    for i in 0..100 {
+        commits.push(json!({ "id": format!("c{:040}", i), "message": format!("commit {}", i), "author": { "name": "dev" } }));
+    }
+    let body = json!({
+        "ref": "refs/heads/main",
+        "repository": { "full_name": "org/repo" },
+        "commits": commits
+    });
+    let raw = body.to_string();
+    let sig = github_sig(&token, raw.as_bytes());
+
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .header("x-github-event", "push")
+        .header("x-hub-signature-256", sig)
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 202);
+
+    crew.wait_event("ход по 100", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+    let thread = crew.ok("GET", &format!("/api/bots/{}/thread?limit=20", bot), None).await;
+    let text = thread["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str())
+        .find(|t| t.contains("[GitHub: push]"))
+        .unwrap_or("");
+    // data part under 8000 chars: check the whole turn text? The payload is inside; ensure <= 8000 for the data portion not directly. We check lists 10 commits.
+    assert!(text.contains("commits (100):"), "нет счётчика коммитов: {text}");
+    let commit_lines = text.lines().filter(|l| l.trim_start().starts_with("- ")).count();
+    assert_eq!(commit_lines, 10, "должно быть 10 коммитов, а не {commit_lines}");
+    // ensure data part under 8000: approximate by checking text length reasonable
+    assert!(text.chars().count() < 8_000 + 2_000, "текст слишком большой: {}", text.chars().count());
+}
+
+#[tokio::test]
+async fn generic_webhook_still_works() {
+    // covers generic webhook without GitHub headers
+    let crew = Crew::start("gh-gen").await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+
+    let made = crew
+        .ok(
+            "POST",
+            "/api/routines",
+            Some(json!({ "botId": bot, "title": "Форма", "prompt": "Разбери", "hook": true })),
+        )
+        .await;
+    let id = made["routine"]["id"].as_str().unwrap().to_string();
+    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+
+    let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
+    let res = crew
+        .client
+        .post(&hook)
+        .header("content-type", "application/json")
+        .body(json!({ "event": "new_ticket", "email": "a@b.c" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 202);
+    crew.wait_event("ход по вебхуку", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+}
+
+fn github_sig(secret: &str, body: &[u8]) -> String {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac key");
+    mac.update(body);
+    let bytes = mac.finalize().into_bytes();
+    let mut hex = String::with_capacity(64);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(hex, "{:02x}", b);
+    }
+    format!("sha256={}", hex)
+}
 const FAKE_MCP: &str = r#"
 let buf = '';
 process.stdin.setEncoding('utf8');

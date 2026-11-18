@@ -9380,6 +9380,8 @@ function syncRoutineMode() {
   $('#rt-at-box').hidden = hook || !atMode;
   const days = $('#rt-days').closest('.field');
   if (days) days.hidden = Boolean(hook);
+  const eventsBox = $('#rt-hook-events-box');
+  if (eventsBox) eventsBox.hidden = !hook;
 }
 
 function bindRoutineForm() {
@@ -9387,6 +9389,7 @@ function bindRoutineForm() {
   $('#rt-hook').addEventListener('change', () => {
     const hook = $('#rt-hook').checked;
     $('#rt-hook-box').hidden = !hook || !$('#rt-hook-url').value;
+    $('#rt-hook-events-box').hidden = !hook;
     // Расписание и вебхук взаимоисключающие: одно и то же не настраиваем дважды.
     $('#routine-mode').disabled = hook;
     $('#rt-every-box').hidden = hook || $('#routine-mode').value === 'at';
@@ -9423,6 +9426,12 @@ function bindRoutineForm() {
       catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
       quiet: f.quiet.checked,
       hook: $('#rt-hook').checked,
+      hookEvents: $('#rt-hook').checked
+        ? String($('#rt-hook-events')?.value || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
     };
     try {
       const { routine } = await api('/api/routines', { method: 'POST', body });
@@ -9441,6 +9450,8 @@ function bindRoutineForm() {
         // Адрес показываем сразу: именно его нужно вставить во внешний сервис.
         $('#rt-hook-box').hidden = false;
         $('#rt-hook-url').value = hookUrl(routine);
+        if ($('#rt-hook-token')) $('#rt-hook-token').textContent = routine.hookToken || '';
+        if ($('#rt-hook-events')) $('#rt-hook-events').value = (routine.hookEvents || []).join(', ');
         $('#rt-hook-url').select?.();
         toast(tr('Адрес для вызова на экране'));
       } else {

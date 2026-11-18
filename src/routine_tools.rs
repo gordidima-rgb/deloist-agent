@@ -63,6 +63,7 @@ pub fn defs() -> Vec<Value> {
                 "enabled": { "type": "boolean", "description": "Включена ли. По умолчанию да." },
                 "quiet": { "type": "boolean", "description": "Писать в чат, только если есть что сказать. По умолчанию да." },
                 "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» — выполнить последний, «skip» — пропустить. По умолчанию last." },
+                "hook_events": { "type": "array", "items": { "type": "string" }, "description": "Для вебхука: события GitHub, на которые реагировать (push, pull_request.opened, issues, release.published). Пусто — любое." },
             })),
             &["title"],
         ),
@@ -78,6 +79,7 @@ pub fn defs() -> Vec<Value> {
                 "enabled": { "type": "boolean", "description": "Включить или выключить." },
                 "quiet": { "type": "boolean", "description": "Только важное или писать всё." },
                 "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» или «skip»." },
+                "hook_events": { "type": "array", "items": { "type": "string" }, "description": "Для вебхука: события GitHub, на которые реагировать (push, pull_request.opened). Пусто — любое." },
             })),
             &["routine_id"],
         ),
@@ -264,6 +266,9 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             input.insert("goalId".into(), json!(goal_id));
             input.insert("enabled".into(), json!(flag(args, "enabled")?.unwrap_or(true)));
             input.insert("quiet".into(), json!(flag(args, "quiet")?.unwrap_or(true)));
+            if let Some(v) = args.get("hook_events").filter(|v| !v.is_null()) {
+                input.insert("hookEvents".into(), v.clone());
+            }
             // Рутина для чужого бота не должна выйти смелее того, кто её завёл: как при делегировании.
             if target.id != bot.id {
                 let floor = crate::tools::stricter(&bot.approval, &target.approval);
@@ -281,7 +286,10 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
         "update_routine" => {
             let routine = find(app, args)?;
             let mut patch = schedule_patch(args)?;
-            if routine.hook && !patch.is_empty() {
+            if let Some(v) = args.get("hook_events").filter(|v| !v.is_null()) {
+                patch.insert("hookEvents".into(), v.clone());
+            }
+            if routine.hook && patch.keys().any(|k| k != "hookEvents") {
                 return Err("эта рутина запускается вебхуком, у неё нет расписания".into());
             }
             let new_at = patch.get("at").and_then(Value::as_str).map(str::to_string);
@@ -295,14 +303,16 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             let window_from = patch.get("windowFrom").and_then(Value::as_str).map_or(routine.window_from.clone(), str::to_string);
             let window_to = patch.get("windowTo").and_then(Value::as_str).map_or(routine.window_to.clone(), str::to_string);
             check_window(&window_from, &window_to)?;
-            for key in ["title", "prompt"] {
-                if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
-                    let value = v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой"))?.trim();
-                    let limit = if key == "title" { MAX_TITLE } else { MAX_PROMPT };
-                    if value.is_empty() || value.chars().count() > limit {
-                        return Err(format!("{key}: от 1 до {limit} символов"));
+            if !routine.hook {
+                for key in ["title", "prompt"] {
+                    if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
+                        let value = v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой"))?.trim();
+                        let limit = if key == "title" { MAX_TITLE } else { MAX_PROMPT };
+                        if value.is_empty() || value.chars().count() > limit {
+                            return Err(format!("{key}: от 1 до {limit} символов"));
+                        }
+                        patch.insert(key.into(), json!(value));
                     }
-                    patch.insert(key.into(), json!(value));
                 }
             }
             if let Some(v) = args.get("goal_id").filter(|v| !v.is_null()) {
@@ -312,9 +322,11 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 }
                 patch.insert("goalId".into(), json!(id));
             }
-            for key in ["enabled", "quiet"] {
-                if let Some(v) = flag(args, key)? {
-                    patch.insert(key.into(), json!(v));
+            if !routine.hook {
+                for key in ["enabled", "quiet"] {
+                    if let Some(v) = flag(args, key)? {
+                        patch.insert(key.into(), json!(v));
+                    }
                 }
             }
             if patch.is_empty() {

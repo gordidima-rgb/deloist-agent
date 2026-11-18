@@ -2246,6 +2246,9 @@
     'Загрузить файл': 'Load a file',
     'Запускать по вебхуку, а не по расписанию': 'Run by webhook instead of on a schedule',
     'Адрес для вызова (нажми, чтобы скопировать)': 'Call address (click to copy)',
+    'События (через запятую)': 'Events (comma-separated)',
+    'GitHub: вставьте адрес в Payload URL, секрет —': 'GitHub: paste the address into Payload URL, secret —',
+    ', Content type — application/json': ', Content type — application/json',
     // Окно настроек: Облако (ui/src/components/settings/CloudSettings.svelte)
     'Облако': 'Cloud',
     'Боты в облаке, даже когда компьютер выключен': 'Bots in the cloud, even when the computer is off',

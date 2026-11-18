@@ -484,6 +484,9 @@ pub struct Routine {
     pub hook: bool,
     /// Секрет в адресе вебхука. Пусто у обычной рутины.
     pub hook_token: String,
+    /// События GitHub, на которые реагирует вебхук. Пусто — на любое.
+    #[serde(default)]
+    pub hook_events: Vec<String>,
     /// Цель, которую запускает рутина вместо обычного задания. Пусто — рутина как раньше.
     pub goal_id: String,
     /// Осторожность создателя, если рутину завёл другой бот: запуски не смелее её.
@@ -555,6 +558,7 @@ impl Default for Routine {
             created_at: 0,
             hook: false,
             hook_token: String::new(),
+            hook_events: Vec::new(),
             goal_id: String::new(),
             approval_floor: String::new(),
             last_status: None,
@@ -2704,6 +2708,9 @@ impl Store {
         routine.hook = input.get("hook").is_some_and(truthy);
         routine.goal_id = text_or(input, "goalId", "");
         routine.approval_floor = text_or(input, "approvalFloor", "");
+        if let Some(v) = input.get("hookEvents").filter(|v| !v.is_null()) {
+            routine.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        }
         if routine.hook {
             routine.hook_token = crate::guard::random_token();
             // Вебхук не по расписанию: тикер его не трогает.
@@ -2772,6 +2779,9 @@ impl Store {
                     r.hook_token.clear();
                 }
                 r.hook = want;
+            }
+            if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
+                r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             }
             apply_schedule(r, patch);
             if reminders::is_reminder(r) {
@@ -3616,6 +3626,40 @@ impl Store {
 /// Сравнение секретов без раннего выхода: время не подсказывает, сколько символов совпало.
 fn constant_time_eq(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Проверка имени события GitHub: `push` или `pull_request.opened`.
+pub(crate) fn valid_hook_event(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let Some(first) = parts.next() else { return false; };
+    if first.is_empty() || !first.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+        return false;
+    }
+    if let Some(second) = parts.next() {
+        if second.is_empty() || !second.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return false;
+        }
+        if parts.next().is_some() {
+            return false;
+        }
+    }
+    true
+}
+
+pub(crate) fn validate_hook_events(value: &Value) -> Result<Vec<String>, String> {
+    let items = value.as_array().ok_or("hookEvents должен быть списком строк")?;
+    if items.len() > 20 {
+        return Err("hookEvents: не больше 20 событий".into());
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let name = item.as_str().ok_or("hookEvents: каждое событие — строка")?;
+        if !valid_hook_event(name) {
+            return Err(format!("hookEvents: недопустимое имя события «{name}»"));
+        }
+        out.push(name.to_string());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -1077,6 +1077,11 @@
               <label class="field" id="rt-hook-box" hidden>
                 <span>Адрес для вызова (нажми, чтобы скопировать)</span>
                 <input id="rt-hook-url" readonly />
+                <span class="note">GitHub: вставьте адрес в Payload URL, секрет — <span id="rt-hook-token"></span>, Content type — application/json</span>
+              </label>
+              <label class="field" id="rt-hook-events-box" hidden>
+                <span>События (через запятую)</span>
+                <input id="rt-hook-events" placeholder="push, pull_request.opened" />
               </label>
               <div class="modal-actions">
                 <button type="submit" class="k-btn k-btn--primary">Добавить</button>
