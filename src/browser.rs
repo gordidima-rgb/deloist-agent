@@ -1457,6 +1457,9 @@ pub struct Suspension {
 
 impl LeaseLock {
     async fn take(&self, cancel: &CancellationToken, wait: Option<Duration>) -> Result<Guard, String> {
+        if cancel.is_cancelled() {
+            return Err("ход остановлен".into());
+        }
         let limit = async {
             match wait {
                 Some(wait) => tokio::time::sleep(wait).await,
@@ -1708,6 +1711,15 @@ mod tests {
         let fourth = lock.acquire("a", &none, wait).await.unwrap();
         assert!(lock.suspend("b").is_none());
         lock.release(fourth);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_turn_does_not_take_even_a_free_lock() {
+        let lock = LeaseLock::default();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(lock.acquire("a", &cancel, Some(Duration::from_secs(1))).await.is_err());
+        assert!(lock.try_take().is_some(), "замок остался свободным");
     }
 
     #[tokio::test]

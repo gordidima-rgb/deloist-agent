@@ -287,16 +287,20 @@ async fn ask(app: &Arc<App>, bot: &Bot, session: &Session, tool: &str, title: &s
 
 /// Карточка для человека из браузерного инструмента: пока он решает, бот не держит общий браузер команды.
 /// После ответа бот возвращается в очередь; ход остановлен за это время — ответ «нет», инструмент дальше не идёт.
-async fn confirm(app: &Arc<App>, bot: &Bot, session: &Session, question: Confirmation<'_>) -> bool {
+pub(crate) async fn confirm(app: &Arc<App>, bot: &Bot, session: &Session, question: Confirmation<'_>) -> bool {
+    confirm_held(app, bot, session, question).await.unwrap_or(false)
+}
+
+/// То же, но с отличием «человек сказал нет» (`Ok(false)`) от «браузер не вернулся к боту» (`Err`): ход остановлен
+/// или уже закончился, пока шла карточка. Тогда инструмент ничего больше не делает в браузере.
+async fn confirm_held(app: &Arc<App>, bot: &Bot, session: &Session, question: Confirmation<'_>) -> Result<bool, ()> {
     let held = session.suspend(&bot.id);
     let answer = request_confirmation(app, &bot.id, question).await;
     if let Some(suspension) = held {
-        let cancel = app.turns.cancel_of(&bot.id).unwrap_or_default();
-        if session.resume(suspension, &cancel).await.is_err() {
-            return false;
-        }
+        let Some(cancel) = app.turns.cancel_of(&bot.id) else { return Err(()) };
+        session.resume(suspension, &cancel).await.map_err(|_| ())?;
     }
-    answer
+    Ok(answer)
 }
 
 async fn gate_site(app: &Arc<App>, bot: &Bot, session: &Session) -> Result<(), String> {
@@ -1848,7 +1852,7 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
     if !on_screen {
         session.show().await?;
     }
-    let done = confirm(
+    let done = confirm_held(
         app,
         bot,
         session,
@@ -1869,6 +1873,8 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
         },
     )
     .await;
+    // Браузер к боту не вернулся (ход остановлен): без замка экран не трогаем.
+    let Ok(done) = done else { return Err("ход остановлен".into()) };
     let left = crate::screen::take_back(app, &bot.id);
     if session.shown.load(std::sync::atomic::Ordering::Relaxed) {
         session.hide().await;
@@ -2276,7 +2282,7 @@ async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Resul
         let url = text(args, "url");
         if name == "browser_nav" && matches!(text(args, "action"), "open" | "new_tab") && !url.is_empty() {
             check_address(url).await?;
-            crate::user_chrome::gate_site(app, bot, relay, url).await?;
+            crate::user_chrome::gate_site(app, bot, &session, relay, url).await?;
         }
     }
     crate::screen::step(app, &bot.id, &step_text(&session, name, args).await);

@@ -1012,7 +1012,9 @@ fn team_guarded(workspace: &Path, path: &Path) -> bool {
 }
 
 /// memory.md и brain.md в корне папки любого бота пишет только программа: память — через `remember`
-/// (там проверки и журнал), правила — карточкой `propose_rule`.
+/// (там проверки и журнал), правила — карточкой `propose_rule`. Файлы с указаниями для агентов (`INSTRUCTION_FILES`)
+/// в корне общей папки команды тоже. Те же имена в подпапках и короткие имена 8.3 здесь не отказ, а карточка:
+/// их ловит `special_write_guard` (`project_guard_reason` и проверка имён `~цифра`).
 pub(crate) fn memory_file_refusal(app: &App, path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_string_lossy().to_lowercase();
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());

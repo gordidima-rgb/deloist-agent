@@ -962,7 +962,7 @@ pub fn check_unattended(app: &App, bot_id: &str) -> Result<(), String> {
 
 /// Перед переходом на сайт: разрешён ли он; если нет — карточка человеку.
 /// Без человека карточки нет: только сайты с правилом «всегда».
-pub async fn gate_site(app: &Arc<App>, bot: &Bot, relay: &BotRelay, url: &str) -> Result<(), String> {
+pub async fn gate_site(app: &Arc<App>, bot: &Bot, session: &crate::browser::Session, relay: &BotRelay, url: &str) -> Result<(), String> {
     if denied_url(url) {
         return Err("Этот сайт в Chrome человека запрещён (банк, пароли или госуслуги).".into());
     }
@@ -997,7 +997,8 @@ pub async fn gate_site(app: &Arc<App>, bot: &Bot, relay: &BotRelay, url: &str) -
         // Подробности карточки и есть весь вызов (адрес сайта): отдельного отпечатка не нужно.
         exact: None,
     };
-    if crate::turn::request_confirmation(app, &bot.id, question).await {
+    // Карточка может висеть до пяти минут: на это время бот не держит общий браузер команды.
+    if crate::browser_tools::confirm(app, bot, session, question).await {
         relay.allow_once(&origin);
         push_state();
         Ok(())
