@@ -182,7 +182,7 @@ async fn completions(State(model): State<Model>, body: Bytes) -> Response {
             json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }], "usage": { "prompt_tokens": 100, "completion_tokens": 10 } }),
         ])
     } else if system.contains("Ты — Старший") {
-        tool_step("delegate", json!({ "bot": "Младший", "task": "запусти" }))
+        tool_step("assign_task", json!({ "bot": "Младший", "text": "запусти" }))
     } else {
         tool_step("run_command", json!({ "command": "echo проба > C:\\Windows\\deloist-probe.txt" }))
     };

@@ -830,30 +830,25 @@ async fn cards_speak_plain_language_and_the_bots_words_change_nothing() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn handing_a_task_to_another_bot_shows_no_card_and_the_receiver_keeps_its_own_rules() {
-    let (crew, fake, _first) = setup("ap-delegate", &[]).await;
-    let mut ids = Vec::new();
-    for name in ["Скаут-тест", "Редактор-тест"] {
-        ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string());
-    }
+    let (crew, fake) = named_crew("ap-delegate", &[]).await;
+    let ids = named_bots(&crew, &[("Скаут-тест", "auto"), ("Редактор-тест", "auto")]).await;
     let (scout, editor) = (ids[0].clone(), ids[1].clone());
     crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [scout, editor], "lead": scout }))).await;
     // Отправитель решает сам, получатель — строгий: свои рискованные шаги получатель всё равно спрашивает.
     set_mode(&crew, &scout, "auto").await;
     set_mode(&crew, &editor, "strict").await;
     let away = outside("delegate");
-    *fake.script.lock().unwrap() = vec![
-        tool("delegate", json!({ "bot": "Редактор-тест", "task": "Вот новые находки: ..." })),
-        write(&away.join("a").join("note.txt")),
-        say("записать не дали"),
-        say("передал"),
-    ];
+    fake.script("Скаут-тест", vec![tool("assign_task", json!({ "bot": "Редактор-тест", "text": "Вот новые находки: ..." })), say("передал")]);
+    fake.script("Редактор-тест", vec![write(&away.join("a").join("note.txt")), say("записать не дали")]);
     crew.clear_events();
     crew.say(&scout, "передай находки").await;
     let card = crew.wait_event("карточка получателя", |e| e["type"] == "approval").await;
     assert_eq!(card["botId"], editor.as_str(), "карточку видит получатель, а не отправитель: {card}");
     assert_eq!(card["tool"], "write_file");
-    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
+    // Отправитель не ждёт получателя: его ход кончается, пока карточка висит без ответа.
     crew.wait_event("конец хода отправителя", |e| e["type"] == "turn_end" && e["botId"] == scout.as_str()).await;
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
+    crew.wait_event("задача закрыта", |e| e["type"] == "task_done" && e["botId"] == scout.as_str()).await;
     assert_eq!(crew.count_events(|e| e["type"] == "approval"), 1, "на саму передачу карточки не было");
     assert!(!away.join("a").join("note.txt").exists());
     // След в треде получателя: задача пришла «от Скаут-тест».
@@ -868,26 +863,22 @@ async fn handing_a_task_to_another_bot_shows_no_card_and_the_receiver_keeps_its_
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_chain_of_handoffs_stops_after_two_hops() {
-    let (crew, fake, _first) = setup("ap-chain", &[]).await;
-    let mut ids = Vec::new();
-    for name in ["Один", "Два", "Три", "Четыре"] {
-        ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string());
-    }
+    let (crew, fake) = named_crew("ap-chain", &[]).await;
+    let ids = named_bots(&crew, &[("Один", "auto"), ("Два", "auto"), ("Три", "auto"), ("Четыре", "auto")]).await;
     crew.ok("POST", "/api/rooms", Some(json!({ "name": "Цепочка", "botIds": [ids[0], ids[1], ids[2], ids[3]], "lead": ids[0] }))).await;
-    *fake.script.lock().unwrap() = vec![
-        tool("delegate", json!({ "bot": "Два", "task": "дальше" })),
-        tool("delegate", json!({ "bot": "Три", "task": "дальше" })),
-        tool("delegate", json!({ "bot": "Четыре", "task": "ещё дальше" })),
-        say("Три: не смог передать"),
-        say("Два: готово"),
-        say("Один: готово"),
-    ];
+    fake.script("Один", vec![tool("assign_task", json!({ "bot": "Два", "text": "дальше" })), say("Один: готово")]);
+    fake.script("Два", vec![tool("assign_task", json!({ "bot": "Три", "text": "дальше" })), say("Два: готово")]);
+    fake.script("Три", vec![tool("assign_task", json!({ "bot": "Четыре", "text": "ещё дальше" })), say("Три: не смог передать")]);
     crew.clear_events();
     crew.say(&ids[0], "цепочка").await;
-    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == ids[0].as_str()).await;
-    let started = crew.count_events(|e| e["type"] == "delegate_start");
-    assert_eq!(started, 2, "третья передача подряд не стартует");
+    // Задача Два→Три закрывается после хода Три, а он идёт последним в цепочке.
+    crew.wait_event("конец цепочки", |e| e["type"] == "task_done" && e["botId"] == ids[1].as_str()).await;
+    assert_eq!(crew.count_events(|e| e["type"] == "delegate_start"), 2, "третья передача подряд не стартует");
     assert!(crew.find_event(|e| e["type"] == "delegate_start" && e["target"] == "Четыре").is_none());
+    let refused = fake.requests.lock().unwrap().iter().any(|(who, r)| {
+        who == "Три" && r["messages"].as_array().unwrap().iter().any(|m| m["role"] == "tool" && m["content"].as_str().is_some_and(|c| c.contains("слишком глубокая цепочка делегирования")))
+    });
+    assert!(refused, "Три получил отказ на третьей передаче");
 }
 
 // --- раунд 2: файлы автозапуска, подмена оболочки, чужие папки в передаче, невидимые знаки --------------------
@@ -930,26 +921,22 @@ async fn file_writes_guard_git_autorun_and_hard_links() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn nested_delegation_keeps_original_floor_and_folder_intersection() {
-    let (crew, fake, _) = setup("ap-nested-floor", &[]).await;
-    let mut ids = Vec::new();
-    for (name, mode) in [("First", "ask"), ("Middle", "auto"), ("Last", "auto")] {
-        ids.push(crew.ok("POST", "/api/bots", Some(json!({"name":name,"role":"r","approval":mode}))).await["bot"]["id"].as_str().unwrap().to_string());
-    }
+    let (crew, fake) = named_crew("ap-nested-floor", &[]).await;
+    let ids = named_bots(&crew, &[("First", "ask"), ("Middle", "auto"), ("Last", "auto")]).await;
     let dir = outside("nested-folders");
     let folder = dir.join("a");
     make_team(&crew, &[&ids[1], &ids[2]], &folder).await;
-    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Верх", "botIds": [ids[0], ids[1]], "lead": ids[0] }))).await;
-    *fake.script.lock().unwrap() = vec![
-        tool("delegate", json!({"bot":"Middle","task":"delegate"})),
-        tool("delegate", json!({"bot":"Last","task":"write"})),
-        write(&folder.join("nested.txt")), say("last"), say("middle"), say("first"),
-    ];
+    // Бот состоит только в одной команде: First ведёт свою, вне команды ведущий поручает ведущему (Middle ведёт общую с Last).
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Верх", "botIds": [ids[0]], "lead": ids[0] }))).await;
+    fake.script("First", vec![tool("assign_task", json!({"bot":"Middle","text":"delegate"})), say("first")]);
+    fake.script("Middle", vec![tool("assign_task", json!({"bot":"Last","text":"write"})), say("middle")]);
+    fake.script("Last", vec![write(&folder.join("nested.txt")), say("last")]);
     crew.clear_events();
     crew.say(&ids[0], "delegate").await;
     let card = crew.wait_event("nested approval", |e| e["type"] == "approval").await;
     assert_eq!(card["botId"], ids[2].as_str());
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({"answer":"deny"}))).await;
-    crew.wait_event("end", |e| e["type"] == "turn_end" && e["botId"] == ids[0].as_str()).await;
+    crew.wait_event("end", |e| e["type"] == "task_done" && e["botId"] == ids[1].as_str()).await;
     assert!(!folder.join("nested.txt").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1023,11 +1010,8 @@ async fn a_planted_shell_in_the_workspace_never_runs_and_cannot_be_written() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_team_folder_is_not_open_to_a_task_from_a_bot_outside_that_team() {
-    let (crew, fake, _first) = setup("ap-handoff-team", &[]).await;
-    let mut ids = Vec::new();
-    for name in ["Чужак-тест", "Свой-тест", "Член-тест"] {
-        ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": "ask" }))).await["bot"]["id"].as_str().unwrap().to_string());
-    }
+    let (crew, fake) = named_crew("ap-handoff-team", &[]).await;
+    let ids = named_bots(&crew, &[("Чужак-тест", "ask"), ("Свой-тест", "ask"), ("Член-тест", "ask")]).await;
     let (stranger, receiver, member) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
     let dir = outside("handoff-team");
     let folder = dir.join("a");
@@ -1036,21 +1020,23 @@ async fn a_team_folder_is_not_open_to_a_task_from_a_bot_outside_that_team() {
     crew.ok("POST", "/api/rooms", Some(json!({ "name": "Чужая", "botIds": [stranger], "lead": stranger }))).await;
 
     // Отправитель вне команды: получатель в своей команде пишет, но по чужой передаче папка команды не его.
-    *fake.script.lock().unwrap() = vec![tool("delegate", json!({ "bot": "Свой-тест", "task": "запиши" })), write(&folder.join("x.txt")), say("не дали"), say("передал")];
+    fake.script("Чужак-тест", vec![tool("assign_task", json!({ "bot": "Свой-тест", "text": "запиши" })), say("передал")]);
+    fake.script("Свой-тест", vec![write(&folder.join("x.txt")), say("не дали")]);
     crew.clear_events();
     crew.say(&stranger, "передай").await;
     let card = crew.wait_event("карточка получателя", |e| e["type"] == "approval").await;
     assert_eq!(card["botId"], receiver.as_str(), "{card}");
     assert!(card["human"]["text"].as_str().unwrap().contains("вне своих папок"), "{card}");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
-    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == stranger.as_str()).await;
+    crew.wait_event("конец", |e| e["type"] == "task_done" && e["botId"] == stranger.as_str()).await;
     assert!(!folder.join("x.txt").exists());
 
     // Отправитель из той же команды: папка общая, карточки нет.
-    *fake.script.lock().unwrap() = vec![tool("delegate", json!({ "bot": "Свой-тест", "task": "запиши" })), write(&folder.join("y.txt")), say("записал"), say("передал")];
+    fake.script("Член-тест", vec![tool("assign_task", json!({ "bot": "Свой-тест", "text": "запиши" })), say("передал")]);
+    fake.script("Свой-тест", vec![write(&folder.join("y.txt")), say("записал")]);
     crew.clear_events();
     crew.say(&member, "передай").await;
-    crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == member.as_str()).await;
+    crew.wait_event("конец", |e| e["type"] == "task_done" && e["botId"] == member.as_str()).await;
     assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "из той же команды карточки нет");
     assert!(folder.join("y.txt").exists());
     let _ = std::fs::remove_dir_all(&dir);
@@ -1469,7 +1455,8 @@ async fn named_completions(State(fake): State<Named>, body: Bytes) -> Response {
         return Json(json!({ "choices": [{ "message": say("{\"ops\": []}") }] })).into_response();
     }
     let system = request["messages"][0]["content"].as_str().unwrap_or_default().to_string();
-    let who = if system.contains("Ты — Бета") { "beta" } else { "alpha" }.to_string();
+    // Сценарий ищется по имени бота из строки «Ты — Имя, роль.».
+    let who = system.split("Ты — ").nth(1).and_then(|rest| rest.split(',').next()).unwrap_or_default().to_string();
     fake.requests.lock().unwrap().push((who.clone(), request));
     let message = {
         let mut scripts = fake.scripts.lock().unwrap();
@@ -1479,6 +1466,12 @@ async fn named_completions(State(fake): State<Named>, body: Bytes) -> Response {
     Json(json!({ "choices": [{ "message": message }] })).into_response()
 }
 
+impl Named {
+    fn script(&self, who: &str, steps: Vec<Value>) {
+        self.scripts.lock().unwrap().insert(who.to_string(), steps);
+    }
+}
+
 struct TeamSetup {
     crew: Crew,
     fake: Named,
@@ -1486,15 +1479,29 @@ struct TeamSetup {
     dir: PathBuf,
 }
 
-async fn team_setup(name: &str) -> TeamSetup {
+/// Сервер с моделью по именам ботов и сессия, которая слушает события.
+async fn named_crew(name: &str, env: &[(&str, &str)]) -> (Crew, Named) {
     let fake = Named::default();
     let router = Router::new().route("/v1/chat/completions", post(named_completions)).with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let crew = Crew::start_with_env(name, SHORT).await;
+    let crew = Crew::start_with_env(name, env).await;
     crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "k" }))).await;
     crew.listen().await;
+    (crew, fake)
+}
+
+async fn named_bots(crew: &Crew, bots: &[(&str, &str)]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for (name, mode) in bots {
+        ids.push(crew.ok("POST", "/api/bots", Some(json!({ "name": name, "role": "р", "approval": mode }))).await["bot"]["id"].as_str().unwrap().to_string());
+    }
+    ids
+}
+
+async fn team_setup(name: &str) -> TeamSetup {
+    let (crew, fake) = named_crew(name, SHORT).await;
     let mut ids = Vec::new();
     for (bot, role, mode) in [("Альфа", "ведущий", "auto"), ("Бета", "картинки", "ask")] {
         let id = crew.ok("POST", "/api/bots", Some(json!({ "name": bot, "role": role, "approval": mode }))).await["bot"]["id"].as_str().unwrap().to_string();
@@ -1510,17 +1517,17 @@ impl TeamSetup {
     }
 
     fn script(&self, who: &str, steps: Vec<Value>) {
-        self.fake.scripts.lock().unwrap().insert(who.to_string(), steps);
+        self.fake.script(who, steps);
     }
 
     fn beta_saw(&self, text: &str) -> bool {
-        self.fake.requests.lock().unwrap().iter().filter(|(who, _)| who == "beta").any(|(_, r)| r.to_string().contains(text))
+        self.fake.requests.lock().unwrap().iter().filter(|(who, _)| who == "Бета").any(|(_, r)| r.to_string().contains(text))
     }
 
     /// Исполнитель упёрся в карточку без ответа: задача закрыта как прерванная, запись ждёт человека.
     async fn start_and_wait_for_the_card(&self, file: &std::path::Path) -> String {
-        self.script("alpha", vec![tool("assign_task", json!({ "bot": "Бета", "text": "сделай запись" })), say("поручил")]);
-        self.script("beta", vec![write(file), say("это не должно прозвучать")]);
+        self.script("Альфа", vec![tool("assign_task", json!({ "bot": "Бета", "text": "сделай запись" })), say("поручил")]);
+        self.script("Бета", vec![write(file), say("это не должно прозвучать")]);
         self.crew.clear_events();
         self.crew.say(&self.alpha, "поручи").await;
         let card = self.crew.wait_event("карточка исполнителя", |e| e["type"] == "approval").await;
@@ -1535,7 +1542,7 @@ async fn a_team_task_continues_on_the_same_run_after_a_late_allow() {
     let t = team_setup("ap-team-allow").await;
     let file = t.dir.join("a").join("x.txt");
     let id = t.start_and_wait_for_the_card(&file).await;
-    t.script("beta", vec![write(&file), say("записал")]);
+    t.script("Бета", vec![write(&file), say("записал")]);
     t.crew.clear_events();
     t.crew.ok("POST", &format!("/api/approvals/{id}"), Some(json!({ "answer": "once" }))).await;
     common::wait_until("задача закончена", 40, || async { t.tasks().first().is_some_and(|t| t["state"] == "done") }).await;
@@ -1553,7 +1560,7 @@ async fn a_team_task_hears_a_late_deny_and_does_not_ask_again() {
     let t = team_setup("ap-team-deny").await;
     let file = t.dir.join("a").join("x.txt");
     let id = t.start_and_wait_for_the_card(&file).await;
-    t.script("beta", vec![say("обошёлся без записи")]);
+    t.script("Бета", vec![say("обошёлся без записи")]);
     t.crew.clear_events();
     t.crew.ok("POST", &format!("/api/approvals/{id}"), Some(json!({ "answer": "deny" }))).await;
     common::wait_until("задача закончена", 40, || async { t.tasks().first().is_some_and(|t| t["state"] == "done") }).await;
@@ -1561,6 +1568,39 @@ async fn a_team_task_hears_a_late_deny_and_does_not_ask_again() {
     assert!(t.beta_saw("Человек запретил:"), "исполнитель получил запрет и пояснение");
     assert_eq!(t.crew.count_events(|e| e["type"] == "approval"), 0);
     let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queued_task_whose_sender_turn_ended_still_gets_only_the_folders_of_the_whole_chain() {
+    let (mut crew, fake) = named_crew("ap-queued-chain", &[]).await;
+    let ids = named_bots(&crew, &[("First", "auto"), ("Middle", "auto"), ("Last", "ask")]).await;
+    let dir = outside("queued-chain");
+    let folder = dir.join("a");
+    make_team(&crew, &[&ids[1], &ids[2]], &folder).await;
+    // Бот состоит только в одной команде: First ведёт свою, вне команды ведущий поручает ведущему (Middle ведёт общую с Last).
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Верх", "botIds": [ids[0]], "lead": ids[0] }))).await;
+    // Задача Middle→Last, выданная в ходе, который First передал Middle: самого хода Middle к запуску уже нет, цепочка лежит в записи.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    let task = json!([{
+        "id": "task_chain", "from": ids[1], "fromName": "Middle", "to": ids[2], "toName": "Last", "text": "write", "files": [],
+        "state": "queued", "created": now, "floor": "auto", "unattended": false, "depth": 1, "room": "", "above": [ids[0]], "outside": false,
+    }]);
+    fake.script("Last", vec![write(&folder.join("chain.txt")), say("last")]);
+    let data_dir = crew.data_dir.clone();
+    crew.keep_data();
+    drop(crew);
+    std::fs::write(data_dir.join("team_tasks.json"), serde_json::to_vec(&task).unwrap()).unwrap();
+    let crew = Crew::start_at(data_dir, &[]).await;
+    crew.listen().await;
+    // Задача началась до `listen`: карточку берём из списка «Нужен ты». First не в команде с папкой: у Last по цепочке её нет.
+    common::wait_until("карточка у Last", 30, || async { needs(&crew).await["count"] == 1 }).await;
+    let card = needs(&crew).await["items"][0].clone();
+    assert_eq!(card["kind"], "approval", "{card}");
+    assert!(card.to_string().contains(&ids[2]), "{card}");
+    crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
+    common::wait_until("задача закрыта", 30, || async { std::fs::read_to_string(crew.data_dir.join("team_tasks.json")).is_ok_and(|t| t.contains("\"state\":\"done\"")) }).await;
+    assert!(!folder.join("chain.txt").exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test(flavor = "multi_thread")]

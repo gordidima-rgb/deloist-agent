@@ -605,7 +605,7 @@ mod tests {
             (json!({ "steps": [{ "tool": "run_command", "args": { "command": "dir" } }] }), "оболочка"),
             (json!({ "steps": [{ "tool": "browser_devtools", "args": { "action": "eval" } }] }), "код на странице"),
             (json!({ "steps": [{ "tool": "run_script", "args": {} }] }), "рекурсия"),
-            (json!({ "steps": [{ "tool": "delegate", "args": {} }] }), "передача"),
+            (json!({ "steps": [{ "tool": "assign_task", "args": {} }] }), "передача"),
             (json!({ "steps": [{ "tool": "web_fetch", "for_each": "nope" }] }), "чужой for_each"),
             (json!({ "steps": [] }), "пусто"),
             (json!({ "params": [{ "name": "item" }] }), "зарезервированное имя"),

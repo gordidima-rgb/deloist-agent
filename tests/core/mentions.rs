@@ -47,9 +47,9 @@ async fn completions(State(model): State<Model>, body: Bytes) -> Response {
         ])
     } else if system.contains("Ты — Альфа") {
         if user_text.contains("@Бета") {
-            tool_step("delegate", json!({ "bot": "Бета", "task": "сделай" }))
+            tool_step("assign_task", json!({ "bot": "Бета", "text": "сделай" }))
         } else {
-            tool_step("delegate", json!({ "bot": "Гамма", "task": "сделай" }))
+            tool_step("assign_task", json!({ "bot": "Гамма", "text": "сделай" }))
         }
     } else if model.delegated_write && system.contains("Ты — Гамма") {
         tool_step("write_file", json!({ "path": "receiver.txt", "content": "needs the sender's approval policy" }))

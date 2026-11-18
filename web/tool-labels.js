@@ -31,7 +31,6 @@
     create_habit: 'Заводит привычку',
     create_routine: 'Создаёт рутину',
     create_workflow: 'Создаёт процесс',
-    delegate: 'Передаёт задачу',
     delete_goal: 'Удаляет цель',
     delete_routine: 'Удаляет рутину',
     delete_todo: 'Удаляет задачу',

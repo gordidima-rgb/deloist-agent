@@ -51,11 +51,11 @@ fn pick(text: &str, english: bool) -> Option<(ToolCall, String)> {
     if has(r"делег|передай|попроси .*бот|другому боту|delegate|another bot") {
         return Some((
             call(
-                "delegate",
+                "assign_task",
                 if english {
-                    json!({ "bot": "Editor", "task": "Describe in one paragraph why personal memory matters for a bot." })
+                    json!({ "bot": "Editor", "text": "Describe in one paragraph why personal memory matters for a bot." })
                 } else {
-                    json!({ "bot": "Редактор", "task": "Опиши одним абзацем, почему личная память важна для бота." })
+                    json!({ "bot": "Редактор", "text": "Опиши одним абзацем, почему личная память важна для бота." })
                 },
             ),
             say("Это не моя работа — передам Редактору. Он ответит в своём чате.", "That's not my job, so I'll pass it to the Editor. The answer will be in that bot's chat."),

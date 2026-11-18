@@ -493,9 +493,11 @@ async fn the_agent_hands_a_task_to_another_bot_through_its_team_tools() {
     s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
     assert!(s.crew.find_event(|e| e["type"] == "approval").is_none(), "упомянутому боту карточка не нужна");
     let answer = s.last_answer().await;
-    // Бриф делегату кончается требованием к итогу (`DELEGATION_TAIL`), заглушка отвечает эхом
-    // последней строки. Что задача дошла, проверяет тред второго бота ниже.
-    assert!(answer.contains("делегирование: ответ:") && answer.contains("эхо: Верни итог не длиннее 20 строк"), "{answer}");
+    // Агент не ждёт итога: инструмент вернул номер задачи. Бриф кончается требованием к итогу (`DELEGATION_TAIL`),
+    // заглушка отвечает эхом последней строки, и это эхо приходит строкой о закрытой задаче.
+    assert!(answer.contains("делегирование: ответ: Задача отдана «Второй»"), "{answer}");
+    let done = s.crew.wait_event("задача закрыта", |e| e["type"] == "task_done" && e["botId"] == s.bot.as_str()).await;
+    assert!(done["message"]["text"].as_str().is_some_and(|t| t.contains("эхо: Верни итог не длиннее 20 строк")), "{done}");
     let thread = s.crew.ok("GET", &format!("/api/bots/{other}/thread?limit=10"), None).await;
     assert!(thread.to_string().contains("задача от агента"), "второй бот не получил задачу: {thread}");
 

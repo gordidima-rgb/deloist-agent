@@ -17,9 +17,6 @@ use crate::App;
 
 const MAX_OUTPUT: usize = 8000;
 const MAX_FILE: u64 = 200_000;
-/// Бриф делегата — короткая постановка, а не вся переписка: длинный текст жжёт чужое окно.
-const MAX_BRIEF_CHARS: usize = 6000;
-const BRIEF_TOO_LONG: &str = "Бриф длиннее 6000 знаков: сократи до сути — цель, входные данные, что вернуть";
 
 pub fn clamp(s: &str, limit: usize) -> String {
     let count = s.chars().count();
@@ -36,7 +33,7 @@ pub fn clamp(s: &str, limit: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// Командные инструменты, которые получает и агент ACP через MCP-сервер своего бота.
-pub const TEAM_TOOLS: [&str; 16] = ["delegate", "offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "finish_turn", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule", "read_help"];
+pub const TEAM_TOOLS: [&str; 15] = ["offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "finish_turn", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule", "read_help"];
 
 /// Всё, что MCP-процесс агента ACP вправе просить у приложения: браузер бота, команда и рутины.
 /// Рутины идут теми же правилами, что у API-ботов: создание и правка спрашивают человека по режиму бота, удаление всегда.
@@ -276,17 +273,8 @@ fn base_tool_defs() -> Value {
             }), &["bot_id"],
         ),
         function(
-            "delegate",
-            "Передать задачу боту своей команды (ведущий — ещё и ведущему другой команды) и получить его ответ. Работает в одну сторону, без цепочек. Бот-получатель не видит ни этой переписки, ни прошлых ходов: задача должна быть самодостаточным брифом.",
-            json!({
-                "bot": { "type": "string", "description": "Имя бота из команды." },
-                "task": { "type": "string", "description": "Самодостаточный бриф: цель, входные данные и пути, ограничения, что вернуть. До ~1500 токенов, без истории переписки и «см. выше»." },
-            }),
-            &["bot", "task"],
-        ),
-        function(
             "offer_specialist",
-            "Показать человеку карточку «Подключу специалиста», когда задача вне твоего профиля. Вызывай для специалиста из списка команды, а не delegate: работу начнёт специалист только после согласия человека.",
+            "Показать человеку карточку «Подключу специалиста», когда задача вне твоего профиля. Вызывай для специалиста из списка команды, а не assign_task: работу начнёт специалист только после согласия человека.",
             json!({
                 "bot": { "type": "string", "description": "Имя специалиста из команды." },
                 "reason": { "type": "string", "description": "Почему эта задача по его профилю: одна короткая фраза." },
@@ -438,7 +426,7 @@ pub fn needs_approval(app: &App, bot: &Bot, name: &str) -> bool {
     if name == "share_file" {
         return bot.approval != "auto";
     }
-    if name == "delegate" || crate::team_tasks::is_tool(name) {
+    if crate::team_tasks::is_tool(name) {
         return false;
     }
     // Привычки и задачи человека: бот по его просьбе ведёт их без карточки, но удаление спрашивается всегда.
@@ -530,7 +518,7 @@ pub(crate) fn mode_needs_approval_for(app: &App, bot: &Bot, name: &str, args: &V
     if name == "share_file" || (name == "assign_task" && args.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())) {
         return bot.approval != "auto";
     }
-    if name == "delegate" || crate::team_tasks::is_tool(name) {
+    if crate::team_tasks::is_tool(name) {
         return false;
     }
     if crate::habits::is_bot_tool(name) || crate::todos::is_bot_tool(name) {
@@ -1206,7 +1194,6 @@ pub fn label(name: &str) -> &str {
         "save_skill" => "сохранение навыка",
         "read_skill" => "чтение навыка",
         "workspace_graph" => "граф файлов",
-        "delegate" => "делегирование",
         "offer_specialist" => "предложение специалиста",
         "propose_team" => "предложение команды",
         "propose_bot_change" => "предложение изменить бота",
@@ -1284,7 +1271,7 @@ pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
         "run_command" => command_effect(args["command"].as_str().unwrap_or_default()),
         "web_fetch" | "web_search" | "telegram_posts" => Effect::Read,
         // Другой бот или процесс действует по нашей просьбе; его ход журнал не ведёт, повтор сделал бы то же дважды.
-        "delegate" | "assign_task" | "run_goal" | "run_workflow" => Effect::External,
+        "assign_task" | "run_goal" | "run_workflow" => Effect::External,
         // Нажатия и ввод на сайте, вход паролем, отладчик с произвольным кодом, платная картинка.
         "browser_mouse" | "browser_keyboard" | "browser_login" | "browser_human" | "browser_devtools" | "generate_image" => Effect::External,
         // Инструмент MCP-сервера, не объявленный «только чтение», может сделать что угодно снаружи.
@@ -1832,32 +1819,6 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
             Ok(json!({ "id": updated.id, "name": updated.name, "role": updated.role }).to_string())
         }
 
-        "delegate" => {
-            let target = arg(args, "bot").trim();
-            let task = arg(args, "task").trim();
-            if target.is_empty() {
-                return Err("не указан бот".into());
-            }
-            if task.is_empty() {
-                return Err("пустая задача".into());
-            }
-            if task.chars().count() > MAX_BRIEF_CHARS {
-                return Err(BRIEF_TOO_LONG.into());
-            }
-            match crate::turn::delegate_to(app.clone(), bot.clone(), target.to_string(), task.to_string(), depth).await {
-                // Получатель занят: задача встаёт в очередь команды и начнётся, когда он освободится (до 30 минут),
-                // а не возвращается отправителю с ошибкой.
-                Err(e) if e.ends_with(crate::turn::BUSY_SUFFIX) => {
-                    let queued = crate::team_tasks::exec(app, bot, "assign_task", &json!({ "bot": target, "text": task }), depth).await;
-                    match queued {
-                        Ok(text) => Ok(format!("Получатель сейчас занят, задача поставлена в его очередь. {text}")),
-                        Err(_) => Err(e),
-                    }
-                }
-                other => other,
-            }
-        }
-
         "offer_specialist" => {
             // Предлагает только ведущий: специалисту нечего передавать дальше.
             if bot.rank != "lead" {
@@ -1998,7 +1959,7 @@ mod effect_tests {
 
     #[test]
     fn handing_work_over_and_site_actions_are_external() {
-        for name in ["delegate", "assign_task", "run_goal", "run_workflow", "browser_mouse"] {
+        for name in ["assign_task", "run_goal", "run_workflow", "browser_mouse"] {
             assert_eq!(effect(name, &json!({})), External, "{name}");
         }
         assert_eq!(effect("browser_page", &json!({ "action": "upload" })), External);
@@ -2007,6 +1968,21 @@ mod effect_tests {
         assert_eq!(effect("browser_nav", &json!({ "action": "open" })), External);
         assert_eq!(effect("browser_nav", &json!({ "action": "back" })), Local);
         assert_eq!(effect("write_file", &json!({})), Local);
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::*;
+
+    #[test]
+    fn a_hand_off_is_always_a_queued_task_and_there_is_no_synchronous_delegate() {
+        let names = |defs: Vec<Value>| -> Vec<String> { defs.iter().filter_map(|d| d["function"]["name"].as_str().map(str::to_string)).collect() };
+        let all = names(tool_defs().as_array().cloned().unwrap_or_default());
+        let team = names(team_tool_defs());
+        assert!(!all.iter().chain(&team).any(|n| n == "delegate"));
+        assert!(!is_bridge_tool("delegate"));
+        assert!(all.iter().any(|n| n == "assign_task") && team.iter().any(|n| n == "assign_task"));
     }
 }
 

@@ -189,20 +189,18 @@ pub fn room_homes(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
 /// Development checkouts also have to be shared by every sender in the chain.
 pub fn projects_for_turn(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
     let mut projects = crate::selfdev::projects(&app.store, bot_id);
-    let mut current = bot_id.to_string();
     let mut seen = std::collections::HashSet::new();
-    seen.insert(current.clone());
-    while let Some(sender) = app.turns.delegation_sender(&current) {
+    seen.insert(bot_id.to_string());
+    for sender in app.turns.delegation_chain(bot_id) {
         if !seen.insert(sender.clone()) { return Vec::new(); }
         let mut allowed = crate::selfdev::projects(&app.store, &sender);
         allowed.extend(homes_of_bot(&app.store, &sender).into_iter().map(|h| h.path));
         projects.retain(|p| allowed.iter().any(|a| p == a));
-        current = sender;
     }
     projects
 }
 
-/// Папки команд для хода бота. В задаче, пришедшей от другого бота (`delegate`), общая папка чужой команды не считается
+/// Папки команд для хода бота. В задаче, пришедшей от другого бота (`assign_task`), общая папка чужой команды не считается
 /// своей: получатель получает только те папки, на которые вправе и отправитель (оба состоят в той же команде).
 pub fn homes_for_turn(app: &App, bot_id: &str) -> Vec<TeamHome> {
     // В облаке папок человека нет: общие папки команды там не действуют.
@@ -210,10 +208,9 @@ pub fn homes_for_turn(app: &App, bot_id: &str) -> Vec<TeamHome> {
         return Vec::new();
     }
     let mut own = homes_of_bot(&app.store, bot_id);
-    let mut current = bot_id.to_string();
     let mut seen = std::collections::HashSet::new();
-    seen.insert(current.clone());
-    while let Some(sender) = app.turns.delegation_sender(&current) {
+    seen.insert(bot_id.to_string());
+    for sender in app.turns.delegation_chain(bot_id) {
         if !seen.insert(sender.clone()) { return Vec::new(); }
         let theirs = homes_of_bot(&app.store, &sender);
         own.retain_mut(|h| {
@@ -222,7 +219,6 @@ pub fn homes_for_turn(app: &App, bot_id: &str) -> Vec<TeamHome> {
                 true
             } else { false }
         });
-        current = sender;
     }
     own
 }

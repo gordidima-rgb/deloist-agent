@@ -898,7 +898,7 @@ const ORCHESTRATOR: Starter = [
 - Итог — ровно один вызов propose_team: роли, правила команды и коротко, почему именно такой состав. Не спрашивай «создать?» перед карточкой и не пересказывай состав текстом до неё: решает карточка.\n\
 - Если человек отказался или попросил поправить — учти и предложи заново, но не повторяй то же без новой причины.\n\
 \n\
-После того как команда создана: коротко скажи, что получилось и с чего начать, и дальше работай ведущим — принимай задачи, отдавай их нужным ботам инструментом delegate и собирай итог. Если человеку нужен другой состав, снова расспроси его и предложи новый через propose_team.",
+После того как команда создана: коротко скажи, что получилось и с чего начать, и дальше работай ведущим — принимай задачи, отдавай их нужным ботам инструментом assign_task и собирай итог. Если человеку нужен другой состав, снова расспроси его и предложи новый через propose_team.",
     ),
     (
         "Orchestrator",
@@ -920,7 +920,7 @@ How you finish the interview:\n\
 - The result is exactly one propose_team call: roles, team rules and a short reason for this exact lineup. Don't ask \"create it?\" before the card and don't retell the lineup in text first: the card decides.\n\
 - If the person declines or asks for changes, take it into account and propose again, but don't repeat the same without a new reason.\n\
 \n\
-Once the team is created: say briefly what you got and where to start, then work as the lead - take tasks, hand them to the right bots with the delegate tool and gather the result. If the person needs a different lineup, interview them again and propose a new one with propose_team.\n\
+Once the team is created: say briefly what you got and where to start, then work as the lead - take tasks, hand them to the right bots with the assign_task tool and gather the result. If the person needs a different lineup, interview them again and propose a new one with propose_team.\n\
 Reply in English unless asked otherwise.",
     ),
 ];

@@ -190,10 +190,11 @@ pub struct Turns {
     questions: Mutex<HashMap<String, Question>>,
     busy: Mutex<HashMap<String, Busy>>,
     unattended: Mutex<HashMap<String, Unattended>>,
-    /// Глубина цепочки передач, в которой сейчас работает бот (0 — задачу дал человек). Мост ACP зовёт `delegate` без глубины.
+    /// Глубина цепочки передач, в которой сейчас работает бот (0 — задачу дал человек). Мост ACP зовёт `assign_task` без глубины.
     delegation_depth: Mutex<HashMap<String, (u64, u32)>>,
-    /// Кто передал задачу боту и какой режим вопросов был у него: пол осторожности получателя на время хода (бот, режим).
-    delegation_from: Mutex<HashMap<String, (u64, String, String, Vec<String>)>>,
+    /// Кто передал задачу боту, какой режим вопросов был у него, его список «Всегда спрашивать» и кто передавал задачу самому
+    /// отправителю (выше по цепочке): пол осторожности и общие папки получателя на время хода (запись, бот, режим, «Всегда спрашивать», цепочка выше).
+    delegation_from: Mutex<HashMap<String, (u64, String, String, Vec<String>, Vec<String>)>>,
     /// Пол осторожности любого хода с `approval_floor` (передача, рутина, цель): ключ — бот, значение — режим.
     turn_floor: Mutex<HashMap<String, (u64, String)>>,
     /// Номер записи пола: сторож старого хода не трогает пол нового.
@@ -318,9 +319,11 @@ impl Turns {
         self.mentioned.lock().unwrap().get(bot_id).cloned().unwrap_or_default()
     }
 
-    /// Бот, передавший задачу, пока `bot_id` работает по передаче.
-    pub(crate) fn delegation_sender(&self, bot_id: &str) -> Option<String> {
-        self.delegation_from.lock().unwrap().get(bot_id).map(|(_, from, _, _)| from.clone())
+    /// Вся цепочка отправителей, пока `bot_id` работает по передаче: ближайший первым, дальше те, кто передавал ему.
+    /// Единственный обход цепочки: по нему считаются и общие папки, и режим со списком «Всегда спрашивать».
+    pub(crate) fn delegation_chain(&self, bot_id: &str) -> Vec<String> {
+        let chain = self.delegation_from.lock().unwrap();
+        chain.get(bot_id).map(|(_, from, _, _, above)| std::iter::once(from.clone()).chain(above.iter().cloned()).collect()).unwrap_or_default()
     }
 
     /// Режим вопросов с полом осторожности передачи: свежий режим бота никогда не мягче режима того, кто передал задачу.
@@ -347,23 +350,23 @@ impl Turns {
         if let Some((_, floor)) = self.turn_floor.lock().unwrap().get(bot_id) {
             result = tools::stricter(&result, floor);
         }
-        let chain = self.delegation_from.lock().unwrap();
-        let mut current = bot_id.to_string();
-        let mut seen = std::collections::HashSet::new();
-        seen.insert(current.clone());
-        // Вся цепочка передач: пол каждого звена и свежий режим каждого отправителя; петля или пропавший бот — самый строгий режим.
-        while let Some((_, sender, floor, carried)) = chain.get(&current) {
+        // Звено получателя: пол и список на момент передачи (у выданной в очередь задачи записи отправителя уже нет).
+        if let Some((_, _, floor, carried, _)) = self.delegation_from.lock().unwrap().get(bot_id) {
             result = tools::stricter(&result, floor);
             add(&mut asks, carried);
+        }
+        // Дальше вся цепочка по свежим данным: режим и список каждого отправителя; петля или пропавший бот — самый строгий режим.
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(bot_id.to_string());
+        for sender in self.delegation_chain(bot_id) {
             if !seen.insert(sender.clone()) { return ("strict".to_string(), asks); }
-            match store.bot(sender) {
+            match store.bot(&sender) {
                 Some(bot) => {
                     result = tools::stricter(&result, &bot.approval);
                     add(&mut asks, &bot.always_ask);
                 }
                 None => return ("strict".to_string(), asks),
             }
-            current = sender.clone();
         }
         (result, asks)
     }
@@ -375,11 +378,11 @@ impl Turns {
         epoch
     }
 
-    /// Записать след передачи (кто, какой режим, глубина) для получателя.
-    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, asks: Vec<String>, depth: u32) -> u64 {
+    /// Записать след передачи (кто, какой режим, «Всегда спрашивать», глубина, цепочка выше отправителя) для получателя.
+    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, asks: Vec<String>, depth: u32, above: Vec<String>) -> u64 {
         let epoch = self.floor_epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.delegation_depth.lock().unwrap().insert(bot_id.to_string(), (epoch, depth));
-        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string(), asks));
+        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string(), asks, above));
         epoch
     }
 
@@ -396,7 +399,7 @@ impl Turns {
         }
         drop(depth);
         let mut from = self.delegation_from.lock().unwrap();
-        if from.get(bot_id).is_some_and(|(e, _, _, _)| *e == epoch) {
+        if from.get(bot_id).is_some_and(|(e, ..)| *e == epoch) {
             from.remove(bot_id);
         }
     }
@@ -1034,7 +1037,7 @@ const SPECIALISTS_LIMIT: usize = 1_500;
 const SPECIALISTS_MAX: usize = 12;
 const SPECIALIST_KEYWORDS_MAX: usize = 6;
 pub(crate) const SPECIALISTS_RULE: &str =
-    "Если задача явно по профилю специалиста — вызови offer_specialist, а не делай сама и не вызывай delegate без согласия человека.";
+    "Если задача явно по профилю специалиста — вызови offer_specialist, а не делай сама и не вызывай assign_task без согласия человека.";
 
 fn one_line(text: &str, limit: usize) -> String {
     let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -2310,9 +2313,8 @@ fn run_turn_body(
             } else {
                 Vec::new()
             };
-            if !mentioned_ids.is_empty() {
-                app.turns.set_mentioned(&bot_id, mentioned_ids.clone());
-            }
+            // Всегда, в том числе пустой список: упоминание прошлого хода не должно пережить оборванный ход.
+            app.turns.set_mentioned(&bot_id, mentioned_ids.clone());
             let main = main_choice(&app, &bot, &settings);
             let tools_driver = main.takes_tools();
             marker_quiet = !tools_driver;
@@ -2329,7 +2331,7 @@ fn run_turn_body(
                         .map(|b| format!("{} (id {})", b.name, b.id))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    Some(format!("Человек упомянул ботов: {list}. Можешь поручить им задачу инструментом delegate."))
+                    Some(format!("Человек упомянул ботов: {list}. Можешь поручить им задачу инструментом assign_task."))
                 }
             } else {
                 None
@@ -2948,7 +2950,7 @@ fn run_turn_body(
         if !leftover.is_empty() {
             let _ = app.queues.prepend(&bot_id, leftover).await;
         }
-        // Очередь делегата разбирается в `delegate_to`, когда с него снята отметка «без человека».
+        // Очередь делегата разбирается в `delegate_to_bot_with`, когда с него снята отметка «без человека».
         if opts.depth == 0 {
             drain_queue(&app, &bot_id).await;
         }
@@ -3108,51 +3110,8 @@ fn handoff_summary(text: &str) -> String {
     }
 }
 
-pub fn delegate_to(
-    app: Arc<App>,
-    from: Bot,
-    target_name: String,
-    task: String,
-    depth: u32,
-) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> {
-    Box::pin(async move {
-        // Мост ACP зовёт `delegate` с глубиной 0: настоящую берём из того, где сам отправитель сейчас работает.
-        let depth = depth.max(app.turns.delegation_depth_of(&from.id));
-        if depth >= 2 {
-            return Err("слишком глубокая цепочка делегирования".into());
-        }
-        // Вне команды поручают только ведущие ведущим; упомянутые человеком и приглашённые специалисты — можно.
-        let allowed = crate::team_tasks::delegate_targets(&app, &from);
-        let target = crate::team_tasks::pick_by_name(&allowed, &target_name).ok_or_else(|| {
-            if app.store.bots().iter().any(|b| b.name.to_lowercase() == target_name.trim().to_lowercase()) {
-                format!("«{target_name}» {}", crate::team_tasks::OUTSIDE_TEAM)
-            } else {
-                // Бота могли переименовать: называем тех, кому можно передать задачу, и бот не гадает.
-                let names: Vec<String> = allowed.iter().map(|b| format!("«{}»", b.name)).collect();
-                if names.is_empty() {
-                    format!("нет бота «{target_name}»")
-                } else {
-                    format!("нет бота «{target_name}» (возможно, его переименовали). Можно передать: {}", names.join(", "))
-                }
-            }
-        })?;
-        delegate_to_bot(app, from, target, task, depth).await
-    })
-}
-
 /// Конец сообщения «бот занят»: по нему очередь задач команды отличает занятого получателя от настоящей ошибки.
 pub const BUSY_SUFFIX: &str = "сейчас занят";
-
-/// Передача задачи уже найденному боту (по id, а не по имени: имена могут совпасть).
-pub fn delegate_to_bot(
-    app: Arc<App>,
-    from: Bot,
-    target: Bot,
-    task: String,
-    depth: u32,
-) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> {
-    delegate_to_bot_with(app, from, target, task, depth, None)
-}
 
 /// То, что отправитель имел в момент выдачи отложенной задачи: к моменту запуска его ход уже кончился.
 #[derive(Clone, Debug, Default)]
@@ -3167,6 +3126,8 @@ pub struct Carried {
     pub task_id: String,
     /// Запись журнала прерванного хода этой задачи, если его продолжают.
     pub resume: Option<String>,
+    /// Кто передавал задачу самому отправителю: его ход к запуску кончился, а общие папки цепочки считаются по всем звеньям.
+    pub above: Vec<String>,
 }
 
 /// Начало брифа получателю: кто просит. Бот не человек, права и подтверждения у получателя свои.
@@ -3240,7 +3201,9 @@ pub fn delegate_to_bot_with(
         if let Some(c) = &carried {
             asks.extend(c.asks.iter().filter(|k| !asks.contains(k)).cloned().collect::<Vec<_>>());
         }
-        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, asks, depth + 1);
+        // Выданная в очередь задача несёт цепочку выше отправителя с собой: у него самого записи уже нет.
+        let above = carried.as_ref().map_or_else(|| app.turns.delegation_chain(&from.id), |c| c.above.clone());
+        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, asks, depth + 1, above);
         let _delegation_guard = FloorGuard { app: app.clone(), bot_id: target.id.clone(), epoch };
         let (text, tokens) = run_turn_body(app.clone(), target.clone(), brief, Vec::new(), opts, cancel).await;
         drop(_delegation_guard);
@@ -3585,8 +3548,9 @@ mod floor_tests {
             ids.push(bot.id);
         }
         let turns = Turns::default();
-        turns.set_delegation(&ids[1], &ids[0], "ask", vec!["command".into()], 1);
-        turns.set_delegation(&ids[2], &ids[1], "ask", vec!["pay".into()], 2);
+        // Как при настоящей передаче: следующее звено получает список предыдущего (`effective_always_ask`) и цепочку выше отправителя.
+        turns.set_delegation(&ids[1], &ids[0], "ask", vec!["command".into()], 1, Vec::new());
+        turns.set_delegation(&ids[2], &ids[1], "ask", vec!["pay".into(), "command".into()], 2, vec![ids[0].clone()]);
         let mut got = turns.effective_always_ask(&store, &ids[2], &["files".to_string()]);
         got.sort();
         assert_eq!(got, ["command", "delete", "files", "pay", "send"]);
@@ -3633,21 +3597,21 @@ mod floor_tests {
         let store = crate::store::Store::open(dir.clone()).await.unwrap();
         let turns = Turns::default();
         let old = turns.set_turn_floor("bot", "ask");
-        let old_delegation = turns.set_delegation("bot", "sender", "ask", Vec::new(), 1);
+        let old_delegation = turns.set_delegation("bot", "sender", "ask", Vec::new(), 1, Vec::new());
         // Новый ход того же бота: свои записи.
         let newer = turns.set_turn_floor("bot", "strict");
-        let newer_delegation = turns.set_delegation("bot", "other", "strict", Vec::new(), 2);
+        let newer_delegation = turns.set_delegation("bot", "other", "strict", Vec::new(), 2, vec!["first".to_string()]);
         turns.clear_floor("bot", old);
         turns.clear_floor("bot", old_delegation);
         assert_eq!(turns.effective_approval(&store, "bot", "auto"), "strict", "пол нового хода пропал");
         assert_eq!(turns.delegation_depth_of("bot"), 2);
-        assert_eq!(turns.delegation_sender("bot").as_deref(), Some("other"));
+        assert_eq!(turns.delegation_chain("bot"), ["other", "first"]);
         // Свою запись каждый сторож снимает.
         turns.clear_floor("bot", newer);
         turns.clear_floor("bot", newer_delegation);
         assert_eq!(turns.effective_approval(&store, "bot", "auto"), "auto");
         assert_eq!(turns.delegation_depth_of("bot"), 0);
-        assert!(turns.delegation_sender("bot").is_none());
+        assert!(turns.delegation_chain("bot").is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
@@ -3662,7 +3626,7 @@ mod brief_tests {
             framed_brief("Альфа", "Нарисуй обложку", true),
             "Задача от бота «Альфа» из твоей команды (не от человека; права и подтверждения у тебя свои):\nНарисуй обложку"
         );
-        // Старый delegate: тот же заголовок без слов про команду.
+        // Тот же заголовок без слов про команду.
         assert_eq!(framed_brief("Альфа", "Сделай", false), "Задача от бота «Альфа» (не от человека; права и подтверждения у тебя свои):\nСделай");
     }
 }

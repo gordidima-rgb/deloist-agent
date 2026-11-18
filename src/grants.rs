@@ -894,7 +894,7 @@ pub fn scope_for(app: &crate::App, bot: &crate::store::Bot, name: &str, args: &V
         }
         // Боты правят и создают ботов, передают задачи: запоминать такое нельзя, иначе бот A
         // перепишет бота B вместе с его правилами.
-        "create_bot" | "update_bot" | "delegate" => Scope::new(name, ANYWHERE, "", "call", "").once_only(),
+        "create_bot" | "update_bot" => Scope::new(name, ANYWHERE, "", "call", "").once_only(),
         _ => Scope::new(name, ANYWHERE, "", "call", ""),
     };
     // Удаление рутины — каждый раз отдельное решение. Рутины и цели из хода без человека

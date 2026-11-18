@@ -11,7 +11,7 @@ use axum::routing::post;
 use axum::Router;
 
 const SPECIALISTS_RULE: &str =
-    "Если задача явно по профилю специалиста — вызови offer_specialist, а не делай сама и не вызывай delegate без согласия человека.";
+    "Если задача явно по профилю специалиста — вызови offer_specialist, а не делай сама и не вызывай assign_task без согласия человека.";
 
 #[derive(Clone, Default)]
 struct Model {
@@ -59,7 +59,7 @@ async fn completions(State(model): State<Model>, body: Bytes) -> Response {
         } else if last_user.contains("нужен специалист") {
             tool_step("offer_specialist", json!({ "bot": "Бета", "reason": "Rust-разработка", "task": "почини сборку" }))
         } else if last_user.contains("@Бета") {
-            tool_step("delegate", json!({ "bot": "Бета", "task": "почини сборку" }))
+            tool_step("assign_task", json!({ "bot": "Бета", "text": "почини сборку" }))
         } else {
             say("готово")
         }

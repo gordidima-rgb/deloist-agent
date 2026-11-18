@@ -447,12 +447,6 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
             d.risk = "low";
             d.text = ph!(format!("{me} хочет поискать в интернете: «{query}»"), format!("{me} wants to search the web: “{query}”"));
         }
-        "delegate" => {
-            let target = arg(args, "bot");
-            d.class = "handoff";
-            d.risk = "low";
-            d.text = ph!(format!("{me} передаёт задачу боту «{target}»"), format!("{me} hands a task to the bot “{target}”"));
-        }
         "create_bot" => {
             let n = arg(args, "name");
             d.class = "create";

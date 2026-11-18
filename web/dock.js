@@ -887,9 +887,9 @@
 
   // Агенты ACP зовут наш браузер через MCP: «mcp.deloist_browser.browser_page» → «browser_page».
   function plainTool(name) {
-    return String(name || '').replace(/^mcp(?:\.|__)[a-z0-9_-]+?(?:\.|__)(?=(?:browser_|web_|delegate$|list_bots$|remember$|recall$))/i, '');
+    return String(name || '').replace(/^mcp(?:\.|__)[a-z0-9_-]+?(?:\.|__)(?=(?:browser_|web_|assign_task$|list_bots$|remember$|recall$))/i, '');
   }
-  const looksLikeTool = (text) => /^mcp(?:\.|__)|^(?:(?:browser|web)_[a-z_]+|delegate|list_bots|remember|recall)$/i.test(String(text || '').trim());
+  const looksLikeTool = (text) => /^mcp(?:\.|__)|^(?:(?:browser|web)_[a-z_]+|assign_task|list_bots|remember|recall)$/i.test(String(text || '').trim());
 
   // Шаг словами: что делает сейчас и как это звучит, когда сделано.
   function describe(rawName, args = {}) {
@@ -937,7 +937,7 @@
         return { now: tr('Рисует картинку'), past: tr('Нарисовал картинку') };
       case 'remember':
         return { now: tr('Запоминает'), past: tr('Запомнил') };
-      case 'delegate':
+      case 'assign_task':
         return { now: tr('Передаёт задачу: {bot}', { bot: args.bot || '' }), past: tr('Передал задачу: {bot}', { bot: args.bot || '' }) };
       case 'ask_user':
         return { now: tr('Спрашивает тебя'), past: tr('Спросил тебя') };

@@ -4,7 +4,7 @@
 //! - «разреши» — просит разрешение и сообщает, что выбрал человек;
 //! - «прочитай <путь>» / «запиши <путь>» — читает или пишет файл через клиента;
 //! - «медленно» — ждёт `session/cancel` и заканчивает ход отменой;
-//! - «передай <Имя> …» — зовёт инструмент `delegate` MCP-сервера, запущенного по `mcpServers` сессии;
+//! - «передай <Имя> …» — зовёт инструмент `assign_task` MCP-сервера, запущенного по `mcpServers` сессии;
 //! - «рутина <название>» — создаёт рутину и читает список рутин через тот же MCP-сервер;
 //! - «спроси <вопрос> | <вариант>, <вариант>» — зовёт `ask_user` MCP-сервера и сообщает ответ человека;
 //! - «умри» — падает посреди хода;
@@ -487,18 +487,18 @@ fn reply_text(reply: &Value) -> String {
     format!("{} {}", if result["isError"] == true { "ошибка:" } else { "ответ:" }, result["content"][0]["text"].as_str().unwrap_or_default())
 }
 
-/// Зовёт `delegate`: имя бота — слово после «передай».
+/// Зовёт `assign_task`: имя бота — слово после «передай».
 fn call_delegate(text: &str) -> String {
     let after = text.lines().last().unwrap_or_default().split_once("передай").map(|x| x.1).unwrap_or_default().to_string();
     let target = after.split_whitespace().next().unwrap_or_default().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
     let rest = after.trim().splitn(2, ' ').nth(1).unwrap_or_default().to_string();
     with_mcp(|ask| {
         let names = tool_names(&ask(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })));
-        if !names.iter().any(|n| n == "delegate") || !names.iter().any(|n| n == "list_bots") {
+        if !names.iter().any(|n| n == "assign_task") || !names.iter().any(|n| n == "list_bots") {
             return format!("в списке нет командных инструментов: {names:?}");
         }
         reply_text(&ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": { "name": "delegate", "arguments": { "bot": target, "task": format!("задача от агента: {rest}") } } })))
+            "params": { "name": "assign_task", "arguments": { "bot": target, "text": format!("задача от агента: {rest}") } } })))
     })
 }
 

@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 const DELEGATION_TAIL: &str = "Верни итог не длиннее 20 строк: что сделано, какие файлы, как проверено, что осталось.";
-const TOO_LONG: &str = "Бриф длиннее 6000 знаков: сократи до сути — цель, входные данные, что вернуть";
+const TOO_LONG: &str = "Задача длиннее 6000 знаков: сократи до сути — цель, входные данные, что вернуть";
 const OLD_MARK: &str = "старое-сообщение-МАРКЕР";
 const BRIEF: &str = "Разбери файл report.txt: что изменить.";
 
@@ -62,10 +62,12 @@ async fn completions(State(model): State<Model>, body: Bytes) -> Response {
     let text = if used_tool {
         text_step("готово", 10, 5)
     } else if system.contains("Ты — Альфа") {
-        if user_text.contains("ДЛИННЫЙ_БРИФ") {
-            tool_step("delegate", json!({ "bot": "Бета", "task": "д".repeat(6001) }))
+        if user_text.contains("ЧТО_ПО_ЗАДАЧЕ") {
+            text_step("принято", 10, 5)
+        } else if user_text.contains("ДЛИННЫЙ_БРИФ") {
+            tool_step("assign_task", json!({ "bot": "Бета", "text": "д".repeat(6001) }))
         } else {
-            tool_step("delegate", json!({ "bot": "Бета", "task": BRIEF }))
+            tool_step("assign_task", json!({ "bot": "Бета", "text": BRIEF }))
         }
     } else if user_text.contains(DELEGATION_TAIL) {
         // Делегат отвечает длинным отчётом: вызывающий должен получить сжатый итог.
@@ -139,6 +141,8 @@ async fn a_delegated_turn_sees_the_brief_but_not_the_target_history() {
 
     crew.say(&alpha, "передай задачу").await;
     crew.wait_event("конец Альфы", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
+    // Задача ушла в очередь: получатель работает параллельно, его конец — строка в ленте Альфы.
+    crew.wait_event("задача закрыта", |e| e["type"] == "task_done" && e["botId"] == alpha.as_str()).await;
 
     {
         let requests = requests.lock().unwrap();
@@ -178,23 +182,31 @@ async fn the_result_contract_is_short_and_its_tokens_are_reported() {
     crew.say(&alpha, "передай задачу").await;
     let end = crew.wait_event("конец делегации", |e| e["type"] == "delegate_end").await;
     crew.wait_event("конец Альфы", |e| e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
+    let done = crew.wait_event("задача закрыта", |e| e["type"] == "task_done" && e["botId"] == alpha.as_str()).await;
 
-    // Бриф несёт требование к итогу, а вызывающий получает сжатые 20 строк.
-    let requests = requests.lock().unwrap();
-    let delegated = requests.iter().find(|r| is_beta(r)).expect("запрос Беты");
-    assert!(says_delegation_tail(delegated), "хвост про 20 строк должен быть в брифе");
-    let result = requests
-        .iter()
-        .flat_map(|r| r["messages"].as_array().cloned().unwrap_or_default())
-        .filter(|m| m["role"] == "tool")
-        .map(|m| text_of(&m))
-        .find(|text| text.contains("(итог сокращён)"))
-        .expect("итог с отметкой об обрезке");
-    let lines: Vec<&str> = result.lines().collect();
-    assert_eq!(lines.len(), 20, "20 строк вместе с отметкой: {result}");
+    // Бриф несёт требование к итогу.
+    {
+        let requests = requests.lock().unwrap();
+        let delegated = requests.iter().find(|r| is_beta(r)).expect("запрос Беты");
+        assert!(says_delegation_tail(delegated), "хвост про 20 строк должен быть в брифе");
+    }
+
+    // Итог сжат до 20 строк вместе с отметкой: он записан в задаче, а в ленте Альфы идёт строкой.
+    let tasks: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("team_tasks.json")).unwrap()).unwrap();
+    let summary = tasks[0]["summary"].as_str().expect("итог в задаче");
+    let lines: Vec<&str> = summary.lines().collect();
+    assert_eq!(lines.len(), 20, "20 строк вместе с отметкой: {summary}");
     assert_eq!(lines[19], "(итог сокращён)");
     assert_eq!(lines[0], "строка 1");
     assert_eq!(lines[18], "строка 19");
+    assert!(done["message"]["text"].as_str().is_some_and(|t| t.contains("(итог сокращён)")), "строка в ленте несёт сжатый итог: {done}");
+
+    // Тот же итог Альфа получает заметкой в начале следующего хода.
+    crew.say(&alpha, "ЧТО_ПО_ЗАДАЧЕ").await;
+    common::wait_until("заметка в ходе Альфы", 20, || async {
+        requests.lock().unwrap().iter().any(|r| system_of(r).contains("Ты — Альфа") && r["messages"].as_array().is_some_and(|msgs| msgs.iter().any(|m| text_of(m).contains("закрылись задачи") && text_of(m).contains("(итог сокращён)"))))
+    })
+    .await;
 
     // 123 входа + 7 выхода одного шага делегата.
     assert_eq!(end["tokens"], 130, "делегация показывает потраченные токены: {end}");
@@ -209,7 +221,7 @@ async fn relay_completions(body: Bytes) -> Response {
     let text = if messages.iter().any(|m| m["role"] == "tool") {
         text_step("готово", 10, 5)
     } else if system.contains("Ты — Альфа") {
-        tool_step("delegate", json!({ "bot": "Бета", "task": BRIEF }))
+        tool_step("assign_task", json!({ "bot": "Бета", "text": BRIEF }))
     } else if user_text.contains(DELEGATION_TAIL) {
         tool_step("run_command", json!({ "command": "echo hi" }))
     } else {
@@ -233,8 +245,7 @@ async fn the_always_ask_list_of_the_sender_follows_the_delegation() {
     crew.listen().await;
     crew.say(&alpha, "передай задачу").await;
     // У Беты список пуст и режим «решай сам», но команду по цепочке спрашивает список Альфы.
-    let card = crew.wait_event("карточка Беты", |e| e["type"] == "approval" || e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
-    assert_eq!(card["type"], "approval", "{card}");
+    let card = crew.wait_event("карточка Беты", |e| e["type"] == "approval").await;
     assert_eq!(card["botId"], beta.as_str(), "{card}");
     assert_eq!(card["tool"], "run_command", "{card}");
     assert_eq!(card["always"], false, "{card}");

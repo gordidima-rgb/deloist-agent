@@ -1371,7 +1371,7 @@ async fn browser_bridge_works_only_with_the_key_of_the_running_turn() {
     assert_eq!(browser_call(&crew, &bot, Some(key.trim()), "browser_nav").await, 200);
 
     // Командные инструменты и рутины идут тем же мостом и под теми же ключами (рутины: и карточки те же, что у API-ботов); опасные (создание ботов, команды) мост не принимает.
-    for tool in ["delegate", "list_bots", "remember", "recall", "telegram_posts", "list_routines", "create_routine", "update_routine", "delete_routine"] {
+    for tool in ["assign_task", "list_bots", "remember", "recall", "telegram_posts", "list_routines", "create_routine", "update_routine", "delete_routine"] {
         assert_eq!(browser_call(&crew, &bot, None, tool).await, 403, "{tool} без ключа хода");
         assert_eq!(browser_call(&crew, &bot, Some(other_key.trim()), tool).await, 403, "{tool} с ключом другого бота");
         assert_eq!(browser_call(&crew, &other, Some(key.trim()), tool).await, 403, "{tool} от имени другого бота");
@@ -2795,7 +2795,7 @@ async fn acp_own_browser_tools_pass_to_the_real_check_and_every_lookalike_asks_i
 
     // Наш браузер и командные инструменты: карточку по сайту и по действию покажет само приложение при выполнении
     // (то же правило, что у собственных ботов), а здесь второй, пустой карточки нет.
-    for tool in ["browser_nav", "browser_mouse", "browser_keyboard", "browser_page", "delegate", "remember"] {
+    for tool in ["browser_nav", "browser_mouse", "browser_keyboard", "browser_page", "assign_task", "remember"] {
         let (card, answer) = acp_asks(&crew, &bot, mcp_call(&bridge, tool, json!({ "url": "https://x.com/explore?t=SECRET" }))).await;
         assert!(card.is_none(), "{tool}: лишняя карточка {card:?}");
         assert!(answer.contains("разрешение: yes"), "{tool}: {answer}");

@@ -1225,8 +1225,10 @@ async fn send_message(
     }
 }
 
-/// Человек нажал «Передать» в карточке специалиста: хозяин получает ход,
-/// а `@`-упоминание снимает карточку подтверждения с `delegate`.
+/// Человек нажал «Передать» в карточке специалиста: хозяин получает ход.
+/// Упоминание через `@` добавляет бота в разрешённые адресаты `assign_task`
+/// (см. team_tasks::targets) и само по себе не требует карточки подтверждения
+/// — `assign_task` идёт без неё, как и все командные инструменты.
 async fn accept_offer(State(app): Shared, Path((id, offer_id)): Path<(String, String)>) -> Response {
     if let Err(r) = need_bot(&app, &id) {
         return r;
@@ -1252,7 +1254,7 @@ async fn accept_offer(State(app): Shared, Path((id, offer_id)): Path<(String, St
         return fail(StatusCode::NOT_FOUND, "специалист больше не в команде");
     };
     let text = format!(
-        "@{} {}\n\nЧеловек согласился: передай это специалисту инструментом delegate и коротко перескажи итог.",
+        "@{} {}\n\nЧеловек согласился: передай это специалисту инструментом assign_task ; итог придёт заметкой в твой следующий ход, тогда коротко перескажи его.",
         specialist.name, offer.task
     );
     let busy = app.turns.is_busy(&id);
