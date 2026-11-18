@@ -263,7 +263,7 @@ fn is_risky(name: &str) -> bool {
 
 const RISKY_LABEL_MAX: usize = 40;
 
-async fn ask(app: &Arc<App>, bot: &Bot, tool: &str, title: &str, detail: &str, scope: Scope, danger: bool) -> Result<(), String> {
+async fn ask(app: &Arc<App>, bot: &Bot, session: &Session, tool: &str, title: &str, detail: &str, scope: Scope, danger: bool) -> Result<(), String> {
     let mut remote = crate::grants::remote_ok(tool, &serde_json::Value::Null, Some(&scope), false, danger, std::path::Path::new(""));
     // Действия на сайте с другого устройства: только там, где у бота нет сохранённого входа в менеджере паролей.
     if remote == crate::grants::Remote::Actions {
@@ -278,11 +278,25 @@ async fn ask(app: &Arc<App>, bot: &Bot, tool: &str, title: &str, detail: &str, s
     }
     let exact = crate::turn::call_key(tool, &serde_json::json!({ "scope": scope, "detail": detail, "danger": danger }));
     let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None, exact: Some(exact) };
-    if request_confirmation(app, &bot.id, question).await {
+    if confirm(app, bot, session, question).await {
         Ok(())
     } else {
         Err("Человек не разрешил это действие. Не пытайся сделать его другим способом.".into())
     }
+}
+
+/// Карточка для человека из браузерного инструмента: пока он решает, бот не держит общий браузер команды.
+/// После ответа бот возвращается в очередь; ход остановлен за это время — ответ «нет», инструмент дальше не идёт.
+async fn confirm(app: &Arc<App>, bot: &Bot, session: &Session, question: Confirmation<'_>) -> bool {
+    let held = session.suspend(&bot.id);
+    let answer = request_confirmation(app, &bot.id, question).await;
+    if let Some(suspension) = held {
+        let cancel = app.turns.cancel_of(&bot.id).unwrap_or_default();
+        if session.resume(suspension, &cancel).await.is_err() {
+            return false;
+        }
+    }
+    answer
 }
 
 async fn gate_site(app: &Arc<App>, bot: &Bot, session: &Session) -> Result<(), String> {
@@ -312,7 +326,7 @@ async fn gate_site_for(app: &Arc<App>, bot: &Bot, session: &Session, action: &st
     }
     let title = format!("{} хочет действовать на сайте {host}", bot.name);
     let detail = format!("Адрес: {url}\nБот сможет нажимать и вводить текст на этом сайте. Оплату, отправку и удаление он всё равно будет спрашивать каждый раз.");
-    ask(app, bot, "browser_site", &title, &detail, scope, false).await
+    ask(app, bot, session, "browser_site", &title, &detail, scope, false).await
 }
 
 /// Правило мессенджера «можно» снимает карточку про отправку и удаление, но не про оплату и пароли;
@@ -335,7 +349,7 @@ async fn gate_risky(app: &Arc<App>, bot: &Bot, session: &Session, action: &str, 
         return Ok(());
     }
     let title = format!("Похоже на необратимое действие: {action}");
-    ask(app, bot, "browser_risky", &title, &format!("Элемент: {short}\nАдрес: {url}"), scope, false).await
+    ask(app, bot, session, "browser_risky", &title, &format!("Элемент: {short}\nАдрес: {url}"), scope, false).await
 }
 
 /// Клик внутри фрейма: что в нём (часто платёжная форма), не видно — спрашиваем каждый раз.
@@ -343,7 +357,7 @@ async fn gate_frame(app: &Arc<App>, bot: &Bot, session: &Session) -> Result<(), 
     let url = session.with_page(|page| page.url.clone())?;
     let scope = site_scope("browser_risky", &url, "pay", "click", "фрейм").once_only();
     let detail = format!("Внутрь фрейма не заглянуть: там может быть оплата.\nАдрес: {url}");
-    ask(app, bot, "browser_risky", "Похоже на необратимое действие: клик внутри фрейма", &detail, scope, false).await
+    ask(app, bot, session, "browser_risky", "Похоже на необратимое действие: клик внутри фрейма", &detail, scope, false).await
 }
 
 /// Загрузка файла — отправка наружу. Место — сайт и папка файла.
@@ -357,7 +371,7 @@ async fn gate_upload(app: &Arc<App>, bot: &Bot, session: &Session, rel: &str, pa
     if scope.grantable {
         scope.place = format!("{} ← {folder}", scope.place);
     }
-    ask(app, bot, "browser_upload", "Загрузить файл на сайт", &format!("Файл: {rel}\nАдрес: {url}"), scope, false).await
+    ask(app, bot, session, "browser_upload", "Загрузить файл на сайт", &format!("Файл: {rel}\nАдрес: {url}"), scope, false).await
 }
 
 /// Хоть одно правило мессенджера «нельзя» — выполнять код на его странице нельзя вовсе.
@@ -376,7 +390,7 @@ async fn gate_always(app: &Arc<App>, bot: &Bot, session: &Session, tool: &str, t
     // «один раз» или «до конца этой задачи» (но не навсегда): site_scope даёт только разговор.
     let scope = site_scope(tool, &url, "secure", "call", "");
     let scope = if tool == "browser_eval" { scope } else { scope.once_only() };
-    ask(app, bot, tool, title, &format!("{detail}\nАдрес: {url}"), scope, danger).await
+    ask(app, bot, session, tool, title, &format!("{detail}\nАдрес: {url}"), scope, danger).await
 }
 
 /// Что правила мессенджера решили для действия: `allowed` — карточки пропускаем (кроме оплаты и паролей).
@@ -1834,9 +1848,10 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
     if !on_screen {
         session.show().await?;
     }
-    let done = request_confirmation(
+    let done = confirm(
         app,
-        &bot.id,
+        bot,
+        session,
         Confirmation {
             tool: "browser_human",
             title: "Нужна твоя помощь в браузере",
@@ -1904,9 +1919,10 @@ async fn capture_key(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value)
     let last4: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
     let title = format!("Бот хочет сохранить ключ API для {}", built.name);
     let detail = format!("ключ …{last4} будет сохранён в защищённом хранилище программы");
-    let approved = request_confirmation(
+    let approved = confirm(
         app,
-        &bot.id,
+        bot,
+        session,
         Confirmation {
             tool: "browser_capture_key",
             title: &title,
@@ -2141,7 +2157,7 @@ async fn vault_login(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value)
     }
     let who = login.username.clone().unwrap_or_else(|| "без логина".into());
     let title = format!("Бот хочет войти на {} как {who} ({})", host_of(&url), vault_source_label(login.source));
-    ask(app, bot, "browser_login", &title, &format!("Пароль вставит программа, в чат он не попадёт.\nАдрес: {url}"), scope, false).await?;
+    ask(app, bot, session, "browser_login", &title, &format!("Пароль вставит программа, в чат он не попадёт.\nАдрес: {url}"), scope, false).await?;
     // Пока ждали человека, страница могла смениться, на ней мог выполниться код, а поле стать другим.
     if session.with_page(|page| page.url.clone())? != url || session.code_ran_on(&origin) {
         return Err("Страница изменилась, пока ждали разрешения: сними новый снимок и повтори вход".into());

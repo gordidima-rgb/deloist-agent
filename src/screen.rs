@@ -454,7 +454,7 @@ async fn capture(app: Arc<App>, bot: String, stop: CancellationToken, generation
                     break;
                 }
                 // Браузер команды общий: человеку показываем вкладку этого бота, если им сейчас никто не работает.
-                if !session.view_as(&bot) {
+                if session.view_as(&bot).is_none() {
                     // Браузер сейчас у другого бота команды: его вкладку этому человеку не показываем.
                     if let Some(old) = current.take() {
                         let _ = quick(&session, &old, "Page.stopScreencast", json!({})).await;
@@ -612,7 +612,9 @@ fn f(body: &Value, key: &str) -> f64 {
 const NOT_HELD: &str = "Сначала возьми управление: кнопка «Взять управление».";
 
 /// Бот есть, управление у человека — дай его браузер.
-async fn held_session(app: &Arc<App>, id: &str) -> Result<Arc<Session>, Response> {
+/// Вместе с сессией возвращается замок браузера (если он свободен): пока обработчик не закончил, другой бот команды
+/// не возьмёт браузер и действие человека не попадёт в его вкладку.
+async fn held_session(app: &Arc<App>, id: &str) -> Result<(Arc<Session>, Option<tokio::sync::OwnedMutexGuard<()>>), Response> {
     if app.store.bot(id).is_none() {
         return Err(fail(StatusCode::NOT_FOUND, "бот не найден"));
     }
@@ -620,10 +622,10 @@ async fn held_session(app: &Arc<App>, id: &str) -> Result<Arc<Session>, Response
         return Err(fail(StatusCode::CONFLICT, NOT_HELD));
     }
     let session = app.browsers.session(&app.store, id).await.map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    if !session.view_as(id) {
+    let Some(guard) = session.view_as(id) else {
         return Err(fail(StatusCode::CONFLICT, TEAM_BUSY));
-    }
-    Ok(session)
+    };
+    Ok((session, guard))
 }
 
 const TEAM_BUSY: &str = "Браузер команды сейчас занят другим ботом. Подожди, пока он закончит шаг.";
@@ -778,8 +780,8 @@ fn steps_brief(bot: &str) -> Value {
 }
 
 async fn input(State(app): State<Arc<App>>, Path(id): Path<String>, body: Bytes) -> Response {
-    let session = match held_session(&app, &id).await {
-        Ok(session) => session,
+    let (session, _held) = match held_session(&app, &id).await {
+        Ok(pair) => pair,
         Err(r) => return r,
     };
     let body = body_json(&body);
@@ -796,8 +798,8 @@ async fn input(State(app): State<Arc<App>>, Path(id): Path<String>, body: Bytes)
 }
 
 async fn nav(State(app): State<Arc<App>>, Path(id): Path<String>, body: Bytes) -> Response {
-    let session = match held_session(&app, &id).await {
-        Ok(session) => session,
+    let (session, _held) = match held_session(&app, &id).await {
+        Ok(pair) => pair,
         Err(r) => return r,
     };
     let body = body_json(&body);
@@ -1048,8 +1050,8 @@ async fn teach_get(State(app): State<Arc<App>>, Path(id): Path<String>) -> Respo
 }
 
 async fn teach_start(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
-    let session = match held_session(&app, &id).await {
-        Ok(session) => session,
+    let (session, _held) = match held_session(&app, &id).await {
+        Ok(pair) => pair,
         Err(r) => return r,
     };
     let url = current_url(&session);

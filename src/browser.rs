@@ -586,9 +586,7 @@ pub struct Session {
     /// Только у «моего Chrome»: фильтр и согласия этой сессии.
     pub relay: Option<Arc<crate::user_chrome::BotRelay>>,
     /// Один вызов бота за раз: см. `lease`.
-    lease_lock: Arc<tokio::sync::Mutex<()>>,
-    /// Кто держит замок сейчас и его охранник: на время карточки для человека замок отпускается (`suspend`).
-    held: Mutex<Option<(String, tokio::sync::OwnedMutexGuard<()>)>>,
+    lock: LeaseLock,
 }
 
 impl Session {
@@ -782,8 +780,7 @@ impl Session {
             last_used: AtomicI64::new(now()),
             shown: AtomicBool::new(false),
             relay,
-            lease_lock: Arc::new(tokio::sync::Mutex::new(())),
-            held: Mutex::new(None),
+            lock: LeaseLock::default(),
         }))
     }
 
@@ -795,25 +792,9 @@ impl Session {
     /// другой бот ждёт (не дольше `LEASE_WAIT`), а текущей становится вкладка этого бота (новая, если своей ещё нет).
     /// Первая вкладка при запуске достаётся тому, кто пришёл первым. Ход остановлен — ожидание прерывается.
     pub async fn lease(self: &Arc<Self>, bot_id: &str, cancel: &CancellationToken) -> Result<Lease, String> {
-        self.take_lock(bot_id, cancel, Some(LEASE_WAIT)).await?;
+        let generation = self.lock.acquire(bot_id, cancel, Some(LEASE_WAIT)).await?;
         self.claim_tab(bot_id).await;
-        Ok(Lease { session: self.clone(), bot: bot_id.to_string() })
-    }
-
-    async fn take_lock(&self, bot_id: &str, cancel: &CancellationToken, wait: Option<Duration>) -> Result<(), String> {
-        let limit = async {
-            match wait {
-                Some(wait) => tokio::time::sleep(wait).await,
-                None => std::future::pending().await,
-            }
-        };
-        let guard = tokio::select! {
-            guard = self.lease_lock.clone().lock_owned() => guard,
-            _ = cancel.cancelled() => return Err("ход остановлен".into()),
-            _ = limit => return Err(TEAM_BROWSER_BUSY.into()),
-        };
-        *self.held.lock().unwrap() = Some((bot_id.to_string(), guard));
-        Ok(())
+        Ok(Lease { session: self.clone(), bot: bot_id.to_string(), generation })
     }
 
     /// Текущей становится вкладка бота; своей нет — открывается новая.
@@ -830,38 +811,39 @@ impl Session {
         }
     }
 
-    /// Бот ждёт человека (карточка): браузер отпускается, чтобы товарищи по команде не стояли в очереди.
-    /// Ответ — держал ли бот браузер; тогда после ответа его нужно вернуть (`resume`).
-    pub fn suspend(&self, bot_id: &str) -> bool {
-        let mut held = self.held.lock().unwrap();
-        if held.as_ref().is_some_and(|(bot, _)| bot == bot_id) {
-            *held = None;
-            let mut tabs = self.tabs.lock().unwrap();
-            if let Some(id) = tabs.current.clone() {
-                tabs.bot_current.insert(bot_id.to_string(), id);
-            }
-            return true;
+    /// Бот ждёт человека (карточка браузерного инструмента): браузер отпускается, чтобы товарищи по команде не
+    /// стояли в очереди. Нечего отпускать (бот сейчас не держит браузер) — `None`.
+    pub fn suspend(&self, bot_id: &str) -> Option<Suspension> {
+        let suspension = self.lock.suspend(bot_id)?;
+        let mut tabs = self.tabs.lock().unwrap();
+        if let Some(id) = tabs.current.clone() {
+            tabs.bot_current.insert(bot_id.to_string(), id);
         }
-        false
+        Some(suspension)
     }
 
     /// Бот снова берёт браузер после ответа человека: ждёт своей очереди (без предела) и возвращается в свою вкладку.
-    pub async fn resume(&self, bot_id: &str, cancel: &CancellationToken) {
-        if self.take_lock(bot_id, cancel, None).await.is_ok() {
-            self.claim_tab(bot_id).await;
+    /// Вызов за это время закончился — ничего не берётся. Ход остановлен — `Err`, и инструмент дальше не идёт.
+    pub async fn resume(&self, suspension: Suspension, cancel: &CancellationToken) -> Result<(), String> {
+        if self.lock.resume(&suspension, cancel).await? {
+            self.claim_tab(&suspension.bot).await;
         }
+        Ok(())
     }
 
-    /// Показать человеку вкладку этого бота, не мешая тому, кто держит браузер сейчас. Занят другой бот — ничего не
-    /// меняем и отвечаем `false`: действия человека не должны попасть во вкладку чужого бота.
-    pub fn view_as(&self, bot_id: &str) -> bool {
-        let Ok(_guard) = self.lease_lock.clone().try_lock_owned() else { return self.tabs.lock().unwrap().active_bot == bot_id };
+    /// Показать человеку вкладку этого бота, не мешая тому, кто держит браузер сейчас. Занят другой бот — `None`:
+    /// действия человека не должны попасть во вкладку чужого бота. Свободен — замок возвращается вызывающему, и пока
+    /// он у него, другой бот браузер не возьмёт. Браузер держит сам этот бот — `Some(None)`.
+    pub fn view_as(&self, bot_id: &str) -> Option<Option<tokio::sync::OwnedMutexGuard<()>>> {
+        let Some(guard) = self.lock.try_take() else {
+            return (self.tabs.lock().unwrap().active_bot == bot_id).then_some(None);
+        };
         let mut tabs = self.tabs.lock().unwrap();
         tabs.active_bot = bot_id.to_string();
         if let Some(id) = tabs.bot_current.get(bot_id).filter(|id| tabs.pages.contains_key(*id)).cloned() {
             tabs.current = Some(id);
         }
-        true
+        Some(Some(guard))
     }
 
     fn touch(&self) {
@@ -1428,6 +1410,7 @@ fn page_event(page: &mut Page, method: &str, params: &Value) {
 pub struct Lease {
     session: Arc<Session>,
     bot: String,
+    generation: u64,
 }
 
 impl Drop for Lease {
@@ -1438,11 +1421,96 @@ impl Drop for Lease {
                 tabs.bot_current.insert(self.bot.clone(), id);
             }
         }
-        // Замок отпускается, только если он ещё этого бота: после `suspend` его мог взять другой.
-        let mut held = self.session.held.lock().unwrap();
-        if held.as_ref().is_some_and(|(bot, _)| *bot == self.bot) {
-            *held = None;
+        self.session.lock.release(self.generation);
+    }
+}
+
+type Guard = tokio::sync::OwnedMutexGuard<()>;
+
+/// Замок общего браузера: один вызов бота за раз. `held` — кто держит замок сейчас (номер вызова и охранник).
+/// Вызов, который отпустил замок на время карточки (`suspend`), живёт в `suspended`, пока не закончится или не вернёт
+/// замок (`resume`): возвращает замок только он сам, а закончившийся вызов ничего не оставляет занятым.
+#[derive(Default)]
+struct LeaseLock {
+    lock: Arc<tokio::sync::Mutex<()>>,
+    state: Mutex<LockState>,
+    generation: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Default)]
+struct LockState {
+    held: Option<Held>,
+    suspended: HashSet<u64>,
+}
+
+struct Held {
+    bot: String,
+    generation: u64,
+    _guard: Guard,
+}
+
+/// Отпущенный на время карточки замок: вернуть его может только `Session::resume` и только в тот же вызов.
+pub struct Suspension {
+    bot: String,
+    generation: u64,
+}
+
+impl LeaseLock {
+    async fn take(&self, cancel: &CancellationToken, wait: Option<Duration>) -> Result<Guard, String> {
+        let limit = async {
+            match wait {
+                Some(wait) => tokio::time::sleep(wait).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            guard = self.lock.clone().lock_owned() => Ok(guard),
+            _ = cancel.cancelled() => Err("ход остановлен".into()),
+            _ = limit => Err(TEAM_BROWSER_BUSY.into()),
         }
+    }
+
+    fn try_take(&self) -> Option<Guard> {
+        self.lock.clone().try_lock_owned().ok()
+    }
+
+    /// Берёт замок для вызова бота; ответ — номер вызова.
+    async fn acquire(&self, bot: &str, cancel: &CancellationToken, wait: Option<Duration>) -> Result<u64, String> {
+        let guard = self.take(cancel, wait).await?;
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.state.lock().unwrap().held = Some(Held { bot: bot.to_string(), generation, _guard: guard });
+        Ok(generation)
+    }
+
+    /// Вызов закончился: замок (если он сейчас у вызова) освобождается, из отпущенных вызов вычёркивается.
+    fn release(&self, generation: u64) {
+        let mut state = self.state.lock().unwrap();
+        state.suspended.remove(&generation);
+        if state.held.as_ref().is_some_and(|h| h.generation == generation) {
+            state.held = None;
+        }
+    }
+
+    fn suspend(&self, bot: &str) -> Option<Suspension> {
+        let mut state = self.state.lock().unwrap();
+        let generation = state.held.as_ref().filter(|h| h.bot == bot)?.generation;
+        state.held = None;
+        state.suspended.insert(generation);
+        Some(Suspension { bot: bot.to_string(), generation })
+    }
+
+    /// `Ok(true)` — замок снова у вызова; `Ok(false)` — вызов за это время закончился, брать нечего.
+    async fn resume(&self, suspension: &Suspension, cancel: &CancellationToken) -> Result<bool, String> {
+        if !self.state.lock().unwrap().suspended.contains(&suspension.generation) {
+            return Ok(false);
+        }
+        let guard = self.take(cancel, None).await?;
+        let mut state = self.state.lock().unwrap();
+        if !state.suspended.remove(&suspension.generation) {
+            return Ok(false);
+        }
+        state.held = Some(Held { bot: suspension.bot.clone(), generation: suspension.generation, _guard: guard });
+        Ok(true)
     }
 }
 
@@ -1517,13 +1585,6 @@ impl Browsers {
 
     fn owner_of(&self, bot_id: &str) -> String {
         self.owners.lock().unwrap().get(bot_id).cloned().unwrap_or_else(|| bot_id.to_string())
-    }
-
-    /// Бот ждёт человека: его вызов отпускает общий браузер (см. `Session::suspend`). Вернуть — `Session::resume`.
-    pub async fn suspend(&self, bot_id: &str) -> Option<Arc<Session>> {
-        let key = self.owner_of(bot_id);
-        let session = self.sessions.lock().await.get(&key).cloned()?;
-        session.suspend(bot_id).then_some(session)
     }
 
     pub async fn close(&self, bot_id: &str) {
@@ -1621,6 +1682,54 @@ mod tests {
         assert!(!tabs.claim("a"));
         assert_eq!(tabs.current.as_deref(), Some("t1"));
         assert_eq!(tabs.mine(), vec!["t1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_card_during_a_call_gives_the_browser_away_and_a_finished_call_leaves_it_free() {
+        let lock = LeaseLock::default();
+        let none = CancellationToken::new();
+        let wait = Some(Duration::from_secs(1));
+        let first = lock.acquire("a", &none, wait).await.unwrap();
+        // Карточка: замок отпущен, товарищ берёт и заканчивает свой вызов.
+        let suspension = lock.suspend("a").expect("бот держал замок");
+        let second = lock.acquire("b", &none, wait).await.unwrap();
+        lock.release(second);
+        assert!(lock.resume(&suspension, &none).await.unwrap(), "после ответа бот снова держит замок");
+        assert!(lock.try_take().is_none(), "замок у вызова a");
+        lock.release(first);
+        assert!(lock.try_take().is_some(), "вызов кончился — замок свободен");
+        // Вызов закончился, пока шла карточка: возвращать нечего, замок не залипает.
+        let third = lock.acquire("a", &none, wait).await.unwrap();
+        let suspension = lock.suspend("a").unwrap();
+        lock.release(third);
+        assert!(!lock.resume(&suspension, &none).await.unwrap());
+        assert!(lock.try_take().is_some(), "после закончившегося вызова замок свободен");
+        // Карточка другого бота чужой вызов не отпускает.
+        let fourth = lock.acquire("a", &none, wait).await.unwrap();
+        assert!(lock.suspend("b").is_none());
+        lock.release(fourth);
+    }
+
+    #[tokio::test]
+    async fn stopping_the_turn_during_a_card_makes_resume_fail() {
+        let lock = LeaseLock::default();
+        let cancel = CancellationToken::new();
+        let none = CancellationToken::new();
+        let wait = Some(Duration::from_secs(1));
+        let first = lock.acquire("a", &none, wait).await.unwrap();
+        let suspension = lock.suspend("a").unwrap();
+        // Товарищ занял браузер, пока шла карточка; ход бота остановили.
+        let second = lock.acquire("b", &none, wait).await.unwrap();
+        cancel.cancel();
+        assert!(lock.resume(&suspension, &cancel).await.is_err(), "ход остановлен: инструмент дальше не идёт");
+        lock.release(first);
+        lock.release(second);
+        // Ожидание в очереди прерывается остановкой, а без неё упирается в предел.
+        let held = lock.acquire("a", &none, wait).await.unwrap();
+        assert!(lock.acquire("b", &cancel, Some(Duration::from_secs(5))).await.is_err());
+        let late = lock.acquire("b", &none, Some(Duration::from_millis(50))).await;
+        assert_eq!(late.err().as_deref(), Some(TEAM_BROWSER_BUSY));
+        lock.release(held);
     }
 
     #[test]
