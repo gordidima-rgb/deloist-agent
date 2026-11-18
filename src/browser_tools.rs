@@ -315,6 +315,12 @@ async fn gate_site_for(app: &Arc<App>, bot: &Bot, session: &Session, action: &st
     ask(app, bot, "browser_site", &title, &detail, scope, false).await
 }
 
+/// Правило мессенджера «можно» снимает карточку про отправку и удаление, но не про оплату и пароли;
+/// список «Всегда спрашивать» бота сильнее правила.
+fn risky_pass_skips_card(bot: &Bot, scope: &Scope, pass: &Pass) -> bool {
+    pass.allowed && !pass.read && !matches!(scope.kind.as_str(), "pay" | "secure") && !crate::tools::always_asks(bot, "browser_risky", &serde_json::Value::Null, Some(scope))
+}
+
 async fn gate_risky(app: &Arc<App>, bot: &Bot, session: &Session, action: &str, name: &str, pass: &Pass) -> Result<(), String> {
     if !is_risky(name) {
         return Ok(());
@@ -325,8 +331,7 @@ async fn gate_risky(app: &Arc<App>, bot: &Bot, session: &Session, action: &str, 
     let url = session.with_page(|page| page.url.clone())?;
     let short: String = name.chars().take(200).collect();
     let scope = site_scope("browser_risky", &url, kind, "click", short.trim());
-    // Список «Всегда спрашивать» сильнее правил мессенджера.
-    if pass.allowed && !pass.read && !matches!(kind, "pay" | "secure") && !crate::tools::always_asks(bot, "browser_risky", &serde_json::Value::Null, Some(&scope)) {
+    if risky_pass_skips_card(bot, &scope, pass) {
         return Ok(());
     }
     let title = format!("Похоже на необратимое действие: {action}");
@@ -2273,6 +2278,18 @@ mod tests {
 
     fn field(kind: &str, auto: &str, name: &str) -> Value {
         json!({ "tag": "input", "type": kind, "auto": auto, "name": name, "label": "", "submit": "" })
+    }
+
+    #[test]
+    fn the_always_ask_list_beats_a_messenger_allow_rule() {
+        let scope = Scope::new("browser_risky", "web.telegram.org", "send", "click", "Отправить");
+        let allowed = Pass { allowed: true, ..Pass::default() };
+        let mut bot = Bot::default();
+        assert!(risky_pass_skips_card(&bot, &scope, &allowed), "правило «можно» снимает карточку отправки");
+        bot.always_ask = vec!["send".into()];
+        assert!(!risky_pass_skips_card(&bot, &scope, &allowed), "список «send» сильнее правила мессенджера");
+        bot.always_ask = vec!["delete".into()];
+        assert!(risky_pass_skips_card(&bot, &scope, &allowed), "другой вид списка отправку не трогает");
     }
 
     #[test]

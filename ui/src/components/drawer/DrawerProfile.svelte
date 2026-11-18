@@ -403,6 +403,7 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
     {/if}
     <div class="dp-ask" id="dp-always-ask">
       <p class="dp-note">{tr('Всегда спрашивать: в любом режиме, даже в «Никогда», и без «запомнить».')}</p>
+      <p class="dp-note">{tr('Вид действия программа узнаёт по кнопкам на сайтах, именам инструментов и разбору команд. Незнакомые инструменты внешних серверов спрашиваются всегда, если включена отправка, публикация, оплата или удаление. Процессы, которые запустил человек или триггер, и их выходные узлы список не охватывает: их запускает человек.')}</p>
       {#each rights?.alwaysAsk || [] as kind (kind.id)}
         <Checkbox label={serverText(kind.label)} checked={alwaysAsk.includes(kind.id)} onchange={(on) => toggleAsk(kind.id, on)} />
       {/each}

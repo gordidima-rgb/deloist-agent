@@ -4082,3 +4082,20 @@ async fn always_ask_is_changed_and_read_only_by_the_window() {
     let state = crew.ok("GET", "/api/state", None).await;
     assert_eq!(state["bots"][0]["alwaysAsk"], json!(["command", "pay"]));
 }
+
+#[tokio::test]
+async fn acp_foreign_mcp_send_tools_and_commands_follow_the_always_ask_list() {
+    let (crew, bot, _log) = acp_crew("acp-always-ask").await;
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "auto" }))).await;
+    let send = mcp_call("gmail", "send_email", json!({ "to": "a@b.c" }));
+    let (card, _) = acp_asks(&crew, &bot, send.clone()).await;
+    assert!(card.is_none(), "список пуст: «решай сам» не спрашивает");
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["send"] }))).await;
+    let (card, _) = acp_asks(&crew, &bot, send).await;
+    assert!(card.is_some(), "[send] спрашивает чужой MCP-инструмент отправки");
+    // Команда агента: [delete] ловит удаление по тому же разбору, что и свой run_command.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["delete"] }))).await;
+    let rm = json!({ "toolCallId": "c1", "title": "rm -rf x", "kind": "execute", "rawInput": { "command": "rm -rf x" } });
+    let (card, _) = acp_asks(&crew, &bot, rm).await;
+    assert!(card.is_some(), "[delete] спрашивает rm -rf");
+}

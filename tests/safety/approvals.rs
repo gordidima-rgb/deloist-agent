@@ -1609,3 +1609,23 @@ async fn the_rights_summary_follows_the_mode() {
     let pay = rights["alwaysAsk"].as_array().unwrap().iter().find(|k| k["id"] == "pay").unwrap().clone();
     assert_eq!(pay["on"], true, "{rights}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_always_ask_list_asks_by_the_kind_of_a_real_call() {
+    let (crew, fake, bot) = setup("ap-always-kinds", &[]).await;
+    set_mode(&crew, &bot, "auto").await;
+    let todo = tool("delete_todo", json!({ "id": "nope" }));
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["delete"] }))).await;
+    // delete_todo спрашивается и без списка; со списком карточка к тому же одноразовая.
+    let card = turn(&crew, &fake, &bot, todo, None).await.expect("[delete] спрашивает delete_todo");
+    assert_eq!(card["tool"], "delete_todo", "{card}");
+    assert_eq!(card["always"], false, "{card}");
+    // Команда удаления: вид берётся из `reach::command_place`.
+    let rm = turn(&crew, &fake, &bot, tool("run_command", json!({ "command": "rm -rf x" })), None).await;
+    assert!(rm.is_some(), "[delete] спрашивает rm -rf");
+    // Команда, которую разобрать нельзя (подстановка), — только вид `command`: при [delete] идёт без карточки.
+    let opaque = turn(&crew, &fake, &bot, tool("run_command", json!({ "command": "echo %CD%" })), None).await;
+    assert!(opaque.is_none(), "неразобранная команда не относится к [delete]");
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["command"] }))).await;
+    assert!(turn(&crew, &fake, &bot, tool("run_command", json!({ "command": "echo %CD%" })), None).await.is_some(), "[command] спрашивает любую команду");
+}

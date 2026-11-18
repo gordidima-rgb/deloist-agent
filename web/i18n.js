@@ -2572,6 +2572,7 @@
     'оплата и платные вызовы': 'payments and paid calls',
     'передача файлов другим ботам': 'passing files to other bots',
     'создание и правка ботов, рутин и процессов': 'creating and editing bots, routines and workflows',
+    'Вид действия программа узнаёт по кнопкам на сайтах, именам инструментов и разбору команд. Незнакомые инструменты внешних серверов спрашиваются всегда, если включена отправка, публикация, оплата или удаление. Процессы, которые запустил человек или триггер, и их выходные узлы список не охватывает: их запускает человек.': 'The program recognises the kind of action by site buttons, tool names and command parsing. Unknown tools of external servers are always asked about when sending, publishing, paying or deleting is on. Workflows started by a person or a trigger, and their output nodes, are not covered by the list: the person starts them.',
     'Без спроса': 'Without asking',
     'Спросит': 'Will ask',
     'Не сделает': 'Will not do',

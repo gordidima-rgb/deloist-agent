@@ -199,3 +199,43 @@ async fn the_result_contract_is_short_and_its_tokens_are_reported() {
     // 123 входа + 7 выхода одного шага делегата.
     assert_eq!(end["tokens"], 130, "делегация показывает потраченные токены: {end}");
 }
+
+/// Альфа передаёт задачу Бете; Бета в ответ запускает команду.
+async fn relay_completions(body: Bytes) -> Response {
+    let payload: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+    let messages = payload["messages"].as_array().cloned().unwrap_or_default();
+    let system = messages.first().and_then(|m| m["content"].as_str()).unwrap_or_default().to_string();
+    let user_text = messages.iter().map(text_of).collect::<Vec<_>>().join(" ");
+    let text = if messages.iter().any(|m| m["role"] == "tool") {
+        text_step("готово", 10, 5)
+    } else if system.contains("Ты — Альфа") {
+        tool_step("delegate", json!({ "bot": "Бета", "task": BRIEF }))
+    } else if user_text.contains(DELEGATION_TAIL) {
+        tool_step("run_command", json!({ "command": "echo hi" }))
+    } else {
+        text_step("ответ", 1, 1)
+    };
+    Response::builder().header("content-type", "text/event-stream").body(Body::from(text)).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_always_ask_list_of_the_sender_follows_the_delegation() {
+    let router = Router::new().route("/v1/chat/completions", post(relay_completions));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let crew = Crew::start("handoff-always-ask").await;
+    crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "model": "m", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "test-key" }))).await;
+    let alpha = crew.ok("POST", "/api/bots", Some(json!({ "name": "Альфа", "role": "старший", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let beta = crew.ok("POST", "/api/bots", Some(json!({ "name": "Бета", "role": "младший", "approval": "auto" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [alpha, beta], "lead": alpha }))).await;
+    crew.ok("PATCH", &format!("/api/bots/{alpha}"), Some(json!({ "alwaysAsk": ["command"] }))).await;
+    crew.listen().await;
+    crew.say(&alpha, "передай задачу").await;
+    // У Беты список пуст и режим «решай сам», но команду по цепочке спрашивает список Альфы.
+    let card = crew.wait_event("карточка Беты", |e| e["type"] == "approval" || e["type"] == "turn_end" && e["botId"] == alpha.as_str()).await;
+    assert_eq!(card["type"], "approval", "{card}");
+    assert_eq!(card["botId"], beta.as_str(), "{card}");
+    assert_eq!(card["tool"], "run_command", "{card}");
+    assert_eq!(card["always"], false, "{card}");
+}
