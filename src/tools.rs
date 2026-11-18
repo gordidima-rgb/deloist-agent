@@ -41,7 +41,7 @@ pub const TEAM_TOOLS: [&str; 14] = ["delegate", "offer_specialist", "list_bots",
 /// Всё, что MCP-процесс агента ACP вправе просить у приложения: браузер бота, команда и рутины.
 /// Рутины идут теми же правилами, что у API-ботов: создание и правка спрашивают человека по режиму бота, удаление всегда.
 pub fn is_bridge_tool(name: &str) -> bool {
-    TEAM_TOOLS.contains(&name) || crate::team_tasks::is_tool(name) || crate::routine_tools::is_routine_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
+    TEAM_TOOLS.contains(&name) || crate::runs::is_wait_tool(name) || crate::team_tasks::is_tool(name) || crate::routine_tools::is_routine_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
 }
 
 pub fn team_tool_defs() -> Vec<Value> {
@@ -51,6 +51,7 @@ pub fn team_tool_defs() -> Vec<Value> {
     defs.extend(crate::team_tasks::defs());
     defs.extend(crate::routine_tools::defs());
     defs.extend(crate::memory::team_review::defs());
+    defs.push(crate::runs::wait_def());
     defs
 }
 
@@ -60,6 +61,7 @@ pub fn tool_defs() -> Value {
         list.extend(crate::browser_tools::tool_defs());
         list.extend(crate::team_tasks::defs());
         list.extend(crate::routine_tools::defs());
+        list.push(crate::runs::wait_def());
         list.extend(crate::memory::team_review::defs());
         list.extend(crate::workflow_tools::defs());
         list.extend(crate::goal_tools::defs());
@@ -359,7 +361,7 @@ pub fn is_read_only(name: &str) -> bool {
     // `ask_user` и так обращается к человеку. `remember` меняет память бота, это уже запись.
     // `save_script` и `run_script` сами ничего не делают: сохранять можно только под согласие человека, а каждый шаг
     // скрипта идёт через обычную проверку и карточки (`turn::execute_call_in`).
-    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "save_script" | "run_script")
+    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "save_script" | "run_script" | "await_event")
 }
 
 /// Какой из двух режимов осторожнее. Передача задачи не должна снижать осторожность:
@@ -1819,6 +1821,8 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
         team if crate::team_tasks::is_tool(team) => crate::team_tasks::exec(app, bot, team, args, depth).await,
 
         routine if crate::routine_tools::is_routine_tool(routine) => crate::routine_tools::exec(app, bot, routine, args).await,
+
+        wait if crate::runs::is_wait_tool(wait) => crate::runs::exec_wait(app, bot, args),
 
         flow if crate::workflow_tools::is_tool(flow) => crate::workflow_tools::exec(app, bot, flow, args).await,
 

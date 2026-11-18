@@ -46,10 +46,16 @@ pub enum StepState {
     Err,
 }
 
-/// Почему запуск остановился. Задачи про лимиты и повторы добавят свои причины.
+/// Почему запуск остановился. Задача про повторы добавит свои причины.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
+    /// Лимит провайдера или окно подписки.
+    Limit,
+    /// Дневной предел токенов команды или месячный предел бота.
+    Budget,
+    /// Бот сам ждёт времени или вебхука (`await_event`).
+    Event,
     Human,
     Unknown,
 }
@@ -68,6 +74,17 @@ pub enum Origin {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunState {
     Running,
+    /// Ход ждёт срока, а не человека: сбросится лимит, придёт событие. Сам продолжится в `resume_due`.
+    Paused {
+        until_ms: i64,
+        reason: StopReason,
+        /// Номер вебхук-рутины бота, чей вызов тоже будит запись раньше срока.
+        #[serde(default)]
+        webhook: Option<String>,
+        /// Для человека: чей лимит (провайдер) или что ждёт бот.
+        #[serde(default)]
+        note: String,
+    },
     NeedsHuman { reason: StopReason, text: String },
     Done,
     Failed { reason: StopReason, text: String },
@@ -105,6 +122,27 @@ pub struct Run {
     /// Внешние действия, которые кончились ошибкой: могли и пройти.
     #[serde(default)]
     pub failed_external: Vec<String>,
+    /// Сколько раз подряд ход вставал на паузу из-за лимита: пятая подряд — «Нужен ты».
+    #[serde(default)]
+    pub pauses: u32,
+    /// Человек нажал «Продолжить сейчас»: этот ход не останавливают заранее ни отдых модели, ни почти пустое окно подписки.
+    #[serde(default)]
+    pub forced: bool,
+    /// Первое сообщение продолжения, если ход ещё ничего не успел: постановка рутины вместо «продолжай».
+    #[serde(default)]
+    pub resume_text: Option<String>,
+    /// Об этой паузе уже сказано уведомлением Windows.
+    #[serde(default)]
+    pub notified: bool,
+}
+
+/// Из какого состояния запись берут на продолжение.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Held {
+    /// Остаток прошлого запуска (программу закрыли посреди хода).
+    Stale,
+    Human,
+    Paused,
 }
 
 impl Run {
@@ -125,6 +163,10 @@ impl Run {
             steps: Vec::new(),
             done_external: Vec::new(),
             failed_external: Vec::new(),
+            pauses: 0,
+            forced: false,
+            resume_text: None,
+            notified: false,
         }
     }
 
@@ -185,6 +227,8 @@ struct Inner {
     items: Vec<Run>,
     /// Бот → запись хода, который идёт сейчас (в памяти: после перезапуска пусто).
     active: HashMap<String, String>,
+    /// Бот → пауза, которую он попросил сам (`await_event`) и которая ждёт конца шага.
+    waits: HashMap<String, RunState>,
 }
 
 pub struct Runs {
@@ -200,7 +244,7 @@ impl Runs {
         let mut items: Vec<Run> = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         prune(&mut items);
         let stale = items.iter().filter(|r| r.is_running()).map(|r| r.id.clone()).collect();
-        Self { path, inner: Mutex::new(Inner { items, active: HashMap::new() }), stale }
+        Self { path, inner: Mutex::new(Inner { items, ..Inner::default() }), stale }
     }
 
     fn save(&self, items: &[Run]) {
@@ -252,6 +296,12 @@ impl Runs {
             if matches!(state, RunState::Done) {
                 run.steps.clear();
             }
+            if matches!(state, RunState::Paused { reason: StopReason::Limit, .. }) {
+                run.pauses += 1;
+            }
+            run.forced = false;
+            run.resume_text = None;
+            run.notified = false;
             run.state = state;
             run.updated_ms = now();
         }
@@ -304,15 +354,22 @@ impl Runs {
     }
 
     /// Занять запись для продолжения одним действием под замком: попытка +1, состояние «идёт».
-    /// `from_human` — запись обязана ждать человека, иначе обязана идти (остаток прошлого запуска). Возвращает прежнее состояние.
-    fn claim(&self, id: &str, from_human: bool) -> Option<(RunState, Run)> {
+    /// Запись обязана быть в состоянии `from`. Пауза попыткой не считается: она не обрыв. Возвращает прежнее состояние.
+    fn claim(&self, id: &str, from: Held) -> Option<(RunState, Run)> {
         let mut inner = self.inner.lock().unwrap();
         let run = inner.items.iter_mut().find(|r| r.id == id)?;
-        if from_human != matches!(run.state, RunState::NeedsHuman { .. }) || (!from_human && !run.is_running()) {
+        let state_is = match from {
+            Held::Stale => run.is_running(),
+            Held::Human => matches!(run.state, RunState::NeedsHuman { .. }),
+            Held::Paused => matches!(run.state, RunState::Paused { .. }),
+        };
+        if !state_is {
             return None;
         }
         let held = std::mem::replace(&mut run.state, RunState::Running);
-        run.attempts += 1;
+        if from != Held::Paused {
+            run.attempts += 1;
+        }
         run.updated_ms = now();
         let copy = run.clone();
         self.save(&inner.items);
@@ -326,10 +383,54 @@ impl Runs {
             return;
         }
         if let Some(run) = inner.items.iter_mut().find(|r| r.id == id).filter(|r| r.is_running()) {
+            if !matches!(held, RunState::Paused { .. }) {
+                run.attempts = run.attempts.saturating_sub(1);
+            }
             run.state = held;
-            run.attempts = run.attempts.saturating_sub(1);
             self.save(&inner.items);
         }
+    }
+
+    /// Сколько раз идущий ход бота уже вставал на паузу из-за лимита.
+    pub fn pauses(&self, bot_id: &str) -> u32 {
+        self.on_active_read(bot_id, |r| r.pauses).unwrap_or(0)
+    }
+
+    /// Человек велел идущему ходу продолжать, не глядя на отдых модели.
+    pub fn is_forced(&self, bot_id: &str) -> bool {
+        self.on_active_read(bot_id, |r| r.forced).unwrap_or(false)
+    }
+
+    fn on_active_read<T>(&self, bot_id: &str, read: impl FnOnce(&Run) -> T) -> Option<T> {
+        let inner = self.inner.lock().unwrap();
+        let id = inner.active.get(bot_id)?;
+        inner.items.iter().find(|r| r.id == *id).map(read)
+    }
+
+    /// Бот вызвал `await_event`: ход закончится паузой, когда шаг дойдёт до конца.
+    pub fn request_wait(&self, bot_id: &str, state: RunState) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        let active = inner.active.contains_key(bot_id);
+        if active {
+            inner.waits.insert(bot_id.to_string(), state);
+        }
+        active
+    }
+
+    pub fn take_wait(&self, bot_id: &str) -> Option<RunState> {
+        self.inner.lock().unwrap().waits.remove(bot_id)
+    }
+
+    /// Записи на паузе.
+    pub fn paused(&self) -> Vec<Run> {
+        self.inner.lock().unwrap().items.iter().filter(|r| matches!(r.state, RunState::Paused { .. })).cloned().collect()
+    }
+
+    /// Запись, которая сразу на паузе (ход ещё не начинался).
+    fn add(&self, run: Run) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.items.push(run);
+        self.save(&inner.items);
     }
 
     /// Запись, ждущая человека: для «Нужен ты».
@@ -384,8 +485,9 @@ fn note_external(run: &mut Run, call_id: &str) {
 
 fn prune(items: &mut Vec<Run>) {
     let at = now();
-    items.retain(|r| r.is_running() || matches!(r.state, RunState::NeedsHuman { .. }) || at - r.updated_ms < KEEP_MS);
-    let closed = items.iter().filter(|r| !r.is_running()).count();
+    let open = |r: &Run| r.is_running() || matches!(r.state, RunState::NeedsHuman { .. } | RunState::Paused { .. });
+    items.retain(|r| open(r) || at - r.updated_ms < KEEP_MS);
+    let closed = items.iter().filter(|r| !open(r)).count();
     let mut drop = closed.saturating_sub(KEEP_CLOSED);
     items.retain(|r| {
         let old = drop > 0 && matches!(r.state, RunState::Done | RunState::Failed { .. });
@@ -412,8 +514,8 @@ pub async fn recover(app: &Arc<App>) {
             needs_human(app, &run, &text).await;
         } else if run.attempts >= 1 {
             needs_human(app, &run, "Ход прерывался дважды — нужен ты.").await;
-        } else if let Some((_, claimed)) = app.runs.claim(&id, false) {
-            if let Err(e) = launch(app, &claimed) {
+        } else if let Some((_, claimed)) = app.runs.claim(&id, Held::Stale) {
+            if let Err(e) = launch(app, &claimed, &claimed.continuation_note()) {
                 needs_human(app, &run, &format!("Не смог продолжить: {e}")).await;
             }
         }
@@ -424,23 +526,175 @@ pub async fn recover(app: &Arc<App>) {
     }
 }
 
-/// Запустить ход продолжения. Командную задачу запускает её собственный путь (она ждёт в очереди задач).
-fn launch(app: &Arc<App>, run: &Run) -> Result<(), String> {
+/// Запустить ход продолжения с первым сообщением `text`. Командную задачу запускает её собственный путь (она ждёт в очереди задач).
+fn launch(app: &Arc<App>, run: &Run, text: &str) -> Result<(), String> {
     if let Origin::Team { task_id } = &run.origin {
         return crate::team_tasks::requeue(app, task_id);
     }
-    crate::turn::start_turn(app, &run.bot_id, &run.continuation_note(), run.options()).map_err(|StartError { message, .. }| message)
+    crate::turn::start_turn(app, &run.bot_id, text, run.options()).map_err(|StartError { message, .. }| message)
 }
 
 /// Человек нажал «Продолжить» на карточке «Нужен ты». Два нажатия подряд: второе получает отказ и записи не касается.
 pub async fn resume_by_human(app: &Arc<App>, id: &str) -> Result<(), String> {
-    let (held, run) = app.runs.claim(id, true).ok_or("запись уже не ждёт человека")?;
-    launch(app, &run).inspect_err(|_| app.runs.release(id, held))
+    let (held, run) = app.runs.claim(id, Held::Human).ok_or("запись уже не ждёт человека")?;
+    launch(app, &run, &run.continuation_note()).inspect_err(|_| app.runs.release(id, held))
+}
+
+// ---------------------------------------------------------------------------
+// Паузы: лимит, предел токенов, ожидание события
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Инструмент `await_event`: бот сам встаёт на паузу
+// ---------------------------------------------------------------------------
+
+/// Дольше недели ждать нельзя: дальше это уже не ожидание, а рутина.
+const MAX_WAIT_MS: i64 = 7 * 24 * 3600 * 1000;
+
+pub fn is_wait_tool(name: &str) -> bool {
+    name == "await_event"
+}
+
+pub fn wait_def() -> Value {
+    json!({ "type": "function", "function": {
+        "name": "await_event",
+        "description": "Остановить это задание и продолжить позже: когда пройдёт время или придёт вызов вебхука. Ход после этого вызова кончается, \
+            программа сама разбудит тебя и дошлёт данные. Ждать можно до 7 суток. Используй вместо цикла проверок: «проверю, когда придёт ответ».",
+        "parameters": { "type": "object", "properties": {
+            "in_minutes": { "type": "integer", "description": "Через сколько минут продолжить." },
+            "at": { "type": "string", "description": "Во сколько продолжить, ЧЧ:ММ по часам человека (ближайшее такое время)." },
+            "webhook": { "type": "string", "description": "Номер рутины-вебхука этого бота (list_routines): продолжить, когда его вызовут. Вместе с in_minutes или at — это крайний срок." },
+            "note": { "type": "string", "description": "Чего ждёшь, коротко: человек увидит это в списке." },
+        } },
+    } })
+}
+
+/// Вызов `await_event`. Пауза начинается, когда шаг дойдёт до конца: тут только записывается просьба.
+pub fn exec_wait(app: &Arc<App>, bot: &crate::store::Bot, args: &Value) -> Result<String, String> {
+    let text = |key: &str| args[key].as_str().unwrap_or_default().trim();
+    let at = now();
+    let webhook = Some(text("webhook")).filter(|w| !w.is_empty());
+    if let Some(id) = webhook {
+        let hook = app.store.routine(id).filter(|r| r.hook && r.bot_id == bot.id);
+        hook.ok_or("webhook: нужен номер рутины-вебхука этого бота из list_routines")?;
+    }
+    let until = if let Some(minutes) = args["in_minutes"].as_i64() {
+        at + minutes.max(1).saturating_mul(60_000)
+    } else if !text("at").is_empty() {
+        crate::limit::next_clock_ms(text("at"), chrono::Local::now()).ok_or("at: время ЧЧ:ММ, например 14:30")?
+    } else if webhook.is_some() {
+        at + MAX_WAIT_MS
+    } else {
+        return Err("нужно in_minutes, at или webhook".into());
+    };
+    let until = until.min(at + MAX_WAIT_MS);
+    let note: String = text("note").chars().take(200).collect();
+    let state = RunState::Paused { until_ms: until, reason: StopReason::Event, webhook: webhook.map(str::to_string), note };
+    if !app.runs.request_wait(&bot.id, state) {
+        return Err("ждать можно только в запущенном задании".into());
+    }
+    Ok(format!("Ожидание принято: продолжу в {}. Заверши ход.", crate::scheduler::clock(until)))
+}
+
+/// Пока рутина стоит на паузе, она «идёт» по журналу, но не по ходу.
+fn origin_routine(origin: &Origin) -> Option<&str> {
+    match origin {
+        Origin::Routine { id, .. } | Origin::Webhook { id, .. } | Origin::Goal { id, .. } => Some(id),
+        Origin::Human | Origin::Team { .. } => None,
+    }
+}
+
+/// Первое сообщение продолжения после паузы.
+fn resume_text(run: &Run, data: Option<&str>) -> String {
+    if let Some(text) = &run.resume_text {
+        return text.clone();
+    }
+    match (&run.state, data) {
+        (_, Some(data)) => format!("Сработал вебхук, которого ты ждал.
+{data}"),
+        (RunState::Paused { reason: StopReason::Event, .. }, None) => "Срок ожидания вышел — продолжай задание с того места, где остановился.".into(),
+        (RunState::Paused { reason: StopReason::Budget, .. }, None) => "Предел токенов сбросился — продолжай задание с того места, где остановился.".into(),
+        _ => "Лимит сбросился — продолжай задание с того места, где остановился.".into(),
+    }
+}
+
+/// Взять паузу на продолжение. `data` — тело вебхука, который её разбудил. `forced` — решил человек: отдых модели не мешает.
+async fn resume(app: &Arc<App>, id: &str, forced: bool, data: Option<&str>) -> Result<(), String> {
+    let (held, run) = app.runs.claim(id, Held::Paused).ok_or("запись уже не на паузе")?;
+    let text = resume_text(&Run { state: held.clone(), ..run.clone() }, data);
+    if forced {
+        app.runs.update(id, |r| r.forced = true);
+    }
+    launch(app, &run, &text).inspect_err(|_| app.runs.release(id, held))?;
+    if let Some(routine) = origin_routine(&run.origin) {
+        let _ = app.store.set_routine_status(routine, "running").await;
+    }
+    app.turns.emit(json!({ "type": "state_changed" }));
+    Ok(())
+}
+
+/// «Продолжить сейчас» на паузе.
+pub async fn resume_now(app: &Arc<App>, id: &str) -> Result<(), String> {
+    resume(app, id, true, None).await
+}
+
+/// Тик планировщика: паузы, чей срок вышел, продолжаются. Занятый бот ждёт следующего тика.
+pub async fn resume_due(app: &Arc<App>) {
+    let at = now();
+    for run in app.runs.paused() {
+        if matches!(run.state, RunState::Paused { until_ms, .. } if until_ms <= at) && !app.turns.is_busy(&run.bot_id) {
+            if let Err(e) = resume(app, &run.id, false, None).await {
+                eprintln!("[runs] пауза не продолжена: {e}");
+            }
+        }
+    }
+}
+
+/// Пришёл вебхук рутины: ход этого бота, который его ждал, продолжается с данными вместо нового хода. `false` — никто не ждал.
+pub async fn resume_on_webhook(app: &Arc<App>, routine_id: &str, bot_id: &str, data: &str) -> bool {
+    let waiting = app.runs.paused().into_iter().find(|r| {
+        r.bot_id == bot_id && matches!(&r.state, RunState::Paused { webhook: Some(w), .. } if w == routine_id)
+    });
+    match waiting {
+        Some(run) => resume(app, &run.id, false, Some(data)).await.is_ok(),
+        None => false,
+    }
+}
+
+/// Ход ещё не начат, а ему уже нельзя (предел токенов): запись ждёт срока и потом идёт с этим текстом.
+/// Рутина — одна запись: повторный срок, пока она ждёт, новой не заводит. Вызовы вебхука — каждый свой.
+pub fn pause_unstarted(app: &Arc<App>, bot_id: &str, origin: Origin, opts: &TurnOptions, text: &str, until_ms: i64, reason: StopReason, note: &str) {
+    let key = origin_routine(&origin).map(str::to_string).filter(|_| matches!(origin, Origin::Routine { .. }));
+    if key.is_some() && app.runs.paused().iter().any(|r| r.bot_id == bot_id && origin_routine(&r.origin) == key.as_deref()) {
+        return;
+    }
+    let mut run = Run::new(bot_id, origin, opts);
+    run.state = RunState::Paused { until_ms, reason, webhook: None, note: note.to_string() };
+    run.resume_text = Some(text.to_string());
+    app.runs.add(run);
+    app.turns.emit(json!({ "type": "state_changed" }));
+}
+
+/// Одно уведомление на окно сброса, а не на каждого бота: паузы с одним провайдером и одним сроком идут вместе.
+pub async fn notify_pauses(app: &Arc<App>) {
+    let mut groups: std::collections::BTreeMap<(String, i64), Vec<String>> = Default::default();
+    for run in app.runs.paused().into_iter().filter(|r| !r.notified) {
+        if let RunState::Paused { until_ms, reason: StopReason::Limit | StopReason::Budget, note, .. } = &run.state {
+            groups.entry((note.clone(), *until_ms)).or_default().push(run.id.clone());
+        }
+    }
+    for ((note, until), ids) in groups {
+        for id in &ids {
+            app.runs.update(id, |r| r.notified = true);
+        }
+        let body = format!("{note} — ждут ботов: {}, сброс в {}", ids.len(), crate::scheduler::clock(until));
+        let _ = crate::reminders::send_text(app, "Задания на паузе", &body, &["windows".to_string()]).await;
+    }
 }
 
 /// Человек отказался продолжать: запись закрыта.
 pub async fn dismiss(app: &Arc<App>, id: &str) -> Result<(), String> {
-    let run = app.runs.get(id).filter(|r| matches!(r.state, RunState::NeedsHuman { .. })).ok_or("запись уже не ждёт человека")?;
+    let run = app.runs.get(id).filter(|r| matches!(r.state, RunState::NeedsHuman { .. } | RunState::Paused { .. })).ok_or("запись уже не ждёт человека")?;
     close_stopped(app, &run, "отменено человеком").await;
     Ok(())
 }

@@ -119,7 +119,7 @@ pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool,
     started
 }
 
-fn clock(ms: i64) -> String {
+pub fn clock(ms: i64) -> String {
     use chrono::TimeZone;
     chrono::Local.timestamp_millis_opt(ms).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
 }
@@ -189,6 +189,8 @@ async fn tick(app: &Arc<App>) {
     crate::todos::tick(app);
     crate::habits::remind_tick(app).await;
     crate::goals::tick(app).await;
+    crate::runs::resume_due(app).await;
+    crate::runs::notify_pauses(app).await;
     crate::workflow_run::tick(app);
     app.browsers.close_idle(browser_idle_ms(), |bot| app.turns.is_busy(bot)).await;
 
@@ -249,14 +251,36 @@ async fn tick(app: &Arc<App>) {
             continue;
         }
         if over_limit(app) {
-            note(app, &routine, "limit", "Дневной предел токенов исчерпан, запуск пропущен.").await;
-            let _ = app.store.reschedule_routine(&routine.id, "limit").await;
+            pause_for_budget(app, &routine).await;
             continue;
         }
         if let Err(e) = run_routine_as(app, &routine, true, "routine", late_ms).await {
             note(app, &routine, "failed", &e.message).await;
         }
     }
+}
+
+/// Дневной предел токенов исчерпан: рутина не пропадает, а ждёт полуночи записью в журнале запусков.
+/// Рутина цели ведётся самой целью: её срок просто пропускается.
+async fn pause_for_budget(app: &Arc<App>, routine: &Routine) {
+    if !routine.goal_id.is_empty() {
+        note(app, routine, "limit", "Дневной предел токенов исчерпан, запуск пропущен.").await;
+        let _ = app.store.reschedule_routine(&routine.id, "limit").await;
+        return;
+    }
+    let until = crate::limit::next_day_ms(chrono::Local::now()).unwrap_or_else(|| now() + crate::limit::backoff_ms(0));
+    let text = format!("[рутина] {}\n{}", routine.title, routine.prompt);
+    let opts = TurnOptions {
+        source: Some("routine".into()),
+        unattended: true,
+        quiet: routine.quiet,
+        approval_floor: crate::goals::combine_floor(&routine.approval_floor, ""),
+        ..TurnOptions::default()
+    };
+    let origin = crate::runs::Origin::Routine { id: routine.id.clone(), title: routine.title.clone() };
+    crate::runs::pause_unstarted(app, &routine.bot_id, origin, &opts, &text, until, crate::runs::StopReason::Budget, "дневной предел");
+    note(app, routine, "paused", &format!("Дневной предел токенов исчерпан: запуск на паузе до {}.", clock(until))).await;
+    let _ = app.store.reschedule_routine(&routine.id, "paused").await;
 }
 
 pub fn start(app: Arc<App>) {

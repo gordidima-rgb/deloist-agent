@@ -26,8 +26,8 @@ pub(crate) const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const QUESTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Рутина ночью: столько ждём человека один раз за ход, дальше считаем, что его нет.
 const UNATTENDED_WAIT: Duration = Duration::from_secs(5 * 60);
-/// После лимита у основной новые ходы столько времени сразу идут на запасную.
-const FALLBACK_COOLDOWN: Duration = Duration::from_secs(15 * 60);
+/// Пять пауз из-за лимита подряд: лимит не отпускает, дальше решает человек.
+const MAX_LIMIT_PAUSES: u32 = 5;
 const LIMIT_REACHED: &str = "дневной предел токенов исчерпан, рутина остановлена";
 const JOURNAL_TEXT_LIMIT: usize = 600;
 /// Что делегат обязан вернуть: короткий итог, а не отчёт на весь экран.
@@ -72,15 +72,6 @@ fn unattended_wait() -> Duration {
         }
     }
     UNATTENDED_WAIT
-}
-
-fn fallback_cooldown_ms() -> i64 {
-    if cfg!(debug_assertions) {
-        if let Some(ms) = std::env::var("CREW_TEST_FALLBACK_COOLDOWN_MS").ok().and_then(|v| v.parse().ok()) {
-            return ms;
-        }
-    }
-    FALLBACK_COOLDOWN.as_millis() as i64
 }
 
 /// Ход без человека: что он так и не решил.
@@ -191,8 +182,6 @@ pub struct Turns {
     turn_floor: Mutex<HashMap<String, (u64, String)>>,
     /// Номер записи пола: сторож старого хода не трогает пол нового.
     floor_epoch: std::sync::atomic::AtomicU64,
-    /// До какого времени основная модель считается упёршейся в лимит: ключ → метка времени.
-    main_limited_until: Mutex<HashMap<String, i64>>,
     /// Сколько ходов подряд упало у бота: для эскалации уровня модели.
     failure_streaks: Mutex<HashMap<String, u32>>,
     /// Правила «всегда здесь» и разрешения «в этом разговоре».
@@ -220,7 +209,6 @@ impl Default for Turns {
             delegation_from: Mutex::new(HashMap::new()),
             turn_floor: Mutex::new(HashMap::new()),
             floor_epoch: std::sync::atomic::AtomicU64::new(1),
-            main_limited_until: Mutex::new(HashMap::new()),
             failure_streaks: Mutex::new(HashMap::new()),
             perms: crate::grants::Perms::default(),
             messengers: crate::messengers::Store::default(),
@@ -404,23 +392,6 @@ impl Turns {
 
     fn take_missed(&self, bot_id: &str) -> Vec<String> {
         self.unattended.lock().unwrap().remove(bot_id).map(|u| u.missed).unwrap_or_default()
-    }
-
-    /// Основная модель недавно упёрлась в лимит: новый ход сразу идёт на запасную.
-    fn main_recently_limited(&self, key: &str) -> bool {
-        let mut map = self.main_limited_until.lock().unwrap();
-        match map.get(key) {
-            Some(&until) if until > now() => true,
-            Some(_) => {
-                map.remove(key);
-                false
-            }
-            None => false,
-        }
-    }
-
-    fn note_main_limit(&self, key: &str) {
-        self.main_limited_until.lock().unwrap().insert(key.to_string(), now() + fallback_cooldown_ms());
     }
 
     pub fn failure_streak(&self, bot_id: &str) -> u32 {
@@ -1802,6 +1773,87 @@ async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool,
 
 /// Ход к модели. Если провайдер отвечает 400 и жалуется на картинки, запрос уходит ещё раз, но картинки заменены
 /// строкой с путём файла; пара «провайдер и модель» запоминается, и дальше её картинками не кормят.
+/// Конец хода без провала: запись журнала получает это состояние, а человек — строку в чате.
+struct Pause {
+    state: crate::runs::RunState,
+    line: String,
+}
+
+/// Название провайдера для человека: `acp:claude` → `claude`.
+fn provider_name(choice: &ModelChoice) -> String {
+    choice.provider().trim_start_matches("acp:").to_string()
+}
+
+/// Когда закончится окно подписки агента, если в нём осталось не больше 5%: ход без человека в него не входит.
+fn window_end(app: &App, choice: &ModelChoice) -> Option<i64> {
+    let id = choice.driver.strip_prefix("acp:")?;
+    let (left, reset) = app.providers.subscription_left(app, id)?;
+    (left <= 5).then(|| reset.unwrap_or_else(|| now() + crate::limit::backoff_ms(0)))
+}
+
+/// Когда модель снова можно спрашивать: общий «отдых» после лимита, а для хода без человека ещё и почти исчерпанное окно подписки.
+fn unavailable_until(app: &App, choice: &ModelChoice, unattended: bool) -> Option<i64> {
+    app.rest.until(&choice.key()).max(unattended.then(|| window_end(app, choice)).flatten())
+}
+
+/// Срок сброса после лимита: из аккаунта подписки, иначе из текста ошибки, иначе 5 минут с удвоением (до суток).
+fn limit_until(app: &App, choice: &ModelChoice, message: &str, pauses: u32) -> i64 {
+    let account = choice.driver.strip_prefix("acp:").and_then(|id| app.providers.subscription_left(app, id)).filter(|(left, _)| *left <= 5).and_then(|(_, reset)| reset);
+    account
+        .or_else(|| crate::limit::reset_in_error(message, chrono::Local::now()))
+        .filter(|&at| at > now())
+        .unwrap_or_else(|| now() + crate::limit::backoff_ms(pauses))
+}
+
+fn limit_pause(app: &App, bot_id: &str, choice: &ModelChoice, until: i64, english: bool) -> Pause {
+    let provider = provider_name(choice);
+    if app.runs.pauses(bot_id) >= MAX_LIMIT_PAUSES {
+        let text = if english { format!("{provider} limit will not lift: I need you.") } else { format!("Лимит {provider} не отпускает: нужен ты.") };
+        let state = crate::runs::RunState::NeedsHuman { reason: crate::runs::StopReason::Limit, text: text.clone() };
+        return Pause { state, line: text };
+    }
+    let at = crate::scheduler::clock(until);
+    let line = if english { format!("{provider} limit: I will continue at {at}") } else { format!("Лимит {provider}: продолжу в {at}") };
+    Pause { state: crate::runs::RunState::Paused { until_ms: until, reason: crate::runs::StopReason::Limit, webhook: None, note: provider }, line }
+}
+
+/// Предел токенов: дневной — до полуночи, месячный бота — до 1-го числа.
+fn budget_pause(month: bool, english: bool) -> Pause {
+    let local = chrono::Local::now();
+    let next = if month { crate::limit::next_month_ms(local) } else { crate::limit::next_day_ms(local) };
+    let until = next.unwrap_or_else(|| now() + crate::limit::backoff_ms(0));
+    let at = if month {
+        chrono::TimeZone::timestamp_millis_opt(&chrono::Local, until).single().map(|d| d.format("%d.%m").to_string()).unwrap_or_default()
+    } else {
+        crate::scheduler::clock(until)
+    };
+    let (note, line) = match (month, english) {
+        (false, false) => ("дневной предел", format!("Дневной предел токенов исчерпан: продолжу в {at}")),
+        (false, true) => ("daily limit", format!("Daily token limit reached: I will continue at {at}")),
+        (true, false) => ("месячный предел", format!("Месячный лимит бота исчерпан: продолжу {at}")),
+        (true, true) => ("monthly limit", format!("Monthly bot limit reached: I will continue on {at}")),
+    };
+    Pause { state: crate::runs::RunState::Paused { until_ms: until, reason: crate::runs::StopReason::Budget, webhook: None, note: note.into() }, line }
+}
+
+/// Бот сам попросил ждать (`await_event`): строка в чате называет, чего и до какого времени.
+fn event_pause(wait: crate::runs::RunState, english: bool) -> Pause {
+    let line = match &wait {
+        crate::runs::RunState::Paused { until_ms, webhook, note, .. } => {
+            let what = if note.is_empty() { String::new() } else { format!(": {note}") };
+            let at = crate::scheduler::clock(*until_ms);
+            match (webhook.is_some(), english) {
+                (true, false) => format!("Жду события{what}. Если не придёт, продолжу в {at}"),
+                (true, true) => format!("Waiting for an event{what}. If none comes, I will continue at {at}"),
+                (false, false) => format!("Жду{what}. Продолжу в {at}"),
+                (false, true) => format!("Waiting{what}. I will continue at {at}"),
+            }
+        }
+        _ => String::new(),
+    };
+    Pause { state: wait, line }
+}
+
 pub(crate) async fn drive(
     app: &Arc<App>,
     bot: &Bot,
@@ -2036,6 +2088,8 @@ fn run_turn_body(
         let mut failure: Option<String> = None;
         let mut steered = false;
         let mut fallback_model: Option<String> = None;
+        // Ход кончается паузой, а не провалом: лимит, предел токенов, `await_event`.
+        let mut pause: Option<Pause> = None;
         let started_at = now();
         let mut turn_tokens: i64 = 0;
         // Чья модель отвечала последней: для квитанции хода (экраны «Использование» и «Отчёт»).
@@ -2190,9 +2244,11 @@ fn run_turn_body(
                     "model": &main.model, "level": level_after_failures(&bot, failures).map(|level| level.key()),
                 }));
             }
-            // Основная недавно упёрлась в лимит: не тратим на неё запрос, сразу идём на запасную.
+            // Основная отдыхает после лимита (или в окне подписки осталось меньше 5%): не тратим на неё запрос, сразу идём на запасную.
+            // «Продолжить сейчас» от человека отдых отменяет: он решил сам.
+            let forced = journaled && app.runs.is_forced(&bot_id);
             if let Some(spare) = &fallback {
-                if app.turns.main_recently_limited(&main.key()) {
+                if !forced && unavailable_until(&app, &main, unattended).is_some() {
                     current = spare.clone();
                     fallback_model = Some(spare.label());
                     app.turns.emit(json!({
@@ -2202,13 +2258,29 @@ fn run_turn_body(
                     }));
                 }
             }
+            // Запасной нет, а идти некому: ход без человека ждёт, а не бьётся о лимит и не тратит запрос.
+            if journaled && unattended && !forced {
+                let english = app.store.settings().ui_lang == "en";
+                if let Some(until) = unavailable_until(&app, &current, true) {
+                    pause = Some(limit_pause(&app, &bot_id, &current, until, english));
+                    return Ok(());
+                }
+                if crate::limit::month_blocked(app.ledger.tokens_month(&bot_id), bot.monthly_token_limit) {
+                    pause = Some(budget_pause(true, english));
+                    return Ok(());
+                }
+            }
 
             let mut continuations = 0;
             let mut continuation_request = user_text.clone();
             for step in 0..MAX_STEPS {
                 // Живой разговор человек видит и может остановить сам, а ночью следить некому.
                 if unattended && crate::scheduler::over_limit(&app) {
-                    return Err(LIMIT_REACHED.to_string());
+                    if !journaled {
+                        return Err(LIMIT_REACHED.to_string());
+                    }
+                    pause = Some(budget_pause(false, app.store.settings().ui_lang == "en"));
+                    return Ok(());
                 }
                 app.turns.emit(json!({ "type": "step_start", "botId": bot_id, "turnId": turn_id, "step": step }));
 
@@ -2323,13 +2395,18 @@ fn run_turn_body(
                         continue;
                     }
                     // Один переход за ход: если и запасная упала, ход падает с её ошибкой.
-                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none()) else {
+                    let limited = !cancel.is_cancelled() && is_limit_error(&message);
+                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none() && limited) else {
+                        if limited && journaled {
+                            // Запасной нет или и она упала: ход ждёт сброса, а не проваливается.
+                            let until = limit_until(&app, &current, &message, app.runs.pauses(&bot_id));
+                            app.rest.set(&current.key(), until);
+                            pause = Some(limit_pause(&app, &bot_id, &current, until, app.store.settings().ui_lang == "en"));
+                            return Ok(());
+                        }
                         return Err(message);
                     };
-                    if cancel.is_cancelled() || !is_limit_error(&message) {
-                        return Err(message);
-                    }
-                    app.turns.note_main_limit(&main.key());
+                    app.rest.set(&main.key(), limit_until(&app, &main, &message, 0));
                     app.turns.emit(json!({
                         "type": "model_switched", "botId": bot_id, "turnId": turn_id,
                         "from": main.label(), "to": spare.label(), "reason": shorten(&message, 200),
@@ -2416,6 +2493,10 @@ fn run_turn_body(
                     crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len) + text.chars().count()).await;
                     saved.push(first);
                     flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
+                    if let Some(wait) = app.runs.take_wait(&bot_id) {
+                        pause = Some(event_pause(wait, app.store.settings().ui_lang == "en"));
+                        break;
+                    }
                     if continue_task {
                         continuations += 1;
                         model_messages.push(json!({ "role": "assistant", "content": text }));
@@ -2461,6 +2542,10 @@ fn run_turn_body(
                 session_step.tool_ms = now() - model_done;
                 crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len)).await;
                 if cancel.is_cancelled() { return Err("остановлено".into()); }
+                if let Some(wait) = app.runs.take_wait(&bot_id) {
+                    pause = Some(event_pause(wait, app.store.settings().ui_lang == "en"));
+                    break;
+                }
 
                 // Картинку можно показать модели только после всех ответов инструментов этого шага.
                 if let Some(image) = app.browsers.take_image(&bot_id) {
@@ -2491,6 +2576,11 @@ fn run_turn_body(
         }
         .await;
 
+        if let Some(p) = &pause {
+            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": p.line, "at": now() });
+            app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
+            saved.push(entry);
+        }
         if let Err(message) = result {
             let aborted = cancel.is_cancelled();
             let english = app.store.settings().ui_lang == "en";
@@ -2526,6 +2616,7 @@ fn run_turn_body(
         if journaled {
             let state = match (&failure, aborted) {
                 (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
+                (None, false) if pause.is_some() => pause.as_ref().map(|p| p.state.clone()).unwrap_or(crate::runs::RunState::Done),
                 (Some(message), false) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Unknown, text: shorten(message, JOURNAL_TEXT_LIMIT) },
                 (None, false) => crate::runs::RunState::Done,
             };
@@ -2570,7 +2661,7 @@ fn run_turn_body(
             }
         }
         // Квитанция хода: тихие рутины («Сообщать нечего») и остановка человеком ответом не считаются.
-        if !quiet && !aborted {
+        if !quiet && !aborted && pause.is_none() {
             if last_model.is_empty() {
                 let choice = main_choice(&app, &bot, &settings);
                 last_model = choice.label();
@@ -2594,14 +2685,17 @@ fn run_turn_body(
         if let Some(routine) = &opts.routine {
             let status = match failure.as_deref() {
                 _ if aborted => "stopped",
-                Some(LIMIT_REACHED) => "limit",
                 Some(_) => "failed",
+                None if matches!(&pause, Some(Pause { state: crate::runs::RunState::Paused { .. }, .. })) => "paused",
+                None if pause.is_some() => "needs",
                 None if quiet => "quiet",
                 None if !missed.is_empty() => "needs",
                 None => "ok",
             };
             let summary = if let Some(f) = failure.as_deref() {
                 shorten(f, JOURNAL_TEXT_LIMIT)
+            } else if let Some(p) = &pause {
+                p.line.clone()
             } else if quiet {
                 String::new()
             } else if opts.quiet && is_quiet_answer(&final_text) {

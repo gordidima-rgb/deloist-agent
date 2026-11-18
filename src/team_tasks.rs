@@ -489,6 +489,12 @@ async fn run(app: Arc<App>, id: String) {
                 finish(&app, &id, "error", e, Vec::new()).await;
                 return;
             }
+            // Ход встал на паузу (лимит, предел): задача не закрыта, её продолжит журнал запусков через `requeue`.
+            Ok(_) if app.runs.paused().iter().any(|r| matches!(&r.origin, crate::runs::Origin::Team { task_id } if *task_id == id)) => {
+                app.tasks.update(&id, |t| t.state = "paused".into());
+                app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": "paused" }));
+                return;
+            }
             Ok(text) => {
                 let files = fresh_files(&app.store, &target.id, started);
                 let (state, summary) = if text.trim() == NO_REPLY { ("error", text) } else { ("done", text) };
