@@ -15,7 +15,7 @@
     nextBucket,
     checklistProgress,
     dueInfo,
-    editorFromRecurrence,
+    recurrenceSummary,
     matchesQuery,
     todayIso,
     OWNERS,
@@ -399,18 +399,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu, T
     return info.time ? `${day}, ${info.time}` : day;
   }
 
-  function repeatText(rule) {
-    const e = editorFromRecurrence(rule);
-    const names = [tr('Пн'), tr('Вт'), tr('Ср'), tr('Чт'), tr('Пт'), tr('Сб'), tr('Вс')];
-    const days = e.weekdays.map((d) => names[d - 1]).join(', ');
-    if (e.preset === 'daily') return tr('каждый день');
-    if (e.preset === 'weekdays') return tr('по будням');
-    if (e.preset === 'weekly') return tr('каждую неделю: {days}', { days });
-    if (e.preset === 'biweekly') return tr('раз в 2 недели: {days}', { days });
-    if (e.preset === 'monthly') return tr('каждый месяц');
-    if (e.preset === 'yearly') return tr('каждый год');
-    return tr('повторяется');
-  }
+  const repeatText = (rule) => recurrenceSummary(rule, tr, locale());
 </script>
 
 {#snippet row(todo)}

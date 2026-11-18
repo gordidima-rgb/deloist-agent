@@ -8239,11 +8239,13 @@ const isTime = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
 
 function scheduleText(r) {
   if (r.hook) return tr('по внешнему вызову');
+  const timed = window.DeloistUI.routineSchedule.timedScheduleText(r, tr, window.LOCALE, (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'long' }));
+  if (timed) return timed;
   const low = Number(r.everyMinutes) || 60;
   const high = Number(r.everyMaxMinutes) || 0;
   const every = high > low ? tr('каждые {from}–{to} мин', { from: low, to: high }) : tr('каждые {minutes} мин', { minutes: low });
-  const parts = [isTime(r.at) ? tr('в {time}', { time: r.at }) : every];
-  if (!isTime(r.at) && isTime(r.windowFrom) && isTime(r.windowTo)) parts.push(`${r.windowFrom}–${r.windowTo}`);
+  const parts = [every];
+  if (isTime(r.windowFrom) && isTime(r.windowTo)) parts.push(`${r.windowFrom}–${r.windowTo}`);
   const days = [...new Set((r.days || []).map(Number).filter((d) => d >= 1 && d <= 7))].sort((a, b) => a - b);
   const key = days.join('');
   if (key === '12345') parts.push(tr('по будням'));
@@ -8265,7 +8267,9 @@ function nextText(ts) {
   if (!Number.isFinite(n) || n <= 0) return '';
   const d = new Date(n);
   if (sameDay(d, new Date())) return timeOf(n);
-  return `${d.toLocaleDateString(window.LOCALE, { weekday: 'short' })} ${timeOf(n)}`;
+  // Дальше недели день недели не однозначен: показываем число и месяц.
+  const far = n - Date.now() > 6 * 864e5;
+  return `${d.toLocaleDateString(window.LOCALE, far ? { day: 'numeric', month: 'short' } : { weekday: 'short' })} ${timeOf(n)}`;
 }
 
 function whenText(ts) {
@@ -9587,28 +9591,35 @@ function selectedDays() {
     .map((b) => Number(b.dataset.day));
 }
 
+// Расписание новой рутины рисует Svelte (по времени / по интервалу / один раз); поля интервала и дни остаются в форме.
+let routineSchedule = { kind: 'at', at: '', date: '', startOn: '', recurrence: null };
+let routineScheduleView = null;
+
+function mountRoutineSchedule() {
+  routineScheduleView?.destroy();
+  routineScheduleView = window.DeloistUI.mountRoutineSchedule($('#rt-schedule'), {
+    onchange: (next) => {
+      routineSchedule = next;
+      syncRoutineMode();
+    },
+  });
+}
+
 function syncRoutineMode() {
   const hook = $('#rt-hook')?.checked;
-  const atMode = $('#routine-mode').value === 'at';
-  $('#rt-every-box').hidden = hook || atMode;
-  $('#rt-at-box').hidden = hook || !atMode;
-  const days = $('#rt-days').closest('.field');
-  if (days) days.hidden = Boolean(hook);
-  const eventsBox = $('#rt-hook-events-box');
-  if (eventsBox) eventsBox.hidden = !hook;
+  const every = routineSchedule.kind === 'every';
+  $('#rt-schedule').hidden = Boolean(hook);
+  $('#rt-every-box').hidden = hook || !every;
+  $('#rt-days-box').hidden = hook || !every;
+  $('#rt-hook-events-box').hidden = !hook;
 }
 
 function bindRoutineForm() {
-  $('#routine-mode').addEventListener('change', syncRoutineMode);
+  mountRoutineSchedule();
   $('#rt-hook').addEventListener('change', () => {
-    const hook = $('#rt-hook').checked;
-    $('#rt-hook-box').hidden = !hook || !$('#rt-hook-url').value;
-    $('#rt-hook-events-box').hidden = !hook;
     // Расписание и вебхук взаимоисключающие: одно и то же не настраиваем дважды.
-    $('#routine-mode').disabled = hook;
-    $('#rt-every-box').hidden = hook || $('#routine-mode').value === 'at';
-    $('#rt-at-box').hidden = hook || $('#routine-mode').value !== 'at';
-    $('#rt-days').closest('.field').hidden = hook;
+    $('#rt-hook-box').hidden = !$('#rt-hook').checked || !$('#rt-hook-url').value;
+    syncRoutineMode();
   });
   $$('#rt-days .day-btn').forEach((b) =>
     b.addEventListener('click', () => b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'))),
@@ -9622,25 +9633,27 @@ function bindRoutineForm() {
   $('#form-routine').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
-    const atMode = f.mode.value === 'at';
-    if (atMode && !f.at.value) {
-      toast(tr('Выбери время запуска'));
+    const hook = $('#rt-hook').checked;
+    const problem = hook ? '' : window.DeloistUI.routineSchedule.scheduleProblem(routineSchedule);
+    if (problem) {
+      toast(problem === 'past' ? tr('Выбери момент в будущем') : tr('Выбери время запуска'));
       return;
     }
+    const every = routineSchedule.kind === 'every';
     const body = {
       botId: f.botId.value,
       title: f.title.value.trim(),
       prompt: f.prompt.value.trim(),
       everyMinutes: Number(f.everyMinutes.value) || 60,
-      everyMaxMinutes: atMode ? 0 : Number(f.everyMaxMinutes.value) || 0,
-      days: selectedDays(),
-      at: atMode ? f.at.value : '',
-      windowFrom: atMode ? '' : f.windowFrom.value,
-      windowTo: atMode ? '' : f.windowTo.value,
+      everyMaxMinutes: every ? Number(f.everyMaxMinutes.value) || 0 : 0,
+      days: every ? selectedDays() : [],
+      windowFrom: every ? f.windowFrom.value : '',
+      windowTo: every ? f.windowTo.value : '',
+      ...(hook ? {} : window.DeloistUI.routineSchedule.scheduleFields(routineSchedule)),
       catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
       quiet: f.quiet.checked,
-      hook: $('#rt-hook').checked,
-      hookEvents: $('#rt-hook').checked
+      hook,
+      hookEvents: hook
         ? String($('#rt-hook-events')?.value || '')
             .split(',')
             .map((s) => s.trim())
@@ -9655,7 +9668,7 @@ function bindRoutineForm() {
       f.reset();
       $$('#rt-days .day-btn').forEach((b) => b.setAttribute('aria-pressed', 'false'));
       // Форма вернулась в обычный вид: расписание снова доступно.
-      $('#routine-mode').disabled = false;
+      mountRoutineSchedule();
       $('#rt-hook-box').hidden = true;
       $('#rt-hook-url').value = '';
       syncRoutineMode();

@@ -1016,14 +1016,8 @@
                   <span>Бот</span>
                   <select name="botId" id="routine-bot"></select>
                 </label>
-                <label class="field">
-                  <span>Когда</span>
-                  <select name="mode" id="routine-mode">
-                    <option value="every">Каждые N минут</option>
-                    <option value="at">В определённое время</option>
-                  </select>
-                </label>
               </div>
+              <div id="rt-schedule"></div>
               <div class="row" id="rt-every-box">
                 <label class="field small">
                   <span>Каждые, мин</span>
@@ -1043,12 +1037,6 @@
                 </label>
                 <button type="button" class="k-btn k-btn--ghost" id="rt-night">Ночью</button>
               </div>
-              <div class="row" id="rt-at-box" hidden>
-                <label class="field small">
-                  <span>Во сколько</span>
-                  <input name="at" type="time" class="k-input" />
-                </label>
-              </div>
               <label class="field">
                 <span>Если пропущен запуск</span>
                 <select name="catchUp">
@@ -1056,7 +1044,7 @@
                   <option value="skip">Пропустить</option>
                 </select>
               </label>
-              <div class="field">
+              <div class="field" id="rt-days-box">
                 <span>Дни (ни одного значит каждый день)</span>
                 <div class="days" id="rt-days">
                   <button type="button" class="day-btn" data-day="1" aria-pressed="false">Пн</button>

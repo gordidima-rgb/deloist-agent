@@ -56,6 +56,8 @@ import UsageScreen from './components/usage/UsageScreen.svelte';
 import RemindersTab from './components/routines/RemindersTab.svelte';
 import RoutinesPane from './components/routines/RoutinesPane.svelte';
 import TodosTab from './components/routines/TodosTab.svelte';
+import RoutineSchedule from './components/routines/RoutineSchedule.svelte';
+import * as routineSchedule from './lib/routineSchedule.js';
 import HabitsTab from './components/routines/HabitsTab.svelte';
 import Report from './components/report/Report.svelte';
 import { bindReportEntry } from './lib/reportEntry.js';
@@ -175,6 +177,9 @@ window.DeloistUI = {
   mountHabitsTab: (target, props) => mountComponent(HabitsTab, target, props),
   mountReport: (target, props) => mountComponent(Report, target, props),
   mountTodosTab: (target, props) => mountComponent(TodosTab, target, props),
+  // Расписание в форме новой рутины: по времени, по интервалу, один раз; routineSchedule — поля для сервера и подпись.
+  mountRoutineSchedule: (target, props) => mountComponent(RoutineSchedule, target, props),
+  routineSchedule,
   shouldShowSignIn: signInLib.shouldShowSignIn,
   // Окно «Подключить свою ИИ»: список слева (строки кита, логотипы как в выборе модели).
   ProviderList,
