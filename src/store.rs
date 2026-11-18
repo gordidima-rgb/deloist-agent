@@ -393,6 +393,8 @@ pub struct Bot {
     pub browser_sites: Vec<String>,
     /// Политика подтверждений: `ask` (по умолчанию), `auto` или `strict`.
     pub approval: String,
+    /// Виды действий, которые бот спрашивает всегда, в любом режиме и без «запомнить» (`tools::ALWAYS_ASK_KINDS`). Меняет только человек в окне.
+    pub always_ask: Vec<String>,
     /// Подключённые навыки: идентификаторы из state.skills.
     pub skills: Vec<String>,
     /// Какой из двенадцати стеклянных шаров (web/avatar.js, ORBS) стоит у бота. -1 — ещё не назначен: при загрузке получает шар по id.
@@ -434,6 +436,7 @@ impl Default for Bot {
             created_at: 0,
             browser_sites: Vec::new(),
             approval: "ask".into(),
+            always_ask: Vec::new(),
             skills: Vec::new(),
             skin: -1,
             pet: false,
@@ -1092,6 +1095,12 @@ pub fn check_bot_patch(patch: &Value) -> Result<(), String> {
     if let Some(v) = patch.get("monthlyTokenLimit").filter(|v| !v.is_null()) {
         if !v.as_i64().is_some_and(|n| (0..=1_000_000_000_000).contains(&n)) {
             return Err("monthlyTokenLimit: целое число токенов, 0 или пусто — без предела".into());
+        }
+    }
+    if let Some(v) = patch.get("alwaysAsk").filter(|v| !v.is_null()) {
+        let known = v.as_array().is_some_and(|list| list.iter().all(|k| k.as_str().is_some_and(|k| crate::tools::ALWAYS_ASK_KINDS.iter().any(|(id, _)| *id == k))));
+        if !known {
+            return Err("alwaysAsk: список из command, send, publish, pay, delete, files, bots".into());
         }
     }
     if let Some(v) = patch.get("removeGuest").filter(|v| !v.is_null()) {
@@ -2119,6 +2128,7 @@ impl Store {
             created_at: now(),
             browser_sites: Vec::new(),
             approval: approval_mode(input.get("approval")),
+            always_ask: Vec::new(),
             skills: string_list(input.get("skills")),
             skin: look_index(input.get("skin"), MAX_SKIN).unwrap_or(-1),
             pet: false,
@@ -2208,6 +2218,9 @@ impl Store {
             }
             if let Some(v) = patch.get("approval").filter(|v| !v.is_null()) {
                 bot.approval = approval_mode(Some(v));
+            }
+            if let Some(v) = patch.get("alwaysAsk") {
+                bot.always_ask = string_list(Some(v));
             }
             if let Some(v) = patch.get("skills").filter(|v| !v.is_null()) {
                 bot.skills = string_list(Some(v));

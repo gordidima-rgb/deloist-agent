@@ -321,15 +321,15 @@ async fn gate_risky(app: &Arc<App>, bot: &Bot, session: &Session, action: &str, 
     }
     // Правило мессенджера «можно» не снимает вопрос про оплату и пароли. «Читать: можно» необратимое
     // не снимает вовсе: «Подтвердить», «Пригласить» по словам не отправка и попали бы в чтение.
-    let kind_now = crate::grants::risky_kind(name).unwrap_or("send");
-    if pass.allowed && !pass.read && !matches!(kind_now, "pay" | "secure") {
+    let kind = crate::grants::risky_kind(name).unwrap_or("send");
+    let url = session.with_page(|page| page.url.clone())?;
+    let short: String = name.chars().take(200).collect();
+    let scope = site_scope("browser_risky", &url, kind, "click", short.trim());
+    // Список «Всегда спрашивать» сильнее правил мессенджера.
+    if pass.allowed && !pass.read && !matches!(kind, "pay" | "secure") && !crate::tools::always_asks(bot, "browser_risky", &serde_json::Value::Null, Some(&scope)) {
         return Ok(());
     }
-    let url = session.with_page(|page| page.url.clone())?;
     let title = format!("Похоже на необратимое действие: {action}");
-    let short: String = name.chars().take(200).collect();
-    let kind = crate::grants::risky_kind(name).unwrap_or("send");
-    let scope = site_scope("browser_risky", &url, kind, "click", short.trim());
     ask(app, bot, "browser_risky", &title, &format!("Элемент: {short}\nАдрес: {url}"), scope, false).await
 }
 
@@ -343,12 +343,12 @@ async fn gate_frame(app: &Arc<App>, bot: &Bot, session: &Session) -> Result<(), 
 
 /// Загрузка файла — отправка наружу. Место — сайт и папка файла.
 async fn gate_upload(app: &Arc<App>, bot: &Bot, session: &Session, rel: &str, pass: &Pass) -> Result<(), String> {
-    if pass.allowed {
-        return Ok(());
-    }
     let url = session.with_page(|page| page.url.clone())?;
     let folder = std::path::Path::new(rel).parent().map(|p| p.display().to_string()).filter(|p| !p.is_empty()).unwrap_or_else(|| ".".into());
     let mut scope = site_scope("browser_upload", &url, "send", "upload", rel);
+    if pass.allowed && !crate::tools::always_asks(bot, "browser_upload", &serde_json::Value::Null, Some(&scope)) {
+        return Ok(());
+    }
     if scope.grantable {
         scope.place = format!("{} ← {folder}", scope.place);
     }

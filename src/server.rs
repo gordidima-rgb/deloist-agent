@@ -807,9 +807,9 @@ async fn patch_bot(
         return fail(StatusCode::FORBIDDEN, "предел токенов меняет только человек в окне");
     }
     // Режим вопросов и список сайтов, где бот действует без карточки, расширяют его права: меняет только человек в окне.
-    // Скрипт бота с ключом программы не должен ни включить «Свободу действий», ни выдать себе сайт.
-    if (body.get("approval").is_some() || body.get("browserSites").is_some()) && window.is_none() {
-        return fail(StatusCode::FORBIDDEN, "режим вопросов и список сайтов меняет только человек в окне");
+    // Скрипт бота с ключом программы не должен ни включить «Свободу действий», ни выдать себе сайт, ни снять «Всегда спрашивать».
+    if (body.get("approval").is_some() || body.get("browserSites").is_some() || body.get("alwaysAsk").is_some()) && window.is_none() {
+        return fail(StatusCode::FORBIDDEN, "режим вопросов, список сайтов и «Всегда спрашивать» меняет только человек в окне");
     }
     // Роль, инструкции и ранг определяют, чем бот занимается и как себя ведёт: скрипт с ключом программы правит их только
     // карточкой propose_bot_change, которую принимает человек.
@@ -1010,6 +1010,14 @@ async fn get_messengers(State(app): Shared, Path(id): Path<String>) -> Response 
     let places: Vec<String> = perms.grants(None).into_iter().filter(|g| g.bot_id == id).map(|g| g.place).chain(perms.rules().into_iter().filter(|r| r.bot_id == id).map(|r| r.place)).collect();
     app.turns.messengers.mark_from_places(&id, places.iter().map(String::as_str));
     ok(json!({ "messengers": app.turns.messengers.entries(&id), "registry": registry }))
+}
+
+/// Что бот может без спроса, о чём спросит и чего не сделает. Только окно: сводка показывает, какие действия идут без карточки.
+async fn get_rights(State(app): Shared, Path(id): Path<String>) -> Response {
+    match app.store.bot(&id) {
+        Some(bot) => ok(crate::rights::summary(&app, &bot)),
+        None => fail(StatusCode::NOT_FOUND, "такого бота нет"),
+    }
 }
 
 /// Человек меняет одно правило бота в мессенджере. Модель и скрипт бота сюда не попадают (guard::human_only).
@@ -4350,6 +4358,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/bots/{id}/browser/sign-in", post(browser_sign_in))
         .route("/api/bots/{id}/browser-tool", post(browser_tool))
         .route("/api/bots/{id}/sign-in-state", axum::routing::put(put_sign_in_state))
+        .route("/api/bots/{id}/rights", get(get_rights))
         .route("/api/bots/{id}/messengers", get(get_messengers))
         .route("/api/bots/{id}/messengers/{messenger}/rules", axum::routing::put(put_messenger_rule))
         .route("/api/approvals/{id}", post(approval))

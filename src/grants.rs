@@ -902,6 +902,7 @@ pub fn scope_for(app: &crate::App, bot: &crate::store::Bot, name: &str, args: &V
     // не запускал, и правило «всегда» не должно молча менять его расписание.
     let unattended = app.turns.is_unattended(&bot.id) || matches!(crate::goals::current_run(&bot.id), Some(crate::goals::Run::CheckIn));
     let schedule_tool = crate::routine_tools::is_routine_tool(name) || crate::goal_tools::is_goal_tool(name);
-    let scope = if crate::tools::never_remember(name) || (schedule_tool && unattended) { scope.once_only() } else { scope };
-    Some(scope)
+    // «Всегда спрашивать» (список бота): ни правило, ни «в этом разговоре» такой вызов не пропускают.
+    let once = crate::tools::never_remember(name) || (schedule_tool && unattended) || crate::tools::always_asks(bot, name, args, Some(&scope));
+    Some(if once { scope.once_only() } else { scope })
 }

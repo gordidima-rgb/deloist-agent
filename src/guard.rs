@@ -604,7 +604,8 @@ fn human_only(path: &str) -> bool {
                 // Запуск редактора кода на компьютере человека: только по его кнопке в просмотрщике файлов.
                 || path.ends_with("/file/open-in-vscode")))
         // Правила бота в мессенджерах (что можно писать, вступать, удалять): задаёт только человек в окне.
-        || (path.starts_with("/api/bots/") && (path.ends_with("/messengers") || path.contains("/messengers/")))
+        // Сводка прав (`/rights`) показывает то же, что видно по правилам мессенджеров и режиму: читает тоже только окно.
+        || (path.starts_with("/api/bots/") && (path.ends_with("/messengers") || path.contains("/messengers/") || path.ends_with("/rights")))
         // Перенос ботов из Hermes создаёт ботов и пишет их персоны и память: решает человек.
         || path.starts_with("/api/import/hermes")
         // Передача задачи в группе запускает ход бота так же, как сообщение человека.

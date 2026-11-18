@@ -704,6 +704,12 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
             return ApprovalResult::Denied;
         }
     }
+    // «Всегда спрашивать»: карточки браузера и ACP приходят сюда без аргументов вызова, вид берётся из места (`scope.kind`) и имени.
+    // Такой вызов не берёт ни правило, ни разговор и не предлагает «запомнить»; позднее «да» на ровно этот вызов (`take_once`) работает.
+    if let Some(bot) = app.store.bot(bot_id) {
+        let tool = question.tool;
+        question.scope = question.scope.take().map(|scope| if crate::tools::always_asks(&bot, tool, &Value::Null, Some(&scope)) { scope.once_only() } else { scope });
+    }
     if let Some(scope) = &question.scope {
         match app.turns.perms.find(bot_id, conv.as_deref(), scope) {
             Some(crate::grants::Decided::Rule(id)) => {

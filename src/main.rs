@@ -95,6 +95,7 @@ mod providers;
 mod openrouter_login;
 mod queue;
 mod reach;
+mod rights;
 mod routine_tools;
 mod rooms;
 mod runs;

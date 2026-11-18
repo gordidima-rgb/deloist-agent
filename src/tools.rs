@@ -460,9 +460,55 @@ pub fn needs_approval(app: &App, bot: &Bot, name: &str) -> bool {
     policy_needs_approval(&bot.approval, name, false, false)
 }
 
+/// Виды действий, которые человек может отметить «спрашивать всегда» (`Bot.always_ask`), с подписью для окна.
+pub const ALWAYS_ASK_KINDS: [(&str, &str); 7] = [
+    ("command", "запуск команд"),
+    ("send", "отправка сообщений и писем"),
+    ("publish", "публикация и выпуск"),
+    ("pay", "оплата и платные вызовы"),
+    ("delete", "удаление"),
+    ("files", "передача файлов другим ботам"),
+    ("bots", "создание и правка ботов, рутин и процессов"),
+];
+
+/// Какой из видов `ALWAYS_ASK_KINDS` у вызова. `scope` — область карточки, если она уже есть: у браузера и ACP вид берётся из неё.
+fn ask_kind(name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> Option<&'static str> {
+    if name == "run_command" {
+        return Some("command");
+    }
+    if name == "share_file" || (name == "assign_task" && args.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())) {
+        return Some("files");
+    }
+    if matches!(name, "create_bot" | "update_bot") || (crate::routine_tools::is_routine_tool(name) && name != "list_routines") || crate::workflow_tools::is_mutating(name) {
+        return Some("bots");
+    }
+    let kind = match scope {
+        Some(scope) => scope.kind.as_str(),
+        None if is_read_only(name) => "",
+        None => crate::grants::risky_kind(&name.replace('_', " ")).unwrap_or(""),
+    };
+    ["send", "publish", "pay", "delete"].into_iter().find(|k| *k == kind)
+}
+
+/// Спрашивает ли бот этот вызов всегда, в любом режиме, по списку «Всегда спрашивать» (`Bot.always_ask`).
+pub fn always_asks(bot: &Bot, name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> bool {
+    !bot.always_ask.is_empty() && ask_kind(name, args, scope).is_some_and(|kind| bot.always_ask.iter().any(|k| k == kind))
+}
+
 /// То же с учётом аргументов. В режиме «спрашивать» своя папка и чтение где угодно идут
-/// без вопроса, а изменения вне своей папки спрашиваются (см. `reach`).
+/// без вопроса, а изменения вне своей папки спрашиваются (см. `reach`). Список «Всегда спрашивать» сильнее режима.
 pub fn needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> bool {
+    if !bot.always_ask.is_empty() && always_asks(bot, name, args, crate::grants::scope_for(app, bot, name, args).as_ref()) {
+        // Команду, которую выполнение всё равно откажет (секреты программы), карточкой не спрашиваем.
+        let command = arg(args, "command");
+        return name != "run_command"
+            || (command_refused(app, &bot.id, command).is_none()
+                && crate::reach::command_secret(command, &app.store.workspace(&bot.id), app.store.data_dir()).is_none());
+    }
+    mode_needs_approval_for(app, bot, name, args)
+}
+
+pub(crate) fn mode_needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> bool {
     if name == "write_file" && special_write_guard(app, &bot.id, arg(args, "path")) {
         return true;
     }
@@ -1947,5 +1993,57 @@ mod effect_tests {
         assert_eq!(effect("browser_nav", &json!({ "action": "open" })), External);
         assert_eq!(effect("browser_nav", &json!({ "action": "back" })), Local);
         assert_eq!(effect("write_file", &json!({})), Local);
+    }
+}
+
+#[cfg(test)]
+mod always_ask_tests {
+    use super::{always_asks, ALWAYS_ASK_KINDS};
+    use crate::grants::Scope;
+    use crate::store::Bot;
+    use serde_json::{json, Value};
+
+    fn bot(kinds: &[&str]) -> Bot {
+        Bot { always_ask: kinds.iter().map(|k| k.to_string()).collect(), ..Bot::default() }
+    }
+
+    #[test]
+    fn empty_list_asks_nothing_extra() {
+        let b = bot(&[]);
+        for name in ["run_command", "share_file", "create_bot", "delete_todo"] {
+            assert!(!always_asks(&b, name, &json!({}), None), "{name}");
+        }
+    }
+
+    #[test]
+    fn each_kind_maps_its_own_calls() {
+        let files = json!({ "files": ["a.txt"] });
+        assert!(always_asks(&bot(&["command"]), "run_command", &json!({}), None));
+        assert!(!always_asks(&bot(&["command"]), "write_file", &json!({}), None));
+        assert!(always_asks(&bot(&["files"]), "share_file", &json!({}), None));
+        assert!(always_asks(&bot(&["files"]), "assign_task", &files, None));
+        assert!(!always_asks(&bot(&["files"]), "assign_task", &json!({ "files": [] }), None), "без файлов передача карточки не требует");
+        for name in ["create_bot", "update_bot", "create_routine", "run_routine", "delete_routine", "create_workflow", "run_workflow"] {
+            assert!(always_asks(&bot(&["bots"]), name, &json!({}), None), "{name}");
+        }
+        assert!(!always_asks(&bot(&["bots"]), "list_routines", &json!({}), None));
+        assert!(!always_asks(&bot(&["bots"]), "read_file", &json!({}), None));
+    }
+
+    #[test]
+    fn site_and_tool_kinds_come_from_the_scope_or_the_name() {
+        for kind in ["send", "publish", "pay", "delete"] {
+            let scope = Scope::new("browser_risky", "x.ru", kind, "click", "кнопка");
+            assert!(always_asks(&bot(&[kind]), "browser_risky", &Value::Null, Some(&scope)), "{kind}");
+            assert!(!always_asks(&bot(&["command"]), "browser_risky", &Value::Null, Some(&scope)), "{kind}: чужой вид");
+        }
+        assert!(always_asks(&bot(&["delete"]), "delete_todo", &json!({}), None));
+        assert!(!always_asks(&bot(&["delete"]), "list_todos", &json!({}), None), "чтение не спрашиваем");
+    }
+
+    #[test]
+    fn the_fixed_set_has_seven_kinds() {
+        let ids: Vec<&str> = ALWAYS_ASK_KINDS.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, ["command", "send", "publish", "pay", "delete", "files", "bots"]);
     }
 }

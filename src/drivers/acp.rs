@@ -1807,15 +1807,18 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
         (crate::tools::autorun_path(p) && bot.approval != "auto")
             || crate::tools::needs_approval_for(req.app, bot, "write_file", &json!({"path":p.to_string_lossy()})));
     let conflicting_known = known.is_some() && safe_known.is_none();
-    let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
+    // Список «Всегда спрашивать» сильнее режима и сильнее разборов ниже: команда и удаление агента спрашиваются каждый раз.
+    let delete_scope = (kind == "delete").then(|| crate::grants::Scope::new("acp", "", "delete", "delete", ""));
+    let always = !ours && crate::tools::always_asks(bot, our_tool_for(kind), &Value::Null, delete_scope.as_ref());
+    let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || always || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
     // Команда только названием (Antigravity), которая по строгому разбору лишь читает: карточка не нужна, как у своего `run_command`.
-    if ask && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
+    if ask && !always && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
         && crate::tools::acp_title_command_is_read_only(req.app, bot, title_command)
     {
         ask = false;
     }
     // Дописать строки данных в свой файл (`cat >> x.csv <<'EOF'`): карточка не нужна, пока файл не защищённый и лежит в своей папке.
-    if ask && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
+    if ask && !always && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
         && crate::tools::acp_title_command_is_own_data_write(req.app, bot, title_command)
     {
         ask = false;
