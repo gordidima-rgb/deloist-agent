@@ -72,7 +72,9 @@ fn list_caps_are_checked() {
     let work = temp("rf-caps");
     let many: Vec<Value> = (0..=MAX_FOLDERS).map(|_| json!(work.to_str().unwrap())).collect();
     assert!(check_folders(&data, &json!(many)).is_err(), "слишком много");
-    let twice = check_folders(&data, &json!([work.to_str().unwrap(), work.to_str().unwrap().to_uppercase()]));
+    // Регистр в путях не различает только Windows; на Linux `A` и `a` — разные папки.
+    let again = if cfg!(windows) { work.to_str().unwrap().to_uppercase() } else { work.to_str().unwrap().to_string() };
+    let twice = check_folders(&data, &json!([work.to_str().unwrap(), again]));
     assert_eq!(twice.map(|l| l.len()).unwrap_or(2), 1, "повтор схлопывается");
     assert!(check_folders(&data, &json!("C:/x")).is_err(), "не список");
     assert!(check_folders(&data, &json!([5])).is_err(), "не строка");

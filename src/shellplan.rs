@@ -1142,6 +1142,10 @@ mod tests {
 
     #[test]
     fn the_command_line_wrappers_respect_what_cmd_would_do() {
+        // Разбор рассчитан на cmd.exe и вне Windows выключен; здесь проверяется сам разбор на любой системе.
+        fn script_from_cmdline(command: &str) -> Option<String> {
+            script_from_cmdline_for(command, true)
+        }
         assert_eq!(script_from_cmdline("pwsh -NoProfile -Command \"Set-Content a.txt 'x'\"").as_deref(), Some("Set-Content a.txt 'x'"));
         assert!(script_from_cmdline("pwsh -NoProfile -Command 'Set-Content a.txt x'").is_none(), "в cmd одинарные кавычки не защищают");
         // Программа — голое имя: путь, расширение и кавычки вокруг имени не принимаются.
