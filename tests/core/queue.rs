@@ -875,13 +875,14 @@ async fn moved_order_survives_a_restart() {
     first.keep_data();
     drop(first);
 
-    // Продолжение прерванного хода занимает бота: очередь ждёт его конца и порядок виден целиком.
+    // Ход, стоявший на карточке, после перезапуска ждёт решения человека и бота не занимает: первым идёт «c»,
+    // как и было передвинуто, а «a» и «b» ждут за ним в том же порядке.
     let gate = Arc::new(tokio::sync::Notify::new());
     *fake.script.lock().unwrap() = vec![Step::Hold(gate.clone())];
     let second = Crew::start_at(dir, &[]).await;
     let queue = second.ok("GET", &format!("/api/bots/{bot}/queue"), None).await;
     assert_eq!(queue["paused"], false, "после перезапуска очередь не стоит: {queue}");
-    assert_eq!(queue_texts(&queue), ["c", "a", "b"], "порядок после перезапуска потерян: {queue}");
+    assert_eq!(queue_texts(&queue), ["a", "b"], "порядок после перезапуска потерян: {queue}");
 }
 
 
