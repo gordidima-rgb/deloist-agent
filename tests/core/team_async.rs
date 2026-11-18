@@ -146,8 +146,10 @@ impl Team {
         results.split_off(results.len().saturating_sub(calls.len()))
     }
 
+    /// Рабочая папка бота: участники «Редакции» работают в общей папке команды, посторонний — в своей.
     fn workspace(&self, bot: &str) -> PathBuf {
-        self.crew.data_dir.join("workspaces").join(bot)
+        let name = if bot == self.outsider { bot.to_string() } else { format!("team_{}", self.room) };
+        self.crew.data_dir.join("workspaces").join(name)
     }
 
     fn tasks_file(&self) -> Vec<Value> {
@@ -688,4 +690,27 @@ async fn a_nested_task_saved_without_its_chain_is_closed_not_run() {
     assert!(stored_state(&crew, "task_old")["summary"].as_str().unwrap().contains("цепочка передачи потеряна"));
     // Задача верхнего уровня цепочки не имеет и идёт как раньше.
     common::wait_until("верхняя идёт", 30, || async { stored_state(&crew, "task_top")["state"] == "done" }).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deadline_validation_and_tasks_list_expose_started_by_and_tokens() {
+    let t = team("async-deadline", 100).await;
+    let out = t
+        .run(&t.alpha, &[
+            ("assign_task", json!({ "bot": "Бета", "text": "быстро", "deadline_minutes": 4 })),
+            ("assign_task", json!({ "bot": "Бета", "text": "срок пять", "deadline_minutes": 5 })),
+        ])
+        .await;
+    assert!(out[0].contains("срок: от 5 до 10080"), "{}", out[0]);
+    let id = task_id(&out[1]);
+    assert!(id.starts_with("task_"), "{}", out[1]);
+    let stored = t.tasks_file().into_iter().find(|x| x["id"] == id).unwrap();
+    assert!(stored["deadline"].as_i64().unwrap() > stored["created"].as_i64().unwrap(), "{stored}");
+    let list = t.crew.ok("GET", "/api/tasks", None).await;
+    let task = list["tasks"].as_array().unwrap().iter().find(|x| x["id"] == id).unwrap();
+    assert_eq!(task["startedBy"], "human", "{task}");
+    common::wait_until("готово", 20, || async { t.task_state(&id).await == "done" }).await;
+    let list = t.crew.ok("GET", "/api/tasks", None).await;
+    let task = list["tasks"].as_array().unwrap().iter().find(|x| x["id"] == id).unwrap();
+    assert!(task["tokens"].as_u64().unwrap_or(0) > 0, "{task}");
 }

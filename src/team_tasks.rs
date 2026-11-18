@@ -9,6 +9,11 @@
 //! ведущего; его собственный ход она не запускает. Новых адресов API нет: инструменты идут только через ход бота.
 
 use std::path::{Component, Path, PathBuf};
+
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -42,8 +47,8 @@ const MAX_FILES: usize = 5;
 pub const MAX_SHARE_BYTES: u64 = 20 * 1024 * 1024;
 const SUMMARY_CHARS: usize = 1_500;
 const NOTE_CHARS: usize = 300;
-const KEEP_MS: i64 = 24 * 3600 * 1000;
 const KEEP_OLD_MS: i64 = 7 * 24 * 3600 * 1000;
+const KEEP_MS: i64 = 24 * 3600 * 1000;
 const KEEP_TOTAL: usize = 300;
 /// Сколько задача ждёт, пока занятый получатель освободится.
 const QUEUE_WAIT: Duration = Duration::from_secs(30 * 60);
@@ -89,11 +94,23 @@ pub struct Task {
     pub noted: bool,
     /// Первое сообщение продолжения (решение человека по карточке или заметка об обрыве): уходит исполнителю после брифа.
     pub carry: String,
+    /// Откуда выдана задача: активный ход отправителя и его Origin (human/routine/goal/webhook/bot).
+    #[serde(default)]
+    pub started_by: String,
+    /// Токены хода получателя.
+    #[serde(default)]
+    pub tokens: u64,
+    /// Срок (мс), 0 — без срока.
+    #[serde(default)]
+    pub deadline: i64,
+    /// Уже написали строку о просрочке.
+    #[serde(default)]
+    pub overdue_noted: bool,
 }
 
 impl Task {
     pub fn is_open(&self) -> bool {
-        matches!(self.state.as_str(), "queued" | "running")
+        matches!(self.state.as_str(), "queued" | "running" | "paused")
     }
 }
 
@@ -109,13 +126,14 @@ impl Tasks {
         let mut items: Vec<Task> = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let at = now();
         let mut changed = false;
-        for task in items.iter_mut().filter(|t| t.is_open()) {
+        // Перезапуск поднимает только ждавшие и шедшие задачи; пауза (лимит) продолжается журналом запусков.
+        for task in items.iter_mut().filter(|t| t.state == "queued" || t.state == "running") {
             changed = true;
             task.state = "queued".into();
             task.started = 0;
         }
         let before = items.len();
-        items.retain(|t| at - t.created < KEEP_OLD_MS);
+        items.retain(|t| t.is_open() || t.finished == 0 || at - t.finished < KEEP_OLD_MS);
         let tasks = Self { path, items: Mutex::new(items) };
         if changed || before != tasks.items.lock().unwrap().len() {
             tasks.save(&tasks.items.lock().unwrap());
@@ -151,6 +169,7 @@ impl Tasks {
             }
         }
         self.save(&items);
+        self.append_journal(&task.id, &task.from, &task.to, "created", 0);
         Ok((task, true))
     }
 
@@ -190,6 +209,40 @@ impl Tasks {
     pub fn all(&self) -> Vec<Task> {
         self.items.lock().unwrap().clone()
     }
+
+    pub fn journal_event(&self, task: &Task, state: &str, tokens: u64) {
+        self.append_journal(&task.id, &task.from, &task.to, state, tokens);
+    }
+
+    fn append_journal(&self, id: &str, from: &str, to: &str, state: &str, tokens: u64) {
+        let path = self.path.with_file_name("team_tasks.jsonl");
+        let line = json!({ "at": now(), "id": id, "from": from, "to": to, "state": state, "tokens": tokens });
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "{}", line);
+        }
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 2 * 1024 * 1024) {
+            let tail = read_tail(&path, 1024 * 1024);
+            let tmp = path.with_extension("jsonl.tmp");
+            let _ = std::fs::write(&tmp, tail).and_then(|_| std::fs::rename(&tmp, &path));
+        }
+    }
+}
+
+fn read_tail(path: &Path, max: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(max);
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if start == 0 {
+        return text;
+    }
+    text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default()
 }
 
 fn squash(text: &str) -> String {
@@ -312,6 +365,7 @@ pub fn defs() -> Vec<Value> {
                 "bot": { "type": "string", "description": "Имя участника твоей команды; ведущий может дать задачу и ведущему другой команды." },
                 "text": { "type": "string", "description": "Самодостаточный бриф: цель, входные данные, ограничения, что вернуть. До 6000 знаков." },
                 "files": { "type": "array", "items": { "type": "string" }, "description": "Файлы из твоей папки, которые нужны участнику (до 5, по 20 МБ). Копии лягут в его папку attachments/." },
+                "deadline_minutes": { "type": "integer", "description": "Срок задачи в минутах (5…10080). Необязательно." },
             }),
             &["bot", "text"],
         ),
@@ -346,7 +400,16 @@ pub fn defs() -> Vec<Value> {
 pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, depth: u32) -> Result<String, String> {
     let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
     match name {
-        "assign_task" => assign(app, bot, &text("bot"), &text("text"), args.get("files"), depth).await,
+        "assign_task" => {
+            let deadline_minutes = match args.get("deadline_minutes") {
+                None | Some(Value::Null) => None,
+                Some(v) => match v.as_i64() {
+                    Some(n) => Some(n),
+                    None => return Err("deadline_minutes — целое число".into()),
+                },
+            };
+            assign(app, bot, &text("bot"), &text("text"), args.get("files"), depth, deadline_minutes).await
+        }
         "task_status" => Ok(status(app, bot, &text("taskId"))),
         "team_status" => team_status(app, bot, &text("room")),
         _ => {
@@ -357,7 +420,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, depth: u3
     }
 }
 
-async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Option<&Value>, depth: u32) -> Result<String, String> {
+async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Option<&Value>, depth: u32, deadline_minutes: Option<i64>) -> Result<String, String> {
     let allowed = targets(app, from);
     let target = pick_by_name(&allowed, to_name.trim()).ok_or_else(|| {
         if app.store.bots().iter().any(|b| b.name.to_lowercase() == to_name.trim().to_lowercase()) {
@@ -387,6 +450,11 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
     if text.chars().count() > MAX_TEXT {
         return Err(TEXT_TOO_LONG.into());
     }
+    if let Some(m) = deadline_minutes {
+        if !(5..=10080).contains(&m) {
+            return Err("срок: от 5 до 10080 минут".into());
+        }
+    }
     let paths: Vec<String> = match files {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(list)) => list.iter().map(|v| v.as_str().unwrap_or_default().trim().to_string()).collect(),
@@ -408,6 +476,17 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
     }
     // Что имел отправитель сейчас: пол осторожности с цепочкой передач, «без человека», глубина и откуда выдано.
     let fresh = app.store.bot(&from.id).unwrap_or_else(|| from.clone());
+    let created = now();
+    let started_by = match app.runs.active_id(&from.id) {
+        Some(run_id) => app.runs.get(&run_id).map(|r| match r.origin {
+            crate::runs::Origin::Human => "human",
+            crate::runs::Origin::Routine { .. } => "routine",
+            crate::runs::Origin::Goal { .. } => "goal",
+            crate::runs::Origin::Webhook { .. } => "webhook",
+            crate::runs::Origin::Team { .. } => "bot",
+        }).unwrap_or("human").to_string(),
+        None => "human".to_string(),
+    };
     let task = Task {
         id: uid("task"),
         from: from.id.clone(),
@@ -417,7 +496,7 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
         text: text.to_string(),
         files: copied.clone(),
         state: "queued".into(),
-        created: now(),
+        created,
         floor: app.turns.effective_approval(&app.store, &from.id, &fresh.approval),
         asks: app.turns.effective_always_ask(&app.store, &from.id, &fresh.always_ask),
         unattended: app.turns.is_unattended(&from.id),
@@ -425,6 +504,8 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
         depth: start_depth,
         above: Some(app.turns.delegation_chain(&from.id)),
         room: app.turns.conv_of(&from.id).and_then(|c| c.strip_prefix("room:").map(str::to_string)).unwrap_or_default(),
+        started_by,
+        deadline: deadline_minutes.map(|m| created + m * 60_000).unwrap_or(0),
         ..Task::default()
     };
     let (task, created) = match app.tasks.begin(task) {
@@ -462,7 +543,7 @@ pub fn resume(app: &Arc<App>) {
         // Задача из версии без записи цепочки: запуск с неизвестной цепочкой открыл бы папки шире, чем вправе отправитель.
         if app.tasks.get(&id).is_some_and(|t| t.depth > 0 && t.above.is_none()) {
             let app = app.clone();
-            tokio::spawn(async move { finish(&app, &id, "error", "цепочка передачи потеряна при обновлении — поручите заново".into(), Vec::new()).await });
+            tokio::spawn(async move { finish(&app, &id, "error", "цепочка передачи потеряна при обновлении — поручите заново".into(), Vec::new(), 0).await });
             continue;
         }
         tokio::spawn(run(app.clone(), id));
@@ -484,27 +565,29 @@ async fn run(app: Arc<App>, id: String) {
     loop {
         let Some(task) = app.tasks.get(&id) else { return };
         let (Some(from), Some(target)) = (app.store.bot(&task.from), app.store.bot(&task.to)) else {
-            finish(&app, &id, "error", "бота больше нет в команде".into(), Vec::new()).await;
+            finish(&app, &id, "error", "бота больше нет в команде".into(), Vec::new(), 0).await;
             return;
         };
         // Пока задача ждала, бота могли убрать из команды: права на задачу давала именно она.
         if !task.outside && !teammates(&app, &from).iter().any(|b| b.id == target.id) {
-            finish(&app, &id, "error", format!("«{}» не в команде: задача не начата", target.name), Vec::new()).await;
+            finish(&app, &id, "error", format!("«{}» не в команде: задача не начата", target.name), Vec::new(), 0).await;
             return;
         }
         if app.turns.is_busy(&target.id) {
             if Instant::now() > deadline {
-                finish(&app, &id, "error", format!("«{}» был занят больше 30 минут, задача не начата", target.name), Vec::new()).await;
+                finish(&app, &id, "error", format!("«{}» был занят больше 30 минут, задача не начата", target.name), Vec::new(), 0).await;
                 return;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         }
         let started = now();
-        app.tasks.update(&id, |t| {
+        if let Some(updated) = app.tasks.update(&id, |t| {
             t.state = "running".into();
             t.started = started;
-        });
+        }) {
+            app.tasks.journal_event(&updated, "started", 0);
+        }
         app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": "running" }));
         // Ход, который оборвал перезапуск: продолжаем его запись, а не начинаем задачу с нуля.
         let pending = app.runs.pending_for_task(&id);
@@ -522,29 +605,31 @@ async fn run(app: Arc<App>, id: String) {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
             Err(e) => {
-                finish(&app, &id, "error", e, Vec::new()).await;
+                finish(&app, &id, "error", e, Vec::new(), 0).await;
                 return;
             }
             // Ход встал на паузу (лимит, предел): задача не закрыта, её продолжит журнал запусков через `requeue`.
             Ok(_) if app.runs.paused().iter().any(|r| matches!(&r.origin, crate::runs::Origin::Team { task_id } if *task_id == id)) => {
-                app.tasks.update(&id, |t| t.state = "paused".into());
+                if let Some(updated) = app.tasks.update(&id, |t| t.state = "paused".into()) {
+                    app.tasks.journal_event(&updated, "paused", 0);
+                }
                 app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": "paused" }));
                 return;
             }
             Ok(_) if app.runs.waiting_for_task(&id).is_some() => {
                 // Исполнитель ждёт человека: задача не закончена, её продолжит решение по карточке.
                 let wait = app.runs.waiting_for_task(&id).map(|r| r.wait_text()).unwrap_or_default();
-                finish(&app, &id, "interrupted", wait, Vec::new()).await;
+                finish(&app, &id, "interrupted", wait, Vec::new(), 0).await;
                 return;
             }
-            Ok(text) => {
+            Ok((text, tokens)) => {
                 // Папка команды общая: «свежие файлы» там могут быть работой товарищей. Постороннему отправителю
                 // (не из команды получателя) отдаём только файлы, названные в итоге получателя.
                 let target_team = app.store.team_of(&target.id).map(|r| r.id);
                 let foreign = target_team.is_some() && app.store.team_of(&task.from).map(|r| r.id) != target_team;
                 let files = if foreign { named_files(&app.store, &target.id, &text, started) } else { fresh_files(&app.store, &target.id, started) };
                 let (state, summary) = if text.trim() == NO_REPLY { ("error", text) } else { ("done", text) };
-                finish(&app, &id, state, summary, files).await;
+                finish(&app, &id, state, summary, files, tokens.max(0) as u64).await;
                 return;
             }
         }
@@ -569,23 +654,28 @@ pub fn requeue(app: &Arc<App>, id: &str, note: &str) -> Result<(), String> {
 
 /// Ход задачи ждёт человека: задача закрыта как прервана, ведущий узнает об этом в своей ленте.
 pub async fn finish_interrupted(app: &Arc<App>, id: &str, text: &str) {
-    finish(app, id, "interrupted", text.to_string(), Vec::new()).await;
+    finish(app, id, "interrupted", text.to_string(), Vec::new(), 0).await;
 }
 
-async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: Vec<String>) {
+async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: Vec<String>, tokens: u64) {
     let Some(task) = app.tasks.update(id, |t| {
         t.state = state.into();
         t.finished = now();
         t.summary = clip(&summary, SUMMARY_CHARS);
         t.result_files = files;
         t.carry.clear();
+        t.tokens = tokens;
     }) else {
         return;
     };
-    // Строка в ленте ведущего: сам он не просыпается, итог ему отдаёт task_status.
+    app.tasks.journal_event(&task, state, tokens);
+    post_task_line(app, &task, &task.summary).await;
+}
+
+async fn post_task_line(app: &Arc<App>, task: &Task, text: &str) {
     let entry = json!({
         "role": "task", "taskId": task.id, "state": task.state, "to": task.to, "toName": task.to_name,
-        "text": task.summary, "files": task.result_files,
+        "text": text, "files": task.result_files,
     });
     // Задача выдана из чата команды: строка о конце ложится туда, где человек её и ждёт.
     if !task.room.is_empty() && app.store.room(&task.room).is_some_and(|r| r.bot_ids.contains(&task.from)) {
@@ -598,6 +688,28 @@ async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: V
     match app.store.append_message(&task.from, entry).await {
         Ok(saved) => app.turns.emit(json!({ "type": "task_done", "botId": task.from, "taskId": task.id, "message": saved })),
         Err(e) => eprintln!("[team_tasks] не смог записать строку в ленту: {e}"),
+    }
+}
+
+/// Чистая выборка просроченных задач, которым ещё не писали строку о просрочке.
+pub fn overdue(tasks: &[Task], now: i64) -> Vec<String> {
+    tasks
+        .iter()
+        .filter(|t| t.is_open() && t.deadline > 0 && t.deadline <= now && !t.overdue_noted)
+        .map(|t| t.id.clone())
+        .collect()
+}
+
+/// Проверка сроков: открытая просроченная задача получает одну строку в ленту отправителя.
+pub async fn check_deadlines(app: &Arc<App>) {
+    let at = now();
+    let ids = overdue(&app.tasks.all(), at);
+    for id in ids {
+        let Some(task) = app.tasks.get(&id) else { continue };
+        app.tasks.update(&task.id, |t| t.overdue_noted = true);
+        app.tasks.journal_event(&task, "overdue", 0);
+        let line = format!("Срок поручения «{}» для {} истёк — задача ещё не закончена", clip(&task.text, 60), task.to_name);
+        post_task_line(app, &task, &line).await;
     }
 }
 
@@ -947,6 +1059,46 @@ pub async fn share(app: &App, from: &Bot, target: &Bot, raw: &str) -> Result<Str
     Ok(rel)
 }
 
+#[derive(serde::Deserialize)]
+pub struct TasksQuery {
+    pub bot: Option<String>,
+    pub open: Option<String>,
+}
+
+async fn list_route(State(app): State<Arc<App>>, Query(q): Query<TasksQuery>) -> Response {
+    let mut items: Vec<Task> = app.tasks.all();
+    if let Some(bot) = q.bot.as_deref().filter(|s| !s.is_empty()) {
+        items.retain(|t| t.from == bot || t.to == bot);
+    }
+    if q.open.as_deref() == Some("1") {
+        items.retain(|t| t.is_open());
+    }
+    items.sort_by(|a, b| b.created.cmp(&a.created));
+    let tasks: Vec<Value> = items.into_iter().map(|t| json!({
+        "id": t.id,
+        "from": t.from,
+        "fromName": t.from_name,
+        "to": t.to,
+        "toName": t.to_name,
+        "text": clip(&t.text, 300),
+        "state": t.state,
+        "created": t.created,
+        "started": t.started,
+        "finished": t.finished,
+        "deadline": t.deadline,
+        "startedBy": t.started_by,
+        "tokens": t.tokens,
+        "summary": clip(&t.summary, 1500),
+        "resultFiles": t.result_files,
+        "room": t.room,
+    })).collect();
+    (StatusCode::OK, Json(json!({ "tasks": tasks }))).into_response()
+}
+
+pub fn routes() -> axum::Router<Arc<App>> {
+    axum::Router::new().route("/api/tasks", axum::routing::get(list_route))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1091,5 +1243,68 @@ mod tests {
         let mine = Task { from: "me".into(), ..task("task_1", "me", "pic", "моя") };
         assert!(describe(&mine).contains("task_1") && describe(&mine).contains("ждёт"));
         assert_eq!(state_ru("interrupted"), "прервана перезапуском программы");
+    }
+
+    #[test]
+    fn paused_task_counts_as_open() {
+        let t = Task { state: "paused".into(), ..Task::default() };
+        assert!(t.is_open());
+    }
+
+    #[test]
+    fn a_paused_task_stays_paused_after_open() {
+        let dir = temp("paused-open");
+        let tasks = Tasks::open(&dir);
+        tasks.begin(task("p", "a", "b", "пауза")).unwrap();
+        tasks.update("p", |t| t.state = "paused".into());
+        drop(tasks);
+        let restored = Tasks::open(&dir);
+        assert_eq!(restored.get("p").unwrap().state, "paused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overdue_picks_only_past_open_unnoted_with_deadline() {
+        let now = 1_000;
+        let tasks = vec![
+            Task { id: "a".into(), state: "queued".into(), deadline: 500, overdue_noted: false, ..Task::default() },
+            Task { id: "b".into(), state: "queued".into(), deadline: 500, overdue_noted: true, ..Task::default() },
+            Task { id: "c".into(), state: "done".into(), deadline: 500, overdue_noted: false, ..Task::default() },
+            Task { id: "d".into(), state: "queued".into(), deadline: 0, overdue_noted: false, ..Task::default() },
+            Task { id: "e".into(), state: "queued".into(), deadline: 2_000, overdue_noted: false, ..Task::default() },
+            Task { id: "f".into(), state: "paused".into(), deadline: 500, overdue_noted: false, ..Task::default() },
+        ];
+        let got = overdue(&tasks, now);
+        assert_eq!(got, vec!["a".to_string(), "f".to_string()]);
+    }
+
+    #[test]
+    fn closed_tasks_are_dropped_seven_days_after_finished() {
+        let dir = temp("retention-finished");
+        let tasks = Tasks::open(&dir);
+        tasks.begin(task("old", "a", "b", "старая")).unwrap();
+        tasks.update("old", |t| { t.state = "done".into(); t.finished = now() - 8 * 24 * 3600 * 1000; });
+        tasks.begin(task("fresh", "a", "b", "свежая")).unwrap();
+        tasks.update("fresh", |t| { t.state = "done".into(); t.finished = now() - 1 * 24 * 3600 * 1000; });
+        tasks.begin(task("open", "a", "b", "открытая")).unwrap();
+        tasks.update("open", |t| t.created = now() - 30 * 24 * 3600 * 1000);
+        drop(tasks);
+        let restored = Tasks::open(&dir);
+        assert!(restored.get("old").is_none(), "старая закрытая задача должна быть удалена");
+        assert!(restored.get("fresh").is_some(), "свежая закрытая задача должна остаться");
+        assert!(restored.get("open").is_some(), "открытая задача не удаляется по возрасту");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn journal_has_no_task_text() {
+        let dir = temp("journal-text");
+        let tasks = Tasks::open(&dir);
+        tasks.begin(task("t1", "a", "b", "секретный текст задачи")).unwrap();
+        let path = dir.join("team_tasks.jsonl");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"created\""), "{text}");
+        assert!(!text.contains("секретный текст задачи"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

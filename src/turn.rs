@@ -3144,7 +3144,7 @@ pub fn delegate_to_bot_with(
     task: String,
     depth: u32,
     carried: Option<Carried>,
-) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> {
+) -> Pin<Box<dyn Future<Output = Result<(String, i64), String>> + Send>> {
     Box::pin(async move {
         let depth = depth.max(app.turns.delegation_depth_of(&from.id));
         if depth >= 2 {
@@ -3217,7 +3217,7 @@ pub fn delegate_to_bot_with(
             "ok": !text.trim().is_empty() && !watch_cancel.is_cancelled(),
             "summary": handoff_summary(&text), "ms": (now() - started_at).max(0),
         }));
-        Ok(if text.is_empty() { NO_REPLY.to_string() } else { clamp_handoff(&text) })
+        Ok((if text.is_empty() { NO_REPLY.to_string() } else { clamp_handoff(&text) }, tokens))
     })
 }
 
