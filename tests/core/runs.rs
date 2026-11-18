@@ -119,6 +119,8 @@ async fn a_human_turn_cut_off_mid_step_continues_once_and_keeps_the_steps() {
         runs_file(&dir).iter().any(|r| r["steps"].as_array().is_some_and(|s| s.iter().any(|x| x["label"] == "список файлов" && x["state"] == "ok")))
     })
     .await;
+    // Обрыв — когда второй запрос уже у модели и завис, а не раньше: иначе он не дошёл бы и запросов было бы два.
+    common::wait_until("второй запрос завис", 20, || async { fake.requests.lock().unwrap().len() == 2 }).await;
     first.keep_data();
     drop(first);
     let saved = std::fs::read_to_string(dir.join("threads").join(format!("{bot}.jsonl"))).unwrap();

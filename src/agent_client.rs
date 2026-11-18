@@ -202,7 +202,8 @@ fn summary(reply: &[Value]) -> Answer {
     let assistant = || reply.iter().rev().filter(|m| m["role"] == "assistant");
     Answer {
         text: assistant().find_map(|m| m["text"].as_str().filter(|t| !t.is_empty())).map(str::to_string),
-        failed: assistant().next().is_some_and(|m| m["error"].as_bool().unwrap_or(false)),
+        // Ход на паузе или в ожидании человека (`held`) ответа не дал: для `deloist run` и MCP это неудача.
+        failed: assistant().next().is_some_and(|m| m["error"].as_bool().unwrap_or(false) || m["held"].as_bool().unwrap_or(false)),
     }
 }
 

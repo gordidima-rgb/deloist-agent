@@ -2728,8 +2728,9 @@ fn run_turn_body(
         // Ход упёрся в карточку без ответа: это не отмена и не ошибка, а ожидание человека.
         let waiting = app.turns.take_waiting(&bot_id);
         let result = if waiting.is_some() { Ok(()) } else { result };
-        if let Some(p) = &pause {
-            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": p.line, "at": now() });
+        // Ход не дал ответа: ждёт сброса, события или человека. `held` — тем, кто читает тред (`deloist run`, MCP): это не ответ.
+        if let Some(line) = pause.as_ref().map(|p| p.line.clone()).or_else(|| waiting.clone()) {
+            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": line, "held": true, "at": now() });
             app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
             saved.push(entry);
         }

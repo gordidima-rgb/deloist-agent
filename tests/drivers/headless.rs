@@ -650,7 +650,8 @@ async fn a_failed_turn_is_a_failure_and_never_the_previous_answer() {
     assert_eq!(code, 1, "сбой модели выдан за успех: {out}");
     let data: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(data["ok"], false, "{data}");
-    assert!(data["answer"].as_str().unwrap_or_default().contains("Не смог"), "старый ответ вместо ошибки: {data}");
+    // Отказ по ключу (401) — причина «нужен вход»: ход ждёт человека, а не выдаёт прошлый ответ.
+    assert!(data["answer"].as_str().unwrap_or_default().contains("Нужен вход"), "старый ответ вместо ошибки: {data}");
     handle.abort();
 }
 
