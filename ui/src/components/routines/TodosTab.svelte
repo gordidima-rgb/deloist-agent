@@ -495,7 +495,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu, T
       <div class="td-tools">
         <Button size="sm" variant="ghost" onclick={pickDate} aria-label={tr('Выбрать дату')}>{tr('Дата')}</Button>
         <input bind:this={dateInput} class="td-hidden-input" type="date" tabindex="-1" aria-hidden="true" onchange={(e) => { composer?.setDate(e.currentTarget.value); e.currentTarget.value = ''; }} />
-        <Select class="td-executor" options={executorOptions} bind:value={executor} aria-label={tr('Исполнитель')} />
+        <span class="td-executor"><Select options={executorOptions} bind:value={executor} aria-label={tr('Исполнитель')} /></span>
         <Button size="sm" variant="ghost" onclick={() => (newBucket = nextBucket(newBucket))} aria-label={tr('Раздел новой задачи: {name}', { name: bucketName(newBucket) })}>
           {tr('Раздел: {name}', { name: bucketName(newBucket) })}
         </Button>
@@ -725,9 +725,8 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu, T
     border-color: var(--k-brand);
     box-shadow: var(--k-focus);
   }
-  .td-tools :global(.td-executor) {
-    min-width: 112px;
-    max-width: 160px;
+  .td-executor {
+    width: 150px;
   }
   .td-bar {
     display: flex;
