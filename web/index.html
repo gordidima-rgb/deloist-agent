@@ -1025,6 +1025,10 @@
                   <span>Каждые, мин</span>
                   <input name="everyMinutes" type="number" min="5" value="60" class="k-input" />
                 </label>
+                <label class="field small" title="Случайный срок между двумя числами, чтобы запуски не шли ровной сеткой">
+                  <span>До, мин (случайно)</span>
+                  <input name="everyMaxMinutes" type="number" min="0" placeholder="—" class="k-input" />
+                </label>
                 <label class="field small">
                   <span>Работать только с</span>
                   <input name="windowFrom" type="time" class="k-input" />
@@ -1041,13 +1045,6 @@
                   <input name="at" type="time" class="k-input" />
                 </label>
               </div>
-              <label class="field">
-                <span>Если пропущен запуск</span>
-                <select name="catchUp">
-                  <option value="last">Выполнить последний</option>
-                  <option value="skip">Пропустить</option>
-                </select>
-              </label>
               <div class="field">
                 <span>Дни (ни одного значит каждый день)</span>
                 <div class="days" id="rt-days">

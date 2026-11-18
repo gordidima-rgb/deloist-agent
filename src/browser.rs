@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::future::join_all;
 use serde_json::{json, Value};
@@ -22,6 +22,9 @@ use crate::store::{now, Store};
 const WINDOW_WIDTH: i64 = 1280;
 const WINDOW_HEIGHT: i64 = 900;
 const MAX_LOG: usize = 300;
+/// Сколько ждём файл отладки встроенного WebView2. Внешнему Chrome хватает 15 с.
+const EMBEDDED_PORT_WAIT: Duration = Duration::from_secs(15);
+
 // ---------------------------------------------------------------------------
 // Путь браузера: встроенный WebView2 или внешний Chrome/Edge
 // ---------------------------------------------------------------------------
@@ -169,28 +172,6 @@ fn parse_devtools_active_port(text: &str) -> Result<DevToolsEndpoint, String> {
     Ok(DevToolsEndpoint { port, path })
 }
 
-/// Адрес своего браузера, пережившего перезапуск программы. Путь `/devtools/browser/<id>` уникален для
-/// запущенного экземпляра: если порт из старого файла занял чужой браузер, путь не совпадёт и подключения нет.
-fn own_browser_url(endpoint: &DevToolsEndpoint, version_ws: Option<&str>) -> Option<String> {
-    let path = endpoint.path.as_deref()?;
-    version_ws.filter(|ws| ws.ends_with(path)).map(str::to_string)
-}
-
-/// Файл порта в профиле бота остался от прошлого запуска, и этот браузер ещё жив.
-async fn surviving_browser(port_file: &Path) -> Option<String> {
-    let endpoint = parse_devtools_active_port(&tokio::fs::read_to_string(port_file).await.ok()?).ok()?;
-    let version = json_version(endpoint.port).await.ok()?;
-    own_browser_url(&endpoint, version.ws.as_deref())
-}
-
-fn handoff_error(handed_off: bool) -> String {
-    if handed_off {
-        "Браузер этого бота уже открыт без управления (окно от прошлого запуска). Закрой окно Chrome бота и повтори.".to_string()
-    } else {
-        "браузер не поднял порт отладки за 15 с: файл DevToolsActivePort не появился. Проверь путь browser_path и права на папку профиля".to_string()
-    }
-}
-
 impl DevToolsEndpoint {
     fn ws_url(&self, from_version: Option<&str>) -> Option<String> {
         if let Some(url) = from_version {
@@ -221,6 +202,31 @@ fn version_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/json/version")
 }
 
+/// Документ WebView2/Chromium может лежать и в профиле, и в подпапке EBWebView.
+fn devtools_port_files(profile: &Path) -> [PathBuf; 2] {
+    [profile.join("DevToolsActivePort"), profile.join("EBWebView").join("DevToolsActivePort")]
+}
+
+async fn wait_for_devtools_port(profile: &Path) -> Result<DevToolsEndpoint, String> {
+    let deadline = Instant::now() + EMBEDDED_PORT_WAIT;
+    loop {
+        for file in devtools_port_files(profile) {
+            if let Ok(text) = tokio::fs::read_to_string(&file).await {
+                if let Ok(endpoint) = parse_devtools_active_port(&text) {
+                    return Ok(endpoint);
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "WebView2 не создал файл DevToolsActivePort за {} с: он мог проигнорировать --remote-debugging-port",
+                EMBEDDED_PORT_WAIT.as_secs()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn json_version(port: u16) -> Result<VersionInfo, String> {
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -237,6 +243,14 @@ async fn json_version(port: u16) -> Result<VersionInfo, String> {
     }
     let text = response.text().await.map_err(|e| format!("/json/version на порту {port}: {e}"))?;
     parse_json_version(&text)
+}
+
+/// Окружения WebView2 не подтверждено: окна-хоста нет, поэтому честно говорим об этом.
+#[allow(dead_code)]
+async fn verify_embedded(profile: &Path) -> Result<String, String> {
+    let endpoint = wait_for_devtools_port(profile).await?;
+    let version = json_version(endpoint.port).await?;
+    endpoint.ws_url(version.ws.as_deref()).ok_or_else(|| "/json/version не дал WebSocket и в DevToolsActivePort нет пути".to_string())
 }
 
 #[derive(Clone, Debug)]
@@ -658,14 +672,6 @@ impl Session {
     async fn launch_external(found: FoundBrowser, profile: PathBuf, workspace: PathBuf, downloads: PathBuf) -> Result<Arc<Self>, String> {
         crate::cloud::deny(crate::cloud::NO_FEATURE)?;
         let port_file = profile.join("DevToolsActivePort");
-
-        // Свой Chrome пережил перезапуск программы (17.11.2026 новый запуск уходил в него, и порт не появлялся):
-        // подключаемся к нему, а не запускаем второй на том же профиле.
-        if let Some(url) = surviving_browser(&port_file).await {
-            let session = Self::start(&url, found.backend, workspace, downloads, None).await?;
-            remember_backend(found.backend);
-            return Ok(session);
-        }
         let _ = tokio::fs::remove_file(&port_file).await;
 
         mark_profile_clean(&profile);
@@ -951,7 +957,7 @@ async fn wait_for_port(port_file: &Path, child: &mut Child) -> Result<String, St
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Err(handoff_error(handed_off))
+    Err("браузер не поднял порт отладки за 15 с: файл DevToolsActivePort не появился. Проверь путь browser_path и права на папку профиля".into())
 }
 
 /// Командная строка браузера бота: обычный Chrome/Edge со своим постоянным профилем.
@@ -1539,29 +1545,6 @@ mod tests {
         let error = find_browser(missing.to_string_lossy().as_ref()).unwrap_err();
         assert!(error.contains("browser_path"), "{error}");
         assert!(error.contains("не найден"), "{error}");
-    }
-
-    #[test]
-    fn only_the_same_browser_instance_is_reused() {
-        let ours = parse_devtools_active_port("51000\n/devtools/browser/aaa-1\n").unwrap();
-        assert_eq!(own_browser_url(&ours, Some("ws://127.0.0.1:51000/devtools/browser/aaa-1")).as_deref(), Some("ws://127.0.0.1:51000/devtools/browser/aaa-1"));
-        // Порт из старого файла занял другой браузер.
-        assert_eq!(own_browser_url(&ours, Some("ws://127.0.0.1:51000/devtools/browser/bbb-2")), None);
-        assert_eq!(own_browser_url(&ours, None), None);
-        let no_path = parse_devtools_active_port("51000\n").unwrap();
-        assert_eq!(own_browser_url(&no_path, Some("ws://127.0.0.1:51000/devtools/browser/aaa-1")), None);
-    }
-
-    #[test]
-    fn handoff_error_text_selection() {
-        assert_eq!(
-            handoff_error(true),
-            "Браузер этого бота уже открыт без управления (окно от прошлого запуска). Закрой окно Chrome бота и повтори."
-        );
-        assert_eq!(
-            handoff_error(false),
-            "браузер не поднял порт отладки за 15 с: файл DevToolsActivePort не появился. Проверь путь browser_path и права на папку профиля"
-        );
     }
 
     #[test]

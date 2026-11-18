@@ -32,6 +32,7 @@ pub fn defs() -> Vec<Value> {
             "at": { "type": "string", "description": "Время запуска ЧЧ:ММ по часам человека: «09:00». Вместе с days — по каким дням. Либо at, либо every_minutes." },
             "days": { "type": "array", "items": { "type": "integer" }, "description": "Дни недели, 1 — понедельник … 7 — воскресенье. Будни — [1,2,3,4,5]; один день — [3]. Пусто или не указано — каждый день." },
             "every_minutes": { "type": "integer", "description": "Повторять каждые N минут, не реже 5: час — 60. Вместо at." },
+            "every_max_minutes": { "type": "integer", "description": "Для every_minutes: случайный интервал — каждый раз срок выпадает между every_minutes и этим числом (40 и 80 — от 40 до 80 мин), чтобы запуски не шли ровной сеткой, как у человека. 0 — ровный интервал." },
             "window_from": { "type": "string", "description": "Для every_minutes: работать только с этого часа, ЧЧ:ММ. Окно может переходить через полночь (22:00–07:00). Нужны оба поля окна." },
             "window_to": { "type": "string", "description": "Конец окна ЧЧ:ММ." },
         })
@@ -61,7 +62,6 @@ pub fn defs() -> Vec<Value> {
                 "bot_id": { "type": "string", "description": "Чей бот выполнит рутину (ID из list_bots). По умолчанию ты сам." },
                 "enabled": { "type": "boolean", "description": "Включена ли. По умолчанию да." },
                 "quiet": { "type": "boolean", "description": "Писать в чат, только если есть что сказать. По умолчанию да." },
-                "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» — выполнить последний, «skip» — пропустить. По умолчанию last." },
             })),
             &["title"],
         ),
@@ -76,7 +76,6 @@ pub fn defs() -> Vec<Value> {
                 "goal_id": { "type": "string", "description": "Привязать рутину к цели (номер из list_goals) или пустая строка, чтобы отвязать." },
                 "enabled": { "type": "boolean", "description": "Включить или выключить." },
                 "quiet": { "type": "boolean", "description": "Только важное или писать всё." },
-                "catch_up": { "type": "string", "description": "Если пропущен запуск: «last» или «skip»." },
             })),
             &["routine_id"],
         ),
@@ -154,16 +153,18 @@ pub(crate) fn schedule_patch(args: &Value) -> Result<Map<String, Value>, String>
         }
         out.insert("everyMinutes".into(), json!(minutes));
     }
+    if let Some(max) = args.get("every_max_minutes").filter(|v| !v.is_null()) {
+        let max = max.as_i64().filter(|m| *m >= 0).ok_or("every_max_minutes должно быть целым числом минут, 0 — без случайности")?;
+        let low = out.get("everyMinutes").and_then(Value::as_i64);
+        if max != 0 && low.is_some_and(|low| max <= low) {
+            return Err("every_max_minutes должно быть больше every_minutes".into());
+        }
+        out.insert("everyMaxMinutes".into(), json!(max));
+    }
     for (key, field) in [("window_from", "windowFrom"), ("window_to", "windowTo")] {
         if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
             out.insert(field.into(), json!(v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой ЧЧ:ММ"))?.trim()));
         }
-    }
-    if let Some(v) = args.get("catch_up").filter(|v| !v.is_null()) {
-        out.insert("catchUp".into(), json!(v.as_str().ok_or("поле catch_up должно быть строкой: last или skip")?.trim()));
-    }
-    if !schedule::catch_up_valid(&Value::Object(out.clone())) {
-        return Err("поле catch_up: только last или skip".into());
     }
     if !schedule::times_valid(&Value::Object(out.clone())) {
         return Err("время нужно в формате ЧЧ:ММ, например 09:00".into());
@@ -360,6 +361,8 @@ mod tests {
         assert!(schedule_patch(&json!({ "at": "9:00" })).is_err());
         assert!(schedule_patch(&json!({ "at": "09:00", "every_minutes": 60 })).is_err());
         assert!(schedule_patch(&json!({ "every_minutes": 1 })).is_err());
+        assert!(schedule_patch(&json!({ "every_minutes": 80, "every_max_minutes": 40 })).is_err());
+        assert_eq!(schedule_patch(&json!({ "every_minutes": 40, "every_max_minutes": 80 })).unwrap()["everyMaxMinutes"], 80);
         assert!(schedule_patch(&json!({ "days": [9] })).is_err());
         assert!(schedule_patch(&json!({})).unwrap().is_empty());
         assert!(check_window("22:00", "").is_err());

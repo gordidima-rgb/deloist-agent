@@ -516,7 +516,7 @@ async fn a_steer_that_missed_the_model_starts_as_its_own_turn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn after_a_restart_the_queue_is_read_and_keeps_going() {
+async fn after_a_restart_the_queue_is_read_and_paused() {
     let (fake, port) = fake_server().await;
     let dir = common::temp_data_dir("queue-restart");
     let mut first = Crew::start_at(dir.clone(), &[]).await;
@@ -542,13 +542,19 @@ async fn after_a_restart_the_queue_is_read_and_keeps_going() {
     legacy[&bot].as_object_mut().unwrap().remove("pause_reason");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
 
-    // Прерванный ход продолжается сам (ответ «после перезапуска»), а за ним идёт очередь: пауза после перезапуска не ставится.
     let second = Crew::start_at(dir.clone(), &[]).await;
-    wait_thread_text(&second, &bot, "после перезапуска").await;
-    wait_thread_text(&second, &bot, "в очереди").await;
     let queue = second.ok("GET", &format!("/api/bots/{bot}/queue"), None).await;
-    assert_eq!(queue["paused"], false, "после перезапуска очередь не стоит: {queue}");
-    assert_ne!(queue["pauseReason"], "restart", "{queue}");
+    assert_eq!(queue["paused"], true, "после перезапуска очередь стоит: {queue}");
+    assert_eq!(queue["pauseReason"], "restart", "{queue}");
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("queue.json")).unwrap()).unwrap();
+    assert_eq!(saved[&bot]["pause_reason"], "restart");
+    assert_eq!(queue["items"].as_array().unwrap().len(), 1, "{queue}");
+    assert_eq!(queue["items"][0]["text"], "в очереди");
+    let state = second.ok("GET", "/api/state", None).await;
+    assert_eq!(state["bots"][0]["queued"], 1, "{state}");
+
+    second.ok("POST", &format!("/api/bots/{bot}/queue/resume"), None).await;
+    wait_thread_text(&second, &bot, "после перезапуска").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -643,7 +649,7 @@ async fn a_paused_queue_does_not_hold_back_a_routine() {
         )
         .await;
     let routine = created["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "nextRun": common::due_now() }))).await;
+    crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "nextRun": 1 }))).await;
 
     let event = crew.wait_event("запуск рутины", |e| e["type"] == "journal").await;
     assert_eq!(event["entry"]["title"], "Проверка", "{event}");
@@ -875,14 +881,10 @@ async fn moved_order_survives_a_restart() {
     first.keep_data();
     drop(first);
 
-    // Ход, стоявший на карточке, после перезапуска ждёт решения человека и бота не занимает: первым идёт «c»,
-    // как и было передвинуто, а «a» и «b» ждут за ним в том же порядке.
-    let gate = Arc::new(tokio::sync::Notify::new());
-    *fake.script.lock().unwrap() = vec![Step::Hold(gate.clone())];
     let second = Crew::start_at(dir, &[]).await;
     let queue = second.ok("GET", &format!("/api/bots/{bot}/queue"), None).await;
-    assert_eq!(queue["paused"], false, "после перезапуска очередь не стоит: {queue}");
-    assert_eq!(queue_texts(&queue), ["a", "b"], "порядок после перезапуска потерян: {queue}");
+    assert_eq!(queue["paused"], true, "после перезапуска очередь стоит: {queue}");
+    assert_eq!(queue_texts(&queue), ["c", "a", "b"], "порядок после перезапуска потерян: {queue}");
 }
 
 

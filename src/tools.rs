@@ -36,12 +36,12 @@ pub fn clamp(s: &str, limit: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// Командные инструменты, которые получает и агент ACP через MCP-сервер своего бота.
-pub const TEAM_TOOLS: [&str; 15] = ["delegate", "offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "finish_turn", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule"];
+pub const TEAM_TOOLS: [&str; 14] = ["delegate", "offer_specialist", "list_bots", "remember", "recall", "search_history", "read_history", "telegram_posts", "ask_user", "propose_team", "search_catalog", "propose_bot_change", "propose_routine", "propose_rule"];
 
 /// Всё, что MCP-процесс агента ACP вправе просить у приложения: браузер бота, команда и рутины.
 /// Рутины идут теми же правилами, что у API-ботов: создание и правка спрашивают человека по режиму бота, удаление всегда.
 pub fn is_bridge_tool(name: &str) -> bool {
-    TEAM_TOOLS.contains(&name) || crate::runs::is_wait_tool(name) || crate::team_tasks::is_tool(name) || crate::routine_tools::is_routine_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
+    TEAM_TOOLS.contains(&name) || crate::team_tasks::is_tool(name) || crate::routine_tools::is_routine_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
 }
 
 pub fn team_tool_defs() -> Vec<Value> {
@@ -51,7 +51,6 @@ pub fn team_tool_defs() -> Vec<Value> {
     defs.extend(crate::team_tasks::defs());
     defs.extend(crate::routine_tools::defs());
     defs.extend(crate::memory::team_review::defs());
-    defs.push(crate::runs::wait_def());
     defs
 }
 
@@ -61,7 +60,6 @@ pub fn tool_defs() -> Value {
         list.extend(crate::browser_tools::tool_defs());
         list.extend(crate::team_tasks::defs());
         list.extend(crate::routine_tools::defs());
-        list.push(crate::runs::wait_def());
         list.extend(crate::memory::team_review::defs());
         list.extend(crate::workflow_tools::defs());
         list.extend(crate::goal_tools::defs());
@@ -236,15 +234,6 @@ fn base_tool_defs() -> Value {
             &["question"],
         ),
         function(
-            "finish_turn",
-            "Завершить ход без человека: вызови один раз в конце. status: continue — продолжать работу; done — ход завершён успешно; nothing — нечего сообщать; need_you — нужен человек; failed — ход провалился. note — короткая заметка для следующего запуска (что сделано, что дальше), до ~2000 токенов.",
-            json!({
-                "status": { "type": "string", "enum": ["continue", "done", "need_you", "failed", "nothing"], "description": "Итог хода." },
-                "note": { "type": "string", "description": "Короткая заметка для следующего запуска: что сделано, что дальше." },
-            }),
-            &["status"],
-        ),
-        function(
             "list_bots",
             "Показать команду и настройки ботов, чтобы выбрать бота для изменения или делегирования.",
             json!({}), &[],
@@ -337,6 +326,7 @@ fn base_tool_defs() -> Value {
                     "at": { "type": "string" },
                     "days": { "type": "array", "items": { "type": "integer" } },
                     "every_minutes": { "type": "integer" },
+                    "every_max_minutes": { "type": "integer", "description": "Случайный интервал: срок между every_minutes и этим числом, без ровной сетки." },
                     "window_from": { "type": "string" },
                     "window_to": { "type": "string" },
                 } },
@@ -369,7 +359,7 @@ pub fn is_read_only(name: &str) -> bool {
     // `ask_user` и так обращается к человеку. `remember` меняет память бота, это уже запись.
     // `save_script` и `run_script` сами ничего не делают: сохранять можно только под согласие человека, а каждый шаг
     // скрипта идёт через обычную проверку и карточки (`turn::execute_call_in`).
-    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "finish_turn" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "save_script" | "run_script" | "await_event")
+    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "save_script" | "run_script")
 }
 
 /// Какой из двух режимов осторожнее. Передача задачи не должна снижать осторожность:
@@ -1118,7 +1108,6 @@ pub fn label(name: &str) -> &str {
         n if crate::team_tasks::is_tool(n) => crate::team_tasks::label(n),
         "run_command" => "команда в оболочке",
         "ask_user" => "вопрос человеку",
-        "finish_turn" => "итог хода",
         "write_file" => "запись файла",
         "read_file" => "чтение файла",
         "list_files" => "список файлов",
@@ -1182,100 +1171,6 @@ pub fn label(name: &str) -> &str {
         "browser_login" => "браузер: вход сохранённым паролем",
         other => other,
     }
-}
-
-/// Что вызов делает с миром: по этому журнал запусков решает, можно ли повторять шаг после обрыва.
-/// Таблицы чужие: «только читает» — `is_read_only` и объявление MCP-сервера, команды — `reach` и `grants`.
-pub fn effect(name: &str, args: &Value) -> crate::runs::Effect {
-    use crate::runs::Effect;
-    let action = args["action"].as_str().unwrap_or_default();
-    match name {
-        // Загрузка файла и принятие диалога меняют мир, хотя `browser_page` в целом читает.
-        "browser_page" if matches!(action, "upload" | "dialog") => return Effect::External,
-        // Адрес по ссылке может подтвердить, отписать или оплатить; назад, вперёд и вкладки — нет.
-        "browser_nav" => return if matches!(action, "open" | "new_tab") { Effect::External } else { Effect::Local },
-        _ => {}
-    }
-    if is_read_only(name) || crate::mcp::is_read_only(name) {
-        return Effect::Read;
-    }
-    match name {
-        "run_command" => command_effect(args["command"].as_str().unwrap_or_default()),
-        "web_fetch" | "web_search" | "telegram_posts" => Effect::Read,
-        // Другой бот или процесс действует по нашей просьбе; его ход журнал не ведёт, повтор сделал бы то же дважды.
-        "delegate" | "assign_task" | "run_goal" | "run_workflow" => Effect::External,
-        // Нажатия и ввод на сайте, вход паролем, отладчик с произвольным кодом, платная картинка.
-        "browser_mouse" | "browser_keyboard" | "browser_login" | "browser_human" | "browser_devtools" | "generate_image" => Effect::External,
-        // Инструмент MCP-сервера, не объявленный «только чтение», может сделать что угодно снаружи.
-        _ if name.starts_with("mcp__") => Effect::External,
-        _ => Effect::Local,
-    }
-}
-
-/// Программы, которые меняют только этот компьютер. Всё, чего здесь нет, считается внешним действием.
-/// Интерпретаторов (`node`, `python`, `npx`, `uv`, `make`) здесь нет: скрипт бота может и опубликовать пост.
-const LOCAL_PROGRAMS: &[&str] = &[
-    "mkdir", "md", "copy", "move", "xcopy", "ren", "rename", "del", "erase", "touch", "cp", "mv", "rm", "echo", "type", "cd", "set",
-    "cargo", "rustc", "npm", "pnpm", "yarn", "pip", "tsc", "vitest", "pytest",
-];
-/// Подкоманды git, которые ходят в сеть или меняют чужой репозиторий.
-const GIT_REMOTE: &[&str] = &["push", "remote", "fetch", "pull", "clone", "submodule", "send-email", "request-pull", "credential"];
-/// Подкоманды менеджеров пакетов, которые публикуют или входят в аккаунт.
-const PACKAGE_REMOTE: &[&str] = &["publish", "login", "logout", "adduser", "owner", "deprecate", "unpublish", "token", "access", "dist-tag", "upload"];
-
-/// Команда оболочки: читающая — Read; известная локальная — Local; всё остальное (отправка, выпуск, облако, базы) — External.
-fn command_effect(command: &str) -> crate::runs::Effect {
-    use crate::runs::Effect;
-    if crate::grants::is_plain_read_only(command) {
-        return Effect::Read;
-    }
-    if crate::reach::release_command(command).is_some() || command.chars().any(|c| matches!(c, '|' | '&' | ';' | '`' | '$' | '>' | '<' | '(' | ')')) {
-        return Effect::External;
-    }
-    let mut words = command.split_whitespace().map(str::to_lowercase);
-    let program = words.next().unwrap_or_default();
-    let program = program.rsplit(['\\', '/']).next().unwrap_or_default().trim_end_matches(".exe").to_string();
-    let rest: Vec<String> = words.collect();
-    let remote = |list: &[&str]| rest.iter().any(|w| list.contains(&w.as_str()));
-    let local = match program.as_str() {
-        "git" => !remote(GIT_REMOTE),
-        "cargo" | "npm" | "pnpm" | "yarn" | "pip" => !remote(PACKAGE_REMOTE),
-        other => LOCAL_PROGRAMS.contains(&other),
-    };
-    if local { Effect::Local } else { Effect::External }
-}
-
-/// Подпись шага для журнала: название инструмента, у записи файла ещё и путь. Аргументы команд и сайтов не берём: в них бывают секреты.
-pub fn step_label(name: &str, args: &Value) -> String {
-    let base = if let Some((server, tool)) = crate::mcp::split_name(name) {
-        format!("{server}: {tool}")
-    } else {
-        label(name).to_string()
-    };
-    match (name, args["path"].as_str()) {
-        ("write_file", Some(path)) => format!("{base} {path}"),
-        _ => base,
-    }
-}
-
-/// Шаг по строке хода внешнего агента (ACP): `(подпись, действие)`. Названия и команды агента — не берём, в них бывают секреты.
-pub fn activity_step(row: &Value) -> (String, crate::runs::Effect) {
-    use crate::runs::Effect;
-    let kind = row["kind"].as_str().unwrap_or("other");
-    let path = row["args"]["path"].as_str().unwrap_or_default();
-    let with_path = |what: &str| if path.is_empty() { what.to_string() } else { format!("{what} {path}") };
-    let (label, effect) = match kind {
-        "read" => (with_path("чтение"), Effect::Read),
-        "search" => ("поиск".to_string(), Effect::Read),
-        "think" => ("размышление".to_string(), Effect::Read),
-        "fetch" => ("запрос в сеть".to_string(), Effect::Read),
-        "edit" => (with_path("правка"), Effect::Local),
-        "delete" => (with_path("удаление"), Effect::Local),
-        "move" => (with_path("перенос"), Effect::Local),
-        "execute" => ("команда агента".to_string(), command_effect(row["args"]["command"].as_str().unwrap_or_default())),
-        _ => ("действие агента".to_string(), Effect::External),
-    };
-    (label, effect)
 }
 
 // ---------------------------------------------------------------------------
@@ -1712,20 +1607,6 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
             }
         }
 
-        "finish_turn" => {
-            if !app.turns.is_unattended(&bot.id) {
-                return Err("finish_turn доступен только в ходе без человека".into());
-            }
-            let status = arg(args, "status").trim();
-            if !matches!(status, "continue" | "done" | "need_you" | "failed" | "nothing") {
-                return Err("неверный status".into());
-            }
-            let note = arg(args, "note").trim();
-            let note = if note.is_empty() { None } else { Some(note.to_string()) };
-            app.turns.record_finish(&bot.id, status, note);
-            Ok("принято".to_string())
-        }
-
         "generate_image" => crate::image::generate(app, bot, args).await,
 
         "list_bots" => {
@@ -1845,8 +1726,6 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
 
         routine if crate::routine_tools::is_routine_tool(routine) => crate::routine_tools::exec(app, bot, routine, args).await,
 
-        wait if crate::runs::is_wait_tool(wait) => crate::runs::exec_wait(app, bot, args),
-
         flow if crate::workflow_tools::is_tool(flow) => crate::workflow_tools::exec(app, bot, flow, args).await,
 
         browser if browser.starts_with("browser_") => crate::browser_tools::exec(app, bot, browser, args).await,
@@ -1876,43 +1755,5 @@ mod unix_read_only_tests {
         assert!(!unix_read_only_in("sort x.csv -o x.csv", ws));
         assert!(!unix_read_only_in("uniq x.csv y.csv", ws));
         assert!(unix_read_only_in("sort x.csv | uniq -c", ws));
-    }
-}
-
-#[cfg(test)]
-mod effect_tests {
-    use super::effect;
-    use crate::runs::Effect::{External, Local, Read};
-    use serde_json::json;
-
-    fn cmd(command: &str) -> crate::runs::Effect {
-        effect("run_command", &json!({ "command": command }))
-    }
-
-    #[test]
-    fn commands_are_local_only_when_known() {
-        assert_eq!(cmd("git status"), Read);
-        assert_eq!(cmd("git commit -m fix"), Local);
-        assert_eq!(cmd("cargo build -q"), Local);
-        assert_eq!(cmd("mkdir out"), Local);
-        for script in ["python post.py", "node send.js", "npx some-cli deploy", "uv run tweet.py", "make release"] {
-            assert_eq!(cmd(script), External, "{script}");
-        }
-        for command in ["git push origin main", "gh pr create", "docker push app", "aws s3 cp a b", "kubectl apply -f x", "psql -c select", "npm publish", "sendmail a@b.c", "cargo build && curl x"] {
-            assert_eq!(cmd(command), External, "{command}");
-        }
-    }
-
-    #[test]
-    fn handing_work_over_and_site_actions_are_external() {
-        for name in ["delegate", "assign_task", "run_goal", "run_workflow", "browser_mouse"] {
-            assert_eq!(effect(name, &json!({})), External, "{name}");
-        }
-        assert_eq!(effect("browser_page", &json!({ "action": "upload" })), External);
-        assert_eq!(effect("browser_page", &json!({ "action": "dialog" })), External);
-        assert_eq!(effect("browser_page", &json!({ "action": "read" })), Read);
-        assert_eq!(effect("browser_nav", &json!({ "action": "open" })), External);
-        assert_eq!(effect("browser_nav", &json!({ "action": "back" })), Local);
-        assert_eq!(effect("write_file", &json!({})), Local);
     }
 }

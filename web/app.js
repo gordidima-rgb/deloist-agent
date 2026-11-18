@@ -1601,9 +1601,7 @@ function messageRow(msg) {
   if (msg.role === 'compacted') return compactedRow(msg);
   if (msg.role === 'task') return taskRow(msg);
   const row = document.createElement('div');
-  // Заметка продолжения (после перезапуска, лимита, ожидания, решения человека) — от имени программы, а не человека.
-  const resumed = msg.role === 'user' && msg.source === 'resume';
-  row.className = `msg ${msg.role === 'user' && !resumed ? 'user' : 'bot'}`;
+  row.className = `msg ${msg.role === 'user' ? 'user' : 'bot'}`;
   row.dataset.id = msg.id || '';
   // Для содержания разговора: время и имена файлов человеческого сообщения.
   if (msg.role === 'user') {
@@ -1616,7 +1614,7 @@ function messageRow(msg) {
 
   // Задачу от другого бота видно в треде получателя: «от Скаут 2» (след передачи, карточки на неё нет).
   const delegatedFrom = msg.role === 'user' && String(msg.source || '').startsWith('delegation:') ? String(msg.source).slice('delegation:'.length) : '';
-  const author = msg.name || (resumed ? tr('Продолжение задания') : delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
+  const author = msg.name || (delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
   if (author) {
     const who = document.createElement('div');
     who.className = 'msg-author';
@@ -1637,7 +1635,6 @@ function messageRow(msg) {
     col.append(bubble);
   }
   if (results?.files.length) col.append(Attach.resultCards(results.files, resultContext()));
-  if (msg.runId && needsItems.some((n) => n.id === msg.runId)) col.append(runActionsNode(msg.runId));
 
   if (Array.isArray(msg.attachments) && msg.attachments.length) col.append(Attach.sent(msg.attachments, attachOwner()));
 
@@ -4378,29 +4375,21 @@ async function refreshNeeds() {
   renderNeeds();
 }
 
-// «на паузе до 14:00 (лимит)»: срок и причина паузы запуска из журнала.
-function pauseLabel(item) {
-  const time = new Date(item.until).toLocaleTimeString(window.LOCALE, { hour: '2-digit', minute: '2-digit' });
-  const why = { limit: tr('лимит'), budget: tr('предел токенов'), event: tr('ждёт события'), network: tr('сеть') }[item.reason] || '';
-  return tr('на паузе до {time} ({why})', { time, why });
-}
-
 function needTitle(item) {
-  if (item.paused) return pauseLabel(item);
   if (item.kind === 'question') return item.question || '';
   if (item.kind === 'handoff') return item.detail || tr('Нужна твоя помощь в браузере');
-  if (item.kind === 'run') return item.text || '';
   return trServer(item.title || item.tool || '');
 }
 
 function needKind(item) {
-  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение'), run: item.paused ? tr('на паузе') : tr('прервано') }[item.kind] || '';
+  return { question: tr('вопрос'), handoff: tr('браузер'), approval: tr('разрешение') }[item.kind] || '';
 }
 
 // Почему сообщение ждёт в очереди. Код приходит с сервера (`holdReason`), слова подбираем здесь.
 function holdText(code) {
   return {
     paused_manual: tr('на паузе: остановлено вручную'),
+    paused_restart: tr('на паузе после перезапуска'),
     limit: tr('ждёт: лимит токенов на месяц'),
     card: tr('ждёт твоего ответа на карточку'),
     busy: tr('ждёт конца хода'),
@@ -4410,7 +4399,7 @@ function holdText(code) {
 // Причина для очереди открытого бота: пауза и лимит знает сервер, карточку и занятость видно по событиям.
 function queueHold(id) {
   const data = S.queues.get(id);
-  if (data?.paused) return 'paused_manual';
+  if (data?.paused) return data.pauseReason === 'manual' ? 'paused_manual' : 'paused_restart';
   if (data?.hold === 'limit') return 'limit';
   if (S.waiting.get(id)?.size) return 'card';
   return S.busy.has(id) ? 'busy' : '';
@@ -4420,7 +4409,6 @@ function boardSections() {
   const where = (item) => (item.roomName ? `${item.botName || ''} · ${item.roomName}` : item.botName || '');
   const needs = needsItems.map((item) => ({
     id: item.id, ref: item, where: where(item), meta: needKind(item), title: needTitle(item).slice(0, 140),
-    actions: item.kind === 'run' ? [{ key: item.paused ? 'resume' : 'continue', label: item.paused ? tr('Продолжить сейчас') : item.reason === 'network' ? tr('Повторить') : tr('Продолжить') }, { key: 'dismiss', label: tr('Отменить ход') }] : undefined,
   }));
   const working = boardWorking.map((item) => ({
     id: `${item.kind}:${item.id || item.botId}`, ref: item, where: where(item),
@@ -4472,33 +4460,7 @@ function renderNeeds() {
   btn.setAttribute('aria-expanded', String(!list.hidden));
   if (list.hidden) return;
   if (needsBoardView) needsBoardView.update({ sections });
-  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard, onaction: (item, key) => runAction(item.ref.id, key) });
-}
-
-// «Продолжить» или «Отменить» для хода, который оборвал перезапуск (карточка «Нужен ты» и строка в чате).
-async function runAction(id, key) {
-  try {
-    await api(`/api/runs/${encodeURIComponent(id)}/${key}`, { method: 'POST' });
-  } catch (e) {
-    toast(trServer(e.message));
-  }
-  document.querySelectorAll(`.run-actions[data-run="${id}"]`).forEach((el) => el.remove());
-  await refreshNeeds();
-}
-
-function runActionsNode(id) {
-  const box = document.createElement('div');
-  box.className = 'run-actions';
-  box.dataset.run = id;
-  for (const [key, label, variant] of [['continue', tr('Продолжить'), 'primary'], ['dismiss', tr('Отменить ход'), 'ghost']]) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `k-btn k-btn--sm k-btn--${variant}`;
-    button.textContent = label;
-    button.addEventListener('click', () => runAction(id, key));
-    box.append(button);
-  }
-  return box;
+  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard });
 }
 
 // Переход к карточке: открыть разговор, дорисовать карточку, если её нет на странице, и показать её.
@@ -4508,8 +4470,6 @@ async function openNeed(item) {
   if (item.roomId && roomById(item.roomId)) await selectRoom(item.roomId);
   else if (botById(item.botId)) await selectBot(item.botId);
   else return;
-  // Прерванный ход: строка о нём уже в чате бота, карточки у него нет.
-  if (item.kind === 'run') return;
   let card = S.cards.get(item.id);
   if (!card?.isConnected) {
     S.cards.delete(item.id);
@@ -7994,38 +7954,24 @@ const STATUS_LABELS = {
   failed: tr('ошибка'),
   stopped: tr('остановлено'),
   limit: tr('упёрлось в предел токенов'),
-  paused: tr('на паузе'),
   skipped: tr('пропущено: компьютер спал'),
   error: tr('не запустилась'),
   running: tr('идёт'),
-  busy: tr('бот был занят'),
+  interrupted: tr('прервалась: программа закрылась'),
+  gave_up: tr('не выполнилась за сутки'),
 };
-// Почему запуск остановился: слово рядом со статусом в истории и в строке рутины (приходит с сервера как `reason`).
-const REASON_LABELS = { network: tr('сеть'), login: tr('нужен вход'), check: tr('проверка не прошла'), stuck: tr('застрял') };
-const statusText = (e) => [STATUS_LABELS[e.status], REASON_LABELS[e.reason]].filter(Boolean).join(': ');
-// «на паузе: 3 ошибки подряд — нужен вход»: рутину остановила серия «вечных» ошибок, ждёт «Возобновить».
-const errorPauseText = (r) => {
-  const n = Number(r.failures) || 3;
-  return tr('на паузе: {errors} подряд — {why}', { errors: `${n} ${plural(n, 'ошибка', 'ошибки', 'ошибок')}`, why: REASON_LABELS[r.stopReason] || tr('ошибка') });
-};
-async function resumeRoutineErrors(id) {
-  try {
-    const res = await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'PATCH', body: { errorPaused: false } });
-    const r = S.routines.find((x) => x.id === id);
-    if (r) Object.assign(r, { errorPaused: false, failures: 0, stopReason: undefined }, res?.routine || {});
-  } catch (err) {
-    toast(err.message);
-  }
-}
 // Чип прошлого запуска с тревожным значком: рутина не дошла до «готово».
-const BAD_STATUSES = ['failed', 'error', 'limit', 'needs'];
+const BAD_STATUSES = ['failed', 'error', 'limit', 'needs', 'interrupted', 'gave_up'];
 const statusClass = (status) => (STATUS_LABELS[status] ? `st-${status}` : '');
 
 const isTime = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
 
 function scheduleText(r) {
   if (r.hook) return tr('по внешнему вызову');
-  const parts = [isTime(r.at) ? tr('в {time}', { time: r.at }) : tr('каждые {minutes} мин', { minutes: Number(r.everyMinutes) || 60 })];
+  const low = Number(r.everyMinutes) || 60;
+  const high = Number(r.everyMaxMinutes) || 0;
+  const every = high > low ? tr('каждые {from}–{to} мин', { from: low, to: high }) : tr('каждые {minutes} мин', { minutes: low });
+  const parts = [isTime(r.at) ? tr('в {time}', { time: r.at }) : every];
   if (!isTime(r.at) && isTime(r.windowFrom) && isTime(r.windowTo)) parts.push(`${r.windowFrom}–${r.windowTo}`);
   const days = [...new Set((r.days || []).map(Number).filter((d) => d >= 1 && d <= 7))].sort((a, b) => a - b);
   const key = days.join('');
@@ -8082,9 +8028,11 @@ function routineParts(r) {
   const icon = (name) => ic(name);
   const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
   const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
-  const why = REASON_LABELS[r.stopReason];
+  const retry = Number(r.retryAttempt) > 0 && r.enabled && !r.hook
+    ? tr('Повтор {n} в {time}', { n: Number(r.retryAttempt) + 1, time: nextText(r.nextRun) })
+    : '';
   const lastTitle = r.lastRun
-    ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${why ? ` (${why})` : ''}`
+    ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${retry ? `. ${retry}` : ''}`
     : '';
   const lastIcon = BAD_STATUSES.includes(r.lastStatus) ? 'alert-circle' : r.lastStatus === 'running' ? 'clock' : 'check-long';
   const chips = [
@@ -8092,7 +8040,6 @@ function routineParts(r) {
     `<span class="rt-chip" title="${tr('Когда')}">${icon('repeat')}${escapeHtml(scheduleText(r))}</span>`,
     next || r.hook ? `<span class="rt-chip" title="${escapeHtml(nextTitle)}">${icon(r.hook ? 'link' : 'clock')}${r.hook ? tr('вебхук') : escapeHtml(next)}</span>` : '',
     r.lastRun ? `<span class="rt-chip rt-last ${statusClass(r.lastStatus)}" title="${escapeHtml(lastTitle)}">${icon(lastIcon)}${escapeHtml(whenText(r.lastRun))}</span>` : '',
-    r.errorPaused ? `<span class="rt-chip rt-last st-failed" title="${escapeHtml(errorPauseText(r))}">${icon('alert-circle')}${escapeHtml(errorPauseText(r))}</span>` : '',
   ].join('');
   return { gist, chips };
 }
@@ -8107,7 +8054,7 @@ function routineRow(r, rerender) {
   el.innerHTML = `
     <div class="rt-text">
       <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
-      ${gist ? `<div class="rt-gist" title="${escapeHtml(gist)}">${escapeHtml(gist)}</div>` : ''}
+      ${gist ? `<div class="rt-gist" role="button" tabindex="0" aria-expanded="false" title="${tr('Показать задание целиком')}">${escapeHtml(gist)}</div>` : ''}
     </div>
     <div class="rt-actions">
       <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? 'bell' : 'bell-off')}</button>
@@ -8117,17 +8064,20 @@ function routineRow(r, rerender) {
     </div>
     <div class="rt-chips">${chips}</div>`;
   $('.rt-run', el).addEventListener('click', () => runRoutine(r.id));
-  if (r.errorPaused) {
-    const resume = document.createElement('button');
-    resume.type = 'button';
-    resume.className = 'k-btn k-btn--ghost';
-    resume.textContent = tr('Возобновить');
-    resume.addEventListener('click', async () => {
-      await resumeRoutineErrors(r.id);
-      rerender();
-    });
-    $('.rt-chips', el).append(resume);
-  }
+  const gistEl = $('.rt-gist', el);
+  const toggleGist = () => {
+    const open = el.classList.toggle('rt-open');
+    gistEl.textContent = open ? String(r.prompt || '').trim() : gist;
+    gistEl.setAttribute('aria-expanded', String(open));
+    gistEl.title = open ? tr('Свернуть') : tr('Показать задание целиком');
+  };
+  gistEl?.addEventListener('click', toggleGist);
+  gistEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleGist();
+    }
+  });
   $('.rt-quiet', el).addEventListener('click', async () => {
     try {
       const { routine } = await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { quiet: !r.quiet } });
@@ -8164,12 +8114,11 @@ function routineCardModel(r) {
   const bot = botById(r.botId);
   const next = r.hook ? tr('вебхук') : r.enabled ? nextText(r.nextRun) : '';
   const last = STATUS_LABELS[r.lastStatus];
-  const wait = needsItems.find((item) => item.paused && item.routineId === r.id);
   return {
     id: r.id,
-    paused: wait ? { id: wait.id, label: pauseLabel(wait) } : null,
     title: r.title,
     gist: String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    prompt: String(r.prompt || '').trim(),
     enabled: Boolean(r.enabled),
     quiet: Boolean(r.quiet),
     bot: { name: bot?.name || '' },
@@ -8178,9 +8127,8 @@ function routineCardModel(r) {
     nextIcon: r.hook ? 'link' : 'clock',
     nextTitle: r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next }),
     last: r.lastRun ? whenText(r.lastRun) : '',
-    lastTitle: r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${REASON_LABELS[r.stopReason] ? ` (${REASON_LABELS[r.stopReason]})` : ''}` : '',
+    lastTitle: r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}` : '',
     lastBad: BAD_STATUSES.includes(r.lastStatus),
-    errorPaused: r.errorPaused ? { label: errorPauseText(r) } : null,
   };
 }
 
@@ -8205,14 +8153,6 @@ function renderRoutines() {
   const props = {
     routines: ordinaryRoutines().map(routineCardModel),
     onrun: (id) => runRoutine(id),
-    onresume: async (runId) => {
-      await runAction(runId, 'resume');
-      renderRoutines();
-    },
-    onunpause: async (id) => {
-      await resumeRoutineErrors(id);
-      both();
-    },
     onquiet: (id, value) => patch(id, { quiet: value }, (r, saved) => { r.quiet = saved ? saved.quiet : value; }),
     ontoggle: (id, value) => patch(id, { enabled: value }, (r) => { r.enabled = value; }),
     ondelete: async (id) => {
@@ -8313,7 +8253,7 @@ function renderJournal() {
         <span class="jr-when">${escapeHtml(whenText(e.at))}</span>
         <span class="jr-bot">${escapeHtml(e.botName)}</span>
         <span class="jr-title">${escapeHtml(trServer(e.title))}</span>
-        <span class="jr-status ${statusClass(e.status)}">${escapeHtml(statusText(e))}</span>
+        <span class="jr-status ${statusClass(e.status)}">${escapeHtml(STATUS_LABELS[e.status] || '')}</span>
       </div>
       ${e.text ? `<div class="jr-text">${escapeHtml(trServer(e.text))}</div>` : ''}
       ${e.fallback ? `<div class="jr-fallback">${tr('на запасной: {name}', { name: escapeHtml(e.fallback) })}</div>` : ''}
@@ -9401,11 +9341,11 @@ function bindRoutineForm() {
       title: f.title.value.trim(),
       prompt: f.prompt.value.trim(),
       everyMinutes: Number(f.everyMinutes.value) || 60,
+      everyMaxMinutes: atMode ? 0 : Number(f.everyMaxMinutes.value) || 0,
       days: selectedDays(),
       at: atMode ? f.at.value : '',
       windowFrom: atMode ? '' : f.windowFrom.value,
       windowTo: atMode ? '' : f.windowTo.value,
-      catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
       quiet: f.quiet.checked,
       hook: $('#rt-hook').checked,
     };

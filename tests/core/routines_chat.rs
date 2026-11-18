@@ -472,9 +472,9 @@ async fn a_check_in_with_nothing_to_report_stays_silent() {
     let (crew, fake, bot) = setup("checkin-quiet", "auto", &[("CREW_TEST_TICK_MS", "200")]).await;
     let (status, _) = crew.send("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 30 }))).await;
     assert_eq!(status, 400, "чаще раза в час нельзя: больше 24 в сутки");
-    *fake.script.lock().unwrap() = vec![tool("finish_turn", json!({ "status": "nothing" }))];
+    *fake.script.lock().unwrap() = vec![say("[ТИХО]")];
     crew.clear_events();
-    let made = crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": common::due_now() }))).await;
+    let made = crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": 1 }))).await;
     assert_eq!(made["checkin"]["enabled"], true);
     let entry = crew.wait_event("журнал самопроверки", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "quiet", "{entry}");
@@ -491,7 +491,7 @@ async fn a_task_started_from_a_check_in_asks_whatever_the_bot_mode() {
     let (crew, fake, bot) = setup("checkin-asks", "auto", &[("CREW_TEST_TICK_MS", "200"), ("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
     *fake.script.lock().unwrap() = vec![tool("write_file", json!({ "path": "заметка.txt", "content": "x" })), say("Ждёт решения")];
     crew.clear_events();
-    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": common::due_now() }))).await;
+    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": 1 }))).await;
     let card = crew.wait_event("карточка самопроверки", |e| e["type"] == "approval").await;
     assert_eq!(card["tool"], "write_file", "режим бота «решай сам», но самопроверку человек не запускал");
     crew.wait_event("журнал", |e| e["type"] == "journal").await;
@@ -506,7 +506,7 @@ async fn a_new_check_in_waits_a_full_interval_and_a_disabled_one_never_runs() {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
     assert!(next > now + 30 * 60_000, "первая самопроверка через интервал, а не сразу");
     crew.clear_events();
-    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": false, "nextRun": common::due_now() }))).await;
+    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": false, "nextRun": 1 }))).await;
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     assert!(crew.find_event(|e| e["type"] == "journal").is_none(), "выключенная самопроверка не идёт");
 }
@@ -551,7 +551,7 @@ async fn a_bot_cannot_turn_a_recurring_goal_into_a_one_off_one_so_it_can_end_it(
     // В самопроверке.
     *fake.script.lock().unwrap() = vec![tool("update_goal", json!({ "goal_id": id, "recurring": false })), say("[ТИХО]")];
     crew.clear_events();
-    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": common::due_now() }))).await;
+    crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": 1 }))).await;
     crew.wait_event("журнал самопроверки", |e| e["type"] == "journal").await;
     assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "отказ приходит без карточки");
     assert_eq!(results(&crew)[0].0, "error");

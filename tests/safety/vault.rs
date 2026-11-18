@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::common::{self, Crew, BIN};
+use crate::common::{Crew, BIN};
 use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -807,7 +807,7 @@ async fn unattended_run_refuses_a_login_without_a_saved_always() {
     let (status, data) = v.crew.send("POST", "/api/routines", Some(body)).await;
     assert_eq!(status, 201, "{data}");
     let id = data["routine"]["id"].as_str().unwrap().to_string();
-    v.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
+    v.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": 1 }))).await;
     let started = Instant::now();
     while v.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == v.bot.as_str()) <= before {
         assert!(started.elapsed() < Duration::from_secs(90), "рутина не закончилась");

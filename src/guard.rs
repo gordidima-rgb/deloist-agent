@@ -554,8 +554,6 @@ fn redirect_home(cookie: Option<String>, target: &'static str) -> Response {
 fn human_only(path: &str) -> bool {
     path.starts_with("/api/approvals/")
         || path.starts_with("/api/questions/")
-        // Прерванный ход продолжает или отменяет человек: решение за него не принимает скрипт бота.
-        || path.starts_with("/api/runs/")
         || path.starts_with("/api/permissions")
         // Доверенные устройства: пропуск телефона и второго ПК, список и отзыв решает только человек.
         || path.starts_with("/api/devices")

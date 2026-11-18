@@ -11,18 +11,14 @@ use serde_json::{json, Map, Value};
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::drivers::{acp, anthropic, cli, demo, gemini, is_context_error, openai, DriverEvent, ToolCall, Usage};
-use crate::runs::{reason_of, RunState, StopReason};
+use crate::drivers::{acp, anthropic, cli, demo, gemini, is_context_error, is_limit_error, openai, DriverEvent, ToolCall, Usage};
 use crate::store::{now, uid, Bot, Settings, Thread};
 use crate::tools::{self, exec_tool};
 use crate::App;
 
 // Работа в кабинете занимает десятки шагов: вход, переходы, клики.
 const MAX_STEPS: usize = 40;
-mod approvals;
 mod completion;
-pub use approvals::{call_key, decide_approval, remind_tick};
-use approvals::{settle_reply, Approval};
 const TOOL_RESULT_LIMIT: usize = 4_000;
 const BROWSER_RESULT_LIMIT: usize = 13_000;
 const OLD_BROWSER_RESULT_LIMIT: usize = 300;
@@ -30,10 +26,8 @@ pub(crate) const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const QUESTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Рутина ночью: столько ждём человека один раз за ход, дальше считаем, что его нет.
 const UNATTENDED_WAIT: Duration = Duration::from_secs(5 * 60);
-/// Пять пауз из-за лимита подряд: лимит не отпускает, дальше решает человек.
-const MAX_LIMIT_PAUSES: u32 = 5;
-/// Сколько раз ход пробует достучаться до модели сам (2, 5, 10, 20, 30 с), прежде чем остановиться из-за связи.
-const MODEL_RECONNECTS: u32 = 5;
+/// После лимита у основной новые ходы столько времени сразу идут на запасную.
+const FALLBACK_COOLDOWN: Duration = Duration::from_secs(15 * 60);
 const LIMIT_REACHED: &str = "дневной предел токенов исчерпан, рутина остановлена";
 const JOURNAL_TEXT_LIMIT: usize = 600;
 /// Что делегат обязан вернуть: короткий итог, а не отчёт на весь экран.
@@ -71,16 +65,6 @@ pub fn is_quiet_answer(text: &str) -> bool {
     trimmed.to_lowercase() == "тихо"
 }
 
-/// Живое ожидание карточки. В отладочной сборке `CREW_TEST_APPROVAL_WAIT_MS` его сокращает.
-fn approval_wait(wait: Duration) -> Duration {
-    if cfg!(debug_assertions) {
-        if let Some(ms) = std::env::var("CREW_TEST_APPROVAL_WAIT_MS").ok().and_then(|v| v.parse().ok()) {
-            return Duration::from_millis(ms);
-        }
-    }
-    wait
-}
-
 fn unattended_wait() -> Duration {
     if cfg!(debug_assertions) {
         if let Some(ms) = std::env::var("CREW_TEST_UNATTENDED_WAIT_MS").ok().and_then(|v| v.parse().ok()) {
@@ -90,11 +74,26 @@ fn unattended_wait() -> Duration {
     UNATTENDED_WAIT
 }
 
+fn fallback_cooldown_ms() -> i64 {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_FALLBACK_COOLDOWN_MS").ok().and_then(|v| v.parse().ok()) {
+            return ms;
+        }
+    }
+    FALLBACK_COOLDOWN.as_millis() as i64
+}
+
 /// Ход без человека: что он так и не решил.
 #[derive(Default)]
 struct Unattended {
     absent: bool,
     missed: Vec<String>,
+}
+
+struct Approval {
+    bot_id: String,
+    payload: Value,
+    tx: oneshot::Sender<Reply>,
 }
 
 /// Ответ человека на карточку.
@@ -121,8 +120,7 @@ impl Reply {
 enum ApprovalResult {
     Allowed,
     Denied,
-    /// Человек не ответил за живое ожидание: карточка осталась, ход закончится.
-    Waiting(String),
+    Timeout,
 }
 
 /// Живой ход, который ждёт ответа на вопрос.
@@ -182,11 +180,6 @@ impl Drop for FloorGuard {
 pub struct Turns {
     events: broadcast::Sender<Value>,
     approvals: Mutex<HashMap<String, Approval>>,
-    approvals_path: Option<std::path::PathBuf>,
-    /// Бот → что ждёт его остановленный ход: после этого ход должен кончиться, а не идти дальше в обход.
-    waiting: Mutex<HashMap<String, String>>,
-    /// Разовые разрешения на один вызов после позднего «да».
-    once: Mutex<Vec<approvals::Once>>,
     questions: Mutex<HashMap<String, Question>>,
     busy: Mutex<HashMap<String, Busy>>,
     unattended: Mutex<HashMap<String, Unattended>>,
@@ -198,6 +191,8 @@ pub struct Turns {
     turn_floor: Mutex<HashMap<String, (u64, String)>>,
     /// Номер записи пола: сторож старого хода не трогает пол нового.
     floor_epoch: std::sync::atomic::AtomicU64,
+    /// До какого времени основная модель считается упёршейся в лимит: ключ → метка времени.
+    main_limited_until: Mutex<HashMap<String, i64>>,
     /// Сколько ходов подряд упало у бота: для эскалации уровня модели.
     failure_streaks: Mutex<HashMap<String, u32>>,
     /// Правила «всегда здесь» и разрешения «в этом разговоре».
@@ -211,8 +206,6 @@ pub struct Turns {
     /// Все открытые вопросы, и с живым ходом, и без.
     asked: Mutex<Vec<Asked>>,
     asked_path: Option<std::path::PathBuf>,
-    /// Итог finish_turn, записанный во время хода (для драйверов без tool_calls, например ACP).
-    finish: Mutex<HashMap<String, (String, Option<String>)>>,
 }
 
 impl Default for Turns {
@@ -220,9 +213,6 @@ impl Default for Turns {
         Self {
             events: broadcast::channel(4096).0,
             approvals: Mutex::new(HashMap::new()),
-            approvals_path: None,
-            waiting: Mutex::new(HashMap::new()),
-            once: Mutex::new(Vec::new()),
             questions: Mutex::new(HashMap::new()),
             busy: Mutex::new(HashMap::new()),
             unattended: Mutex::new(HashMap::new()),
@@ -230,6 +220,7 @@ impl Default for Turns {
             delegation_from: Mutex::new(HashMap::new()),
             turn_floor: Mutex::new(HashMap::new()),
             floor_epoch: std::sync::atomic::AtomicU64::new(1),
+            main_limited_until: Mutex::new(HashMap::new()),
             failure_streaks: Mutex::new(HashMap::new()),
             perms: crate::grants::Perms::default(),
             messengers: crate::messengers::Store::default(),
@@ -237,7 +228,6 @@ impl Default for Turns {
             mentioned: Mutex::new(HashMap::new()),
             asked: Mutex::new(Vec::new()),
             asked_path: None,
-            finish: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -246,15 +236,12 @@ impl Turns {
     /// С разрешениями и вопросами из служебной папки.
     pub fn open(data_dir: &std::path::Path) -> Self {
         let asked_path = data_dir.join("questions.json");
-        let approvals_path = data_dir.join("approvals.json");
         let asked = std::fs::read_to_string(&asked_path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         Self {
             perms: crate::grants::Perms::open(data_dir),
             messengers: crate::messengers::Store::open(data_dir),
             asked: Mutex::new(asked),
             asked_path: Some(asked_path),
-            approvals: Mutex::new(approvals::load(&approvals_path)),
-            approvals_path: Some(approvals_path),
             ..Self::default()
         }
     }
@@ -299,14 +286,6 @@ impl Turns {
 
     pub fn conv_of(&self, bot_id: &str) -> Option<String> {
         self.convs.lock().unwrap().get(bot_id).cloned()
-    }
-
-    pub(crate) fn record_finish(&self, bot_id: &str, status: &str, note: Option<String>) {
-        self.finish.lock().unwrap().insert(bot_id.to_string(), (status.to_string(), note));
-    }
-
-    pub(crate) fn take_finish(&self, bot_id: &str) -> Option<(String, Option<String>)> {
-        self.finish.lock().unwrap().remove(bot_id)
     }
 
     /// Боты, упомянутые человеком в сообщении этого хода.
@@ -427,6 +406,23 @@ impl Turns {
         self.unattended.lock().unwrap().remove(bot_id).map(|u| u.missed).unwrap_or_default()
     }
 
+    /// Основная модель недавно упёрлась в лимит: новый ход сразу идёт на запасную.
+    fn main_recently_limited(&self, key: &str) -> bool {
+        let mut map = self.main_limited_until.lock().unwrap();
+        match map.get(key) {
+            Some(&until) if until > now() => true,
+            Some(_) => {
+                map.remove(key);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn note_main_limit(&self, key: &str) {
+        self.main_limited_until.lock().unwrap().insert(key.to_string(), now() + fallback_cooldown_ms());
+    }
+
     pub fn failure_streak(&self, bot_id: &str) -> u32 {
         *self.failure_streaks.lock().unwrap().get(bot_id).unwrap_or(&0)
     }
@@ -494,24 +490,34 @@ impl Turns {
         out
     }
 
+    /// Ответ на карточку. Что именно разрешено, решает сервер по самой карточке: клиент
+    /// присылает только ответ, место и инструмент от него не принимаются.
+    pub fn resolve_approval(&self, id: &str, reply: Reply) -> bool {
+        let Some(item) = self.approvals.lock().unwrap().remove(id) else {
+            return false;
+        };
+        let status = if reply == Reply::Deny { "denied" } else { "allowed" };
+        self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": status }));
+        let _ = item.tx.send(reply);
+        true
+    }
+
     /// Чат очищен: открытые карточки этого разговора отклоняются, ответ на них уже не к месту.
     pub fn deny_conversation(&self, conv: &str) {
-        let ids: Vec<String> = self.approvals.lock().unwrap().iter().filter(|(_, a)| a.payload["conv"] == conv).map(|(k, _)| k.clone()).collect();
-        for id in ids {
-            if let Some(item) = self.take_approval(&id) {
-                self.drop_once(&item.bot_id, item.run.as_deref());
-                self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": "denied" }));
-                if let Some(tx) = item.tx {
-                    let _ = tx.send(Reply::Deny);
-                }
-            }
+        let closed: Vec<(String, Approval)> = {
+            let mut map = self.approvals.lock().unwrap();
+            let ids: Vec<String> = map.iter().filter(|(_, a)| a.payload["conv"] == conv).map(|(k, _)| k.clone()).collect();
+            ids.into_iter().filter_map(|id| map.remove(&id).map(|a| (id, a))).collect()
+        };
+        for (id, item) in closed {
+            self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": "denied" }));
+            let _ = item.tx.send(Reply::Deny);
         }
     }
 
     /// Бот удалён: его вопросы больше никто не ждёт.
     pub fn forget_questions(&self, bot_id: &str) {
         self.close_questions(bot_id, "bot_removed");
-        self.forget_approvals(bot_id);
     }
 
     pub fn approval_tool(&self, id: &str) -> Option<String> {
@@ -527,8 +533,7 @@ impl Turns {
     #[cfg(test)]
     pub fn open_approval_for_test(&self, id: &str, bot_id: &str, payload: Value) -> oneshot::Receiver<Reply> {
         let (tx, rx) = oneshot::channel();
-        let item = Approval { bot_id: bot_id.to_string(), payload, tx: Some(tx), run: None, key: String::new(), conv: None, epoch: 0, scope: None, reminded: false };
-        self.add_approval(id.to_string(), item);
+        self.approvals.lock().unwrap().insert(id.to_string(), Approval { bot_id: bot_id.to_string(), payload, tx });
         rx
     }
 
@@ -560,16 +565,15 @@ impl Turns {
         }
     }
 
-    /// Живые карточки бота отклоняются: ждать их больше некому. Отложенные остаются.
     fn deny_all_for_bot(&self, bot_id: &str, reason: &str) {
-        let ids: Vec<String> = self.approvals.lock().unwrap().iter().filter(|(_, a)| a.bot_id == bot_id && a.tx.is_some()).map(|(k, _)| k.clone()).collect();
-        for id in ids {
-            if let Some(item) = self.take_approval(&id) {
-                self.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": reason }));
-                if let Some(tx) = item.tx {
-                    let _ = tx.send(Reply::Deny);
-                }
-            }
+        let approvals: Vec<(String, Approval)> = {
+            let mut map = self.approvals.lock().unwrap();
+            let ids: Vec<String> = map.iter().filter(|(_, a)| a.bot_id == bot_id).map(|(k, _)| k.clone()).collect();
+            ids.into_iter().filter_map(|id| map.remove(&id).map(|a| (id, a))).collect()
+        };
+        for (id, item) in approvals {
+            self.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": reason }));
+            let _ = item.tx.send(Reply::Deny);
         }
     }
 
@@ -590,8 +594,6 @@ impl Turns {
             return None;
         }
         let cancel = CancellationToken::new();
-        // Остаток прежнего хода (групповой ход его не разбирает): новый ход начинается с чистого.
-        self.waiting.lock().unwrap().remove(bot_id);
         busy.insert(bot_id.to_string(), Busy { cancel: cancel.clone(), browser_token: None, since: now() });
         Some(cancel)
     }
@@ -664,8 +666,6 @@ pub struct Confirmation<'a> {
     pub remote: crate::grants::Remote,
     /// Человеческое описание, собранное программой (`describe`). `None` — карточка со своими словами.
     pub human: Option<crate::describe::Described>,
-    /// Отпечаток вызова (`call_key`), если он известен точно. Иначе его берут из инструмента и подробностей карточки.
-    pub exact: Option<String>,
 }
 
 /// Да или нет от человека. Нет ответа — значит нет.
@@ -673,8 +673,8 @@ pub async fn request_confirmation(app: &Arc<App>, bot_id: &str, question: Confir
     matches!(ask_human(app, bot_id, question).await, ApprovalResult::Allowed)
 }
 
-async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote, exact: String) -> ApprovalResult {
-    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human, exact: Some(exact) }).await
+async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote) -> ApprovalResult {
+    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human }).await
 }
 
 /// Действие разрешено правилом, которое живёт вне `Perms` (старые разрешения сайта у бота).
@@ -717,22 +717,16 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
             None => {}
         }
     }
-    // Позднее «да» разрешило ровно этот вызов один раз.
-    let key = question.exact.take().unwrap_or_else(|| call_key(question.tool, &json!(question.detail)));
-    let run = app.runs.active_id(bot_id);
-    if app.turns.take_once(bot_id, run.as_deref(), &key) {
-        if let Some(scope) = &question.scope {
-            log_decision(app, bot_id, scope, "once", "").await;
-        }
-        return ApprovalResult::Allowed;
-    }
     if unattended {
+        if app.turns.is_absent(bot_id) {
+            app.turns.note_missed(bot_id, question.title);
+            return ApprovalResult::Timeout;
+        }
         question.timeout = question.timeout.min(unattended_wait());
     }
-    let timeout = approval_wait(question.timeout);
     let id = uid("ap");
     let (tx, rx) = oneshot::channel();
-    let expires_at = now() + timeout.as_millis() as i64;
+    let expires_at = now() + question.timeout.as_millis() as i64;
     let grantable = question.scope.as_ref().is_some_and(|s| s.grantable);
     let always = question.scope.as_ref().is_some_and(|s| s.always);
     // Эпоха разговора на момент показа: очистка чата делает эту карточку неспособной выдать разрешение.
@@ -755,42 +749,52 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
     if let Some(room) = question.room {
         payload["roomId"] = json!(room);
     }
-    // Карточка на диске до показа: перезапуск её не теряет.
-    app.turns.add_approval(
+    app.turns.approvals.lock().unwrap().insert(
         id.clone(),
-        Approval {
-            bot_id: bot_id.to_string(), payload: payload.clone(), tx: Some(tx), run, key, conv: conv.clone(), epoch,
-            scope: question.scope.clone(), reminded: false,
-        },
+        Approval { bot_id: bot_id.to_string(), payload: payload.clone(), tx },
     );
     let mut event = json!({ "type": "approval", "botId": bot_id, "id": id });
     if let (Some(event), Some(fields)) = (event.as_object_mut(), payload.as_object()) {
         event.extend(fields.clone());
     }
     app.turns.emit(event);
-    let mut rx = rx;
-    let reply = match tokio::time::timeout(timeout, &mut rx).await {
-        Ok(Ok(reply)) => reply,
-        Ok(Err(_)) => return ApprovalResult::Denied,
-        Err(_) => {
-            // Карточка остаётся: ход закончится, а решение человека продолжит его позже.
-            if app.turns.detach_approval(&id) {
-                let text = crate::runs::waiting_text(question.title);
-                app.turns.set_waiting(bot_id, &text);
-                if let Some(cancel) = app.turns.cancel_of(bot_id) {
-                    cancel.cancel();
-                }
-                return ApprovalResult::Waiting(text);
+    match tokio::time::timeout(question.timeout, rx).await {
+        Ok(Ok(reply)) => {
+            let Some(scope) = question.scope.as_ref() else {
+                return if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed };
+            };
+            // Запомнить можно только то, что можно запомнить; иначе «всегда» значит «один раз».
+            let (how, by) = match reply {
+                Reply::Deny => ("deny", String::new()),
+                Reply::Once => ("once", String::new()),
+                Reply::Conversation => match conv.as_deref().and_then(|c| app.turns.perms.add_grant(bot_id, c, epoch, scope)) {
+                    Some(grant) => ("conversation_new", grant.id),
+                    None => ("once", String::new()),
+                },
+                // Где «всегда» нельзя (удаление и пароли на сайте), «всегда» значит «в этом разговоре».
+                Reply::Always if !scope.always => match conv.as_deref().and_then(|c| app.turns.perms.add_grant(bot_id, c, epoch, scope)) {
+                    Some(grant) => ("conversation_new", grant.id),
+                    None => ("once", String::new()),
+                },
+                Reply::Always => match app.turns.perms.add_rule(bot_id, scope) {
+                    Some(rule) => ("always", rule.id),
+                    None => ("once", String::new()),
+                },
+            };
+            if !by.is_empty() {
+                app.turns.emit(json!({ "type": "permissions_changed", "botId": bot_id }));
             }
-            // Человек ответил в ту же секунду: ответ уже в пути.
-            match tokio::time::timeout(Duration::from_secs(1), &mut rx).await {
-                Ok(Ok(reply)) => reply,
-                _ => return ApprovalResult::Denied,
-            }
+            log_decision(app, bot_id, scope, how, &by).await;
+            if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed }
         }
-    };
-    settle_reply(app, bot_id, conv.as_deref(), epoch, question.scope.as_ref(), reply).await;
-    if reply == Reply::Deny { ApprovalResult::Denied } else { ApprovalResult::Allowed }
+        Ok(Err(_)) => ApprovalResult::Denied,
+        Err(_) => {
+            app.turns.approvals.lock().unwrap().remove(&id);
+            app.turns.emit(json!({ "type": "approval_closed", "botId": bot_id, "id": id, "status": "timeout" }));
+            app.turns.note_missed(bot_id, question.title);
+            ApprovalResult::Timeout
+        }
+    }
 }
 
 /// Вопрос человеку: текстом, кнопками-вариантами или простой формой. Вопрос сохраняется
@@ -959,8 +963,6 @@ pub(crate) struct PromptParts<'a> {
     pub summary: Option<&'a str>,
     pub unattended: bool,
     pub quiet: bool,
-    /// Драйвер получает наши инструменты: итог ход сообщает через `finish_turn`, а не маркером `[ТИХО]`.
-    pub tools: bool,
     /// Режим «Разработка Deloist»: где checkout, что закрыто и документы проекта. Меняется редко.
     pub project: Option<&'a str>,
     /// Состав команд, которые ведёт бот (ведущий или оркестратор): кто у него работает. Меняется редко.
@@ -1195,21 +1197,12 @@ fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>
              сделай то, что можно без него, и в конце коротко напиши, что получилось и какое решение ждёт человека."
                 .to_string(),
         );
-        if parts.tools {
-            lines.push("В конце вызови finish_turn с итогом (continue/done/nothing/need_you/failed); note — короткая заметка для следующего запуска.".to_string());
-        }
     }
     if parts.quiet {
-        lines.push(if parts.tools {
-            "Если после работы сообщать нечего, вызови finish_turn со status nothing. \
+        lines.push(format!(
+            "Если после работы сообщать нечего, ответь ровно {QUIET_MARK} и больше ничего. \
              Если есть результат, вопрос к человеку, ошибка или что-то неожиданное — напиши обычный ответ."
-                .to_string()
-        } else {
-            format!(
-                "Если после работы сообщать нечего, ответь ровно {QUIET_MARK} и больше ничего. \
-                 Если есть результат, вопрос к человеку, ошибка или что-то неожиданное — напиши обычный ответ."
-            )
-        });
+        ));
     }
     lines.join("\n\n")
 }
@@ -1439,10 +1432,6 @@ pub struct TurnOptions {
     pub voice: bool,
     /// Какой это ход: запуск цели или самопроверка. Отметку ставит `start_turn`, когда бот правда взят.
     pub run: Option<crate::goals::Run>,
-    /// Чей это ход для журнала запусков (`runs`). `start_turn_with` выводит сам; пусто у делегата и шага процесса: их журнал не ведёт.
-    pub origin: Option<crate::runs::Origin>,
-    /// Продолжение прерванного хода: запись журнала, которую он берёт вместо новой.
-    pub resume: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1467,10 +1456,6 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
     let Some(cancel) = app.turns.begin(bot_id) else {
         return Err(StartError { status: 409, message: "бот ещё думает над предыдущим сообщением".into() });
     };
-    let mut opts = opts;
-    if opts.origin.is_none() {
-        opts.origin = Some(origin_of(&opts));
-    }
     if opts.unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
@@ -1482,17 +1467,6 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
         let _ = run_turn_body(app, bot, task, attachments, opts, cancel).await;
     });
     Ok(())
-}
-
-/// Чей ход для журнала: цель, рутина, вебхук или человек (чат, мессенджеры, очередь).
-fn origin_of(opts: &TurnOptions) -> crate::runs::Origin {
-    use crate::runs::Origin;
-    match (&opts.routine, &opts.run) {
-        (Some(r), Some(run)) => Origin::Goal { id: r.id.clone(), title: r.title.clone(), run: run.clone() },
-        (Some(r), None) if opts.source.as_deref() == Some("webhook") => Origin::Webhook { id: r.id.clone(), title: r.title.clone() },
-        (Some(r), None) => Origin::Routine { id: r.id.clone(), title: r.title.clone() },
-        _ => Origin::Human,
-    }
 }
 
 /// Следующее сообщение очереди. Элемент уходит только после успешного старта: если бот занят,
@@ -1545,17 +1519,11 @@ impl ModelChoice {
         }
     }
 
-    /// Получает ли драйвер наши инструменты (у ACP — через MCP-мост). Только CLI и демо берут один текст:
-    /// им не вызвать `finish_turn`, поэтому «сообщать нечего» они говорят маркером `[ТИХО]`.
-    pub(crate) fn takes_tools(&self) -> bool {
-        matches!(self.driver.as_str(), "api" | "anthropic" | "gemini" | "deloist") || self.driver.starts_with("openai:") || self.driver.starts_with("acp")
-    }
-
     /// Принимает ли выбранная драйвер картинки в запросе; агент ACP сам отфильтрует то, чего не умеет.
-    /// Ни один провайдер не считается текстовым по имени: GigaChat получает картинки файлами, остальные — частями
-    /// сообщения, а отказ провайдера ловит `drive`.
     pub(crate) fn takes_images(&self) -> bool {
-        self.takes_tools()
+        // Ни один провайдер не считается текстовым по имени: GigaChat получает картинки файлами, остальные — частями
+        // сообщения, а отказ провайдера ловит `drive`. Только CLI и демо берут один текст.
+        matches!(self.driver.as_str(), "api" | "anthropic" | "gemini" | "deloist") || self.driver.starts_with("openai:") || self.driver.starts_with("acp")
     }
 
     /// Расход считаем только у API: демо бесплатно, а CLI считает у себя и нам не показывает.
@@ -1774,7 +1742,7 @@ pub(crate) fn fallback_choice(app: &App, settings: &Settings) -> Option<ModelCho
 
 /// Сообщения для модели в начале хода: системный промпт со всеми видами памяти, сводка и окно истории.
 /// Делегат (`source` = `delegation:…`) получает свежий контекст: системный промпт и только бриф этого хода.
-async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool, tools: bool, source: &str) -> Vec<Value> {
+async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool, source: &str) -> Vec<Value> {
     let settings = app.store.settings();
     // Память в промпте — снимок до следующего сдвига окна: новое приходит блоком «Из памяти».
     let memory = crate::memory::prompt_memory(app, Thread::Bot(&bot.id)).await;
@@ -1807,7 +1775,6 @@ async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool,
         summary: summary.as_deref(),
         unattended,
         quiet,
-        tools,
         project: project.as_deref(),
         team: team.as_deref(),
     };
@@ -1816,128 +1783,6 @@ async fn turn_messages(app: &Arc<App>, bot: &Bot, unattended: bool, quiet: bool,
 
 /// Ход к модели. Если провайдер отвечает 400 и жалуется на картинки, запрос уходит ещё раз, но картинки заменены
 /// строкой с путём файла; пара «провайдер и модель» запоминается, и дальше её картинками не кормят.
-/// Конец хода без провала: запись журнала получает это состояние, а человек — строку в чате.
-struct Pause {
-    state: crate::runs::RunState,
-    line: String,
-}
-
-/// Название провайдера для человека: `acp:claude` → `claude`.
-fn provider_name(choice: &ModelChoice) -> String {
-    choice.provider().trim_start_matches("acp:").to_string()
-}
-
-/// Когда закончится окно подписки агента, если в нём осталось не больше 5%: ход без человека в него не входит.
-fn window_end(app: &App, choice: &ModelChoice) -> Option<i64> {
-    let id = choice.driver.strip_prefix("acp:")?;
-    let (left, reset) = app.providers.subscription_left(app, id)?;
-    (left <= 5).then(|| reset.unwrap_or_else(|| now() + crate::limit::backoff_ms(0)))
-}
-
-/// Когда модель снова можно спрашивать: общий «отдых» после лимита, а для хода без человека ещё и почти исчерпанное окно подписки.
-fn unavailable_until(app: &App, choice: &ModelChoice, unattended: bool) -> Option<i64> {
-    app.rest.until(&choice.key()).max(unattended.then(|| window_end(app, choice)).flatten())
-}
-
-/// Срок сброса после лимита: из аккаунта подписки, иначе из текста ошибки, иначе 5 минут с удвоением (до суток).
-fn limit_until(app: &App, choice: &ModelChoice, message: &str, pauses: u32) -> i64 {
-    let account = choice.driver.strip_prefix("acp:").and_then(|id| app.providers.subscription_left(app, id)).filter(|(left, _)| *left <= 5).and_then(|(_, reset)| reset);
-    account
-        .or_else(|| crate::limit::reset_in_error(message, chrono::Local::now()))
-        .filter(|&at| at > now())
-        .unwrap_or_else(|| now() + crate::limit::backoff_ms(pauses))
-}
-
-fn limit_pause(app: &App, bot_id: &str, choice: &ModelChoice, until: i64, english: bool) -> Pause {
-    let provider = provider_name(choice);
-    if app.runs.pauses(bot_id) >= MAX_LIMIT_PAUSES {
-        let text = if english { format!("{provider} limit will not lift: I need you.") } else { format!("Лимит {provider} не отпускает: нужен ты.") };
-        let state = crate::runs::RunState::NeedsHuman { reason: crate::runs::StopReason::Limit, text: text.clone() };
-        return Pause { state, line: text };
-    }
-    let at = crate::scheduler::clock(until);
-    let line = if english { format!("{provider} limit: I will continue at {at}") } else { format!("Лимит {provider}: продолжу в {at}") };
-    Pause { state: crate::runs::RunState::Paused { until_ms: until, reason: crate::runs::StopReason::Limit, webhook: None, note: provider }, line }
-}
-
-/// Связь с провайдером оборвалась. Ход ничего не менял — повторим сами через 1, 5, 15 минут; менял — повторять вслепую нельзя, решает человек.
-fn network_pause(app: &App, bot_id: &str, choice: &ModelChoice, english: bool) -> Pause {
-    let provider = provider_name(choice);
-    let (acted, retries) = app.runs.network_state(bot_id);
-    if let Some(ms) = crate::runs::network_retry_ms(retries).filter(|_| !acted) {
-        let until = now() + ms;
-        let at = crate::scheduler::clock(until);
-        let line = if english { format!("No connection to {provider}: I will retry at {at}") } else { format!("Нет связи с {provider}: повторю в {at}") };
-        return Pause { state: RunState::Paused { until_ms: until, reason: StopReason::Network, webhook: None, note: provider }, line };
-    }
-    let text = match (acted, english) {
-        (true, false) => format!("Связь с {provider} оборвалась посреди работы. Проверь, что уже сделано, и нажми «Повторить»."),
-        (true, true) => format!("The connection to {provider} dropped mid-task. Check what is already done and press “Retry”."),
-        (false, false) => format!("Нет связи с {provider}. Нажми «Повторить», когда она вернётся."),
-        (false, true) => format!("No connection to {provider}. Press “Retry” when it is back."),
-    };
-    Pause { state: RunState::NeedsHuman { reason: StopReason::Network, text: text.clone() }, line: text }
-}
-
-/// Нужен вход в провайдера. Одна карточка на провайдера: если её уже ждёт другой бот, этот запуск просто закрывается.
-fn login_pause(app: &App, choice: &ModelChoice, english: bool) -> Pause {
-    let provider = provider_name(choice);
-    let text = if english { format!("Sign-in to {provider} needed") } else { format!("Нужен вход в {provider}") };
-    let (state, line) = if app.runs.login_waiting(&text) {
-        (RunState::Failed { reason: StopReason::Login, text: text.clone() }, format!("{text}: об этом уже сказано в «Нужен ты»."))
-    } else {
-        (RunState::NeedsHuman { reason: StopReason::Login, text: text.clone() }, format!("{text}. Войди и нажми «Продолжить»."))
-    };
-    Pause { state, line }
-}
-
-/// Сколько запуск без человека может идти: рутина 3 часа, ход цели 12.
-fn run_time_limit_ms(opts: &TurnOptions) -> Option<i64> {
-    let hours = match (&opts.run, &opts.routine) {
-        (Some(_), _) => 12,
-        (None, Some(_)) => 3,
-        _ => return None,
-    };
-    Some(hours * crate::schedule::hour_ms())
-}
-
-/// Предел токенов: дневной — до полуночи, месячный бота — до 1-го числа.
-fn budget_pause(month: bool, english: bool) -> Pause {
-    let local = chrono::Local::now();
-    let next = if month { crate::limit::next_month_ms(local) } else { crate::limit::next_day_ms(local) };
-    let until = next.unwrap_or_else(|| now() + crate::limit::backoff_ms(0));
-    let at = if month {
-        chrono::TimeZone::timestamp_millis_opt(&chrono::Local, until).single().map(|d| d.format("%d.%m").to_string()).unwrap_or_default()
-    } else {
-        crate::scheduler::clock(until)
-    };
-    let (note, line) = match (month, english) {
-        (false, false) => ("дневной предел", format!("Дневной предел токенов исчерпан: продолжу в {at}")),
-        (false, true) => ("daily limit", format!("Daily token limit reached: I will continue at {at}")),
-        (true, false) => ("месячный предел", format!("Месячный лимит бота исчерпан: продолжу {at}")),
-        (true, true) => ("monthly limit", format!("Monthly bot limit reached: I will continue on {at}")),
-    };
-    Pause { state: crate::runs::RunState::Paused { until_ms: until, reason: crate::runs::StopReason::Budget, webhook: None, note: note.into() }, line }
-}
-
-/// Бот сам попросил ждать (`await_event`): строка в чате называет, чего и до какого времени.
-fn event_pause(wait: crate::runs::RunState, english: bool) -> Pause {
-    let line = match &wait {
-        crate::runs::RunState::Paused { until_ms, webhook, note, .. } => {
-            let what = if note.is_empty() { String::new() } else { format!(": {note}") };
-            let at = crate::scheduler::clock(*until_ms);
-            match (webhook.is_some(), english) {
-                (true, false) => format!("Жду события{what}. Если не придёт, продолжу в {at}"),
-                (true, true) => format!("Waiting for an event{what}. If none comes, I will continue at {at}"),
-                (false, false) => format!("Жду{what}. Продолжу в {at}"),
-                (false, true) => format!("Waiting{what}. I will continue at {at}"),
-            }
-        }
-        _ => String::new(),
-    };
-    Pause { state: wait, line }
-}
-
 pub(crate) async fn drive(
     app: &Arc<App>,
     bot: &Bot,
@@ -2166,14 +2011,10 @@ fn run_turn_body(
         let bot_id = bot.id.clone();
 
         let mut saved: Vec<Value> = Vec::new();
-        // Сколько из `saved` уже в треде: шаги пишутся по мере хода, чтобы после обрыва там было видно сделанное.
-        let mut flushed: usize = 0;
         let mut final_text = String::new();
         let mut failure: Option<String> = None;
         let mut steered = false;
         let mut fallback_model: Option<String> = None;
-        // Ход кончается паузой, а не провалом: лимит, предел токенов, `await_event`.
-        let mut pause: Option<Pause> = None;
         let started_at = now();
         let mut turn_tokens: i64 = 0;
         // Чья модель отвечала последней: для квитанции хода (экраны «Использование» и «Отчёт»).
@@ -2183,15 +2024,6 @@ fn run_turn_body(
         let mut turn_usage = Usage::default();
         let mut steps_run: usize = 0;
         let unattended = app.turns.is_unattended(&bot_id);
-        // Запись в журнал запусков до первого шага: продолжение берёт прежнюю, остальные заводят новую.
-        let journaled = match (&opts.resume, &opts.origin) {
-            (Some(id), _) => app.runs.activate(id),
-            (None, Some(origin)) => {
-                app.runs.begin(crate::runs::Run::new(&bot_id, origin.clone(), &opts));
-                true
-            }
-            _ => false,
-        };
         // Ход, начатый человеком в личном чате, — это «разговор»: в нём действуют его разрешения.
         if opts.window && opts.depth == 0 && opts.routine.is_none() && !unattended {
             app.turns.set_conv(&bot_id, &format!("bot:{bot_id}"));
@@ -2200,10 +2032,6 @@ fn run_turn_body(
         app.turns.emit(json!({ "type": "turn_start", "botId": bot_id, "turnId": turn_id, "source": source }));
         crate::extract::activity(&app, crate::extract::Owner::Bot(bot_id.clone()), false);
 
-        let mut last_finish_status: Option<String> = None;
-        let mut finish_note_saved: Option<String> = None;
-        // «Сообщать нечего» драйвер без инструментов говорит маркером в тексте, остальные — `finish_turn(nothing)`.
-        let mut marker_quiet = false;
         let result: Result<(), String> = async {
             // Окно истории двигаем целиком и редко: скользящий сдвиг на одно
             // сообщение за ход меняет начало запроса и выбрасывает кэш провайдера.
@@ -2225,9 +2053,7 @@ fn run_turn_body(
                 }
             }
 
-            // Заметка продолжения после перезапуска: модель читает её как сообщение, а человеку она показана служебной строкой.
-            let entry_source = if opts.resume.is_some() { "resume" } else { source.as_str() };
-            let mut user_entry = json!({ "role": "user", "text": user_text, "source": entry_source });
+            let mut user_entry = json!({ "role": "user", "text": user_text, "source": source });
             if !attachments.is_empty() {
                 user_entry["attachments"] = json!(attachments);
             }
@@ -2280,10 +2106,7 @@ fn run_turn_body(
             if !mentioned_ids.is_empty() {
                 app.turns.set_mentioned(&bot_id, mentioned_ids.clone());
             }
-            let main = main_choice(&app, &bot, &settings);
-            let tools_driver = main.takes_tools();
-            marker_quiet = !tools_driver;
-            let mut model_messages = turn_messages(&app, &bot, unattended, opts.quiet, tools_driver, &source).await;
+            let mut model_messages = turn_messages(&app, &bot, unattended, opts.quiet, &source).await;
             // Короткая системная заметка для модели: кого человек упомянул.
             let mention_note: Option<String> = if opts.depth == 0 && opts.routine.is_none() {
                 let all = app.store.bots();
@@ -2312,6 +2135,7 @@ fn run_turn_body(
             if opts.voice {
                 model_messages.push(json!({ "role": "system", "content": VOICE_NOTE }));
             }
+            let main = main_choice(&app, &bot, &settings);
             let failures = app.turns.failure_streak(&bot_id);
             let escalation = escalation_note(&bot, failures, &main.driver);
             if let Some(note) = &escalation {
@@ -2322,13 +2146,7 @@ fn run_turn_body(
             let mut base_len = model_messages.len();
             let mut squeezed = false;
             // Схемы инструментов одни на весь ход: MCP-серверы отвечают не мгновенно.
-            let mut tool_schemas = crate::tools::tool_defs_with_mcp(&app).await;
-            let wants_finish = unattended && tools_driver;
-            if !wants_finish {
-                if let Some(list) = tool_schemas.as_array_mut() {
-                    list.retain(|def| def["function"]["name"].as_str() != Some("finish_turn"));
-                }
-            }
+            let tool_schemas = crate::tools::tool_defs_with_mcp(&app).await;
             let mut page_views: Vec<usize> = Vec::new();
             let fallback = fallback_choice(&app, &settings);
             let mut current = main.clone();
@@ -2340,11 +2158,9 @@ fn run_turn_body(
                     "model": &main.model, "level": level_after_failures(&bot, failures).map(|level| level.key()),
                 }));
             }
-            // Основная отдыхает после лимита (или в окне подписки осталось меньше 5%): не тратим на неё запрос, сразу идём на запасную.
-            // «Продолжить сейчас» от человека отдых отменяет: он решил сам.
-            let forced = journaled && app.runs.is_forced(&bot_id);
+            // Основная недавно упёрлась в лимит: не тратим на неё запрос, сразу идём на запасную.
             if let Some(spare) = &fallback {
-                if !forced && unavailable_until(&app, &main, unattended).is_some() {
+                if app.turns.main_recently_limited(&main.key()) {
                     current = spare.clone();
                     fallback_model = Some(spare.label());
                     app.turns.emit(json!({
@@ -2354,34 +2170,13 @@ fn run_turn_body(
                     }));
                 }
             }
-            // Запасной нет, а идти некому: ход без человека ждёт, а не бьётся о лимит и не тратит запрос.
-            if journaled && unattended && !forced {
-                let english = app.store.settings().ui_lang == "en";
-                if let Some(until) = unavailable_until(&app, &current, true) {
-                    pause = Some(limit_pause(&app, &bot_id, &current, until, english));
-                    return Ok(());
-                }
-                if crate::limit::month_blocked(app.ledger.tokens_month(&bot_id), bot.monthly_token_limit) {
-                    pause = Some(budget_pause(true, english));
-                    return Ok(());
-                }
-            }
 
             let mut continuations = 0;
-            let mut nudged_finish = false;
-            let mut assistant_texts: Vec<String> = Vec::new();
-            let time_limit = run_time_limit_ms(&opts);
+            let mut continuation_request = user_text.clone();
             for step in 0..MAX_STEPS {
-                if time_limit.is_some_and(|limit| now() - started_at > limit) {
-                    return Err(crate::runs::RUN_TIMEOUT.to_string());
-                }
                 // Живой разговор человек видит и может остановить сам, а ночью следить некому.
                 if unattended && crate::scheduler::over_limit(&app) {
-                    if !journaled {
-                        return Err(LIMIT_REACHED.to_string());
-                    }
-                    pause = Some(budget_pause(false, app.store.settings().ui_lang == "en"));
-                    return Ok(());
+                    return Err(LIMIT_REACHED.to_string());
                 }
                 app.turns.emit(json!({ "type": "step_start", "botId": bot_id, "turnId": turn_id, "step": step }));
 
@@ -2392,6 +2187,8 @@ fn run_turn_body(
                     if text.is_empty() && files.is_empty() {
                         continue;
                     }
+                    continuation_request.push_str("\n");
+                    continuation_request.push_str(&text);
                     let mut entry = json!({
                         "id": uid("msg"), "role": "user", "text": text, "source": "steer", "at": now(),
                     });
@@ -2400,7 +2197,6 @@ fn run_turn_body(
                     }
                     app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
                     saved.push(entry);
-                    flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
                     let content = crate::attach::user_content(&app.store, &bot_id, &text, &files, crate::attach::sees_images(&app, &bot), true);
                     model_messages.push(json!({ "role": "user", "content": content }));
                     steered = true;
@@ -2436,7 +2232,6 @@ fn run_turn_body(
                             DriverEvent::Usage(usage) => reported = Some(usage),
                             DriverEvent::Activity(update) => {
                                 let row = merge_activity(&mut activity, update);
-                                turns.runs.activity(&bid, &row);
                                 turns.turns.emit(json!({
                                     "type": "activity", "botId": bid, "turnId": tid, "step": step, "call": row,
                                 }));
@@ -2453,7 +2248,7 @@ fn run_turn_body(
                     if !squeezed && !cancel.is_cancelled() && is_context_error(&message) {
                         squeezed = true;
                         if crate::compact::bot_thread(&app, &bot, true).await.is_some() {
-                            let mut fresh = turn_messages(&app, &bot, unattended, opts.quiet, tools_driver, &source).await;
+                            let mut fresh = turn_messages(&app, &bot, unattended, opts.quiet, &source).await;
                             if let Some(note) = &mention_note {
                                 fresh.push(json!({ "role": "system", "content": note }));
                             }
@@ -2478,7 +2273,7 @@ fn run_turn_body(
                         }
                     }
                     // Только API-модель: у внешних CLI/ACP действия уже могли выполниться внутри драйвера.
-                    let retryable = current.is_metered() && retry_count < MODEL_RECONNECTS && crate::drivers::is_transient_model_error(&message);
+                    let retryable = current.is_metered() && crate::drivers::is_transient_model_error(&message);
                     let try_fallback = fallback.is_some() && fallback_model.is_none() && retry_count >= 2;
                     if retryable && !cancel.is_cancelled() && !try_fallback {
                         let delay = crate::drivers::retry_delay(retry_count);
@@ -2494,35 +2289,13 @@ fn run_turn_body(
                         continue;
                     }
                     // Один переход за ход: если и запасная упала, ход падает с её ошибкой.
-                    let reason = reason_of(&message);
-                    let can_switch = !cancel.is_cancelled() && matches!(reason, StopReason::Limit | StopReason::Network);
-                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none() && can_switch) else {
-                        // Запасной нет или и она упала: ход без провала ждёт сброса, связи или входа, а не проваливается.
-                        if journaled && !cancel.is_cancelled() {
-                            let english = app.store.settings().ui_lang == "en";
-                            match reason {
-                                StopReason::Limit => {
-                                    let until = limit_until(&app, &current, &message, app.runs.pauses(&bot_id));
-                                    app.rest.set(&current.key(), until);
-                                    pause = Some(limit_pause(&app, &bot_id, &current, until, english));
-                                    return Ok(());
-                                }
-                                StopReason::Network => {
-                                    pause = Some(network_pause(&app, &bot_id, &current, english));
-                                    return Ok(());
-                                }
-                                StopReason::Login => {
-                                    pause = Some(login_pause(&app, &current, english));
-                                    return Ok(());
-                                }
-                                _ => {}
-                            }
-                        }
+                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none()) else {
                         return Err(message);
                     };
-                    if reason == StopReason::Limit {
-                        app.rest.set(&main.key(), limit_until(&app, &main, &message, 0));
+                    if cancel.is_cancelled() || !is_limit_error(&message) {
+                        return Err(message);
                     }
+                    app.turns.note_main_limit(&main.key());
                     app.turns.emit(json!({
                         "type": "model_switched", "botId": bot_id, "turnId": turn_id,
                         "from": main.label(), "to": spare.label(), "reason": shorten(&message, 200),
@@ -2590,30 +2363,9 @@ fn run_turn_body(
                 if let Some(usage) = step_usage {
                     first["usage"] = usage_json(usage);
                 }
-                // Агент ACP вызвал `finish_turn` через мост во время хода; у API-модели вызов исполняется ниже, вместе с остальными.
-                let finish_status = app.turns.take_finish(&bot_id).map(|(status, note)| {
-                    finish_note_saved = note.or(finish_note_saved.take());
-                    last_finish_status = Some(status.clone());
-                    status
-                });
-                let finish_status = finish_status.as_deref();
-                // Залипание: три одинаковых ответа подряд.
-                let trimmed = text.trim().to_string();
-                if !trimmed.is_empty() {
-                    assistant_texts.push(trimmed);
-                    let n = assistant_texts.len();
-                    if n >= 3
-                        && assistant_texts[n - 1] == assistant_texts[n - 2]
-                        && assistant_texts[n - 2] == assistant_texts[n - 3]
-                    {
-                        return Err("Застрял: три одинаковых ответа подряд.".to_string());
-                    }
-                }
-                let auto_continue = !cancel.is_cancelled() && step + 1 < MAX_STEPS && continuations < completion::MAX_CONTINUATIONS
-                    && finish_status == Some("continue");
-                let nudge = !cancel.is_cancelled() && step + 1 < MAX_STEPS
-                    && completion::should_nudge(calls.is_empty(), wants_finish, nudged_finish, finish_status);
-                let continue_task = auto_continue || nudge;
+                // Отдельно от toolCalls: эти вызовы не наши, модели их в истории показывать нельзя.
+                let continue_task = !cancel.is_cancelled() && step + 1 < MAX_STEPS
+                    && completion::should_continue(&current.driver, &text, &activity, &continuation_request, continuations);
                 if !activity.is_empty() {
                     for row in &mut activity {
                         if row["status"] == "running" {
@@ -2629,17 +2381,10 @@ fn run_turn_body(
                 if calls.is_empty() {
                     crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len) + text.chars().count()).await;
                     saved.push(first);
-                    flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
-                    if let Some(wait) = app.runs.take_wait(&bot_id) {
-                        pause = Some(event_pause(wait, app.store.settings().ui_lang == "en"));
-                        break;
-                    }
                     if continue_task {
-                        continuations += usize::from(auto_continue);
-                        nudged_finish |= nudge;
+                        continuations += 1;
                         model_messages.push(json!({ "role": "assistant", "content": text }));
-                        let prompt = if nudge { completion::NUDGE } else { completion::PROMPT };
-                        model_messages.push(json!({ "role": "user", "content": prompt }));
+                        model_messages.push(json!({ "role": "user", "content": completion::PROMPT }));
                         continue;
                     }
                     final_text = text.clone();
@@ -2652,7 +2397,7 @@ fn run_turn_body(
                 let mut finished: Vec<Value> = Vec::new();
                 for call in &calls {
                     let (status, body) = if cancel.is_cancelled() {
-                        stopped(&app, &bot_id)
+                        ("denied".to_string(), "Остановлено пользователем.".to_string())
                     } else {
                         execute_call(&app, &bot, call, opts.depth, &cancel).await
                     };
@@ -2677,24 +2422,9 @@ fn run_turn_body(
                     step_entry["usage"] = usage_json(usage);
                 }
                 saved.push(step_entry);
-                flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
                 session_step.tool_ms = now() - model_done;
                 crate::stats::record(&app, &bot_id, session_step, inflight_chars(&model_messages, base_len)).await;
                 if cancel.is_cancelled() { return Err("остановлено".into()); }
-                if let Some(wait) = app.runs.take_wait(&bot_id) {
-                    pause = Some(event_pause(wait, app.store.settings().ui_lang == "en"));
-                    break;
-                }
-                // Конечный итог — ход закончен: ещё один запрос к модели только тратит токены.
-                if let Some((status, note)) = app.turns.take_finish(&bot_id) {
-                    finish_note_saved = note.or(finish_note_saved.take());
-                    if status != "continue" {
-                        last_finish_status = Some(status);
-                        final_text = text.clone();
-                        break;
-                    }
-                    last_finish_status = Some(status);
-                }
 
                 // Картинку можно показать модели только после всех ответов инструментов этого шага.
                 if let Some(image) = app.browsers.take_image(&bot_id) {
@@ -2725,15 +2455,6 @@ fn run_turn_body(
         }
         .await;
 
-        // Ход упёрся в карточку без ответа: это не отмена и не ошибка, а ожидание человека.
-        let waiting = app.turns.take_waiting(&bot_id);
-        let result = if waiting.is_some() { Ok(()) } else { result };
-        // Ход не дал ответа: ждёт сброса, события или человека. `held` — тем, кто читает тред (`deloist run`, MCP): это не ответ.
-        if let Some(line) = pause.as_ref().map(|p| p.line.clone()).or_else(|| waiting.clone()) {
-            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": line, "held": true, "at": now() });
-            app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
-            saved.push(entry);
-        }
         if let Err(message) = result {
             let aborted = cancel.is_cancelled();
             let english = app.store.settings().ui_lang == "en";
@@ -2753,7 +2474,7 @@ fn run_turn_body(
         }
 
         app.browsers.resume_paused(&bot_id).await;
-        let aborted = cancel.is_cancelled() && waiting.is_none();
+        let aborted = cancel.is_cancelled();
         // Эскалация уровня живёт в памяти: две неудачи подряд поднимают на ступень,
         // успешный ход возвращает к настроенному. Остановка человеком — не неудача модели.
         if !aborted {
@@ -2766,22 +2487,6 @@ fn run_turn_body(
         // Что не решил делегат, заберёт его начальник; журнал пишет только сама рутина.
         let missed = if opts.routine.is_some() { app.turns.take_missed(&bot_id) } else { Vec::new() };
         app.turns.finish(&bot_id);
-        if journaled {
-            let state = match (&failure, aborted) {
-                (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
-                (None, false) if pause.is_some() => pause.as_ref().map(|p| p.state.clone()).unwrap_or(crate::runs::RunState::Done),
-                _ if waiting.is_some() => crate::runs::RunState::NeedsHuman { reason: crate::runs::StopReason::Human, text: waiting.clone().unwrap_or_default() },
-                (Some(message), false) => crate::runs::RunState::Failed { reason: reason_of(message), text: shorten(message, JOURNAL_TEXT_LIMIT) },
-                (None, false) if last_finish_status.as_deref() == Some("failed") => crate::runs::RunState::Failed { reason: StopReason::Check, text: shorten(&final_text, JOURNAL_TEXT_LIMIT) },
-                (None, false) => crate::runs::RunState::Done,
-            };
-            // Неиспользованное разовое разрешение живёт, пока жив запуск.
-            let ended = !matches!(state, crate::runs::RunState::NeedsHuman { .. });
-            if let (true, Some(run)) = (ended, app.runs.active_id(&bot_id)) {
-                app.turns.drop_once(&bot_id, Some(&run));
-            }
-            app.runs.close(&bot_id, state);
-        }
         // Резерв считает дни от последнего законченного хода, а не от создания бота.
         if let Err(e) = app.store.note_bot_active(&bot_id, now()).await {
             eprintln!("[turn] не смог записать активность: {e}");
@@ -2790,7 +2495,6 @@ fn run_turn_body(
         // Размышление о памяти после задачи (extract.rs) прячется целиком, даже если бот не ответил «Тихо» или ход не удался:
         // человеку об этом скажет отдельное уведомление раз в сутки.
         let reflection = opts.routine.is_some() && opts.source.as_deref() == Some(crate::extract::REFLECTION_SOURCE);
-        let said_nothing = if marker_quiet { is_quiet_answer(&final_text) } else { last_finish_status.as_deref() == Some("nothing") };
         let quiet = (reflection && !steered)
             || (opts.routine.is_some()
                 && opts.quiet
@@ -2800,10 +2504,16 @@ fn run_turn_body(
                 && fallback_model.is_none()
                 // Человек написал боту прямо в этот ход: его сообщение нельзя прятать вместе с ходом.
                 && !steered
-                && waiting.is_none()
-                && said_nothing);
+                && is_quiet_answer(&final_text));
 
-        flush_saved(&app, &bot_id, &turn_id, opts.routine.is_some(), &saved, &mut flushed).await;
+        for mut entry in saved {
+            if opts.routine.is_some() {
+                entry["turnId"] = json!(turn_id);
+            }
+            if let Err(e) = app.store.append_message(&bot_id, entry).await {
+                eprintln!("[turn] не смог сохранить сообщение: {e}");
+            }
+        }
         // Оркестратор собрал команду в этом ходе: его итог читают в чате команды, а не только в личном.
         if let Some(room_id) = app.offers.take_team_summary(&bot_id) {
             let text = final_text.trim();
@@ -2823,7 +2533,7 @@ fn run_turn_body(
             }
         }
         // Квитанция хода: тихие рутины («Сообщать нечего») и остановка человеком ответом не считаются.
-        if !quiet && !aborted && pause.is_none() {
+        if !quiet && !aborted {
             if last_model.is_empty() {
                 let choice = main_choice(&app, &bot, &settings);
                 last_model = choice.label();
@@ -2845,30 +2555,19 @@ fn run_turn_body(
         }));
 
         if let Some(routine) = &opts.routine {
-            let status = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
+            let status = match failure.as_deref() {
                 _ if aborted => "stopped",
-                (Some(_), _) => "failed",
-                (None, Some(RunState::Paused { .. })) => "paused",
-                (None, Some(RunState::Failed { .. })) => "failed",
-                (None, Some(_)) => "needs",
-                (None, None) if waiting.is_some() => "needs",
-                (None, None) => completion::status_from_finish(last_finish_status.as_deref(), quiet, missed.is_empty()),
-            };
-            // Почему запуск не удался: подпись в журнале и счёт серии ошибок рутины.
-            let stop = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
-                (Some(message), _) => Some(reason_of(message)),
-                (None, Some(RunState::Paused { reason, .. } | RunState::NeedsHuman { reason, .. } | RunState::Failed { reason, .. })) => Some(*reason),
-                _ => (status == "failed").then_some(StopReason::Check),
+                Some(LIMIT_REACHED) => "limit",
+                Some(_) => "failed",
+                None if quiet => "quiet",
+                None if !missed.is_empty() => "needs",
+                None => "ok",
             };
             let summary = if let Some(f) = failure.as_deref() {
                 shorten(f, JOURNAL_TEXT_LIMIT)
-            } else if let Some(p) = &pause {
-                p.line.clone()
-            } else if let Some(text) = &waiting {
-                text.clone()
             } else if quiet {
                 String::new()
-            } else if opts.quiet && said_nothing {
+            } else if opts.quiet && is_quiet_answer(&final_text) {
                 // Ход не тихий (fallback, решение), но маркер в тексте ничего не сообщает.
                 "Сообщать нечего.".to_string()
             } else {
@@ -2883,28 +2582,10 @@ fn run_turn_body(
             if let Some(model) = &fallback_model {
                 entry["fallback"] = json!(model);
             }
-            if let Some(reason) = stop.filter(|r| r.is_failure()) {
-                entry["reason"] = json!(reason);
-            }
             app.ledger.append_journal(&entry).await;
-            crate::scheduler::routine_finished(&app, routine, &bot_id, status, stop).await;
+            crate::scheduler::routine_finished(&app, routine, &bot_id, status, started_at).await;
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
-        }
-
-        // Заметка прогресса — у цели, если ход шёл к цели, иначе у рутины. Хранится хвост: свежее важнее.
-        if let Some(raw) = &finish_note_saved {
-            let chars: Vec<char> = raw.chars().collect();
-            let note: String = chars[chars.len().saturating_sub(8000)..].iter().collect();
-            match (&opts.run, &opts.routine) {
-                (Some(crate::goals::Run::Goal(goal_id)), _) => {
-                    app.goals.edit(goal_id, |g| g.progress_note = note).await;
-                }
-                (_, Some(routine)) => {
-                    let _ = app.store.update_routine(&routine.id, &json!({ "progressNote": note })).await;
-                }
-                _ => {}
-            }
         }
 
         // Цепочка ходов кончилась и никто не пишет — задача закончена: эпизод и извлечение.
@@ -2922,20 +2603,6 @@ fn run_turn_body(
         app.turns.clear_mentioned(&bot_id);
         (final_text, turn_tokens)
     })
-}
-
-/// Дописать в тред шаги хода, которых там ещё нет.
-async fn flush_saved(app: &App, bot_id: &str, turn_id: &str, routine: bool, saved: &[Value], flushed: &mut usize) {
-    for entry in &saved[*flushed..] {
-        let mut entry = entry.clone();
-        if routine {
-            entry["turnId"] = json!(turn_id);
-        }
-        if let Err(e) = app.store.append_message(bot_id, entry).await {
-            eprintln!("[turn] не смог сохранить сообщение: {e}");
-        }
-    }
-    *flushed = saved.len();
 }
 
 /// Строка хода агента: новое действие добавляется, обновление того же `id` дописывает поля.
@@ -2956,14 +2623,6 @@ pub(crate) fn merge_activity(rows: &mut Vec<Value>, update: Value) -> Value {
     rows[index].clone()
 }
 
-/// Ход остановлен: человеком, или карточка осталась без ответа и ход ждёт её решения.
-fn stopped(app: &Arc<App>, bot_id: &str) -> (String, String) {
-    match app.turns.waiting_text(bot_id) {
-        Some(text) => ("timeout".into(), text),
-        None => ("denied".into(), "Остановлено пользователем.".into()),
-    }
-}
-
 pub(crate) async fn execute_call(app: &Arc<App>, bot: &Bot, call: &ToolCall, depth: u32, cancel: &CancellationToken) -> (String, String) {
     execute_call_in(app, bot, call, depth, cancel, true).await
 }
@@ -2979,7 +2638,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
     crate::screen::wait_released(app, &bot.id, cancel).await;
     // Пока ждали, человек нажал «Стоп»: инструмент не запускаем, ни клик, ни команду.
     if cancel.is_cancelled() {
-        return stopped(app, &bot.id);
+        return ("denied".into(), "Остановлено пользователем.".into());
     }
 
     // Облако: консоли нет. Отказ до карточки: спрашивать человека о том, что всё равно не выполнится, незачем.
@@ -2996,7 +2655,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         // Текст карточки собирает программа (`describe`); слова бота (`purpose`) идут отдельной строкой.
         // Браузерные инструменты спрашивают сами, своими словами: к ним описание не липнем.
         let human = (!call.name.starts_with("browser_")).then(|| crate::describe::call(app, bot, &call.name, &call.args));
-        let mut detail = human.as_ref().map(|h| h.details.clone()).unwrap_or_else(|| crate::describe::cap_masked(&serde_json::to_string_pretty(&call.args).unwrap_or_default()));
+        let mut detail = human.as_ref().map(|h| h.details.clone()).unwrap_or_else(|| serde_json::to_string_pretty(&call.args).unwrap_or_default());
         let touch = crate::keys::call_touch(&call.name, &call.args);
         let secret_title = touch.as_ref().map(|t| t.title());
         if touch.is_some() {
@@ -3009,23 +2668,20 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         };
         let scope = crate::grants::scope_for(app, bot, &call.name, &call.args);
         let remote = crate::grants::remote_ok(&call.name, &call.args, scope.as_ref(), touch.is_some(), false, &app.store.workspace(&bot.id));
-        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote, call_key(&call.name, &call.args)).await {
+        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote).await {
             ApprovalResult::Allowed => {}
             ApprovalResult::Denied => return ("denied".into(), "Человек не разрешил выполнение.".into()),
-            ApprovalResult::Waiting(text) => return ("timeout".into(), text),
+            ApprovalResult::Timeout => return ("timeout".into(), "Человек не разрешил выполнение.".into()),
         }
     }
 
-    // Шаг записан до выполнения: если программа умрёт посреди него, журнал знает, что шло и можно ли это повторять.
-    app.runs.step_start(&bot.id, &call.id, &tools::step_label(&call.name, &call.args), tools::effect(&call.name, &call.args));
     let outcome = if call.name.starts_with("mcp__") {
         crate::mcp::call(app, &call.name, &call.args).await
     } else {
         exec_tool(app, bot, &call.name, &call.args, depth, cancel).await
     };
-    app.runs.step_end(&bot.id, &call.id, outcome.is_ok());
     if cancel.is_cancelled() {
-        return stopped(app, &bot.id);
+        return ("denied".into(), "Остановлено пользователем.".into());
     }
     match outcome {
         Ok(text) => ("ok".into(), text),
@@ -3128,10 +2784,6 @@ pub struct Carried {
     pub floor: String,
     /// Отправитель работал без человека (рутина, ночь).
     pub unattended: bool,
-    /// Командная задача, ради которой идёт ход: по ней ход попадает в журнал запусков. Пусто — не ведётся.
-    pub task_id: String,
-    /// Запись журнала прерванного хода этой задачи, если его продолжают.
-    pub resume: Option<String>,
 }
 
 /// Начало брифа получателю: кто просит. Бот не человек, права и подтверждения у получателя свои.
@@ -3195,8 +2847,6 @@ pub fn delegate_to_bot_with(
             window: false,
             voice: false,
             run: None,
-            origin: carried.as_ref().filter(|c| !c.task_id.is_empty()).map(|c| crate::runs::Origin::Team { task_id: c.task_id.clone() }),
-            resume: carried.as_ref().and_then(|c| c.resume.clone()),
         };
         // Получатель не видит нашу переписку: бриф несёт всё нужное и просит короткий итог.
         let brief = format!("{}\n\n{DELEGATION_TAIL}", framed_brief(&from.name, &task, carried.is_some()));

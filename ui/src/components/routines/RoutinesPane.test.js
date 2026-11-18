@@ -40,6 +40,19 @@ describe('RoutinesPane', () => {
     expect(host.querySelector('[role="switch"]').getAttribute('aria-checked')).toBe('true');
   });
 
+  it('opens the whole task under the card by a click on the gist', () => {
+    const prompt = 'Каждое утро собери новые посты\nи прокомментируй каждый: коротко, без ссылок.';
+    render({ routines: [routine({ prompt })] });
+    expect(host.querySelector('.rc-prompt')).toBeNull();
+    host.querySelector('.rc-gist').click();
+    flushSync();
+    expect(host.querySelector('.rc-prompt').textContent).toBe(prompt);
+    expect(host.querySelector('.rc-gist').getAttribute('aria-expanded')).toBe('true');
+    host.querySelector('.rc-gist').click();
+    flushSync();
+    expect(host.querySelector('.rc-prompt')).toBeNull();
+  });
+
   it('fades a disabled routine and marks a failed last run in red', () => {
     render({ routines: [routine({ enabled: false, lastBad: true })] });
     expect(host.querySelector('.rc').classList.contains('is-off')).toBe(true);
@@ -69,27 +82,5 @@ describe('RoutinesPane', () => {
     render({ routines: [] });
     expect(host.querySelector('.rp-empty')).not.toBeNull();
     expect(host.querySelector('.rp-new')).not.toBeNull();
-  });
-
-  it('a paused routine shows the pause and resumes by its run id', () => {
-    const onresume = vi.fn();
-    render({ routines: [routine({ paused: { id: 'run_7', label: 'на паузе до 14:00 (лимит)' } })], onresume });
-    expect(host.textContent).toContain('на паузе до 14:00 (лимит)');
-    host.querySelector('.rc-resume').click();
-    expect(onresume).toHaveBeenCalledWith('run_7');
-  });
-
-  it('a routine paused by errors shows why and resumes by its own id', () => {
-    const onunpause = vi.fn();
-    render({ routines: [routine({ errorPaused: { label: 'на паузе: 3 ошибки подряд — нужен вход' } })], onunpause });
-    expect(host.textContent).toContain('на паузе: 3 ошибки подряд — нужен вход');
-    host.querySelector('.rc-unpause').click();
-    expect(onunpause).toHaveBeenCalledWith('r1');
-  });
-
-  it('shows no pause controls on a normal routine', () => {
-    render({ routines: [routine()] });
-    expect(host.querySelector('.rc-unpause')).toBeNull();
-    expect(host.querySelector('.rc-resume')).toBeNull();
   });
 });

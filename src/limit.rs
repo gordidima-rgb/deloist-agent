@@ -131,14 +131,6 @@ pub fn parse_reset(text: &str, now: DateTime<Local>) -> Option<i64> {
     Some(at.timestamp_millis())
 }
 
-/// Ближайшее «ЧЧ:ММ» по местным часам: сегодня, если ещё не прошло, иначе завтра.
-pub fn next_clock_ms(text: &str, now: DateTime<Local>) -> Option<i64> {
-    let time = parse_clock(text)?;
-    let today = Local.from_local_datetime(&now.date_naive().and_time(time)).earliest()?;
-    let at = if today > now { today } else { Local.from_local_datetime(&now.date_naive().succ_opt()?.and_time(time)).earliest()? };
-    Some(at.timestamp_millis())
-}
-
 /// `16:01`, `11:10am`, `4pm`. Пустая строка — `None`.
 fn parse_clock(text: &str) -> Option<NaiveTime> {
     let lower = text.trim().to_lowercase().replace(' ', "");
@@ -190,55 +182,6 @@ pub fn for_bot(inputs: Inputs, now: DateTime<Local>) -> Value {
         }),
         None => Value::Null,
     }
-}
-
-/// «Отдых» модели после лимита: ключ модели → момент, когда её снова можно спрашивать. Один на компьютер,
-/// лежит в `limits-rest.json`, поэтому переживает перезапуск и общий для всех ботов.
-pub struct Rest {
-    path: std::path::PathBuf,
-    map: std::sync::Mutex<std::collections::HashMap<String, i64>>,
-}
-
-impl Rest {
-    pub fn open(dir: &std::path::Path) -> Self {
-        let path = dir.join("limits-rest.json");
-        let map = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        Self { path, map: std::sync::Mutex::new(map) }
-    }
-
-    /// Когда модель снова доступна, если она ещё отдыхает.
-    pub fn until(&self, key: &str) -> Option<i64> {
-        self.map.lock().unwrap().get(key).copied().filter(|&at| at > crate::store::now())
-    }
-
-    pub fn set(&self, key: &str, until: i64) {
-        let mut map = self.map.lock().unwrap();
-        let at = crate::store::now();
-        map.retain(|_, &mut v| v > at);
-        map.insert(key.to_string(), until);
-        if let Ok(text) = serde_json::to_string(&*map) {
-            let _ = std::fs::write(&self.path, text);
-        }
-    }
-}
-
-const BACKOFF_BASE_MS: i64 = 5 * 60_000;
-const BACKOFF_MAX_MS: i64 = 24 * 3_600_000;
-
-/// Пауза без названного срока: 5 минут, с каждой подряд идущей паузой вдвое дольше, не больше суток.
-pub fn backoff_ms(pauses: u32) -> i64 {
-    let base = if cfg!(debug_assertions) {
-        std::env::var("CREW_TEST_PAUSE_BASE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(BACKOFF_BASE_MS)
-    } else {
-        BACKOFF_BASE_MS
-    };
-    base.saturating_mul(1i64 << pauses.min(20)).min(BACKOFF_MAX_MS.max(base))
-}
-
-/// Срок сброса из текста ошибки провайдера: «… resets 4pm», «… resets Nov 13, 11:10am». Не назван — `None`.
-pub fn reset_in_error(message: &str, now: DateTime<Local>) -> Option<i64> {
-    let at = message.char_indices().map(|(i, _)| i).find(|&i| message[i..].get(..6).is_some_and(|s| s.eq_ignore_ascii_case("resets")))?;
-    parse_reset(&format!("resets{}", &message[at + 6..]), now).filter(|&ms| ms > now.timestamp_millis())
 }
 
 /// Ответ вместо вызова модели, когда бот выбрал свой месячный предел токенов.
@@ -356,30 +299,5 @@ mod tests {
         for junk in ["", "soon", "Nov", "25:99", "Foo 12"] {
             assert_eq!(parse_reset(junk, now), None, "{junk:?}");
         }
-    }
-
-    #[test]
-    fn the_reset_is_found_inside_an_error_text() {
-        let now = at(11, 12, 10, 0);
-        let expected = at(11, 12, 16, 0).timestamp_millis();
-        assert_eq!(reset_in_error("API 429: usage limit reached, resets 4pm (Europe/Moscow)", now), Some(expected));
-        assert_eq!(reset_in_error("Resets 16:00", now), Some(expected));
-        assert_eq!(reset_in_error("API 429: rate limit exceeded", now), None);
-    }
-
-    #[test]
-    fn next_clock_is_today_or_tomorrow() {
-        let now = at(11, 12, 10, 0);
-        assert_eq!(next_clock_ms("14:30", now), Some(at(11, 12, 14, 30).timestamp_millis()));
-        assert_eq!(next_clock_ms("09:00", now), Some(at(11, 13, 9, 0).timestamp_millis()));
-        assert_eq!(next_clock_ms("soon", now), None);
-    }
-
-    #[test]
-    fn backoff_doubles_up_to_a_day() {
-        assert_eq!(backoff_ms(0), 5 * 60_000);
-        assert_eq!(backoff_ms(1), 10 * 60_000);
-        assert_eq!(backoff_ms(3), 40 * 60_000);
-        assert_eq!(backoff_ms(20), 24 * 3_600_000);
     }
 }

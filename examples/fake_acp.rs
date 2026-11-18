@@ -248,13 +248,6 @@ fn main() {
 
 fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
     let mut cancelled = false;
-    if text.contains("finish_turn") || text.contains("итог хода") || text.starts_with("Продолжи незавершённую часть") {
-        let continuing = text.starts_with("Продолжи незавершённую часть");
-        let (status, note) = if continuing { ("nothing", "x") } else { ("continue", "") };
-        let answer = call_finish_turn(status, note);
-        chunk(io, session, &format!("finish_turn: {answer}"));
-        return "end_turn";
-    }
     if text.contains("тест незавершённости") || text.starts_with("Продолжи незавершённую часть") {
         let continuing = text.starts_with("Продолжи незавершённую часть");
         if !continuing || std::env::var("FAKE_ACP_CONTINUE_LOOP").is_ok() || std::env::var("FAKE_ACP_NO_PROGRESS").is_ok() {
@@ -301,14 +294,6 @@ fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
         chunk(io, session, &format!("env: {}", std::env::var("NoDefaultCurrentDirectoryInExePath").unwrap_or_else(|_| "нет".into())));
         return "end_turn";
     }
-    if text.contains("молчание") {
-        while let Some(message) = io.read() {
-            if message["method"] == "session/cancel" {
-                return "cancelled";
-            }
-        }
-        std::process::exit(0);
-    }
     if text.contains("медленно") {
         chunk(io, session, "начал");
         while let Some(message) = io.read() {
@@ -331,36 +316,9 @@ fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
         chunk(io, session, &format!("разрешение: {picked}"));
         return if cancelled { "cancelled" } else { "end_turn" };
     }
-    // После позднего «да» агент повторяет запомненный вызов, а следом такой же с другим скрытым параметром:
-    // «первый» разрешён разово, «второй» должен спрашивать заново.
-    if text.contains("Человек разрешил:") {
-        let last = std::env::var("FAKE_ACP_LOG").ok().and_then(|p| std::fs::read_to_string(format!("{p}.last")).ok());
-        if let Some(call) = last.and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
-            let mut other = call.clone();
-            other["rawInput"]["env"] = json!({ "A": "другой" });
-            let mut picks = Vec::new();
-            for call in [call, other] {
-                let reply = io.ask(
-                    "session/request_permission",
-                    json!({ "sessionId": session, "toolCall": call, "options": [
-                        { "optionId": "yes", "name": "Разрешить", "kind": "allow_once" },
-                        { "optionId": "no", "name": "Запретить", "kind": "reject_once" },
-                    ] }),
-                    &mut cancelled,
-                );
-                let outcome = &reply["result"]["outcome"];
-                picks.push(if outcome["outcome"] == "selected" { outcome["optionId"].as_str().unwrap_or("?").to_string() } else { "cancelled".into() });
-            }
-            chunk(io, session, &format!("повтор: первый {}, второй {}", picks[0], picks[1]));
-            return "end_turn";
-        }
-    }
     // «разреши-вызов {json}» — запрос разрешения с произвольным `toolCall` (так проверяются карточки и MCP-вызовы).
     if let Some(raw) = text.lines().find(|l| l.contains("разреши-вызов ")).and_then(|l| l.split("разреши-вызов ").nth(1)) {
         let call: Value = serde_json::from_str(raw.trim()).unwrap_or_else(|_| json!({}));
-        if let Ok(path) = std::env::var("FAKE_ACP_LOG") {
-            let _ = std::fs::write(format!("{path}.last"), call.to_string());
-        }
         let reply = io.ask(
             "session/request_permission",
             json!({
@@ -514,23 +472,6 @@ fn call_ask_user(text: &str) -> String {
         }
         reply_text(&ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": { "name": "ask_user", "arguments": { "question": question.trim(), "choices": choices } } })))
-    })
-}
-
-/// Зовёт `finish_turn` моста.
-fn call_finish_turn(status: &str, note: &str) -> String {
-    with_mcp(|ask| {
-        let names = tool_names(&ask(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })));
-        if !names.iter().any(|n| n == "finish_turn") {
-            return format!("в списке нет finish_turn: {names:?}");
-        }
-        let arguments = if note.is_empty() {
-            json!({ "status": status })
-        } else {
-            json!({ "status": status, "note": note })
-        };
-        reply_text(&ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": { "name": "finish_turn", "arguments": arguments } })))
     })
 }
 

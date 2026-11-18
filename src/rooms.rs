@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use crate::drivers::DriverEvent;
+use crate::drivers::{is_limit_error, DriverEvent};
 use crate::store::{now, uid, Bot, Room, Skill};
 use crate::turn::{drain_queue, drive, estimate_usage, execute_call, fallback_choice, main_choice, StartError};
 use crate::App;
@@ -545,8 +545,8 @@ async fn answer(
             }
         };
         if let Err(message) = outcome {
-            // Лимит, баланс или сбой связи: запасная модель работает и в группе.
-            if !cancel.is_cancelled() && matches!(crate::runs::reason_of(&message), crate::runs::StopReason::Limit | crate::runs::StopReason::Network) {
+            // Лимит или баланс: запасная модель работает и в группе.
+            if !cancel.is_cancelled() && is_limit_error(&message) {
                 if let Some(next) = spare.take() {
                     app.turns.emit(json!({ "type": "room_retry", "roomId": room_id, "turnId": turn_id }));
                     choice = next;

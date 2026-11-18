@@ -9,8 +9,13 @@ use crate::App;
 /// Почему сообщение бота ждёт в очереди. Код, а не текст: слова подбирает интерфейс.
 /// Порядок: пауза, лимит месяца, карточка без ответа, занятость бота. `None` — ничто не держит.
 pub fn hold_reason(app: &App, bot: &Bot) -> Option<&'static str> {
-    if app.queues.is_paused(&bot.id) {
-        return Some("paused_manual");
+    use crate::queue::PauseReason;
+    let queue = app.queues.get(&bot.id);
+    if queue.paused {
+        return Some(match queue.pause_reason {
+            Some(PauseReason::Manual) => "paused_manual",
+            _ => "paused_restart",
+        });
     }
     // Та же проверка, что в `turn::drive`: бот с исчерпанным пределом месяца не начнёт ход.
     if crate::limit::month_blocked(app.ledger.tokens_month(&bot.id), bot.monthly_token_limit) {

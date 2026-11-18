@@ -464,6 +464,9 @@ pub struct Routine {
     pub title: String,
     pub prompt: String,
     pub every_minutes: i64,
+    /// Верх случайного интервала: срок выпадает между `every_minutes` и этим числом, чтобы запуски
+    /// не шли ровной сеткой. 0 или не больше `every_minutes` — интервал ровный.
+    pub every_max_minutes: i64,
     /// «09:00»: запускать в это время, а не каждые N минут.
     pub at: String,
     /// Дни недели, 1 — понедельник. Пусто — каждый день.
@@ -487,49 +490,38 @@ pub struct Routine {
     pub approval_floor: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_status: Option<String>,
-    /// Сколько запусков подряд кончились ошибкой: после 3 рутина идёт не чаще раза в час, после 6 — раза в 4 часа.
+    /// Номер следующего повтора после неудачи; 0 — повторов нет.
     #[serde(skip_serializing_if = "is_zero_u32")]
-    pub failures: u32,
-    /// Причина последней ошибки: подпись в строке рутины и в истории.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_reason: Option<crate::runs::StopReason>,
-    /// Три «вечные» ошибки подряд (вход, проверка, неизвестная): рутина на паузе, пока человек не нажмёт «Возобновить».
-    #[serde(skip_serializing_if = "is_false")]
-    pub error_paused: bool,
-    /// С какого момента расписание ждёт занятого бота (0 — не ждёт). Только в памяти.
-    #[serde(skip)]
-    pub busy_since: i64,
-    /// Что делать с пропущенными запусками: "last" — выполнить последний, "skip" — пропустить.
-    #[serde(default = "default_catch_up")]
-    pub catch_up: String,
-    /// Заметка с прошлого запуска (finish_turn note), обрезанная до 8000 знаков, хранится хвост.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub progress_note: String,
+    pub retry_attempt: u32,
+    /// Когда началась первая неудачная попытка этой серии: через сутки от неё рутина сдаётся.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub retry_since: i64,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
-}
-
-fn default_catch_up() -> String {
-    "last".to_string()
 }
 
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
 
-fn is_false(v: &bool) -> bool {
-    !*v
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
 }
 
-/// Чем кончился запуск рутины для расписания.
+/// Чем кончилась попытка рутины для расписания.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RoutineOutcome {
-    /// Не ошибка (выполнена, тихо, остановил человек, пауза): серия не растёт.
+    /// Выполнена или повторять не нужно (тихо, остановил человек, предел токенов).
     Done,
-    /// Ошибка, серия подряд — `failures`.
-    Failed { failures: u32 },
-    /// Третья «вечная» ошибка подряд: рутина встала на паузу, человеку сообщаем один раз.
-    PausedByErrors { failures: u32 },
+    /// Не дошла до конца: следующий повтор в `at`.
+    Retry { at: i64, attempt: u32 },
+    /// Сутки повторов не помогли: ошибка, человеку сообщаем.
+    GaveUp { attempts: u32 },
+}
+
+/// Повторяем только то, что сорвалось само: ошибку модели или обрыв хода перезапуском.
+pub fn routine_retryable(status: &str) -> bool {
+    matches!(status, "failed" | "interrupted")
 }
 
 impl Default for Routine {
@@ -540,6 +532,7 @@ impl Default for Routine {
             title: String::new(),
             prompt: String::new(),
             every_minutes: 60,
+            every_max_minutes: 0,
             at: String::new(),
             days: Vec::new(),
             window_from: String::new(),
@@ -554,12 +547,8 @@ impl Default for Routine {
             goal_id: String::new(),
             approval_floor: String::new(),
             last_status: None,
-            failures: 0,
-            stop_reason: None,
-            error_paused: false,
-            busy_since: 0,
-            catch_up: "last".to_string(),
-            progress_note: String::new(),
+            retry_attempt: 0,
+            retry_since: 0,
             extra: Map::new(),
         }
     }
@@ -1200,6 +1189,9 @@ pub(crate) fn string_map(v: Option<&Value>) -> BTreeMap<String, String> {
 
 /// Поля расписания из запроса. Формат времени проверяет сервер, пустая строка снимает значение.
 fn apply_schedule(routine: &mut Routine, input: &Value) {
+    if let Some(max) = input.get("everyMaxMinutes") {
+        routine.every_max_minutes = number(Some(max)).filter(|x| x.is_finite() && *x > 0.0).map_or(0, |x| x as i64);
+    }
     if let Some(at) = input.get("at").and_then(Value::as_str) {
         routine.at = at.trim().to_string();
     }
@@ -2682,7 +2674,6 @@ impl Store {
             every_minutes: minutes(input.get("everyMinutes")),
             enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
             quiet: input.get("quiet").map_or(true, truthy),
-            catch_up: text_or(input, "catchUp", "last"),
             created_at: now(),
             ..Routine::default()
         };
@@ -2739,20 +2730,6 @@ impl Store {
             if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) {
                 r.approval_floor = as_string(v);
             }
-            // «Возобновить» после паузы из-за ошибок.
-            if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
-                r.error_paused = truthy(v);
-                if !r.error_paused {
-                    r.failures = 0;
-                    r.stop_reason = None;
-                }
-            }
-            if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
-                r.catch_up = as_string(v);
-            }
-            if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
-                r.progress_note = as_string(v);
-            }
             if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
                 r.every_minutes = minutes(patch.get("everyMinutes"));
             }
@@ -2770,11 +2747,11 @@ impl Store {
             if reminders::is_reminder(r) {
                 reminders::apply(r, patch);
             }
-            let rescheduled = ["everyMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null())) || patch.get("onceAt").is_some();
-            // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
+            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null())) || patch.get("onceAt").is_some();
+            // Человек выключил рутину или поменял расписание: прежняя серия повторов больше не нужна.
             if rescheduled || !r.enabled || r.hook {
-                r.failures = 0;
-                r.stop_reason = None;
+                r.retry_attempt = 0;
+                r.retry_since = 0;
             }
             if r.hook {
                 r.next_run = 0;
@@ -2812,7 +2789,6 @@ impl Store {
                 return Ok(());
             };
             r.last_run = now();
-            r.busy_since = 0;
             // «Готово» ставит только конец хода: до него рутина «идёт», а обрыв перезапуском виден при старте.
             r.last_status = Some(if ok { "running" } else { "error" }.to_string());
             r.next_run = schedule::next_run_ms(r, now());
@@ -2820,40 +2796,44 @@ impl Store {
         self.persist().await
     }
 
-    /// Ход рутины кончился со статусом `status`. Выполнено — серия ошибок сброшена. Ошибка (`reason`) растит серию:
-    /// от 3 подряд рутина идёт реже, а три «вечные» ошибки подряд ставят её на паузу. Выключить её сбои не могут.
-    pub async fn finish_routine_run(&self, id: &str, status: &str, reason: Option<crate::runs::StopReason>) -> std::io::Result<RoutineOutcome> {
+    /// Ход рутины кончился со статусом `status`: выполнено — серия повторов сброшена;
+    /// сорвалось само — следующий повтор по лестнице, а через сутки неудач — ошибка.
+    pub async fn finish_routine_run(&self, id: &str, status: &str, started_at: i64) -> std::io::Result<RoutineOutcome> {
         let outcome = {
             let mut state = self.state.lock().unwrap();
             let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
                 return Ok(RoutineOutcome::Done);
             };
-            // Цель ведёт свои запуски сама, вебхук без расписания.
-            let counted = r.goal_id.is_empty() && !r.hook;
-            let outcome = match reason.filter(|r| counted && r.is_failure() && matches!(status, "failed" | "needs")) {
-                Some(reason) => {
-                    r.failures += 1;
-                    r.stop_reason = Some(reason);
-                    if r.enabled {
-                        r.next_run = r.next_run.max(r.last_run + schedule::failure_gap_ms(r.failures));
+            let t = now();
+            // Цель ведёт свои запуски сама, вебхук без расписания, выключенную не будим.
+            let repeatable = routine_retryable(status) && r.enabled && !r.hook && r.goal_id.is_empty();
+            let outcome = if repeatable {
+                let since = if r.retry_attempt == 0 || r.retry_since == 0 { started_at.min(t) } else { r.retry_since };
+                let attempt = r.retry_attempt + 1;
+                match schedule::retry_at(attempt, since, t, schedule::next_run_ms(r, t)) {
+                    Some(at) => {
+                        r.retry_attempt = attempt;
+                        r.retry_since = since;
+                        r.next_run = at;
+                        RoutineOutcome::Retry { at, attempt }
                     }
-                    if reason.is_lasting() && r.failures >= 3 && !r.error_paused {
-                        r.error_paused = true;
-                        RoutineOutcome::PausedByErrors { failures: r.failures }
-                    } else {
-                        RoutineOutcome::Failed { failures: r.failures }
+                    None => {
+                        let attempts = r.retry_attempt + 1;
+                        r.retry_attempt = 0;
+                        r.retry_since = 0;
+                        r.next_run = schedule::next_run_ms(r, t);
+                        RoutineOutcome::GaveUp { attempts }
                     }
                 }
-                None => {
-                    if counted && matches!(status, "ok" | "quiet") {
-                        r.failures = 0;
-                        r.stop_reason = None;
-                        r.error_paused = false;
-                    }
-                    RoutineOutcome::Done
-                }
+            } else {
+                r.retry_attempt = 0;
+                r.retry_since = 0;
+                RoutineOutcome::Done
             };
-            r.last_status = Some(status.to_string());
+            r.last_status = Some(match outcome {
+                RoutineOutcome::GaveUp { .. } => "gave_up".to_string(),
+                _ => status.to_string(),
+            });
             outcome
         };
         self.persist().await?;
@@ -2907,20 +2887,12 @@ impl Store {
         self.state.lock().unwrap().routines.iter().find(|r| r.id == id).cloned()
     }
 
-    /// Бот занят: рутина ждёт его по 5 минут, очередь не копит, но не дольше часа. `false` — час прошёл, запуск пропущен.
-    pub fn wait_for_bot(&self, id: &str) -> bool {
+    /// Окно пропущено, потому что бот занят: очередь не копим, ждём следующего.
+    pub fn delay_routine(&self, id: &str, ms: i64) {
         let mut state = self.state.lock().unwrap();
-        let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else { return true };
-        let t = now();
-        if r.busy_since == 0 {
-            r.busy_since = t;
+        if let Some(r) = state.routines.iter_mut().find(|r| r.id == id) {
+            r.next_run = now() + ms;
         }
-        if t - r.busy_since >= schedule::hour_ms() {
-            r.busy_since = 0;
-            return false;
-        }
-        r.next_run = t + schedule::hour_ms() / 12;
-        true
     }
 
     // --- навыки ------------------------------------------------------------
@@ -3665,50 +3637,39 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
-    // Серия ошибок: после 3 рутина идёт реже, три «вечные» ставят её на паузу, один успех возвращает всё.
+    // Рутина, не дошедшая до «выполнено», повторяется по лестнице, а через сутки сдаётся.
     #[tokio::test]
-    async fn failed_runs_slow_a_routine_and_lasting_ones_pause_it() {
-        use crate::runs::StopReason::{Check, Login, Network};
-        let dir = temp_dir("routine-failures");
+    async fn failed_routine_retries_on_a_ladder_and_gives_up_after_a_day() {
+        let dir = temp_dir("routine-retry");
         let store = Store::open(dir.clone()).await.unwrap();
-        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "everyMinutes": 10 })).await.unwrap();
+        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "at": "09:00" })).await.unwrap();
 
         store.mark_routine_run(&r.id, true).await.unwrap();
         assert_eq!(store.routine(&r.id).unwrap().last_status.as_deref(), Some("running"), "до конца хода — не «готово»");
 
-        for n in 1..=2 {
-            assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap(), RoutineOutcome::Failed { failures: n });
-        }
+        let t = now();
+        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "interrupted", t).await.unwrap() else { panic!("ждали повтор") };
+        assert_eq!(attempt, 1);
+        assert!((at - t - 5 * 60_000).abs() < 5_000, "первый повтор через 5 минут");
+        let RoutineOutcome::Retry { at, attempt } = store.finish_routine_run(&r.id, "failed", t).await.unwrap() else { panic!("ждали повтор") };
+        assert_eq!(attempt, 2);
+        assert!((at - t - 10 * 60_000).abs() < 5_000, "второй через 10");
         let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run < saved.last_run + 20 * 60_000, "две ошибки расписание не меняют");
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap(), RoutineOutcome::Failed { failures: 3 });
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run >= saved.last_run + 3_600_000, "после трёх — не чаще раза в час");
-        assert!(!saved.error_paused, "сеть пройдёт сама: паузы нет");
-        for _ in 0..3 {
-            store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap();
-        }
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run >= saved.last_run + 4 * 3_600_000, "после шести — раз в 4 часа");
+        assert_eq!((saved.next_run, saved.last_status.as_deref()), (at, Some("failed")));
 
-        // Пауза и «стоп» человеком серию не трогают, успех сбрасывает.
-        assert_eq!(store.finish_routine_run(&r.id, "paused", Some(Network)).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.finish_routine_run(&r.id, "needs", Some(crate::runs::StopReason::Limit)).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.finish_routine_run(&r.id, "stopped", None).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.routine(&r.id).unwrap().failures, 6);
-        assert_eq!(store.finish_routine_run(&r.id, "ok", None).await.unwrap(), RoutineOutcome::Done);
+        assert_eq!(store.finish_routine_run(&r.id, "ok", t).await.unwrap(), RoutineOutcome::Done);
         let saved = store.routine(&r.id).unwrap();
-        assert_eq!((saved.failures, saved.stop_reason), (0, None), "выполнено — серия сброшена");
+        assert_eq!((saved.retry_attempt, saved.retry_since), (0, 0), "выполнено — серия сброшена");
 
-        // Вход и проверка — «вечные»: третья подряд ставит на паузу, сообщение одно.
-        assert_eq!(store.finish_routine_run(&r.id, "needs", Some(Login)).await.unwrap(), RoutineOutcome::Failed { failures: 1 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::Failed { failures: 2 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::PausedByErrors { failures: 3 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::Failed { failures: 4 });
+        // Человек остановил ход сам: не повторяем.
+        assert_eq!(store.finish_routine_run(&r.id, "stopped", t).await.unwrap(), RoutineOutcome::Done);
+
+        // Первая неудача случилась больше суток назад: сдаёмся с ошибкой.
+        let long_ago = now() - schedule::RETRY_WINDOW_MS - 60_000;
+        assert_eq!(store.finish_routine_run(&r.id, "failed", long_ago).await.unwrap(), RoutineOutcome::GaveUp { attempts: 1 });
         let saved = store.routine(&r.id).unwrap();
-        assert!(saved.error_paused && saved.enabled, "рутина на паузе, но не выключена");
-        let resumed = store.update_routine(&r.id, &json!({ "errorPaused": false })).await.unwrap().unwrap();
-        assert_eq!((resumed.error_paused, resumed.failures), (false, 0));
+        assert_eq!(saved.last_status.as_deref(), Some("gave_up"));
+        assert_eq!(saved.retry_attempt, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 

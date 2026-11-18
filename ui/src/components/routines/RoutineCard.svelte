@@ -2,20 +2,37 @@
   // Карточка рутины «Углей»: в одной строке название, описание с обрезкой и действия (колокольчик, запуск, переключатель, удаление);
   // ниже метки: бот, как часто, следующий запуск (оранжевым), прошлый запуск. Выключенная рутина бледнеет, а не исчезает.
   import { tr } from '../../lib/i18n.js';
-  import { Button, IconButton, Switch, Tag, Icon } from '../kit';
+  import { IconButton, Switch, Tag, Icon } from '../kit';
 
   /**
-   * routine: { id, title, gist, enabled, quiet, bot: { name, orb }, schedule, next, nextTitle, nextIcon, last, lastTitle, lastBad, paused: { id, label } | null, errorPaused: { label } | null }
-   * (строки приходят готовыми из app.js: дата и расписание считает он). Действия: onrun(id), onquiet(id, value), ontoggle(id, value), ondelete(id),
-   * onresume(runId) для паузы по лимиту, onunpause(id) для паузы из-за серии ошибок.
+   * routine: { id, title, gist, prompt, enabled, quiet, bot: { name, orb }, schedule, next, nextTitle, nextIcon, last, lastTitle, lastBad }
+   * (строки приходят готовыми из app.js: дата и расписание считает он). Действия: onrun(id), onquiet(id, value), ontoggle(id, value), ondelete(id).
    */
-  let { routine, onrun, onresume, onunpause, onquiet, ontoggle, ondelete } = $props();
+  let { routine, onrun, onquiet, ontoggle, ondelete } = $props();
+  // Описание раскрывается в полное задание: обрезка не прячет правила рутины.
+  let open = $state(false);
+  function onGistKey(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      open = !open;
+    }
+  }
 </script>
 
 <article class="rc" class:is-off={!routine.enabled} data-routine={routine.id}>
   <div class="rc-r1">
     <b class="rc-title" title={routine.title}>{routine.title}</b>
-    {#if routine.gist}<span class="rc-gist" title={routine.gist}>{routine.gist}</span>{/if}
+    {#if routine.gist}
+      <span
+        class="rc-gist"
+        role="button"
+        tabindex="0"
+        aria-expanded={open}
+        title={open ? tr('Свернуть') : tr('Показать задание целиком')}
+        onclick={() => (open = !open)}
+        onkeydown={onGistKey}>{routine.gist}</span
+      >
+    {/if}
     <span class="rc-acts">
       <IconButton
         class="k-bell rt-quiet"
@@ -31,6 +48,7 @@
       <IconButton class="rt-del" name="close" size="sm" label={tr('Удалить')} onclick={() => ondelete?.(routine.id)} />
     </span>
   </div>
+  {#if open && routine.prompt}<p class="rc-prompt">{routine.prompt}</p>{/if}
   <div class="rc-r2">
     <Tag title={tr('Бот')}>
       {#if routine.bot?.orb}<img src={routine.bot.orb} alt="" />{:else}<Icon name="user" size={13} />{/if}
@@ -39,14 +57,6 @@
     {#if routine.schedule}<Tag title={tr('Когда')}><Icon name="repeat" size={13} />{routine.schedule}</Tag>{/if}
     {#if routine.next}<Tag tone="accent" title={routine.nextTitle || routine.next}><Icon name={routine.nextIcon || 'clock'} size={13} />{routine.next}</Tag>{/if}
     {#if routine.last}<Tag tone={routine.lastBad ? 'danger' : 'neutral'} title={routine.lastTitle || routine.last}><Icon name={routine.lastBad ? 'alert-circle' : 'check-long'} size={13} />{routine.last}</Tag>{/if}
-    {#if routine.errorPaused}
-      <Tag tone="danger" title={routine.errorPaused.label}><Icon name="alert-circle" size={13} />{routine.errorPaused.label}</Tag>
-      <Button class="rc-unpause" size="sm" variant="ghost" onclick={() => onunpause?.(routine.id)}>{tr('Возобновить')}</Button>
-    {/if}
-    {#if routine.paused}
-      <Tag tone="accent" title={routine.paused.label}><Icon name="clock" size={13} />{routine.paused.label}</Tag>
-      <Button class="rc-resume" size="sm" variant="ghost" onclick={() => onresume?.(routine.paused.id)}>{tr('Продолжить сейчас')}</Button>
-    {/if}
   </div>
 </article>
 
@@ -93,6 +103,14 @@
     white-space: nowrap;
     font: 400 var(--k-text-sm) / 1.3 var(--k-font-body);
     color: var(--k-text-3);
+    cursor: pointer;
+  }
+  .rc-prompt {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 400 var(--k-text-sm) / 1.5 var(--k-font-body);
+    color: var(--k-text-2);
   }
   .rc-acts {
     display: flex;

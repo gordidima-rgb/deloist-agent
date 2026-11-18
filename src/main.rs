@@ -94,7 +94,6 @@ mod queue;
 mod reach;
 mod routine_tools;
 mod rooms;
-mod runs;
 mod runtime;
 mod runtime_node;
 #[cfg(windows)]
@@ -212,10 +211,6 @@ pub struct App {
     pub import_requests: team_import_requests::ImportRequests,
     /// Рабочие процессы: графы шагов, запуски и согласия.
     pub workflows: workflows::Workflows,
-    /// Журнал запусков: что бот делал и как продолжить после перезапуска.
-    pub runs: runs::Runs,
-    /// Модели, которые отдыхают после лимита: общий счёт на компьютер.
-    pub rest: limit::Rest,
 }
 
 /// Папка приложения: при разработке корень репозитория, иначе папка рядом с exe.
@@ -285,13 +280,11 @@ async fn boot(root: &Path) -> std::io::Result<Arc<App>> {
     let data = store.data_dir().to_path_buf();
     let turns = turn::Turns::open(store.data_dir());
     let queues = queue::Queues::open(store.data_dir().to_path_buf(), turns.sender()).await;
-    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , instabox: instabox::Hub::default(), relay: relay::Relay::default(), slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default(), workflows: workflows::Workflows::open(&data), runs: runs::Runs::open(&data), rest: limit::Rest::open(&data) });
+    let app = Arc::new(App { store, turns, queues, browsers: browser::Browsers::default(), pets: pets::Pets::default(), dock: dock::Dock::default(), ledger, updates: update::Updates::default(), mcp: mcp::Mcp::default(), rooms: rooms::Rooms::default(), images: image::Images::default(), account: account::Account::default(), providers: Arc::default(), goals: goals::Goals::open(data.clone()).await, habits: habits::Habits::open(data.clone()), todos: todos::Todos::open(data.clone()),catalog: catalog::Installs::default(), connectors: connectors::Connectors::open(&data), telegram: telegram::Telegram::default(), offers: offers::Offers::default(), discord: discord::Discord::default() , instabox: instabox::Hub::default(), relay: relay::Relay::default(), slack: slack::Slack::default(), vault: password_vault::Vault::default(), tasks: team_tasks::Tasks::open(&data), import_requests: team_import_requests::ImportRequests::default(), workflows: workflows::Workflows::open(&data) });
     // До первого хода: отметки задач у новой версии начинаются с этой минуты.
     extract::init(&app).await;
     // 0.4.3: правила из инструкций — в brain.md, MAIN.md — в memory.md (тот при первом чтении памяти).
     brain::migrate_all(&app).await;
-    // Незаконченные ходы продолжаются или ждут человека до расписания и очередей.
-    runs::recover(&app).await;
     scheduler::start(app.clone());
     providers::start(app.clone());
     update::start(app.clone());

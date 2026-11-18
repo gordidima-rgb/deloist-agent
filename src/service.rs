@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use crate::drivers::{DriverEvent, Usage};
+use crate::drivers::{is_limit_error, DriverEvent, Usage};
 use crate::store::Bot;
 use crate::turn::{drive, estimate_usage, fallback_choice, main_choice, ModelChoice};
 use crate::App;
@@ -89,7 +89,7 @@ pub async fn complete_with(kind: &str, app: &Arc<App>, bot: &Bot, system: &str, 
     match call_once(app, bot, &main, &messages, kind).await {
         Ok(text) if !text.is_empty() => Ok(text),
         Ok(_) => Err("модель вернула пустой ответ".to_string()),
-        Err(message) if matches!(crate::runs::reason_of(&message), crate::runs::StopReason::Limit | crate::runs::StopReason::Network) => {
+        Err(message) if is_limit_error(&message) => {
             let Some(spare) = fallback_choice(app, &settings).filter(|spare| usable(&spare.driver)) else {
                 return Err(message);
             };

@@ -5,15 +5,8 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 
 use crate::store::{Bot, Routine};
 
-/// Последний пропущенный запуск догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
-pub const CATCH_UP_MS: i64 = 12 * 3_600_000;
-
-/// Запуски, которые должны были начаться, пока компьютер был выключен или спал.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Missed {
-    pub count: u32,
-    pub last_slot_ms: Option<i64>,
-}
+/// Запуск «в 09:00» догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
+const CATCH_UP_HOURS: i64 = 12;
 
 pub fn parse_time(text: &str) -> Option<NaiveTime> {
     let (hours, minutes) = text.trim().split_once(':')?;
@@ -29,16 +22,6 @@ pub fn times_valid(body: &serde_json::Value) -> bool {
         None => true,
         Some(value) => value.as_str().is_some_and(|text| text.trim().is_empty() || parse_time(text).is_some()),
     })
-}
-
-/// «catchUp» запроса — нет, «last» или «skip». Одна проверка для интерфейса и ботов.
-pub fn catch_up_valid(body: &serde_json::Value) -> bool {
-    body.get("catchUp").filter(|v| !v.is_null()).map_or(true, |v| matches!(v.as_str(), Some("last" | "skip")))
-}
-
-/// Открыто ли окно расписания сейчас.
-pub fn open_now(routine: &Routine, now_ms: i64) -> bool {
-    allowed(routine, local(now_ms))
 }
 
 fn day_allowed(routine: &Routine, date: NaiveDate) -> bool {
@@ -89,7 +72,7 @@ pub fn next_after(routine: &Routine, now: NaiveDateTime) -> NaiveDateTime {
         }
         return now + Duration::days(1);
     }
-    let candidate = now + Duration::minutes(routine.every_minutes.max(1));
+    let candidate = now + Duration::minutes(interval_minutes(routine, rand::random::<f64>()));
     if allowed(routine, candidate) {
         candidate
     } else {
@@ -111,26 +94,45 @@ fn to_ms(at: NaiveDateTime) -> i64 {
 }
 
 pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
-    next_run_with(routine, now_ms, local, to_ms)
+    next_run_with(routine, now_ms, interval_minutes(routine, rand::random::<f64>()), local, to_ms)
 }
 
-/// Час для ожиданий рутин (занятый бот, пауза после ошибок). В отладочной сборке `CREW_TEST_HOUR_MS` ужимает его для проверок.
-pub fn hour_ms() -> i64 {
-    if cfg!(debug_assertions) {
-        if let Some(ms) = std::env::var("CREW_TEST_HOUR_MS").ok().and_then(|v| v.parse().ok()) {
-            return ms;
-        }
+/// Интервал до следующего запуска: ровный `every_minutes` или случайный до `every_max_minutes`
+/// (`roll` — число из [0, 1)), чтобы запуски не повторялись минута в минуту.
+pub fn interval_minutes(routine: &Routine, roll: f64) -> i64 {
+    let low = routine.every_minutes.max(1);
+    let high = routine.every_max_minutes;
+    if high <= low {
+        return low;
     }
-    3_600_000
+    low + ((high - low + 1) as f64 * roll.clamp(0.0, 0.999_999)) as i64
 }
 
-/// Как редко рутина запускается после неудач подряд: от 3 — не чаще раза в час, от 6 — раза в 4 часа.
-pub fn failure_gap_ms(failures: u32) -> i64 {
-    match failures {
-        0..=2 => 0,
-        3..=5 => hour_ms(),
-        _ => 4 * hour_ms(),
+/// Рутина не дошла до «выполнено»: повторяем через 5, 10, 15, 30, 60 минут, дальше 2, 4, 8… часов.
+/// `attempt` — номер повтора, начиная с 1.
+pub fn retry_delay_minutes(attempt: u32) -> i64 {
+    match attempt {
+        0 | 1 => 5,
+        2 => 10,
+        3 => 15,
+        4 => 30,
+        5 => 60,
+        n => 60 * 2i64.pow((n - 5).min(10)),
     }
+}
+
+/// Сколько рутина пытается выполниться после первой неудачи, прежде чем сдаться с ошибкой.
+pub const RETRY_WINDOW_MS: i64 = 24 * 3_600_000;
+
+/// Когда повторить: по лестнице, но не позже конца суток и не позже обычного следующего запуска.
+/// `None` — сутки прошли, пора сдаться.
+pub fn retry_at(attempt: u32, since_ms: i64, now_ms: i64, regular_next_ms: i64) -> Option<i64> {
+    let deadline = since_ms + RETRY_WINDOW_MS;
+    if now_ms >= deadline {
+        return None;
+    }
+    let at = (now_ms + retry_delay_minutes(attempt) * 60_000).min(deadline);
+    Some(if regular_next_ms > now_ms { at.min(regular_next_ms) } else { at })
 }
 
 /// Расчёт срока с подставляемыми часами пояса: так его можно проверить на переводе часов в любой стране.
@@ -139,13 +141,14 @@ pub fn failure_gap_ms(failures: u32) -> i64 {
 fn next_run_with(
     routine: &Routine,
     now_ms: i64,
+    every: i64,
     local_of: impl Fn(i64) -> NaiveDateTime,
     ms_of: impl Fn(NaiveDateTime) -> i64,
 ) -> i64 {
     let next = if parse_time(&routine.at).is_some() {
         ms_of(next_after(routine, local_of(now_ms)))
     } else {
-        let target = now_ms + routine.every_minutes.max(1) * 60_000;
+        let target = now_ms + every * 60_000;
         let at = local_of(target);
         if allowed(routine, at) {
             target
@@ -199,6 +202,7 @@ pub fn describe(routine: &Routine) -> String {
         return format!("{} в {}", days_text(&routine.days), routine.at.trim());
     }
     let every = match routine.every_minutes {
+        low if routine.every_max_minutes > low => format!("каждые {low}–{} мин, случайно", routine.every_max_minutes),
         60 => "каждый час".to_string(),
         m if m > 60 && m % 60 == 0 => format!("каждые {} ч", m / 60),
         m => format!("каждые {m} мин"),
@@ -342,27 +346,13 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
     out
 }
 
-/// Слоты расписания, которые должны были начаться между `routine.next_run` и `now`, но не начались.
-/// Считаются только полностью прошедшие интервалы (чтобы обычный 30-секундный тик не считался пропуском).
-/// Считаются только последние семь дней: долго выключенный ПК не делает расчёт дорогим, а последний пропуск — настоящий.
-pub fn missed(routine: &Routine, now_ms: i64) -> Missed {
-    const WEEK_MS: i64 = 7 * 24 * 3_600_000;
-    if routine.next_run <= 0 {
-        return Missed { count: 0, last_slot_ms: None };
+/// Срок подошёл: работать или срок давно прошёл, пока компьютер спал.
+pub fn should_run(routine: &Routine, now_ms: i64) -> bool {
+    if parse_time(&routine.at).is_some() {
+        now_ms - routine.next_run < CATCH_UP_HOURS * 3_600_000
+    } else {
+        allowed(routine, local(now_ms))
     }
-    let interval_ms = routine.every_minutes.max(1) * 60_000;
-    let mut slot = if routine.next_run >= now_ms - WEEK_MS { routine.next_run } else { to_ms(next_after(routine, local(now_ms - WEEK_MS))) };
-    let (mut count, mut last) = (0, None);
-    while slot + interval_ms <= now_ms {
-        count += 1;
-        last = Some(slot);
-        let next = to_ms(next_after(routine, local(slot)));
-        if next <= slot {
-            break;
-        }
-        slot = next;
-    }
-    Missed { count, last_slot_ms: last }
 }
 
 #[cfg(test)]
@@ -376,6 +366,21 @@ mod tests {
 
     fn routine(every: i64) -> Routine {
         Routine { every_minutes: every, ..Routine::default() }
+    }
+
+    #[test]
+    fn a_random_interval_stays_inside_its_range_and_reaches_both_ends() {
+        let r = Routine { every_minutes: 40, every_max_minutes: 80, ..Routine::default() };
+        assert_eq!(interval_minutes(&r, 0.0), 40);
+        assert_eq!(interval_minutes(&r, 0.999_999_9), 80);
+        assert_eq!(interval_minutes(&r, 0.5), 60);
+        for _ in 0..200 {
+            assert!((40..=80).contains(&interval_minutes(&r, rand::random::<f64>())));
+        }
+        // Верх не больше низа — интервал ровный.
+        assert_eq!(interval_minutes(&Routine { every_minutes: 50, every_max_minutes: 30, ..Routine::default() }, 0.9), 50);
+        assert_eq!(interval_minutes(&routine(50), 0.9), 50);
+        assert_eq!(describe(&r), "каждые 40–80 мин, случайно");
     }
 
     #[test]
@@ -426,52 +431,15 @@ mod tests {
     }
 
     #[test]
-    fn a_daily_run_missed_for_three_days() {
-        let r = Routine { at: "09:00".into(), next_run: to_ms(at(2, 9, 0)), ..routine(60) };
-        let m = missed(&r, to_ms(at(5, 9, 0)));
-        assert_eq!((m.count, m.last_slot_ms), (3, Some(to_ms(at(4, 9, 0)))));
-    }
+    fn missed_runs_are_not_replayed_out_of_place() {
+        let night = Routine { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
+        let noon = to_ms(at(3, 12, 0));
+        assert!(!should_run(&night, noon), "ночная проверка не должна запускаться днём");
+        assert!(should_run(&night, to_ms(at(3, 1, 0))));
 
-    #[test]
-    fn a_daily_run_two_hours_late_is_one_missed() {
-        let r = Routine { at: "09:00".into(), next_run: to_ms(at(3, 9, 0)), ..routine(60) };
-        let m = missed(&r, to_ms(at(3, 11, 0)));
-        assert_eq!((m.count, m.last_slot_ms), (1, Some(to_ms(at(3, 9, 0)))));
-    }
-
-    #[test]
-    fn a_night_window_missed_whole() {
-        let r = Routine { window_from: "22:00".into(), window_to: "07:00".into(), next_run: to_ms(at(2, 22, 0)), ..routine(60) };
-        let m = missed(&r, to_ms(at(3, 7, 0)));
-        assert_eq!((m.count, m.last_slot_ms), (9, Some(to_ms(at(3, 6, 0)))), "22:00…06:00");
-    }
-
-    #[test]
-    fn a_normal_tick_is_not_a_miss() {
-        let r = Routine { next_run: to_ms(at(3, 9, 0)), ..routine(60) };
-        assert_eq!(missed(&r, to_ms(at(3, 9, 0)) + 40_000).count, 0);
-    }
-
-    #[test]
-    fn missed_runs_skip_days_off() {
-        let r = Routine { at: "09:00".into(), days: vec![1, 2, 3, 4, 5], next_run: to_ms(at(2, 9, 0)), ..routine(60) };
-        let m = missed(&r, to_ms(at(9, 9, 0)));
-        assert_eq!((m.count, m.last_slot_ms), (5, Some(to_ms(at(6, 9, 0)))), "пн–пт, выходные не считаются");
-    }
-
-    #[test]
-    fn after_two_weeks_off_the_last_miss_is_recent() {
-        let r = Routine { at: "09:00".into(), next_run: to_ms(at(2, 9, 0)), ..routine(60) };
-        let m = missed(&r, to_ms(at(20, 10, 30)));
-        assert_eq!((m.count, m.last_slot_ms), (7, Some(to_ms(at(20, 9, 0)))), "считаем неделю до сейчас, а не неделю от старого срока");
-    }
-
-    #[test]
-    fn catch_up_takes_only_last_or_skip() {
-        assert!(catch_up_valid(&serde_json::json!({})));
-        assert!(catch_up_valid(&serde_json::json!({ "catchUp": "skip" })));
-        assert!(!catch_up_valid(&serde_json::json!({ "catchUp": "all" })));
-        assert!(!catch_up_valid(&serde_json::json!({ "catchUp": 1 })));
+        let morning = Routine { at: "09:00".into(), next_run: to_ms(at(3, 9, 0)), ..routine(60) };
+        assert!(should_run(&morning, to_ms(at(3, 10, 0))), "сводка на час позже ещё нужна");
+        assert!(!should_run(&morning, to_ms(at(4, 8, 0))), "через сутки уже нет");
     }
 
     #[test]
@@ -504,10 +472,10 @@ mod tests {
         // Старый расчёт: местные 02:15 понимаются как первый проход, то есть час назад.
         let naive = ms_of(local_of(now_ms) + Duration::minutes(5));
         assert!(naive < now_ms, "демонстрация: наивный расчёт даёт прошлое");
-        assert_eq!(next_run_with(&r, now_ms, &local_of, &ms_of), now_ms + 5 * 60_000);
+        assert_eq!(next_run_with(&r, now_ms, r.every_minutes, &local_of, &ms_of), now_ms + 5 * 60_000);
         // И в самом конце «первого» часа тоже.
         let before = switch - 2 * 60_000;
-        assert_eq!(next_run_with(&r, before, &local_of, &ms_of), before + 5 * 60_000);
+        assert_eq!(next_run_with(&r, before, r.every_minutes, &local_of, &ms_of), before + 5 * 60_000);
     }
 
     #[test]
@@ -628,7 +596,21 @@ mod tests {
     }
 
     #[test]
-    fn failures_slow_a_routine_down() {
-        assert_eq!([0, 2, 3, 5, 6, 40].map(failure_gap_ms), [0, 0, 3_600_000, 3_600_000, 4 * 3_600_000, 4 * 3_600_000]);
+    fn retry_ladder_grows_then_doubles() {
+        let ladder: Vec<i64> = (1..=9).map(retry_delay_minutes).collect();
+        assert_eq!(ladder, vec![5, 10, 15, 30, 60, 120, 240, 480, 960]);
+    }
+
+    #[test]
+    fn retry_stops_after_a_day_and_never_passes_it() {
+        let day = RETRY_WINDOW_MS;
+        // Обычный следующий запуск далеко: решает лестница.
+        assert_eq!(retry_at(1, 0, 1_000, 10 * day), Some(1_000 + 5 * 60_000));
+        // Шаг перепрыгнул бы сутки: последняя попытка ровно на границе.
+        assert_eq!(retry_at(9, 0, day - 60_000, 10 * day), Some(day));
+        // Сутки прошли: сдаёмся.
+        assert_eq!(retry_at(10, 0, day, 10 * day), None);
+        // Частая рутина: свой срок раньше повтора.
+        assert_eq!(retry_at(5, 0, 1_000, 1_000 + 30 * 60_000), Some(1_000 + 30 * 60_000));
     }
 }

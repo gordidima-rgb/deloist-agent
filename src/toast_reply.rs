@@ -12,7 +12,7 @@
 //! Защита: нового адреса HTTP нет. В аргументах кнопки только вид карточки, её номер и номер варианта;
 //! текст варианта и что разрешено решает сервер по сохранённой карточке (`decide`), а не аргументы.
 //! Чужой, устаревший или подделанный номер игнорируется. Ответы идут тем же путём, что в окне
-//! (`turn::decide_approval`, `turn::answer_question`).
+//! (`Turns::resolve_approval`, `turn::answer_question`).
 //!
 //! Тосты с кнопками только при своём идентификаторе приложения (`aumid::in_use`): иначе нажатие ушло бы к PowerShell.
 //! В отладочной сборке `CREW_TEST_TOAST_SINK=<файл>` пишет по строке JSON на показ и на снятие вместо Windows
@@ -49,15 +49,14 @@ struct Labels {
     placeholder: &'static str,
     allow_once: &'static str,
     deny: &'static str,
-    waiting: &'static str,
 }
 
 impl Labels {
     fn new(english: bool) -> Self {
         if english {
-            Labels { open: "Open", reply: "Reply", placeholder: "Your answer", allow_once: "Allow once", deny: "Deny", waiting: "is waiting for your decision" }
+            Labels { open: "Open", reply: "Reply", placeholder: "Your answer", allow_once: "Allow once", deny: "Deny" }
         } else {
-            Labels { open: "Открыть", reply: "Ответить", placeholder: "Ваш ответ", allow_once: "Разрешить один раз", deny: "Отказать", waiting: "ждёт твоего решения" }
+            Labels { open: "Открыть", reply: "Ответить", placeholder: "Ваш ответ", allow_once: "Разрешить один раз", deny: "Отказать" }
         }
     }
 }
@@ -211,13 +210,6 @@ fn plan(event: &Value, bot_name: &str, labels: &Labels) -> Option<Plan> {
             buttons.push(button(labels.deny, "deny", "approval"));
             Some(Plan { kind: "approval", open_args: args_for("approval", &id, "open"), id, bot_id, lines, input: None, buttons })
         }
-        // Напоминание о карточке, которая давно ждёт решения: подробности и «разрешить» — в окне.
-        "approval_reminder" => {
-            let title = clean(event["title"].as_str().unwrap_or_default(), LINE_CHARS);
-            let lines = vec![format!("{who} {}: {title}", labels.waiting)];
-            let buttons = vec![button(labels.open, "open", "approval"), button(labels.deny, "deny", "approval")];
-            Some(Plan { kind: "approval", open_args: args_for("approval", &id, "open"), id, bot_id, lines, input: None, buttons })
-        }
         _ => None,
     }
 }
@@ -305,7 +297,7 @@ pub async fn activate(app: &Arc<App>, args: &str, user_input: Option<&str>) -> D
             app.turns.emit(json!({ "type": "open_bot", "botId": bot_id }));
         }
         Decision::Resolve { id, reply } => {
-            crate::turn::decide_approval(app, id, *reply).await;
+            app.turns.resolve_approval(id, *reply);
         }
         Decision::Answer { id, body } => {
             if let Err(e) = crate::turn::answer_question(app, id, body).await {
@@ -368,16 +360,6 @@ fn main_window_foreground() -> bool {
 pub fn start(app: Arc<App>, runtime: tokio::runtime::Handle) {
     let mut events = app.turns.subscribe();
     let handle = runtime.clone();
-    // Карточка без решения дольше срока: одно напоминание.
-    let sweep = app.clone();
-    runtime.spawn(async move {
-        loop {
-            tokio::time::sleep(crate::turn::remind_tick()).await;
-            for event in sweep.turns.due_reminders() {
-                sweep.turns.emit(event);
-            }
-        }
-    });
     runtime.spawn(async move {
         loop {
             let event = match events.recv().await {
@@ -387,13 +369,6 @@ pub fn start(app: Arc<App>, runtime: tokio::runtime::Handle) {
             };
             match event["type"].as_str() {
                 Some("question" | "approval") => on_card(&app, &handle, &event).await,
-                Some("approval_reminder") => {
-                    // Прежний тост по этой карточке мог остаться: напоминание показывается заново.
-                    if let Some(id) = event["id"].as_str() {
-                        remove(id);
-                    }
-                    on_card(&app, &handle, &event).await;
-                }
                 Some("question_closed" | "approval_closed") => {
                     if let Some(id) = event["id"].as_str() {
                         remove(id);
