@@ -882,6 +882,8 @@ async fn ask_contact(app: &Arc<App>, owner: &Owner, op: Value) {
         sensitive: false,
         remote: crate::grants::Remote::No,
         human: None,
+        // Подробности карточки и есть весь вызов: отдельного отпечатка не нужно.
+        exact: None,
     };
     if !crate::turn::request_confirmation(app, &bot.id, question).await {
         return;

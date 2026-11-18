@@ -141,6 +141,9 @@ async fn a_limit_pauses_the_run_then_one_resume_finishes_it() {
     assert_eq!(run["state"]["reason"], "limit", "{run}");
     assert!(run["state"]["until_ms"].as_i64().unwrap() > now_ms(), "{run}");
     assert!(said(&thread(&crew, &bot).await, "продолжу в"), "в чате нет строки о паузе");
+    let needs = crew.ok("GET", "/api/needs", None).await;
+    let item = needs["items"].as_array().unwrap().iter().find(|i| i["paused"] == true).unwrap_or_else(|| panic!("пауза не видна в «Нужен ты»: {needs}")).clone();
+    assert_eq!((item["reason"].as_str(), item["until"].as_i64()), (Some("limit"), run["state"]["until_ms"].as_i64()), "{item}");
 
     // Срок вышел: тик продолжает ход один раз, первым сообщением идёт «Лимит сбросился».
     wait_thread(&crew, &bot, "готово").await;

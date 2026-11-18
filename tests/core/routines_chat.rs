@@ -472,7 +472,7 @@ async fn a_check_in_with_nothing_to_report_stays_silent() {
     let (crew, fake, bot) = setup("checkin-quiet", "auto", &[("CREW_TEST_TICK_MS", "200")]).await;
     let (status, _) = crew.send("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 30 }))).await;
     assert_eq!(status, 400, "чаще раза в час нельзя: больше 24 в сутки");
-    *fake.script.lock().unwrap() = vec![say("[ТИХО]")];
+    *fake.script.lock().unwrap() = vec![tool("finish_turn", json!({ "status": "nothing" }))];
     crew.clear_events();
     let made = crew.ok("PUT", &format!("/api/bots/{bot}/checkin"), Some(json!({ "enabled": true, "everyMinutes": 60, "nextRun": common::due_now() }))).await;
     assert_eq!(made["checkin"]["enabled"], true);

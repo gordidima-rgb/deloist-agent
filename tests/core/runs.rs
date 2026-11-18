@@ -119,6 +119,8 @@ async fn a_human_turn_cut_off_mid_step_continues_once_and_keeps_the_steps() {
         runs_file(&dir).iter().any(|r| r["steps"].as_array().is_some_and(|s| s.iter().any(|x| x["label"] == "список файлов" && x["state"] == "ok")))
     })
     .await;
+    // Обрыв — когда второй запрос уже у модели и завис, а не раньше: иначе он не дошёл бы и запросов было бы два.
+    common::wait_until("второй запрос завис", 20, || async { fake.requests.lock().unwrap().len() == 2 }).await;
     first.keep_data();
     drop(first);
     let saved = std::fs::read_to_string(dir.join("threads").join(format!("{bot}.jsonl"))).unwrap();
@@ -157,7 +159,7 @@ async fn an_external_step_without_a_result_waits_for_the_human_and_continues_on_
     second.ok("POST", &format!("/api/runs/{}/continue", item["id"].as_str().unwrap()), None).await;
     let messages = wait_thread(&second, &bot, "проверил и дошёл до конца").await;
     let note = messages.iter().find(|m| m["role"] == "user").expect("заметка продолжения");
-    assert_eq!(note["source"], "restart", "служебная строка, а не слова человека: {note}");
+    assert_eq!(note["source"], "resume", "служебная строка, а не слова человека: {note}");
     assert!(note["text"].as_str().unwrap().contains("прошёл ли он — неизвестно"), "{note}");
     common::wait_until("запись закрыта", 20, || async { runs_file(&dir)[0]["state"]["kind"] == "done" }).await;
     let needs = second.ok("GET", "/api/needs", None).await;
@@ -226,7 +228,7 @@ async fn an_interrupted_routine_continues_instead_of_starting_over() {
     assert!(!entries.iter().any(|e| e["status"] == "interrupted"), "перезапуск больше не «повтор с нуля»: {entries:?}");
     let state = second.ok("GET", "/api/state", None).await;
     let saved = state["routines"].as_array().unwrap().iter().find(|r| r["id"] == routine.as_str()).unwrap().clone();
-    assert_eq!(saved["retryAttempt"].as_i64().unwrap_or(0), 0, "{saved}");
+    assert_eq!(saved["failures"].as_u64().unwrap_or(0), 0, "{saved}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

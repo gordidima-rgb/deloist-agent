@@ -21,7 +21,13 @@ struct Setup {
 
 impl Setup {
     async fn new(name: &str, env: Value, approval: &str) -> Self {
-        let crew = Crew::start_with_env(name, &[("OPENAI_API_KEY", "sk-test-secret")]).await;
+        Self::with_crew_env(name, env, approval, &[]).await
+    }
+
+    async fn with_crew_env(name: &str, env: Value, approval: &str, crew_env: &[(&str, &str)]) -> Self {
+        let mut vars = vec![("OPENAI_API_KEY", "sk-test-secret")];
+        vars.extend_from_slice(crew_env);
+        let crew = Crew::start_with_env(name, &vars).await;
         let log = crew.data_dir.join("fake-acp.log");
         let mut acp_env = json!({ "FAKE_ACP_LOG": log.display().to_string() });
         if let (Some(target), Some(extra)) = (acp_env.as_object_mut(), env.as_object()) {
@@ -80,38 +86,55 @@ fn session_of(answer: &str) -> String {
 }
 
 #[tokio::test]
-async fn unfinished_progress_runs_a_second_prompt_and_stops_on_completion() {
-    let s = Setup::new("acp-continuation", json!({}), "ask").await;
-    let (done, answer) = s.turn("тест незавершённости: изучи все аккаунты").await;
-    assert_eq!(done["failed"], false);
-    assert!(answer.contains("Анализ завершён"), "{answer}");
-    assert_eq!(s.count("session/prompt"), 2);
+async fn finish_turn_continue_then_nothing_saves_the_note_for_the_next_run() {
+    let s = Setup::new("acp-finish-turn", json!({}), "auto").await;
+    let created = s.crew.ok(
+        "POST",
+        "/api/routines",
+        Some(json!({ "botId": s.bot, "title": "Проверка", "prompt": "сделай finish_turn", "everyMinutes": 60 })),
+    ).await;
+    let id = created["routine"]["id"].as_str().unwrap().to_string();
+    s.crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    s.crew.wait_event("журнал", |e| e["type"] == "journal").await;
+    assert_eq!(s.count("session/prompt"), 2, "continue → один дозапрос, итог без третьего");
+    let state = s.crew.ok("GET", "/api/state", None).await;
+    let routine = state["routines"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap();
+    assert_eq!(routine["lastStatus"], "quiet");
+    assert_eq!(routine["progressNote"], "x");
+
+    let log_before = std::fs::read_to_string(&s.log).unwrap_or_default();
+    s.crew.clear_events();
+    s.crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    s.crew.wait_event("журнал", |e| e["type"] == "journal").await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let log_after = std::fs::read_to_string(&s.log).unwrap_or_default();
+    let new_part = &log_after[log_before.len()..];
+    assert!(new_part.contains("Заметка с прошлого запуска"), "во втором запуске нет заметки");
 }
 
 #[tokio::test]
-async fn repeated_unfinished_progress_has_a_fixed_budget() {
-    let s = Setup::new("acp-continuation-loop", json!({ "FAKE_ACP_CONTINUE_LOOP": "1" }), "ask").await;
-    let (done, _) = s.turn("тест незавершённости: изучи все аккаунты").await;
-    assert_eq!(done["failed"], false);
-    assert_eq!(s.count("session/prompt"), 5);
-    let idle = Setup::new("acp-continuation-idle", json!({ "FAKE_ACP_NO_PROGRESS": "1" }), "ask").await;
-    idle.turn("тест незавершённости: изучи все аккаунты").await;
-    assert_eq!(idle.count("session/prompt"), 2);
-}
+async fn a_silent_agent_is_stopped_with_a_message() {
+    let crew = Crew::start_with_env("acp-silence", &[("OPENAI_API_KEY", "sk-test-secret"), ("CREW_TEST_ACP_SILENCE_MS", "1000")]).await;
+    let log = crew.data_dir.join("fake-acp.log");
+    let fake = fake();
+    let acp_env = json!({ "FAKE_ACP_LOG": log.display().to_string() });
+    crew.ok(
+        "PUT",
+        "/api/settings",
+        Some(json!({ "driver": "acp", "acpCommand": format!("\"{}\"", fake.display()), "acpEnv": acp_env })),
+    ).await;
+    crew.listen().await;
+    let state = crew.ok("GET", "/api/state", None).await;
+    let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "auto" }))).await;
 
-#[tokio::test]
-async fn unfinished_progress_with_blocker_or_denied_permission_does_not_continue() {
-    let blocked = Setup::new("acp-continuation-blocked", json!({ "FAKE_ACP_CONTINUE_BLOCKED": "1" }), "ask").await;
-    blocked.turn("тест незавершённости").await;
-    assert_eq!(blocked.count("session/prompt"), 1);
-
-    let denied = Setup::new("acp-continuation-denied", json!({ "FAKE_ACP_CONTINUE_DENY": "1" }), "ask").await;
-    denied.crew.clear_events();
-    denied.crew.say(&denied.bot, "тест незавершённости").await;
-    let card = denied.crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    denied.crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
-    denied.crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
-    assert_eq!(denied.count("session/prompt"), 1);
+    crew.clear_events();
+    crew.say(&bot, "молчание").await;
+    let done = crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(done["text"].as_str().unwrap_or_default(), "");
+    assert_eq!(done["failed"], true);
+    let error = crew.find_event(|e| e["type"] == "error").unwrap();
+    assert!(error["message"].as_str().unwrap().contains("молчал 20 минут"), "{error}");
 }
 
 #[tokio::test]
@@ -611,4 +634,34 @@ async fn each_team_and_the_personal_chat_get_their_own_agent_session() {
     assert!(ta.contains("секрет-альфа") && !ta.contains("секрет-бета") && !ta.contains("секрет-личный"), "разговор альфы: {ta}");
     assert!(tb.contains("секрет-бета") && !tb.contains("секрет-альфа") && !tb.contains("секрет-личный"), "разговор беты: {tb}");
     assert!(tp.contains("секрет-личный"), "разговор личного чата: {tp}");
+}
+
+const SHORT_WAIT: &[(&str, &str)] = &[("CREW_TEST_APPROVAL_WAIT_MS", "300")];
+
+#[tokio::test]
+async fn an_unanswered_card_cancels_the_agent_instead_of_rejecting_the_call() {
+    let s = Setup::with_crew_env("acp-unanswered", json!({}), "ask", SHORT_WAIT).await;
+    let (_, answer) = s.turn(r#"разреши-вызов {"toolCallId":"x1","title":"Команда","kind":"execute","rawInput":{"command":"echo hi"}}"#).await;
+    assert!(!answer.contains("разрешение: no") && !answer.contains("разрешение: yes"), "агенту не ответили «да» или «нет»: {answer}");
+    assert_eq!(s.count("session/cancel"), 1, "ход агента отменён, а не отклонён вызов");
+    let needs = s.crew.ok("GET", "/api/needs", None).await;
+    assert_eq!(needs["count"], 1, "карточка осталась: {needs}");
+    assert_eq!(needs["items"][0]["kind"], "approval");
+}
+
+#[tokio::test]
+async fn a_late_allow_covers_the_approved_raw_call_and_not_one_that_only_looks_the_same() {
+    let s = Setup::with_crew_env("acp-exact", json!({}), "ask", SHORT_WAIT).await;
+    // Скрытый параметр `env` в карточке не виден: подробности у обоих вызовов одинаковые.
+    s.turn(r#"разреши-вызов {"toolCallId":"x1","title":"Команда","kind":"execute","rawInput":{"command":"echo hi","env":{"A":"1"}}}"#).await;
+    let first = s.crew.find_event(|e| e["type"] == "approval").unwrap();
+    s.crew.clear_events();
+    s.crew.ok("POST", &format!("/api/approvals/{}", first["id"].as_str().unwrap()), Some(json!({ "answer": "once" }))).await;
+    let second = s.crew.wait_event("карточка на похожий вызов", |e| e["type"] == "approval").await;
+    assert_eq!(second["detail"], first["detail"], "карточки выглядят одинаково");
+    s.crew.ok("POST", &format!("/api/approvals/{}", second["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
+    s.crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(s.crew.count_events(|e| e["type"] == "approval"), 1, "одобренный вызов прошёл без новой карточки");
+    let answer = s.last_answer().await;
+    assert!(answer.contains("повтор: первый yes, второй no"), "{answer}");
 }

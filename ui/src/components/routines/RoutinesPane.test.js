@@ -83,4 +83,26 @@ describe('RoutinesPane', () => {
     expect(host.querySelector('.rp-empty')).not.toBeNull();
     expect(host.querySelector('.rp-new')).not.toBeNull();
   });
+
+  it('a paused routine shows the pause and resumes by its run id', () => {
+    const onresume = vi.fn();
+    render({ routines: [routine({ paused: { id: 'run_7', label: 'на паузе до 14:00 (лимит)' } })], onresume });
+    expect(host.textContent).toContain('на паузе до 14:00 (лимит)');
+    host.querySelector('.rc-resume').click();
+    expect(onresume).toHaveBeenCalledWith('run_7');
+  });
+
+  it('a routine paused by errors shows why and resumes by its own id', () => {
+    const onunpause = vi.fn();
+    render({ routines: [routine({ errorPaused: { label: 'на паузе: 3 ошибки подряд — нужен вход' } })], onunpause });
+    expect(host.textContent).toContain('на паузе: 3 ошибки подряд — нужен вход');
+    host.querySelector('.rc-unpause').click();
+    expect(onunpause).toHaveBeenCalledWith('r1');
+  });
+
+  it('shows no pause controls on a normal routine', () => {
+    render({ routines: [routine()] });
+    expect(host.querySelector('.rc-unpause')).toBeNull();
+    expect(host.querySelector('.rc-resume')).toBeNull();
+  });
 });

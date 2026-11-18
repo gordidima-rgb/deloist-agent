@@ -40,6 +40,16 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// После отмены агент обязан закончить ход сам. Не закончил — гасим процесс.
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
+const SILENCE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
+fn silence_timeout() -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_ACP_SILENCE_MS").ok().and_then(|v| v.parse().ok()) {
+            return Duration::from_millis(ms);
+        }
+    }
+    SILENCE_TIMEOUT
+}
 const STDERR_LINES: usize = 30;
 /// Сколько прошлых сообщений пересказать новой сессии и сколько символов на каждое.
 const RECAP_MESSAGES: usize = 12;
@@ -642,6 +652,8 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
 
     let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, bot_id: bot_id.clone(), thread: req.thread.to_string() };
     let mut deadline: Option<tokio::time::Instant> = None;
+    let mut last_activity = tokio::time::Instant::now();
+    let mut silenced = false;
     let outcome = loop {
         if turn.cancelled && deadline.is_none() {
             deadline = Some(tokio::time::Instant::now() + CANCEL_GRACE);
@@ -665,6 +677,12 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
                     break Err(CallError::Closed);
                 };
                 handle_message(&agent, &req, &session_id, &message, &mut turn, cancel, sink).await;
+                last_activity = tokio::time::Instant::now();
+            }
+            _ = tokio::time::sleep_until(last_activity + silence_timeout()), if !turn.cancelled && !silenced => {
+                silenced = true;
+                turn.cancelled = true;
+                agent.notify("session/cancel", json!({ "sessionId": session_id })).await;
             }
             _ = tokio::time::sleep_until(grace), if deadline.is_some() => {
                 agent.kill();
@@ -682,19 +700,21 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         }
     }
 
+    let stopped = || Err(if silenced { "Агент молчал 20 минут — ход остановлен." } else { "остановлено" }.into());
     match outcome {
         Ok(result) => match result["stopReason"].as_str().unwrap_or("end_turn") {
-            "cancelled" => Err("остановлено".into()),
+            "cancelled" => stopped(),
             "refusal" => Err("агент отказался выполнять просьбу".into()),
-            _ if turn.cancelled => Err("остановлено".into()),
+            _ if turn.cancelled => stopped(),
             _ => Ok(()),
         },
-        Err(_) if turn.cancelled => Err("остановлено".into()),
+        Err(_) if turn.cancelled => stopped(),
         Err(CallError::Rpc(error)) => {
-            if needs_auth(&error) {
+            let login = needs_auth(&error);
+            if login {
                 sessions.remove(req.thread);
             }
-            Err(format!("агент вернул ошибку: {}", rpc_message(&error)))
+            Err(format!("{}: {}", if login { "Агенту нужен вход" } else { "агент вернул ошибку" }, rpc_message(&error)))
         }
         Err(CallError::Closed) | Err(CallError::Timeout) => {
             let tail = agent.stderr_tail();
@@ -1828,14 +1848,12 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: touch.is_some(),
                 remote: crate::grants::Remote::No,
                 human: Some(human),
+                exact: Some(crate::turn::call_key("acp", &json!({ "rawInput": call["rawInput"], "kind": kind, "paths": paths }))),
             },
         );
-        tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => {
-                turn.cancelled = true;
-                return cancelled;
-            }
+        match answer_unless_cancelled(question, cancel, turn).await {
+            Some(answer) => answer,
+            None => return cancelled,
         }
     };
     if allowed {
@@ -1852,6 +1870,21 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
             None => cancelled,
         }
     }
+}
+
+/// Ответ человека на карточку. `None` — ход отменён: «Стоп» или карточка осталась без ответа (`ask_human` тогда отменяет ход
+/// и просит «нет»): агенту не отвечаем ни «да», ни «нет», он не должен успеть сделать ещё шаг.
+async fn answer_unless_cancelled(question: impl std::future::Future<Output = bool>, cancel: &CancellationToken, turn: &mut TurnState) -> Option<bool> {
+    let answer = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        answer = question => Some(answer),
+    };
+    if cancel.is_cancelled() {
+        turn.cancelled = true;
+        return None;
+    }
+    answer
 }
 
 /// Путь агента (обычно абсолютный) — в путь внутри воркспейса бота. Всё, что снаружи, — ошибка.
@@ -1935,12 +1968,9 @@ async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, canc
         let detail = format!("Агент хочет прочитать файл с ключами: {}", touch.label);
         let question = crate::turn::request_confirmation(req.app, &req.bot.id, crate::turn::Confirmation {
             tool: "read_file", title: &title, detail: &detail, allow_label: None, deny_label: None,
-            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None,
+            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None, exact: Some(crate::turn::call_key("read_file", &json!(raw))),
         });
-        let allowed = tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => { turn.cancelled = true; false }
-        };
+        let allowed = answer_unless_cancelled(question, cancel, turn).await.unwrap_or(false);
         if !allowed {
             sink(DriverEvent::Activity(json!({ "id": "acp-secret-read-denied", "name": "Разрешение", "kind": "permission", "status": "denied" })));
             return Err("человек не разрешил чтение файла с ключами".into());
@@ -2010,15 +2040,10 @@ async fn write_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: false,
                 remote: crate::grants::Remote::No,
                 human: Some(human),
+                exact: Some(crate::turn::call_key("write_file", &json!({ "path": raw, "content": content }))),
             },
         );
-        let allowed = tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => {
-                turn.cancelled = true;
-                false
-            }
-        };
+        let allowed = answer_unless_cancelled(question, cancel, turn).await.unwrap_or(false);
         if !allowed {
             return Err("человек не разрешил запись файла".into());
         }

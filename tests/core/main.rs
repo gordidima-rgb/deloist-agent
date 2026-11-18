@@ -27,6 +27,7 @@ mod optimizer;
 mod night;
 mod pets;
 mod queue;
+mod reasons;
 mod reminders;
 mod routines_chat;
 mod runs;
