@@ -95,3 +95,33 @@ describe('summary', () => {
     expect(S.summary([], plural)).toBe('');
   });
 });
+
+describe('Claude Code helpers', () => {
+  const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
+  const helper = (id, extra = {}) => ({ id, name: 'Первая выборка', kind: 'subagent', tool: 'Agent', ...extra });
+
+  it('labels the helper call and SendMessage by the adapter tool name, not the title', () => {
+    expect(S.label(helper('acp-a'))).toBe('Зовёт помощника');
+    expect(S.label({ name: 'SendMessage', kind: 'other', tool: 'SendMessage', args: { to: 'a1b2' } })).toBe('Пишет помощнику');
+    expect(S.target({ name: 'SendMessage', tool: 'SendMessage', args: { to: 'a1b2' } })).toBe('a1b2');
+    expect(S.label({ name: 'Read x.txt', kind: 'read', tool: 'Read' })).toBe('Читает файл');
+  });
+
+  it('puts child steps under their helper and leaves orphans on top', () => {
+    const calls = [
+      { id: 'acp-r', name: 'Read a', kind: 'read' },
+      helper('acp-a'),
+      { id: 'acp-c1', name: 'Grep', kind: 'search', parent: 'acp-a' },
+      { id: 'acp-c2', name: 'Read b', kind: 'read', parent: 'acp-a' },
+      { id: 'acp-o', name: 'Lost', kind: 'read', parent: 'acp-gone' },
+    ];
+    const tree = S.nest(calls);
+    expect(tree.map((r) => r.call.id)).toEqual(['acp-r', 'acp-a', 'acp-o']);
+    expect(tree[1].steps.map((r) => r.call.id)).toEqual(['acp-c1', 'acp-c2']);
+  });
+
+  it('counts helpers in the turn summary, not their inner steps', () => {
+    const top = S.nest([helper('acp-a'), { id: 'acp-c', name: 'Read b', kind: 'read', parent: 'acp-a' }, helper('acp-b')]).map((r) => r.call);
+    expect(S.summary(top, plural)).toBe('позвал помощника 2 раза');
+  });
+});

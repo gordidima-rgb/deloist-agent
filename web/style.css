@@ -669,11 +669,11 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
   --step-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E");
   --step-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
-.tool[data-status="ok"] .t-status::before { color: var(--k-brand); }
-.tool[data-status="error"] .t-status, .tool[data-status="denied"] .t-status, .tool[data-status="timeout"] .t-status { color: var(--k-danger-text); font-weight: 600; }
-.tool[data-status="error"] .t-status::before, .tool[data-status="denied"] .t-status::before, .tool[data-status="timeout"] .t-status::before { -webkit-mask-image: var(--step-x); mask-image: var(--step-x); }
-.tool[data-status="running"] .t-status { color: var(--k-brand-text); }
-.tool[data-status="running"] .t-status::before {
+:is(.tool[data-status="ok"] > summary, .tool.work-step[data-status="ok"]) .t-status::before { color: var(--k-brand); }
+:is(.tool[data-status="error"] > summary, .tool.work-step[data-status="error"]) .t-status, :is(.tool[data-status="denied"] > summary, .tool.work-step[data-status="denied"]) .t-status, :is(.tool[data-status="timeout"] > summary, .tool.work-step[data-status="timeout"]) .t-status { color: var(--k-danger-text); font-weight: 600; }
+:is(.tool[data-status="error"] > summary, .tool.work-step[data-status="error"]) .t-status::before, :is(.tool[data-status="denied"] > summary, .tool.work-step[data-status="denied"]) .t-status::before, :is(.tool[data-status="timeout"] > summary, .tool.work-step[data-status="timeout"]) .t-status::before { -webkit-mask-image: var(--step-x); mask-image: var(--step-x); }
+:is(.tool[data-status="running"] > summary, .tool.work-step[data-status="running"]) .t-status { color: var(--k-brand-text); }
+:is(.tool[data-status="running"] > summary, .tool.work-step[data-status="running"]) .t-status::before {
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -684,9 +684,12 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
   mask: none;
   animation: spin 0.8s linear infinite;
 }
-.tool[data-status="waiting"] .t-status { color: var(--k-brand-text); font-weight: 600; }
-.tool[data-status="waiting"] .t-status::before { width: 8px; height: 8px; border-radius: 50%; background: var(--k-ember); -webkit-mask: none; mask: none; box-shadow: 0 0 6px 1px color-mix(in srgb, var(--k-brand) 70%, transparent); }
-@media (prefers-reduced-motion: reduce) { .tool[data-status="running"] .t-status::before { animation: none; } }
+:is(.tool[data-status="waiting"] > summary, .tool.work-step[data-status="waiting"]) .t-status { color: var(--k-brand-text); font-weight: 600; }
+:is(.tool[data-status="waiting"] > summary, .tool.work-step[data-status="waiting"]) .t-status::before { width: 8px; height: 8px; border-radius: 50%; background: var(--k-ember); -webkit-mask: none; mask: none; box-shadow: 0 0 6px 1px color-mix(in srgb, var(--k-brand) 70%, transparent); }
+@media (prefers-reduced-motion: reduce) { :is(.tool[data-status="running"] > summary, .tool.work-step[data-status="running"]) .t-status::before { animation: none; } }
+.tool.tool-helper[data-status] > summary .t-status::before, .tool.tool-helper.work-step[data-status] .t-status::before { content: none; }
+.helper-steps { display: flex; flex-direction: column; gap: 2px; margin-top: var(--k-space-1); padding-left: var(--k-space-3); border-left: 1px solid var(--k-line); }
+.helper-steps:empty { display: none; }
 .tool-body { padding: var(--space-1) 0 var(--space-2) var(--k-space-6); }
 .tool-body pre, .card pre {
   margin: 0 0 6px;

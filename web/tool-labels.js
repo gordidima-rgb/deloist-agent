@@ -8,6 +8,9 @@
   const plainName = (name) => String(name || '').replace(/^mcp(?:__|\.)[a-z0-9_-]+?(?:__|\.)/i, '');
 
   const LABELS = {
+    Agent: 'Зовёт помощника',
+    SendMessage: 'Пишет помощнику',
+    Task: 'Зовёт помощника',
     add_todo: 'Добавляет задачу',
     archive_habit: 'Архивирует привычку',
     ask_user: 'Спрашивает человека',
@@ -121,6 +124,8 @@
 
   function label(call) {
     const c = typeof call === 'string' ? { name: call } : (call || {});
+    // Внешний агент называет шаг по-своему, а настоящее имя инструмента лежит в `tool`.
+    if (LABELS[c.tool]) return tr(LABELS[c.tool]);
     const name = getName(c);
     const plain = plainName(name);
     if (LABELS[plain]) return tr(LABELS[plain]);
@@ -216,6 +221,7 @@
     web: ['открыл {n} страницу', 'открыл {n} страницы', 'открыл {n} страниц'],
     write: ['записал {n} файл', 'записал {n} файла', 'записал {n} файлов'],
     run: ['запустил {n} команду', 'запустил {n} команды', 'запустил {n} команд'],
+    helper: ['позвал помощника {n} раз', 'позвал помощника {n} раза', 'позвал помощника {n} раз'],
     task: ['передал {n} задачу', 'передал {n} задачи', 'передал {n} задач'],
     other: ['ещё {n} шаг', 'ещё {n} шага', 'ещё {n} шагов'],
   };
@@ -224,6 +230,7 @@
   function kindOf(call) {
     const plain = plainName(getName(call));
     const kind = call && call.kind;
+    if (kind === 'subagent') return 'helper';
     if (kind === 'think') return '';
     if (plain === 'read_file' || plain === 'list_files' || kind === 'read') return 'read';
     if (/^(web_search|search_|recall)/.test(plain) || kind === 'search') return 'search';
@@ -252,5 +259,18 @@
     return parts.join(', ');
   }
 
-  window.CrewToolLabels = { label, target, hidden, liveText, plainName, summary, more };
+  // Шаги помощника Claude Code: вызов с `parent` встаёт под строку помощника с таким `id`, а не в общий список.
+  // Шаг без известного родителя остаётся наверху.
+  function nest(calls) {
+    const rows = new Map();
+    const top = [];
+    for (const call of calls) {
+      const row = { call, steps: [] };
+      if (call.id) rows.set(call.id, row);
+      (rows.get(call.parent)?.steps || top).push(row);
+    }
+    return top;
+  }
+
+  window.CrewToolLabels = { label, target, hidden, liveText, plainName, summary, more, nest };
 })();

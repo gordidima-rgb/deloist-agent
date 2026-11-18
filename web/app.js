@@ -1093,6 +1093,8 @@ function paintWorkNow(kind, text) {
 
 // Живой ход: под строкой «Работает» — последние шесть шагов, остальные одной строкой «ещё N шагов».
 const LIVE_STEPS = 6;
+// Шаги самой группы; шаги помощника лежат внутри его строки и в счёт не идут.
+const STEP_NODES = '.work-body .tool:not(.helper-steps .tool)';
 
 function paintLiveSteps(group) {
   if (!group?.isConnected || !group.classList.contains('is-live')) return;
@@ -1102,10 +1104,10 @@ function paintLiveSteps(group) {
     box.className = 'work-live';
     group.querySelector('summary').after(box);
   }
-  const nodes = $$('.work-body .tool', group);
+  const nodes = $$(STEP_NODES, group);
   const rows = nodes.slice(-LIVE_STEPS).map((node) => {
     const row = document.createElement('div');
-    row.className = 'tool work-step';
+    row.className = node.classList.contains('tool-helper') ? 'tool tool-helper work-step' : 'tool work-step';
     row.dataset.status = node.dataset.status;
     row.append(...[...node.querySelector('summary').children].filter((c) => !c.classList.contains('t-chev')).map((c) => c.cloneNode(true)));
     return row;
@@ -1129,7 +1131,7 @@ function durText(ms) {
 // Время и расход хода (stats) приходят позже, с turn_end, и дописываются в ту же строку.
 function sealWork(group, stats = {}) {
   group.querySelector(':scope > .work-live')?.remove();
-  const nodes = $$('.work-body .tool', group);
+  const nodes = $$(STEP_NODES, group);
   const calls = nodes.map((node) => node._call).filter(Boolean);
   if (!calls.length) return;
   const failed = nodes.filter((node) => ['error', 'denied', 'timeout'].includes(node.dataset.status)).length;
@@ -1394,6 +1396,14 @@ function decorateRemember(d) {
   status.before(undo);
 }
 
+// Бейдж помощника: тот же набор тонов, что у карточки передачи задачи (HANDOFF_STATES).
+function helperState(call) {
+  if (call.status === 'running') return call.background ? [HANDOFF_STATES.running[0], tr('работает в фоне')] : HANDOFF_STATES.running;
+  return call.status === 'ok' ? HANDOFF_STATES.done : HANDOFF_STATES.error;
+}
+
+const helperSteps = (node) => node?.querySelector(':scope > .tool-body > .helper-steps') || null;
+
 function toolNode(call) {
   const d = document.createElement('details');
   d.className = 'tool';
@@ -1403,13 +1413,21 @@ function toolNode(call) {
   const summary = document.createElement('summary');
   const _plain = CrewToolLabels.plainName(call.name);
   const target = (_plain === 'run_script' || _plain === 'save_script') ? scriptTarget(String(call.args?.name || '')) : CrewToolLabels.target(call);
-  summary.innerHTML = ICONS.chev + '<span class="t-label" title="' + escapeHtml(clip(call.name, 160)) + '">' + escapeHtml(CrewToolLabels.label(call)) + '</span>' + (target ? '<span class="t-target" title="' + escapeHtml(target) + '">' + escapeHtml(target) + '</span>' : '') + '<span class="t-status">' + statusLabel(call.status) + '</span>';
+  // Помощник Claude Code: одна строка с бейджем, как у передачи задачи; его шаги лежат внутри и видны по раскрытию.
+  const helper = call.kind === 'subagent';
+  const [tone, word] = helper ? helperState(call) : ['', statusLabel(call.status)];
+  summary.innerHTML = ICONS.chev + '<span class="t-label" title="' + escapeHtml(clip(call.name, 160)) + '">' + escapeHtml(helper ? tr('Помощник') : CrewToolLabels.label(call)) + '</span>' + (target ? '<span class="t-target" title="' + escapeHtml(target) + '">' + escapeHtml(target) + '</span>' : '') + '<span class="t-status' + (helper ? ' k-badge k-badge--' + tone : '') + '">' + word + '</span>';
+  if (helper) d.classList.add('tool-helper');
   const spent = stepTrack(call.id, call.status);
   if (spent != null) summary.querySelector('.t-status').before(stepDurNode(spent));
   const body = document.createElement('div');
   body.className = 'tool-body';
   // Пустое «{}» не показываем: подробности есть, только если есть аргументы или результат.
-  if (call.args && Object.keys(call.args).length) {
+  if (helper) {
+    const steps = document.createElement('div');
+    steps.className = 'helper-steps';
+    body.append(steps);
+  } else if (call.args && Object.keys(call.args).length) {
     const args = document.createElement('pre');
     args.textContent = JSON.stringify(call.args, null, 2);
     body.append(args);
@@ -1597,10 +1615,15 @@ function messageCalls(msg) {
 function toolsNode(calls) {
   const tools = document.createElement('div');
   tools.className = 'tools';
-  for (const call of calls) {
-    if (CrewToolLabels.hidden(call)) continue;
-    tools.append(toolNode(call));
-  }
+  const add = (host, rows) => {
+    for (const { call, steps } of rows) {
+      if (CrewToolLabels.hidden(call)) continue;
+      const node = toolNode(call);
+      host.append(node);
+      add(helperSteps(node) || host, steps);
+    }
+  };
+  add(tools, CrewToolLabels.nest(calls));
   return tools;
 }
 
@@ -3227,12 +3250,15 @@ function showActivity(ev) {
   if (CrewToolLabels.hidden(call)) return;
   paintCallNow(call);
   const fresh = toolNode(call);
-  const old = call.id ? tools.querySelector('.tool[data-call-id="' + CSS.escape(String(call.id)) + '"]') : null;
+  const parent = call.parent ? messagesEl().querySelector('.tool[data-call-id="' + CSS.escape(String(call.parent)) + '"]') : null;
+  const host = helperSteps(parent) || tools;
+  const old = call.id ? host.querySelector('.tool[data-call-id="' + CSS.escape(String(call.id)) + '"]') : null;
   if (old) {
     fresh.open = old.open;
+    helperSteps(fresh)?.append(...(helperSteps(old)?.children || []));
     old.replaceWith(fresh);
   } else {
-    tools.append(fresh);
+    host.append(fresh);
   }
   paintLiveSteps(workGroup);
   scrollBottom();

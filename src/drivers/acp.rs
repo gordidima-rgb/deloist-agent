@@ -650,7 +650,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         }
     };
 
-    let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, bot_id: bot_id.clone(), thread: req.thread.to_string() };
+    let mut turn = TurnState { allowed_paths: HashSet::new(), approval_policy: None, known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, background: HashSet::new(), async_tasks: HashMap::new(), bot_id: bot_id.clone(), thread: req.thread.to_string() };
     let mut deadline: Option<tokio::time::Instant> = None;
     let mut last_activity = tokio::time::Instant::now();
     let mut silenced = false;
@@ -737,6 +737,11 @@ struct TurnState {
     /// Агент уже что-то написал, а потом работал: следующий текст — новое сообщение, с новой строки.
     wrote: bool,
     worked: bool,
+    /// Помощники Claude Code, запущенные в фоне: их строка «работает», пока не придёт `async_task_state_update`,
+    /// хотя сам вызов инструмента уже ответил «запущен».
+    background: HashSet<String>,
+    /// `asyncTaskId` фонового помощника → id его строки в чате.
+    async_tasks: HashMap<String, String>,
 }
 
 /// Only identity and a conflict marker; never retain tool contents, output or arguments.
@@ -1546,6 +1551,9 @@ fn forget_usage(bot_id: &str, thread: &str) {
     usage_store().lock().unwrap().remove(&(bot_id.to_string(), thread.to_string()));
 }
 
+/// Сколько фоновых помощников держим в ходе: больше агент не запускает, а память не растёт.
+const BACKGROUND_HELPERS_MAX: usize = 64;
+
 fn handle_update(message: &Value, turn: &mut TurnState, sink: Sink<'_>) {
     if message["method"] != "session/update" {
         return;
@@ -1591,9 +1599,41 @@ fn handle_update(message: &Value, turn: &mut TurnState, sink: Sink<'_>) {
                     turn.known_calls.remove(id);
                 }
             }
-            if let Some(activity) = activity_of(update) {
+            if let Some(mut activity) = activity_of(update) {
+                let row = activity["id"].as_str().unwrap_or_default().to_string();
+                if activity["background"] == true && turn.background.len() < BACKGROUND_HELPERS_MAX {
+                    turn.background.insert(row.clone());
+                }
+                if activity["status"] == "ok" && turn.background.contains(&row) {
+                    activity["status"] = json!("running");
+                }
                 turn.worked = true;
                 sink(DriverEvent::Activity(activity));
+            }
+        }
+        "async_task_spawned" if update["taskType"] == "local_agent" => {
+            if let (Some(task), Some(call)) = (update["asyncTaskId"].as_str(), update["toolCallId"].as_str()) {
+                if turn.async_tasks.len() < BACKGROUND_HELPERS_MAX {
+                    let row = format!("acp-{call}");
+                    turn.async_tasks.insert(task.to_string(), row.clone());
+                    turn.background.insert(row.clone());
+                    sink(DriverEvent::Activity(json!({ "id": row, "background": true, "status": "running" })));
+                }
+            }
+        }
+        "async_task_state_update" => {
+            let status = match update["state"].as_str() {
+                Some("completed") => "ok",
+                Some("failed" | "stopped") => "error",
+                _ => return,
+            };
+            if let Some(row) = update["asyncTaskId"].as_str().and_then(|task| turn.async_tasks.get(task)).cloned() {
+                turn.background.remove(&row);
+                let mut done = json!({ "id": row, "status": status });
+                if let Some(summary) = update["summary"].as_str().filter(|s| !s.is_empty()) {
+                    done["result"] = json!(summary.chars().take(4000).collect::<String>());
+                }
+                sink(DriverEvent::Activity(done));
             }
         }
         "plan" => {
@@ -1632,6 +1672,20 @@ fn activity_of(update: &Value) -> Option<Value> {
     if let Some(kind) = update["kind"].as_str() {
         out["kind"] = json!(kind);
     }
+    // Claude Code: имя настоящего инструмента и строка помощника, к которому относится шаг (`parentToolUseId`).
+    let meta = &update["_meta"]["claudeCode"];
+    if let Some(tool) = meta["toolName"].as_str().filter(|t| t.len() <= 64) {
+        out["tool"] = json!(tool);
+        if matches!(tool, "Agent" | "Task") {
+            out["kind"] = json!("subagent");
+            if update["rawInput"]["run_in_background"] == true {
+                out["background"] = json!(true);
+            }
+        }
+    }
+    if let Some(parent) = meta["parentToolUseId"].as_str().filter(|p| !p.is_empty() && p.len() <= 256) {
+        out["parent"] = json!(format!("acp-{parent}"));
+    }
     if let Some(status) = update["status"].as_str() {
         out["status"] = json!(match status {
             "completed" => "ok",
@@ -1658,7 +1712,7 @@ fn activity_of(update: &Value) -> Option<Value> {
         args.insert("url".into(), json!(url));
     }
     // Короткие поля запроса: по ним чат показывает, что именно искали, нажимали, печатали (без вложенных данных).
-    for key in ["action", "pattern", "path", "file_path", "query", "q", "text", "keys", "ref", "selector", "label", "description"] {
+    for key in ["action", "pattern", "path", "file_path", "query", "q", "text", "keys", "ref", "selector", "label", "description", "subagent_type", "to"] {
         match &update["rawInput"][key] {
             Value::String(s) if !s.is_empty() => {
                 args.insert(key.into(), json!(s.chars().take(200).collect::<String>()));
@@ -2085,7 +2139,7 @@ mod tests {
     #[test]
     fn duplicate_tool_call_invalidates_identity_even_when_cache_is_full() {
         let mut turn = TurnState { thread: "bot".into(), bot_id: "test".into(), allowed_paths: HashSet::new(), approval_policy: None,
-            known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false };
+            known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, background: HashSet::new(), async_tasks: HashMap::new() };
         for i in 0..256 {
             turn.known_calls.insert(i.to_string(), KnownCall { identity: Some((bridge_name().to_string(), "browser_page".into())), safe: true });
         }
@@ -2094,6 +2148,94 @@ mod tests {
         assert_eq!(turn.known_calls.len(), 256);
         assert!(!turn.known_calls["0"].safe);
         assert!(turn.known_calls["0"].identity.is_none());
+    }
+
+    fn feed(turn: &mut TurnState, updates: &[Value]) -> Vec<Value> {
+        let mut seen = Vec::new();
+        for update in updates {
+            let message = json!({ "method": "session/update", "params": { "update": update } });
+            handle_update(&message, turn, &mut |e| {
+                if let DriverEvent::Activity(a) = e {
+                    seen.push(a);
+                }
+            });
+        }
+        seen
+    }
+
+    fn blank_turn() -> TurnState {
+        TurnState { thread: "bot".into(), bot_id: "test".into(), allowed_paths: HashSet::new(), approval_policy: None,
+            known_calls: HashMap::new(), cancelled: false, wrote: false, worked: false, background: HashSet::new(), async_tasks: HashMap::new() }
+    }
+
+    #[test]
+    fn claude_code_helper_call_becomes_a_subagent_step() {
+        // Форма из claude-agent-acp: `_meta.claudeCode.toolName` и `rawInput` вызова Agent/Task.
+        let call = activity_of(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "toolu_A", "title": "Первая выборка", "kind": "think", "status": "pending",
+            "_meta": { "claudeCode": { "toolName": "Agent" } },
+            "rawInput": { "description": "Первая выборка", "prompt": "собери данные", "subagent_type": "general-purpose", "run_in_background": true },
+        })).unwrap();
+        assert_eq!(call["kind"], "subagent");
+        assert_eq!(call["tool"], "Agent");
+        assert_eq!(call["background"], true);
+        assert_eq!(call["args"]["description"], "Первая выборка");
+        assert_eq!(call["args"]["subagent_type"], "general-purpose");
+        assert!(call["args"].get("prompt").is_none());
+        // Обновление без `kind` и без rawInput не стирает вид строки.
+        let done = activity_of(&json!({ "sessionUpdate": "tool_call_update", "toolCallId": "toolu_A", "status": "completed", "_meta": { "claudeCode": { "toolName": "Task" } } })).unwrap();
+        assert_eq!(done["kind"], "subagent");
+        assert!(done.get("background").is_none());
+    }
+
+    #[test]
+    fn helper_steps_point_at_their_parent_and_send_message_names_the_target() {
+        let child = activity_of(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "toolu_B", "title": "Read x.txt", "kind": "read",
+            "_meta": { "claudeCode": { "toolName": "Read", "parentToolUseId": "toolu_A" } },
+        })).unwrap();
+        assert_eq!(child["parent"], "acp-toolu_A");
+        assert_eq!(child["kind"], "read");
+        let plain = activity_of(&json!({ "sessionUpdate": "tool_call", "toolCallId": "t", "_meta": { "claudeCode": { "toolName": "Read" } } })).unwrap();
+        assert!(plain.get("parent").is_none());
+        let send = activity_of(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "toolu_C", "title": "SendMessage", "kind": "other",
+            "_meta": { "claudeCode": { "toolName": "SendMessage" } }, "rawInput": { "to": "a1b2c3", "message": "дополни выборку" },
+        })).unwrap();
+        assert_eq!(send["tool"], "SendMessage");
+        assert_eq!(send["args"]["to"], "a1b2c3");
+        assert!(send["args"].get("message").is_none());
+    }
+
+    #[test]
+    fn background_helper_runs_until_its_async_task_ends() {
+        let mut turn = blank_turn();
+        let seen = feed(&mut turn, &[
+            json!({ "sessionUpdate": "tool_call", "toolCallId": "toolu_A", "title": "Выборка", "status": "pending",
+                "_meta": { "claudeCode": { "toolName": "Agent" } }, "rawInput": { "description": "Выборка", "run_in_background": true } }),
+            // Ответ вызова «запущен в фоне» не делает помощника готовым.
+            json!({ "sessionUpdate": "tool_call_update", "toolCallId": "toolu_A", "status": "completed", "_meta": { "claudeCode": { "toolName": "Agent" } } }),
+            json!({ "sessionUpdate": "async_task_spawned", "asyncTaskId": "task1", "taskType": "local_agent", "toolCallId": "toolu_A" }),
+            json!({ "sessionUpdate": "async_task_state_update", "asyncTaskId": "task1", "state": "running" }),
+            json!({ "sessionUpdate": "async_task_state_update", "asyncTaskId": "task1", "state": "completed", "summary": "нашёл 12 строк" }),
+        ]);
+        let statuses: Vec<&str> = seen.iter().map(|a| a["status"].as_str().unwrap()).collect();
+        assert_eq!(statuses, ["running", "running", "running", "ok"]);
+        assert_eq!(seen[3]["id"], "acp-toolu_A");
+        assert_eq!(seen[3]["result"], "нашёл 12 строк");
+        // Фоновая задача, не относящаяся к помощнику (монитор), чат не трогает.
+        let other = feed(&mut turn, &[json!({ "sessionUpdate": "async_task_spawned", "asyncTaskId": "m1", "taskType": "monitor", "toolCallId": "toolu_M" })]);
+        assert!(other.is_empty());
+    }
+
+    #[test]
+    fn foreground_helper_finishes_with_its_call() {
+        let mut turn = blank_turn();
+        let seen = feed(&mut turn, &[
+            json!({ "sessionUpdate": "tool_call", "toolCallId": "toolu_F", "status": "pending", "_meta": { "claudeCode": { "toolName": "Task" } }, "rawInput": { "description": "Проверка" } }),
+            json!({ "sessionUpdate": "tool_call_update", "toolCallId": "toolu_F", "status": "completed", "_meta": { "claudeCode": { "toolName": "Task" } } }),
+        ]);
+        assert_eq!(seen[1]["status"], "ok");
     }
 
     #[test]
