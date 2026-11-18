@@ -3086,12 +3086,12 @@ html, body { background: var(--color-bg-canvas); }
 .k-btn { transition: background var(--arc-t), color var(--arc-t), border-color var(--arc-t), opacity var(--arc-t), transform 0.3s var(--arc-spring); }
 .icon-btn:active:not(:disabled), .k-btn--ghost:active:not(:disabled), .k-btn--primary:active:not(:disabled), .k-btn--danger:active:not(:disabled),
 .send:active:not(:disabled), .k-chip:active, .attach:active:not(:disabled), .side-nav:active, .side-foot .side-link:active, .msg-act:active { transform: scale(0.95); }
-/* Тема переключается плавно: на время смены цвета не прыгают, а перетекают. */
-.theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after { transition: background-color 0.35s var(--arc-ease), color 0.35s var(--arc-ease), border-color 0.35s var(--arc-ease), box-shadow 0.35s var(--arc-ease), fill 0.35s var(--arc-ease), stroke 0.35s var(--arc-ease) !important; }
+/* Смена темы (theme.js): элементы перекрашиваются разом, плавность даёт общий снимок страницы. */
+.theme-switching, .theme-switching *, .theme-switching *::before, .theme-switching *::after { transition: none !important; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.2s; animation-timing-function: var(--arc-ease); }
 @media (prefers-reduced-motion: reduce) {
   .arc-pop { animation: none; }
   body.side-anim #app { transition: none; }
-  .theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after { transition: none !important; }
   .icon-btn:active, .k-btn--ghost:active, .k-btn--primary:active, .k-btn--danger:active, .send:active, .k-chip:active, .attach:active, .side-nav:active, .side-link:active, .msg-act:active, .sb-row:active { transform: none !important; }
 }
 

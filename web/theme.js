@@ -1,3 +1,23 @@
+// Смена темы на ходу: всё окно перекрашивается разом, одним мягким переходом снимка страницы.
+// Свои переходы цвета у элементов на этот кадр выключены: иначе каждый перекрашивается
+// со своей скоростью, а картинки и градиенты сразу, и окно выглядит недогруженным.
+// Тема в разметке меняется не сразу, а когда снят старый кадр: ждать возвращённое обещание.
+window.switchTheme = (theme) => {
+  const root = document.documentElement;
+  const apply = () => {
+    root.classList.add('theme-switching');
+    root.dataset.theme = theme;
+    void root.offsetWidth; // новые цвета применяются, пока переходы выключены
+    root.classList.remove('theme-switching');
+  };
+  if (root.dataset.theme === theme) return Promise.resolve();
+  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return document.startViewTransition(apply).updateCallbackDone;
+  }
+  apply();
+  return Promise.resolve();
+};
+
 // Тема ставится до первой отрисовки: системная, пока человек не выбрал свою.
 (() => {
   let saved = null;
@@ -19,7 +39,7 @@
       window.DELOIST_PANE = { bot: q.get('bot') || '', room: q.get('room') || '' };
       // Тему и шрифт выбирает родитель: событие storage приходит во все окна этого адреса.
       addEventListener('storage', (e) => {
-        if (e.key === 'crew-theme' && e.newValue) document.documentElement.dataset.theme = e.newValue;
+        if (e.key === 'crew-theme' && e.newValue) window.switchTheme(e.newValue);
         if (e.key === 'deloist-font') {
           if (e.newValue) document.documentElement.dataset.font = e.newValue;
           else delete document.documentElement.dataset.font;

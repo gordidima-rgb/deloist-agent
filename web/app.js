@@ -407,12 +407,9 @@ async function saveLook(body) {
   }
 }
 
-// Sun/moon buttons use the same path as the Settings switch; the page crossfades for a moment.
+// Sun/moon buttons use the same path as the Settings switch.
 function toggleTheme() {
-  const root = document.documentElement;
-  root.classList.add('theme-fade');
-  chooseTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
-  setTimeout(() => root.classList.remove('theme-fade'), 450);
+  chooseTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 }
 
 // Sidebar rail: state in localStorage, Ctrl+B, width animated by CSS.
@@ -607,11 +604,10 @@ const Toc = (() => {
 })();
 
 function chooseTheme(theme) {
-  document.documentElement.dataset.theme = theme;
+  window.switchTheme(theme).then(markLook);
   try {
     localStorage.setItem('crew-theme', theme);
   } catch {}
-  markLook();
   // Док и питомцы живут в своих окнах и узнают тему только из настроек.
   saveLook({ uiTheme: theme });
 }
