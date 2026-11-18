@@ -422,7 +422,7 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
 fn remove_copies(app: &App, target: &Bot, copied: &[String]) {
     for rel in copied {
         if let Ok(path) = app.store.safe_path(&target.id, rel) {
-            if !is_link(&path) {
+            if !crate::attach::is_link(&path) {
                 let _ = std::fs::remove_file(path);
             }
         }
@@ -602,7 +602,7 @@ fn fresh_files(store: &crate::store::Store, bot_id: &str, since_ms: i64) -> Vec<
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') || is_link(&path) {
+            if name.starts_with('.') || crate::attach::is_link(&path) {
                 continue;
             }
             let Ok(meta) = entry.metadata() else { continue };
@@ -729,21 +729,6 @@ fn team_status(app: &App, bot: &Bot, room_name: &str) -> Result<String, String> 
 // Передача файла
 // ---------------------------------------------------------------------------
 
-/// Ссылка (symlink, junction и любая точка повторной обработки).
-fn is_link(path: &Path) -> bool {
-    let Ok(meta) = std::fs::symlink_metadata(path) else { return false };
-    if meta.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        return meta.file_attributes() & 0x400 != 0;
-    }
-    #[cfg(not(windows))]
-    false
-}
-
 /// Путь внутри папки бота: относительный как есть, полный — только если он лежит в этой папке.
 fn relative_in_workspace(store: &crate::store::Store, bot_id: &str, raw: &str) -> Result<PathBuf, String> {
     if raw.is_empty() {
@@ -788,7 +773,7 @@ fn source_file(store: &crate::store::Store, bot_id: &str, raw: &str) -> Result<P
     for part in rel.components() {
         if let Component::Normal(p) = part {
             walk.push(p);
-            if is_link(&walk) {
+            if crate::attach::is_link(&walk) {
                 return Err(format!("{raw}: ссылки и junction передавать нельзя"));
             }
         }
@@ -844,13 +829,11 @@ pub async fn share(app: &App, from: &Bot, target: &Bot, raw: &str) -> Result<Str
         return Err(format!("{raw}: имя файла не годится"));
     }
     let date = chrono::Local::now().format("%Y-%m-%d");
-    let mut rel = format!("attachments/{date}-{name}");
-    let mut copy = 2;
-    // Чужой файл с таким именем не затираем: у копий нумерация.
-    while store.safe_path(&target.id, &rel).is_ok_and(|p| std::fs::symlink_metadata(&p).is_ok()) {
-        rel = format!("attachments/{date}-{copy}-{name}");
-        copy += 1;
-    }
+    let sender = from.id.clone();
+    // Каталог копии: attachments/<дата>/from-<отправитель>. Свободное имя — как при загрузке в чат.
+    let sub_dir = store.workspace(&target.id).join(format!("{}/{}/from-{}", crate::attach::DIR, date, sender));
+    let free = crate::attach::free_name(&sub_dir, &name)?;
+    let rel = format!("{}/{}/from-{}/{}", crate::attach::DIR, date, sender, free);
     let dest = store.safe_path(&target.id, &rel)?;
     if crate::tools::flagged_target(&dest) {
         return Err(format!("{raw}: имя копии похоже на запускаемый файл или короткое имя, не передаём"));
@@ -863,7 +846,7 @@ pub async fn share(app: &App, from: &Bot, target: &Bot, raw: &str) -> Result<Str
     // Всё, что чувствительно к гонке, — в одном блокирующем куске: открыли источник один раз, проверили ссылки прямо перед записью.
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         // Папка вложений могла стать ссылкой наружу уже после создания: проверяем по настоящему пути прямо перед записью.
-        if is_link(&parent) || !std::fs::canonicalize(&parent).is_ok_and(|real| real.starts_with(&workspace)) {
+        if crate::attach::is_link(&parent) || !std::fs::canonicalize(&parent).is_ok_and(|real| real.starts_with(&workspace)) {
             return Err("папка вложений получателя — ссылка или вне его папки, передавать нельзя".into());
         }
         let file = std::fs::File::open(&source_for_copy).map_err(|e| format!("не смог открыть файл: {e}"))?;
@@ -874,7 +857,7 @@ pub async fn share(app: &App, from: &Bot, target: &Bot, raw: &str) -> Result<Str
         copy_capped(file, &dest_for_copy, MAX_SHARE_BYTES)?;
         // Копия должна лежать внутри папки получателя и быть обычным файлом: иначе стираем.
         let inside = std::fs::canonicalize(&dest_for_copy).is_ok_and(|real| real.starts_with(&workspace));
-        if !inside || is_link(&dest_for_copy) {
+        if !inside || crate::attach::is_link(&dest_for_copy) {
             let _ = std::fs::remove_file(&dest_for_copy);
             return Err("копия оказалась вне папки получателя".into());
         }

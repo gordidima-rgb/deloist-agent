@@ -337,7 +337,7 @@ async fn files_are_copied_only_from_the_own_folder_under_the_rules() {
         ])
         .await;
     assert!(out[0].contains("attachments/") && out[0].contains("report.txt"), "{}", out[0]);
-    assert!(out[1].contains("attachments/") && out[1].contains("-2-report.txt"), "второй файл с тем же именем не затирает первый: {}", out[1]);
+    assert!(out[1].contains("attachments/") && out[1].contains("report-2.txt"), "второй файл с тем же именем не затирает первый: {}", out[1]);
     assert!(out[2].contains("не передаём") || out[2].contains("секрет"), ".env: {}", out[2]);
     assert!(out[3].contains("«..»"), "{}", out[3]);
     assert!(out[4].contains("«..»"), "{}", out[4]);
@@ -348,11 +348,14 @@ async fn files_are_copied_only_from_the_own_folder_under_the_rules() {
     assert!(out[9].contains("не в твоей команде"), "{}", out[9]);
 
     let attachments = t.workspace(&t.beta).join("attachments");
-    let names: Vec<String> = std::fs::read_dir(&attachments).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    // Новая схема: attachments/<дата>/from-<отправитель>/.
+    let date_dir = std::fs::read_dir(&attachments).unwrap().map(|e| e.unwrap().path()).find(|p| p.is_dir()).unwrap();
+    let from_dir = std::fs::read_dir(&date_dir).unwrap().map(|e| e.unwrap().path()).find(|p| p.is_dir()).unwrap();
+    let names: Vec<String> = std::fs::read_dir(&from_dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
     assert_eq!(names.len(), 2, "скопированы только два допустимых: {names:?}");
-    assert!(names.iter().all(|n| n.ends_with("report.txt") && n.chars().take(4).all(|c| c.is_ascii_digit())), "{names:?}");
+    assert!(names.iter().all(|n| n == "report.txt" || n == "report-2.txt"), "{names:?}");
     for name in &names {
-        assert_eq!(std::fs::read_to_string(attachments.join(name)).unwrap(), "отчёт");
+        assert_eq!(std::fs::read_to_string(from_dir.join(name)).unwrap(), "отчёт");
     }
 }
 
@@ -539,7 +542,22 @@ async fn share_file_refuses_planted_executables_and_autorun_names() {
     }
     assert!(out[names.len() - 1].contains("Файл передан"), "обычный файл должен передаваться: {}", out[names.len() - 1]);
     let attachments = t.workspace(&t.beta).join("attachments");
-    let copied: Vec<String> = std::fs::read_dir(&attachments).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    let mut copied: Vec<String> = Vec::new();
+    if let Ok(dates) = std::fs::read_dir(&attachments) {
+        for d in dates.flatten() {
+            if !d.path().is_dir() { continue; }
+            if let Ok(froms) = std::fs::read_dir(d.path()) {
+                for f in froms.flatten() {
+                    if !f.path().is_dir() { continue; }
+                    if let Ok(files) = std::fs::read_dir(f.path()) {
+                        for x in files.flatten() {
+                            copied.push(x.file_name().to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
     assert_eq!(copied.len(), 1, "скопирован только обычный файл: {copied:?}");
     // Файлы той же природы не проходят и вместе с задачей.
     let with_task = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Бета", "text": "возьми", "files": ["run.bat"] }))]).await;

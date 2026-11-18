@@ -204,6 +204,93 @@ pub async fn save(store: &Store, bot_ids: &[String], raw_name: &str, bytes: &[u8
     Ok(describe(&rel, bytes.len() as u64))
 }
 
+/// Свободное имя файла в каталоге `dir`: если `name` занят, пробуем `<stem>-2.<ext>`, `<stem>-3.<ext>` и т.д.
+/// (точно так же, как при загрузке в чат). Проверяем только этот каталог — вызывающий сам создаёт файл.
+pub fn free_name(dir: &Path, name: &str) -> Result<String, String> {
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.to_string(), String::new()),
+    };
+    for counter in 1..=99 {
+        let candidate = if counter == 1 {
+            name.to_string()
+        } else {
+            format!("{stem}-{counter}{extension}")
+        };
+        if std::fs::symlink_metadata(dir.join(&candidate)).is_err() {
+            return Ok(candidate);
+        }
+    }
+    Err("слишком много файлов с таким именем".into())
+}
+
+/// Ссылка (symlink, junction и любая точка повторной обработки).
+pub fn is_link(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return false };
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return meta.file_attributes() & 0x400 != 0;
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// Чистка старых копий, переданных другими ботами: в каждом воркспейсе удаляем папки
+/// `attachments/<дата>/from-*`, чья `<дата>` старше 30 дней, затем пустые папки даты.
+/// Человеческие вложения (файлы прямо в `attachments/<дата>/`) не трогаем. Ссылки удаляем как ссылки.
+pub fn prune_copies(store: &Store, now_ms: i64) {
+    use chrono::TimeZone;
+    let today = chrono::Local
+        .timestamp_millis_opt(now_ms)
+        .single()
+        .map(|d| d.date_naive())
+        .unwrap_or_else(|| chrono::Local::now().date_naive());
+    let cutoff = today - chrono::Duration::days(30);
+    for bot in store.bots() {
+        let attachments = store.workspace(&bot.id).join(DIR);
+        let Ok(entries) = std::fs::read_dir(&attachments) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Ok(ft) = entry.file_type() else { continue };
+            if !ft.is_dir() || is_link(&path) {
+                continue;
+            }
+            let Ok(date) = chrono::NaiveDate::parse_from_str(&name, "%Y-%m-%d") else { continue };
+            if date >= cutoff {
+                continue;
+            }
+            if let Ok(subs) = std::fs::read_dir(&path) {
+                for sub in subs.flatten() {
+                    let subpath = sub.path();
+                    let subname = sub.file_name().to_string_lossy().to_string();
+                    if !subname.starts_with("from-") {
+                        continue;
+                    }
+                    if is_link(&subpath) {
+                        let _ = std::fs::remove_file(&subpath);
+                        let _ = std::fs::remove_dir(&subpath);
+                    } else {
+                        let is_dir = sub.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                        if is_dir {
+                            let _ = std::fs::remove_dir_all(&subpath);
+                        } else {
+                            let _ = std::fs::remove_file(&subpath);
+                        }
+                    }
+                }
+            }
+            if std::fs::read_dir(&path).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                let _ = std::fs::remove_dir(&path);
+            }
+        }
+    }
+}
+
 /// Вложения из тела сообщения: список путей (строки или объекты с `path`). Клиенту не верим:
 /// путь обязан лежать в `attachments/` воркспейса, файл — существовать, а описание строим сами.
 pub fn resolve(store: &Store, bot_id: &str, raw: Option<&Value>) -> Result<Vec<Value>, String> {
@@ -470,5 +557,78 @@ mod tests {
         assert_eq!(kind("данные.csv"), "text");
         assert_eq!(kind("отчёт.pdf"), "file");
         assert_eq!(kind("без-расширения"), "file");
+    }
+
+    #[test]
+    fn free_name_picks_collision_name() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-tmp").join(format!("attach-free-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("report.txt"), "x").unwrap();
+        assert_eq!(super::free_name(&dir, "report.txt").unwrap(), "report-2.txt");
+        std::fs::write(dir.join("report-2.txt"), "x").unwrap();
+        assert_eq!(super::free_name(&dir, "report.txt").unwrap(), "report-3.txt");
+        assert_eq!(super::free_name(&dir, "noext").unwrap(), "noext");
+        assert_eq!(super::free_name(&dir, "other.txt").unwrap(), "other.txt");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn prune_copies_removes_old_and_keeps_recent_and_uploads() {
+        use crate::store::Store;
+        use serde_json::json;
+        let data = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-tmp").join(format!("attach-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(&data).unwrap();
+        let store = Store::open(data.clone()).await.unwrap();
+        let bot = store.add_bot(&json!({ "name": "Бот" })).await.unwrap();
+        let ws = store.workspace(&bot.id);
+        let today = chrono::Local::now().date_naive();
+        let old_date = (today - chrono::Duration::days(31)).to_string();
+        let recent_date = (today - chrono::Duration::days(29)).to_string();
+        let human_date = (today - chrono::Duration::days(40)).to_string();
+
+        // Старая копия from-x — удалится вместе с пустой папкой даты.
+        let old_from = ws.join("attachments").join(&old_date).join("from-x");
+        std::fs::create_dir_all(&old_from).unwrap();
+        std::fs::write(old_from.join("file.txt"), "x").unwrap();
+        // Свежая копия from-y — останется.
+        let recent_from = ws.join("attachments").join(&recent_date).join("from-y");
+        std::fs::create_dir_all(&recent_from).unwrap();
+        std::fs::write(recent_from.join("file.txt"), "x").unwrap();
+        // Старая человеческая загрузка — останется.
+        let human_dir = ws.join("attachments").join(&human_date);
+        std::fs::create_dir_all(&human_dir).unwrap();
+        std::fs::write(human_dir.join("file.txt"), "x").unwrap();
+
+        super::prune_copies(&store, chrono::Local::now().timestamp_millis());
+
+        assert!(!old_from.exists(), "старая копия не удалена");
+        assert!(!ws.join("attachments").join(&old_date).exists(), "пустая папка даты не удалена");
+        assert!(recent_from.exists(), "свежая копия удалена");
+        assert!(human_dir.join("file.txt").exists(), "человеческая загрузка удалена");
+
+        // Ссылка from-*: удаляется как ссылка, цель не трогается.
+        let link_date = (today - chrono::Duration::days(31)).to_string();
+        let link_date_dir = ws.join("attachments").join(&link_date);
+        let link_from = link_date_dir.join("from-link");
+        let target_dir = data.join("link-target");
+        let _ = std::fs::remove_dir_all(&target_dir);
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("secret.txt"), "secret").unwrap();
+        std::fs::create_dir_all(&link_date_dir).unwrap();
+        let mk = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J", &link_from.to_string_lossy(), &target_dir.to_string_lossy()])
+            .output();
+        let created = mk.map(|o| o.status.success()).unwrap_or(false);
+        if !created {
+            println!("note: junction creation unavailable in this environment, skipping link case");
+        } else {
+            super::prune_copies(&store, chrono::Local::now().timestamp_millis());
+            assert!(!link_from.exists() || std::fs::symlink_metadata(&link_from).is_err(), "ссылка не удалена");
+            assert!(target_dir.join("secret.txt").exists(), "цель ссылки повреждена");
+        }
+
+        let _ = std::fs::remove_dir_all(&data);
     }
 }

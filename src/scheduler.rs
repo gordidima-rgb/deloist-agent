@@ -2,6 +2,7 @@
 //! Если бот занят, рутина ждёт следующего окна, а не копит очередь.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -11,6 +12,7 @@ use crate::turn::{start_turn, RoutineRef, TurnOptions};
 use crate::App;
 
 const TICK: Duration = Duration::from_secs(30);
+static PRUNE_LAST: AtomicI64 = AtomicI64::new(0);
 
 const BROWSER_IDLE_MS: i64 = 10 * 60_000;
 /// В облаке память на сервере общая: браузер бота засыпает через 5 минут бездействия (владелец, 14.11.2026).
@@ -194,6 +196,12 @@ pub async fn settle_orphans(app: &Arc<App>) {
 }
 
 async fn tick(app: &Arc<App>) {
+    let now_ms = crate::store::now();
+    let last = PRUNE_LAST.load(Ordering::Relaxed);
+    if now_ms - last >= 24 * 3600 * 1000 {
+        crate::attach::prune_copies(&app.store, now_ms);
+        PRUNE_LAST.store(now_ms, Ordering::Relaxed);
+    }
     crate::update::tick(app);
     crate::memory::daily_tick(app);
     crate::memory::team_review::ensure_routines(app).await;
@@ -312,6 +320,8 @@ pub fn start(app: Arc<App>) {
         // Запуски процессов, прерванные перезапуском, продолжают проход.
         crate::workflow_run::resume(&app);
         settle_orphans(&app).await;
+        crate::attach::prune_copies(&app.store, crate::store::now());
+        PRUNE_LAST.store(crate::store::now(), std::sync::atomic::Ordering::Relaxed);
         let mut timer = tokio::time::interval(tick_period());
         timer.tick().await;
         loop {
