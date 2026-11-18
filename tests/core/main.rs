@@ -20,6 +20,7 @@ mod habits;
 mod handoff;
 mod hermes_import;
 mod know_me;
+mod limits;
 mod memory;
 mod mentions;
 mod optimizer;

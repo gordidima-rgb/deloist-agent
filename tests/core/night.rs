@@ -204,7 +204,7 @@ async fn nobody_answers_at_night_so_the_action_is_refused_and_left_for_morning()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_daily_limit_stops_routines_but_not_a_person() {
+async fn the_daily_limit_pauses_routines_until_midnight_but_not_a_person() {
     let (crew, fake, bot) = setup("night-limit", &[("CREW_TEST_TICK_MS", "100")]).await;
     *fake.usage.lock().unwrap() = Some((600, 100));
     crew.ok("PUT", "/api/settings", Some(json!({ "dailyTokenLimit": 1000 }))).await;
@@ -218,16 +218,23 @@ async fn the_daily_limit_stops_routines_but_not_a_person() {
     crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
 
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
-    assert_eq!(event["entry"]["status"], "limit", "{event}");
+    assert_eq!(event["entry"]["status"], "paused", "{event}");
     assert_eq!(event["entry"]["tokens"], 1400, "два шага и стоп");
     assert_eq!(fake.requests.lock().unwrap().len(), 2);
+    // Ход не провалился: запись журнала запусков ждёт ближайшей местной полуночи.
+    let runs: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runs.json")).unwrap()).unwrap();
+    let paused = &runs[0]["state"];
+    assert_eq!((paused["kind"].as_str(), paused["reason"].as_str()), (Some("paused"), Some("budget")), "{paused}");
+    let tomorrow = chrono::Local::now().date_naive().succ_opt().unwrap().and_time(chrono::NaiveTime::MIN);
+    let midnight = chrono::TimeZone::from_local_datetime(&chrono::Local, &tomorrow).earliest().unwrap().timestamp_millis();
+    assert_eq!(paused["until_ms"].as_i64(), Some(midnight), "{paused}");
 
     // Расписание больше не запускает: пропуск виден в журнале.
     crew.clear_events();
     fake.requests.lock().unwrap().clear();
     crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
-    let event = crew.wait_event("пропуск", |e| e["type"] == "journal").await;
-    assert_eq!(event["entry"]["status"], "limit");
+    let event = crew.wait_event("пауза", |e| e["type"] == "journal").await;
+    assert_eq!(event["entry"]["status"], "paused");
     assert_eq!(event["entry"]["tokens"], 0);
     assert!(fake.requests.lock().unwrap().is_empty(), "модель не вызывается");
 

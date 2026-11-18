@@ -238,7 +238,7 @@ pub fn backoff_ms(pauses: u32) -> i64 {
 /// Срок сброса из текста ошибки провайдера: «… resets 4pm», «… resets Nov 13, 11:10am». Не назван — `None`.
 pub fn reset_in_error(message: &str, now: DateTime<Local>) -> Option<i64> {
     let at = message.char_indices().map(|(i, _)| i).find(|&i| message[i..].get(..6).is_some_and(|s| s.eq_ignore_ascii_case("resets")))?;
-    parse_reset(&message[at..], now).filter(|&ms| ms > now.timestamp_millis())
+    parse_reset(&format!("resets{}", &message[at + 6..]), now).filter(|&ms| ms > now.timestamp_millis())
 }
 
 /// Ответ вместо вызова модели, когда бот выбрал свой месячный предел токенов.
@@ -356,5 +356,30 @@ mod tests {
         for junk in ["", "soon", "Nov", "25:99", "Foo 12"] {
             assert_eq!(parse_reset(junk, now), None, "{junk:?}");
         }
+    }
+
+    #[test]
+    fn the_reset_is_found_inside_an_error_text() {
+        let now = at(11, 12, 10, 0);
+        let expected = at(11, 12, 16, 0).timestamp_millis();
+        assert_eq!(reset_in_error("API 429: usage limit reached, resets 4pm (Europe/Moscow)", now), Some(expected));
+        assert_eq!(reset_in_error("Resets 16:00", now), Some(expected));
+        assert_eq!(reset_in_error("API 429: rate limit exceeded", now), None);
+    }
+
+    #[test]
+    fn next_clock_is_today_or_tomorrow() {
+        let now = at(11, 12, 10, 0);
+        assert_eq!(next_clock_ms("14:30", now), Some(at(11, 12, 14, 30).timestamp_millis()));
+        assert_eq!(next_clock_ms("09:00", now), Some(at(11, 13, 9, 0).timestamp_millis()));
+        assert_eq!(next_clock_ms("soon", now), None);
+    }
+
+    #[test]
+    fn backoff_doubles_up_to_a_day() {
+        assert_eq!(backoff_ms(0), 5 * 60_000);
+        assert_eq!(backoff_ms(1), 10 * 60_000);
+        assert_eq!(backoff_ms(3), 40 * 60_000);
+        assert_eq!(backoff_ms(20), 24 * 3_600_000);
     }
 }
