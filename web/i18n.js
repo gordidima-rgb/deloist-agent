@@ -562,6 +562,7 @@
     'Пишет помощнику': 'Messages a helper',
     'работает в фоне': 'working in the background',
     'позвал помощника {n} раз': 'called a helper {n}×',
+    'Спрашивает коллегу': 'Asks a teammate',
     'Смотрит задачи': 'Checks the tasks',
     'Передаёт файл': 'Passes a file',
     'Файлов: {n}': 'Files: {n}',

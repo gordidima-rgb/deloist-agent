@@ -14,6 +14,7 @@
     add_todo: 'Добавляет задачу',
     archive_habit: 'Архивирует привычку',
     ask_user: 'Спрашивает человека',
+    ask_teammate: 'Спрашивает коллегу',
     assign_task: 'Даёт задачу участнику',
     await_event: 'Ждёт событие',
     browser_capture_key: 'Сохраняет ключ',

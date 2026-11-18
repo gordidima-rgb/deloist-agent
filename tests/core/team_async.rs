@@ -603,6 +603,55 @@ async fn a_busy_target_queues_the_task_and_the_senders_turn_ends_without_waiting
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn ask_teammate_returns_the_answer_between_two_identical_fence_lines() {
+    let t = team("async-ask-ok", 100).await;
+    let out = t.run(&t.alpha, &[("ask_teammate", json!({ "bot": "Бета", "question": "Какой цвет?" }))]).await;
+    assert_eq!(out.len(), 1, "{out:?}");
+    let result = &out[0];
+    assert!(result.contains("Итог от Бета"), "ответ коллеги потерян: {result}");
+    let fences: Vec<&str> = result.lines().filter(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit())).collect();
+    assert_eq!(fences.len(), 2, "должно быть две строки-метки: {result}");
+    assert_eq!(fences[0], fences[1], "метки должны совпадать: {result}");
+    // Альфа продолжила ход (turn_end уже дождались в run).
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ask_teammate_to_a_busy_teammate_errors_and_mentions_assign_task() {
+    let t = team("async-ask-busy", 1500).await;
+    t.crew.say(&t.beta, "просто ответь").await;
+    // Дать ходу Беты стартовать, чтобы она стала занятой.
+    common::wait_until("бета занята", 5, || async { t.crew.count_events(|e| e["type"] == "turn_start" && e["botId"] == t.beta.as_str()) > 0 }).await;
+    let out = t.run(&t.alpha, &[("ask_teammate", json!({ "bot": "Бета", "question": "Какой цвет?" }))]).await;
+    assert!(out[0].contains("сейчас занят") && out[0].contains("assign_task"), "{}", out[0]);
+    // Дождаться окончания хода Беты.
+    common::wait_until("бета закончила", 10, || async { t.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == t.beta.as_str()) > 0 }).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ask_teammate_to_an_outsider_is_refused_like_assign_task() {
+    let t = team("async-ask-outsider", 100).await;
+    let out = t.run(&t.alpha, &[("ask_teammate", json!({ "bot": "Дельта", "question": "Привет?" }))]).await;
+    assert!(out[0].contains("не в твоей команде"), "{}", out[0]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ask_teammate_with_a_question_over_2000_chars_points_to_assign_task() {
+    let t = team("async-ask-long", 100).await;
+    let out = t.run(&t.alpha, &[("ask_teammate", json!({ "bot": "Бета", "question": "я".repeat(2001) }))]).await;
+    assert!(out[0].contains("2000") && out[0].contains("assign_task"), "{}", out[0]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn handoff_counter_refuses_the_ninth_assignment_of_one_human_request() {
+    let t = team("async-handoff", 100).await;
+    let call = ("assign_task", json!({ "bot": "Бета", "text": "нарисуй логотип" }));
+    let out = t.run(&t.alpha, &vec![call; 9]).await;
+    assert_eq!(out.len(), 9, "{out:?}");
+    assert!(out[..8].iter().all(|r| !r.contains("слишком много передач")), "{out:?}");
+    assert!(out[8].contains("слишком много передач"), "{}", out[8]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_summary_with_instructions_reaches_the_lead_only_inside_the_fence() {
     let t = team("async-fence", 100).await;
     let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Бета", "text": "ВРЕДНЫЙ_ИТОГ" }))]).await;

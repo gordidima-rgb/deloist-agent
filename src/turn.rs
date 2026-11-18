@@ -194,7 +194,7 @@ pub struct Turns {
     delegation_depth: Mutex<HashMap<String, (u64, u32)>>,
     /// Кто передал задачу боту, какой режим вопросов был у него, его список «Всегда спрашивать» и кто передавал задачу самому
     /// отправителю (выше по цепочке): пол осторожности и общие папки получателя на время хода (запись, бот, режим, «Всегда спрашивать», цепочка выше).
-    delegation_from: Mutex<HashMap<String, (u64, String, String, Vec<String>, Vec<String>)>>,
+    delegation_from: Mutex<HashMap<String, (u64, String, String, Vec<String>, Vec<String>, String)>>,
     /// Пол осторожности любого хода с `approval_floor` (передача, рутина, цель): ключ — бот, значение — режим.
     turn_floor: Mutex<HashMap<String, (u64, String)>>,
     /// Номер записи пола: сторож старого хода не трогает пол нового.
@@ -323,7 +323,7 @@ impl Turns {
     /// Единственный обход цепочки: по нему считаются и общие папки, и режим со списком «Всегда спрашивать».
     pub(crate) fn delegation_chain(&self, bot_id: &str) -> Vec<String> {
         let chain = self.delegation_from.lock().unwrap();
-        chain.get(bot_id).map(|(_, from, _, _, above)| std::iter::once(from.clone()).chain(above.iter().cloned()).collect()).unwrap_or_default()
+        chain.get(bot_id).map(|(_, from, _, _, above, _)| std::iter::once(from.clone()).chain(above.iter().cloned()).collect()).unwrap_or_default()
     }
 
     /// Режим вопросов с полом осторожности передачи: свежий режим бота никогда не мягче режима того, кто передал задачу.
@@ -351,7 +351,7 @@ impl Turns {
             result = tools::stricter(&result, floor);
         }
         // Звено получателя: пол и список на момент передачи (у выданной в очередь задачи записи отправителя уже нет).
-        if let Some((_, _, floor, carried, _)) = self.delegation_from.lock().unwrap().get(bot_id) {
+        if let Some((_, _, floor, carried, _, _)) = self.delegation_from.lock().unwrap().get(bot_id) {
             result = tools::stricter(&result, floor);
             add(&mut asks, carried);
         }
@@ -379,10 +379,10 @@ impl Turns {
     }
 
     /// Записать след передачи (кто, какой режим, «Всегда спрашивать», глубина, цепочка выше отправителя) для получателя.
-    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, asks: Vec<String>, depth: u32, above: Vec<String>) -> u64 {
+    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, asks: Vec<String>, depth: u32, above: Vec<String>, root: String) -> u64 {
         let epoch = self.floor_epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.delegation_depth.lock().unwrap().insert(bot_id.to_string(), (epoch, depth));
-        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string(), asks, above));
+        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string(), asks, above, root));
         epoch
     }
 
@@ -406,6 +406,10 @@ impl Turns {
 
     pub(crate) fn delegation_depth_of(&self, bot_id: &str) -> u32 {
         self.delegation_depth.lock().unwrap().get(bot_id).map(|(_, d)| *d).unwrap_or(0)
+    }
+
+    pub(crate) fn delegation_root_of(&self, bot_id: &str) -> String {
+        self.delegation_from.lock().unwrap().get(bot_id).map(|(_, _, _, _, _, r)| r.clone()).unwrap_or_default()
     }
 
     pub fn clear_mentioned(&self, bot_id: &str) {
@@ -3128,6 +3132,8 @@ pub struct Carried {
     pub resume: Option<String>,
     /// Кто передавал задачу самому отправителю: его ход к запуску кончился, а общие папки цепочки считаются по всем звеньям.
     pub above: Vec<String>,
+    /// Корень цепочки передач (запуск с Origin::Human или собственный run id): счётчик передач на одну просьбу.
+    pub root: String,
 }
 
 /// Начало брифа получателю: кто просит. Бот не человек, права и подтверждения у получателя свои.
@@ -3203,7 +3209,8 @@ pub fn delegate_to_bot_with(
         }
         // Выданная в очередь задача несёт цепочку выше отправителя с собой: у него самого записи уже нет.
         let above = carried.as_ref().map_or_else(|| app.turns.delegation_chain(&from.id), |c| c.above.clone());
-        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, asks, depth + 1, above);
+        let root = carried.as_ref().map(|c| c.root.clone()).unwrap_or_default();
+        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, asks, depth + 1, above, root);
         let _delegation_guard = FloorGuard { app: app.clone(), bot_id: target.id.clone(), epoch };
         let (text, tokens) = run_turn_body(app.clone(), target.clone(), brief, Vec::new(), opts, cancel).await;
         drop(_delegation_guard);
@@ -3549,8 +3556,8 @@ mod floor_tests {
         }
         let turns = Turns::default();
         // Как при настоящей передаче: следующее звено получает список предыдущего (`effective_always_ask`) и цепочку выше отправителя.
-        turns.set_delegation(&ids[1], &ids[0], "ask", vec!["command".into()], 1, Vec::new());
-        turns.set_delegation(&ids[2], &ids[1], "ask", vec!["pay".into(), "command".into()], 2, vec![ids[0].clone()]);
+        turns.set_delegation(&ids[1], &ids[0], "ask", vec!["command".into()], 1, Vec::new(), String::new());
+        turns.set_delegation(&ids[2], &ids[1], "ask", vec!["pay".into(), "command".into()], 2, vec![ids[0].clone()], String::new());
         let mut got = turns.effective_always_ask(&store, &ids[2], &["files".to_string()]);
         got.sort();
         assert_eq!(got, ["command", "delete", "files", "pay", "send"]);
@@ -3597,10 +3604,10 @@ mod floor_tests {
         let store = crate::store::Store::open(dir.clone()).await.unwrap();
         let turns = Turns::default();
         let old = turns.set_turn_floor("bot", "ask");
-        let old_delegation = turns.set_delegation("bot", "sender", "ask", Vec::new(), 1, Vec::new());
+        let old_delegation = turns.set_delegation("bot", "sender", "ask", Vec::new(), 1, Vec::new(), String::new());
         // Новый ход того же бота: свои записи.
         let newer = turns.set_turn_floor("bot", "strict");
-        let newer_delegation = turns.set_delegation("bot", "other", "strict", Vec::new(), 2, vec!["first".to_string()]);
+        let newer_delegation = turns.set_delegation("bot", "other", "strict", Vec::new(), 2, vec!["first".to_string()], String::new());
         turns.clear_floor("bot", old);
         turns.clear_floor("bot", old_delegation);
         assert_eq!(turns.effective_approval(&store, "bot", "auto"), "strict", "пол нового хода пропал");
