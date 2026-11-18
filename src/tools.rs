@@ -177,7 +177,6 @@ fn base_tool_defs() -> Value {
                     "description": "user — о человеке; feedback — поправка, как делать, и почему; project — дела и решения; reference — ссылки, кабинеты, где что лежит.",
                 },
                 "scope": { "type": "string", "enum": ["self", "shared", "team"], "description": "Чья память. По умолчанию self." },
-                "team": { "type": "string", "description": "Только для scope team, если ты в нескольких командах: название нужной." },
                 "entities": { "type": "array", "items": { "type": "string" }, "description": "Люди, компании, проекты, кабинеты, о которых факт." },
                 "links": { "type": "array", "items": { "type": "string" }, "description": "Номера связанных фактов: m12." },
                 "id": { "type": "string", "description": "Номер факта, чтобы исправить его." },
@@ -1820,6 +1819,15 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
             }
             if target.rank != "specialist" {
                 return Err(format!("«{}» не специалист: предложить можно только специалиста", target.name));
+            }
+            let lead_team = app.store.team_of(&bot.id);
+            let in_lead_team = lead_team.as_ref().is_some_and(|r| r.bot_ids.iter().any(|id| id == &target.id));
+            let in_no_team = app.store.team_of(&target.id).is_none();
+            if !in_lead_team && !in_no_team {
+                let available: Vec<String> = bots.iter().filter(|b| {
+                    b.rank == "specialist" && (lead_team.as_ref().is_some_and(|r| r.bot_ids.iter().any(|id| id == &b.id)) || app.store.team_of(&b.id).is_none())
+                }).map(|b| b.name.clone()).collect();
+                return Err(format!("в команде нет бота «{target_name}»: предложить можно {}", if available.is_empty() { "никого".to_string() } else { available.join(", ") }));
             }
             let offer = crate::offers::Offer {
                 id: uid("offer"),

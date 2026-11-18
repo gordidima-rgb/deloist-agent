@@ -236,15 +236,8 @@ pub struct TeamHome {
 }
 
 pub fn homes_of_bot(store: &crate::store::Store, bot_id: &str) -> Vec<TeamHome> {
-    let mut out: Vec<TeamHome> = Vec::new();
-    for room in store.rooms() {
-        for home in homes_in_room_named(store, &room.id, bot_id) {
-            if !out.iter().any(|h| h.path == home.path) {
-                out.push(home);
-            }
-        }
-    }
-    out
+    let Some(room) = store.team_of(bot_id) else { return Vec::new(); };
+    homes_in_room_named(store, &room.id, bot_id)
 }
 
 #[cfg(test)]

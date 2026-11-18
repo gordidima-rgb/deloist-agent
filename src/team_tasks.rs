@@ -216,7 +216,7 @@ fn lead_of(app: &App, room: &Room) -> Option<String> {
 }
 
 fn rooms_of(app: &App, bot_id: &str) -> Vec<Room> {
-    app.store.rooms().into_iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).collect()
+    app.store.team_of(bot_id).into_iter().collect()
 }
 
 /// Те, кому `from` вправе давать задачи и файлы (владелец, 16.11.2026): внутри команды — любому

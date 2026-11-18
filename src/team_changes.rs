@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -18,13 +18,13 @@ use crate::store::{uid, Bot, Room};
 use crate::team_proposal::{await_decision, clean_line, hidden_in_instructions, is_bidi_control, is_format_char, same, MAX_INSTRUCTIONS, MAX_ROLE};
 use crate::App;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Edit {
     pub before: String,
     pub after: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomRef {
     pub id: String,
@@ -33,7 +33,7 @@ pub struct RoomRef {
     pub new_lead: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotChange {
     pub host_id: String,
@@ -55,7 +55,7 @@ pub struct BotChange {
     pub drift: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuleNote {
     pub add: String,
     pub remove: String,
@@ -65,7 +65,7 @@ pub struct RuleNote {
 pub const RULES_HEAD: &str = "Правила от человека:";
 const MAX_RULE: usize = 300;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutinePlan {
     pub host_id: String,
@@ -87,7 +87,7 @@ pub struct RoutinePlan {
     pub quiet: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
     BotChange(BotChange),
@@ -150,9 +150,12 @@ fn find_bot(app: &App, me: &Bot, name: &str, allow_self: bool) -> Result<Bot, St
         .ok_or_else(|| format!("в твоей команде нет бота «{wanted}»: он не в твоей команде или такого бота нет. Изменить можно только участника команды, где состоишь и ты (команду собирай через propose_team)"))
 }
 
-/// Команды (не архивные), где состоят оба бота.
+/// Команда (не архивная), где состоят оба бота — по инварианту «один бот — одна команда» их общая команда не более одной.
 fn shared_rooms(app: &App, a: &str, b: &str) -> Vec<Room> {
-    app.store.rooms().into_iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| id == a) && r.bot_ids.iter().any(|id| id == b)).collect()
+    match (app.store.team_of(a), app.store.team_of(b)) {
+        (Some(ra), Some(rb)) if ra.id == rb.id => vec![ra],
+        _ => Vec::new(),
+    }
 }
 
 fn no_hidden(text: &str) -> bool {

@@ -77,12 +77,11 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
 }
 
 /// Команда оркестратора: только он и только его.
-fn team_of(rooms: &[Room], bot: &Bot, args: &Value) -> Result<Room, String> {
+fn team_of(rooms: &[Room], bot: &Bot) -> Result<Room, String> {
     if !bot.orchestrator {
         return Err("этот инструмент только для оркестратора команды".into());
     }
-    let wanted = args.get("team").and_then(Value::as_str).unwrap_or_default();
-    let scope = resolve_team(rooms, &bot.id, wanted)?;
+    let scope = resolve_team(rooms, &bot.id)?;
     rooms.iter().find(|r| room_scope(&r.id) == scope).cloned().ok_or_else(|| "такой команды нет".into())
 }
 
@@ -136,8 +135,8 @@ pub(crate) fn review_text(book: &Book, room: &Room, bots: &[Bot], orchestrator: 
     service::take_chars(&out, REVIEW_LIMIT)
 }
 
-pub async fn review(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
-    let room = team_of(&app.store.rooms(), bot, args)?;
+pub async fn review(app: &Arc<App>, bot: &Bot, _args: &Value) -> Result<String, String> {
+    let room = team_of(&app.store.rooms(), bot)?;
     let book = load(app).await;
     let bots = app.store.bots();
     Ok(review_text(&book, &room, &bots, &bot.id))
@@ -212,7 +211,7 @@ pub(crate) fn merge_in(book: &mut Book, scope: &str, keep: &str, drops: &[String
 }
 
 pub async fn merge(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
-    let room = team_of(&app.store.rooms(), bot, args)?;
+    let room = team_of(&app.store.rooms(), bot)?;
     let scope = room_scope(&room.id);
     let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
     let keep = bare_id(&text("keep_id").unwrap_or_default());
@@ -233,7 +232,7 @@ pub async fn merge(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, St
 }
 
 pub async fn report(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
-    let room = team_of(&app.store.rooms(), bot, args)?;
+    let room = team_of(&app.store.rooms(), bot)?;
     let text = args.get("text").and_then(Value::as_str).unwrap_or_default().trim();
     if text.is_empty() {
         return Err("пустой итог".into());
@@ -396,9 +395,8 @@ mod tests {
     #[test]
     fn tools_are_for_an_orchestrator_and_only_for_its_own_team() {
         let rooms = vec![room("r1", &["b1", "b2"]), room("r2", &["b9"])];
-        assert!(team_of(&rooms, &bot("b2", "Автор", false), &json!({})).is_err(), "обычный участник не разбирает память");
-        assert_eq!(team_of(&rooms, &bot("b1", "О", true), &json!({})).unwrap().id, "r1");
-        assert!(team_of(&rooms, &bot("b1", "О", true), &json!({ "team": "Команда r2" })).is_err(), "чужая команда недоступна");
+        assert!(team_of(&rooms, &bot("b2", "Автор", false)).is_err(), "обычный участник не разбирает память");
+        assert_eq!(team_of(&rooms, &bot("b1", "О", true)).unwrap().id, "r1");
     }
 
     #[test]

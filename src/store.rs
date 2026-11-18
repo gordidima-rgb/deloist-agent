@@ -1466,6 +1466,14 @@ fn migrate_secrets(path: &Path, backup: &Path, original: &[u8], secrets: &Secret
     }
 }
 
+/// Если ведущий команды больше не входит в её состав (например, его убрали) — назначить первого участника.
+/// Тот же код, что использует `update_room`, чтобы логика не расходилась.
+fn fix_room_lead(room: &mut Room) {
+    if !room.bot_ids.contains(&room.lead) {
+        room.lead = room.bot_ids.first().cloned().unwrap_or_default();
+    }
+}
+
 impl Store {
     pub async fn open(data_dir: PathBuf) -> std::io::Result<Self> {
         for sub in ["threads", "memory", "workspaces", "tmp", "rooms"] {
@@ -1526,6 +1534,7 @@ impl Store {
         if must_write {
             store.persist().await?;
         }
+        store.migrate_one_bot_one_team().await;
         Ok(store)
     }
 
@@ -3170,10 +3179,34 @@ impl Store {
         self.state.lock().unwrap().rooms.iter().find(|r| r.id == id).cloned()
     }
 
+    /// Незаблокированная (не архивная) команда, в которой состоит бот. Бот может быть только в одной такой команде.
+    pub fn team_of(&self, bot_id: &str) -> Option<Room> {
+        self.state.lock().unwrap().rooms.iter().find(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).cloned()
+    }
+
+    /// Проверка «один бот — одна команда»: ни один из `bot_ids` не должен уже состоять в другой
+    /// незаблокированной команде, кроме, возможно, `room_id` (та же команда, в которую их добавляют).
+    /// Возвращает текст ошибки, пригодный для отдачи клиенту.
+    pub fn check_single_team(&self, bot_ids: &[String], room_id: Option<&str>) -> Result<(), String> {
+        let bots = self.bots();
+        for id in bot_ids {
+            if let Some(room) = self.team_of(id) {
+                if room_id.map(|r| r != room.id).unwrap_or(true) {
+                    let name = bots.iter().find(|b| &b.id == id).map(|b| b.name.clone()).unwrap_or_else(|| id.clone());
+                    return Err(format!("«{name}» уже в команде «{}». Бот может быть только в одной команде — сначала убери его оттуда.", room.name));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn add_room(&self, input: &Value) -> std::io::Result<Room> {
         let bots = self.bots();
         let wanted = string_list(input.get("botIds"));
         let members: Vec<String> = wanted.into_iter().filter(|id| bots.iter().any(|b| &b.id == id)).collect();
+        if let Err(msg) = self.check_single_team(&members, None) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
+        }
         let lead = text_or(input, "lead", "");
         let lead = if members.contains(&lead) { lead } else { members.first().cloned().unwrap_or_default() };
         let room = Room {
@@ -3296,8 +3329,29 @@ impl Store {
     }
 
     pub async fn update_room(&self, id: &str, patch: &Value) -> std::io::Result<Option<Room>> {
+        if self.room(id).is_none() {
+            return Ok(None);
+        }
+        let bots = self.bots();
+        // Проверка одиночной команды: добавляемые боты не должны состоять в другой незаблокированной команде.
+        if let Some(v) = patch.get("botIds").filter(|v| !v.is_null()) {
+            let members: Vec<String> = string_list(Some(v)).into_iter().filter(|bid| bots.iter().any(|b| &b.id == bid)).collect();
+            if let Err(msg) = self.check_single_team(&members, Some(id)) {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
+            }
+        }
+        // Разблокировка команды: её участники не должны уже состоять в другой незаблокированной команде.
+        if patch.get("archived").and_then(Value::as_bool) == Some(false) {
+            let final_members = if let Some(v) = patch.get("botIds").filter(|v| !v.is_null()) {
+                string_list(Some(v)).into_iter().filter(|bid| bots.iter().any(|b| &b.id == bid)).collect()
+            } else {
+                self.room(id).map(|r| r.bot_ids).unwrap_or_default()
+            };
+            if let Err(msg) = self.check_single_team(&final_members, Some(id)) {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
+            }
+        }
         let updated = {
-            let bots = self.bots();
             let mut state = self.state.lock().unwrap();
             let Some(room) = state.rooms.iter_mut().find(|r| r.id == id) else {
                 return Ok(None);
@@ -3313,9 +3367,7 @@ impl Store {
             if let Some(v) = patch.get("lead").filter(|v| !v.is_null()) {
                 room.lead = as_string(v);
             }
-            if !room.bot_ids.contains(&room.lead) {
-                room.lead = room.bot_ids.first().cloned().unwrap_or_default();
-            }
+            fix_room_lead(room);
             if let Some(v) = patch.get("mode").and_then(Value::as_str) {
                 room.mode = if v == "auto" { "auto".into() } else { "lead".into() };
             }
@@ -3338,6 +3390,49 @@ impl Store {
         };
         self.persist().await?;
         Ok(Some(updated))
+    }
+
+    /// Миграция «один бот — одна команда»: при загрузке состояния бот, состоящий в нескольких незаблокированных
+    /// командах, остаётся в одной (где он ведущий; среди равных — с большим составом, потом старейшая) и удаляется из остальных.
+    /// Для каждой покинутой команды в её тред пишется служебная строка. Идемпотентно.
+    pub async fn migrate_one_bot_one_team(&self) -> bool {
+        #[derive(Clone)]
+        struct Act { left_room: String, bot_name: String, keep_room_name: String }
+        let mut actions: Vec<Act> = Vec::new();
+        let mut changed = false;
+        {
+            let mut state = self.state.lock().unwrap();
+            let bot_ids: Vec<String> = state.bots.iter().map(|b| b.id.clone()).collect();
+            for bot_id in bot_ids {
+                let rooms: Vec<usize> = state.rooms.iter().enumerate().filter(|(_, r)| !r.archived && r.bot_ids.iter().any(|b| b == &bot_id)).map(|(i, _)| i).collect();
+                if rooms.len() <= 1 { continue; }
+                // Остаётся команда, где бот ведущий; среди равных — с большим составом, потом старейшая.
+                let keep_idx = *rooms
+                    .iter()
+                    .min_by_key(|&&i| (state.rooms[i].lead != bot_id, std::cmp::Reverse(state.rooms[i].bot_ids.len()), state.rooms[i].created_at))
+                    .unwrap();
+                let keep_room_name = state.rooms[keep_idx].name.clone();
+                let bot_name = state.bots.iter().find(|b| b.id == bot_id).map(|b| b.name.clone()).unwrap_or_else(|| bot_id.clone());
+                for &i in &rooms {
+                    if i == keep_idx { continue; }
+                    let room = &mut state.rooms[i];
+                    room.bot_ids.retain(|b| b != &bot_id);
+                    fix_room_lead(room);
+                    actions.push(Act { left_room: room.id.clone(), bot_name: bot_name.clone(), keep_room_name: keep_room_name.clone() });
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return false;
+        }
+        let _ = self.persist().await;
+        for a in &actions {
+            let line = format!("{} перешёл только в команду «{}»: бот может быть только в одной команде.", a.bot_name, a.keep_room_name);
+            let entry = serde_json::json!({ "role": "system", "text": line });
+            let _ = self.append_room_message(&a.left_room, entry).await;
+        }
+        true
     }
 
     pub async fn remove_room(&self, id: &str) -> std::io::Result<bool> {
@@ -4193,6 +4288,71 @@ mod tests {
         let gone = guests[7].id.clone();
         let updated = store.update_bot(&host.id, &json!({ "removeGuest": gone })).await.unwrap().unwrap();
         assert!(bot_guests(&updated).iter().all(|guest| guest["botId"] != gone.as_str()));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn check_single_team_rejects_busy_bot() {
+        let dir = temp_dir("check-single-team");
+        let store = Store::open(dir.clone()).await.unwrap();
+        let b1 = store.add_bot(&json!({ "name": "Аня" })).await.unwrap();
+        let b2 = store.add_bot(&json!({ "name": "Боря" })).await.unwrap();
+        let r1 = store.add_room(&json!({ "name": "R1", "botIds": [b1.id.clone()], "lead": b1.id.clone() })).await.unwrap();
+        // b1 уже в команде
+        assert!(store.check_single_team(&[b1.id.clone()], None).is_err());
+        // добавление его во вторую команду не проходит
+        let res = store.add_room(&json!({ "name": "R2", "botIds": [b1.id.clone()], "lead": b1.id.clone() })).await;
+        assert!(res.is_err(), "занятый бот не должен создать вторую команду");
+        // свободный бот проходит
+        assert!(store.check_single_team(&[b2.id.clone()], None).is_ok());
+        // тот же id в той же команде допустим
+        assert!(store.check_single_team(&[b1.id.clone()], Some(&r1.id)).is_ok());
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn migrate_one_bot_one_team_leaves_one_room() {
+        let dir = temp_dir("migrate-one-bot");
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = json!({
+            "bots": [{ "id": "b1", "name": "Бот", "driver": "", "model": "" }],
+            "rooms": [
+                { "id": "r_lead", "name": "Лид", "emoji": "", "color": "#7a8595", "instructions": "", "botIds": ["b1"], "lead": "b1", "mode": "lead", "createdAt": 1 },
+                { "id": "r_other", "name": "Другая", "emoji": "", "color": "#7a8595", "instructions": "", "botIds": ["b1"], "lead": "", "mode": "lead", "createdAt": 2 }
+            ]
+        });
+        std::fs::write(dir.join("state.json"), serde_json::to_string(&state).unwrap()).unwrap();
+        let store = Store::open(dir.clone()).await.unwrap();
+        // бот остался в команде, где он ведущий
+        assert!(store.room("r_lead").unwrap().bot_ids.contains(&"b1".to_string()));
+        assert!(!store.room("r_other").unwrap().bot_ids.contains(&"b1".to_string()));
+        // ведущий покинутой команды исправлен
+        assert_eq!(store.room("r_other").unwrap().lead, "");
+        // в треде покинутой команды — строка о переходе
+        let thread = store.read_room_thread("r_other", 50).await;
+        assert!(thread.iter().any(|m| m["text"].as_str().is_some_and(|t| t.contains("перешёл только в команду «Лид»"))), "{thread:?}");
+        // повторный прогон ничего не меняет
+        assert!(!store.migrate_one_bot_one_team().await);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn migration_keeps_the_bigger_team_among_teams_the_bot_leads() {
+        // Как у владельца 18.11: «Редактор» ведёт команду из одного себя и команду из восьми.
+        let dir = temp_dir("migrate-bigger");
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = json!({
+            "bots": [{ "id": "b1", "name": "Редактор" }, { "id": "b2", "name": "Автор" }],
+            "rooms": [
+                { "id": "r_small", "name": "Команда 2", "botIds": ["b1"], "lead": "b1", "createdAt": 1 },
+                { "id": "r_big", "name": "Соцсети", "botIds": ["b1", "b2"], "lead": "b1", "createdAt": 2 }
+            ]
+        });
+        std::fs::write(dir.join("state.json"), serde_json::to_string(&state).unwrap()).unwrap();
+        let store = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(store.team_of("b1").unwrap().id, "r_big");
+        assert!(store.room("r_small").unwrap().bot_ids.is_empty());
+        assert_eq!(store.team_of("b2").unwrap().id, "r_big");
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }

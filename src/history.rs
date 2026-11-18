@@ -32,7 +32,7 @@ struct Source {
 
 /// Группы, чьи треды видит бот: он участник, группа не в архиве.
 pub fn readable_rooms<'a>(rooms: &'a [Room], bot_id: &str) -> Vec<&'a Room> {
-    rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).collect()
+    rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).take(1).collect()
 }
 
 /// «24h», «7d», «30m», «2w» или дата ГГГГ-ММ-ДД: с какого момента (мс) искать.

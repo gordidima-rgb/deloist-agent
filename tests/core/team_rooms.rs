@@ -296,3 +296,39 @@ async fn a_fresh_install_starts_with_one_team_and_an_orchestrator() {
     assert_eq!(state["bots"][0]["name"], "Orchestrator");
     assert_eq!(state["rooms"][0]["name"], "Main team");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_room_with_a_bot_already_in_a_team_returns_4xx_and_creates_no_room() {
+    let crew = Crew::start("busy-post").await;
+    let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Аня" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Первая", "botIds": [bot.clone()], "lead": bot.clone() }))).await;
+    let (status, reply) = crew.send("POST", "/api/rooms", Some(json!({ "name": "Вторая", "botIds": [bot.clone()], "lead": bot.clone() }))).await;
+    assert!(status >= 400 && status < 500, "{status} {reply}");
+    assert!(reply.to_string().contains("уже в команде"));
+    let state = crew.ok("GET", "/api/state", None).await;
+    assert!(!state["rooms"].as_array().unwrap().iter().any(|r| r["name"] == "Вторая"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn patch_room_adding_a_bot_from_another_team_returns_4xx() {
+    let crew = Crew::start("busy-patch").await;
+    let b1 = crew.ok("POST", "/api/bots", Some(json!({ "name": "Аня" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let b2 = crew.ok("POST", "/api/bots", Some(json!({ "name": "Боря" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let r2 = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Вторая", "botIds": [b2.clone()], "lead": b2.clone() }))).await["room"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Первая", "botIds": [b1.clone()], "lead": b1.clone() }))).await;
+    let (status, reply) = crew.send("PATCH", &format!("/api/rooms/{r2}"), Some(json!({ "botIds": [b2.clone(), b1.clone()] }))).await;
+    assert!(status >= 400 && status < 500, "{status} {reply}");
+    assert!(reply.to_string().contains("уже в команде"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unarchiving_a_room_conflicting_with_another_returns_4xx() {
+    let crew = Crew::start("unarch-conflict").await;
+    let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Аня" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let r1 = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Первая", "botIds": [bot.clone()], "lead": bot.clone() }))).await["room"]["id"].as_str().unwrap().to_string();
+    crew.ok("PATCH", &format!("/api/rooms/{r1}"), Some(json!({ "archived": true }))).await;
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Вторая", "botIds": [bot.clone()], "lead": bot.clone() }))).await;
+    let (status, reply) = crew.send("PATCH", &format!("/api/rooms/{r1}"), Some(json!({ "archived": false }))).await;
+    assert!(status >= 400 && status < 500, "{status} {reply}");
+    assert!(reply.to_string().contains("уже в команде"));
+}

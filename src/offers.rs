@@ -1,17 +1,19 @@
 //! Карточки «Подключу специалиста»: лид предлагает специалиста, а решает человек.
-//! Хранятся только в памяти: нерешённая карточка гаснет вместе с окном, ничего не запустив.
+//! Нерешённые карточки сохраняются на диск и переживают перезапуск.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// Сколько предложений помнит один бот: старые вытесняются новыми.
 pub const MAX_OFFERS_PER_BOT: usize = 20;
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Offer {
     pub id: String,
     pub host_bot_id: String,
@@ -21,11 +23,11 @@ pub struct Offer {
     pub at: i64,
     /// Предложение собрать команду (`propose_team`): ровно то, что создадим по «Создать».
     /// Хранится здесь, а не перечитывается у агента: человек видит и подтверждает именно этот состав.
-    #[serde(skip)]
+    #[serde(default)]
     pub team: Option<crate::team_proposal::TeamPlan>,
     /// Предложение поправить участника или завести ему рутину (`propose_bot_change`, `propose_routine`):
     /// применяется ровно то, что сохранено здесь.
-    #[serde(skip)]
+    #[serde(default)]
     pub change: Option<crate::team_changes::Change>,
 }
 
@@ -52,9 +54,35 @@ pub struct Offers {
     decisions: Mutex<HashMap<String, tokio::sync::watch::Sender<Option<String>>>>,
     /// Оркестратор собрал команду по «Создать»: его итог в конце этого хода уходит и в чат команды.
     team_summaries: Mutex<HashMap<String, String>>,
+    path: Option<PathBuf>,
 }
 
 impl Offers {
+    pub fn open(data_dir: &Path) -> Self {
+        let path = data_dir.join("offers.json");
+        let inner: HashMap<String, VecDeque<Offer>> = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        Self {
+            inner: Mutex::new(inner),
+            decisions: Mutex::new(HashMap::new()),
+            team_summaries: Mutex::new(HashMap::new()),
+            path: Some(path),
+        }
+    }
+
+    fn save(&self) {
+        let Some(path) = &self.path else { return; };
+        let inner = self.inner.lock().unwrap();
+        match serde_json::to_string(&*inner) {
+            Ok(text) => {
+                let tmp = path.with_extension("json.tmp");
+                if std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, path)).is_err() {
+                    eprintln!("[offers] не смог записать offers.json");
+                }
+            }
+            Err(e) => eprintln!("[offers] не смог сериализовать offers.json: {e}"),
+        }
+    }
+
     pub fn add(&self, offer: Offer) {
         let mut evicted = Vec::new();
         {
@@ -70,6 +98,7 @@ impl Offers {
         for old in evicted.iter().filter(|o| o.team.is_some() || o.change.is_some()) {
             self.decide(&old.id, "Предложение снято: появились новые, эта карточка больше не действует.".into());
         }
+        self.save();
     }
 
     /// Уже висящая карточка команды этого бота с тем же составом: повторный вызов не плодит вторую.
@@ -116,6 +145,7 @@ impl Offers {
         if let Some(sender) = self.decisions.lock().unwrap().remove(offer_id) {
             let _ = sender.send(Some(outcome));
         }
+        self.save();
     }
 
     /// Забрать предложение у его хозяина. Чужой id или чужой бот — `None`.
@@ -127,6 +157,8 @@ impl Offers {
         if queue.is_empty() {
             inner.remove(host_bot_id);
         }
+        drop(inner);
+        self.save();
         Some(offer)
     }
 
@@ -221,6 +253,36 @@ mod tests {
         assert_eq!(offers.find_change("lead", &change_card("Пост")).as_deref(), Some("offer_change"));
         assert!(offers.find_change("lead", &change_card("Другое")).is_none());
         assert!(offers.find_change("other", &change_card("Пост")).is_none(), "карточки чужого бота не видны");
+    }
+
+    #[tokio::test]
+    async fn offers_survive_reopen_with_team_and_specialist() {
+        let dir = std::env::temp_dir().join(format!("deloist-offers-reopen-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plan = crate::team_proposal::TeamPlan {
+            new_bots: vec![],
+            catalog_bots: vec![],
+            add_bots: vec![],
+            room: None,
+            lead: String::new(),
+            access: vec![],
+            access_key: String::new(),
+            host_name: "Хозяин".into(),
+            host_driver: "api".into(),
+            host_model: "m".into(),
+            host_extra: vec![],
+            host_orchestrator: false,
+        };
+        {
+            let offers = Offers::open(&dir);
+            offers.add(Offer { team: Some(plan.clone()), ..offer("lead", "offer_team") });
+            offers.add(offer("lead", "offer_spec"));
+        }
+        let reopened = Offers::open(&dir);
+        assert_eq!(reopened.find_team("lead", &plan).as_deref(), Some("offer_team"));
+        let events = reopened.pending_events("lead", |_| "Spec".into());
+        assert_eq!(events.len(), 2, "командная и специалистская карточки пережили перезапуск");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

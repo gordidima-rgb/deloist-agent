@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -31,7 +31,7 @@ const PROGRAM_FOLDER_MARK: &str = "ПАПКА С ПРОГРАММОЙ";
 pub const DECISION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const SEARCH_LIMIT: usize = 10;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewBot {
     pub name: String,
@@ -40,7 +40,7 @@ pub struct NewBot {
 }
 
 /// Бот из каталога: ставится существующей установкой каталога (`catalog::install`).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogPick {
     pub id: String,
@@ -50,14 +50,14 @@ pub struct CatalogPick {
     pub installed: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExistingBot {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomPlan {
     /// Пусто — команда новая.
@@ -66,7 +66,7 @@ pub struct RoomPlan {
     pub is_new: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamPlan {
     pub new_bots: Vec<NewBot>,
@@ -464,6 +464,9 @@ async fn build(app: &Arc<App>, plan: &TeamPlan) -> Result<(String, Option<String
         None => None,
     };
 
+    // Бот может состоять только в одной команде: добавляемые участники не должны уже быть в другой.
+    let add_ids: Vec<String> = plan.add_bots.iter().map(|b| b.id.clone()).collect();
+    app.store.check_single_team(&add_ids, existing_room.as_ref().map(|r| r.id.as_str()))?;
     let mut made: Vec<(String, String)> = Vec::new();
     let fail = |made: &[(String, String)], message: String| {
         let done: Vec<String> = made.iter().map(|(n, i)| format!("{n} ({i})")).collect();

@@ -582,8 +582,7 @@ async fn bot_change_decline_and_stale_accept_change_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn bot_change_removes_a_teammate_from_the_named_room_only() {
     let (crew, host, mate, room) = team_with_mate("change-remove", "ask").await;
-    // Вторая команда, где участник тоже состоит: убирается только названная.
-    let other = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Резерв", "botIds": [host.clone(), mate.clone()] }))).await["room"]["id"].as_str().unwrap().to_string();
+    // Второй комнаты не создаём: бот состоит только в одной команде.
     crew.say(&host, &format!("BOTCHANGE {}", json!({ "bot": "Пост", "removeFromRoom": "Лента" }))).await;
     let event = crew.wait_event("карточка", |e| e["type"] == "team_proposal").await;
     assert_eq!(event["proposal"]["removeFrom"]["name"], "Лента", "{event}");
@@ -596,7 +595,6 @@ async fn bot_change_removes_a_teammate_from_the_named_room_only() {
     let rooms = state["rooms"].as_array().unwrap();
     let ids = |room_id: &str| rooms.iter().find(|r| r["id"] == room_id).unwrap()["botIds"].clone();
     assert_eq!(ids(&room), json!([host.clone()]));
-    assert_eq!(ids(&other), json!([host.clone(), mate.clone()]));
     assert_eq!(bot_json(&crew, &mate).await["role"], "пишет посты", "роль не должна меняться");
 }
 

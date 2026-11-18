@@ -973,7 +973,7 @@ const TEAM_ROSTER_LIMIT: usize = 2_000;
 /// чате видел только общий список специалистов программы, а в чате команды — одни имена (владелец 17.11.2026).
 pub(crate) fn team_roster_block(rooms: &[crate::store::Room], bots: &[Bot], bot: &Bot) -> Option<String> {
     let mut out = String::new();
-    for room in rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| *id == bot.id)) {
+    for room in rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|id| *id == bot.id)).take(1) {
         if room.lead != bot.id && !bot.orchestrator {
             continue;
         }

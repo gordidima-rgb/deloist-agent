@@ -70,7 +70,7 @@ pub fn is_room_scope(scope: &str) -> bool {
 
 /// Группы, где бот участник и которые ещё не убраны в архив.
 fn teams_in<'a>(rooms: &'a [Room], bot_id: &str) -> Vec<&'a Room> {
-    rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).collect()
+    rooms.iter().filter(|r| !r.archived && r.bot_ids.iter().any(|b| b == bot_id)).take(1).collect()
 }
 
 fn team_scopes_in(rooms: &[Room], bot_id: &str) -> Vec<String> {
@@ -88,23 +88,11 @@ fn bot_may_touch(rooms: &[Room], bot_id: &str, scope: &str) -> bool {
 }
 
 /// Какую память команды имеет в виду бот: единственная его группа, а если их несколько — названная в `team`.
-fn resolve_team(rooms: &[Room], bot_id: &str, team: &str) -> Result<String, String> {
+fn resolve_team(rooms: &[Room], bot_id: &str) -> Result<String, String> {
     let mine = teams_in(rooms, bot_id);
-    let team = team.trim();
-    if !team.is_empty() {
-        return mine
-            .iter()
-            .find(|r| r.id == team || r.name.trim().to_lowercase() == team.to_lowercase())
-            .map(|r| room_scope(&r.id))
-            .ok_or_else(|| format!("ты не состоишь в команде «{team}»: запиши в свою память (scope self) или назови свою команду"));
-    }
     match mine.len() {
         0 => Err("ты не состоишь ни в одной команде: запиши в свою память (scope self) или в общую (scope shared)".into()),
-        1 => Ok(room_scope(&mine[0].id)),
-        _ => Err(format!(
-            "ты состоишь в нескольких командах ({}): передай team с названием нужной, либо запиши в свою память (scope self)",
-            mine.iter().map(|r| format!("«{}»", r.name)).collect::<Vec<_>>().join(", ")
-        )),
+        _ => Ok(room_scope(&mine[0].id)),
     }
 }
 
@@ -1056,8 +1044,6 @@ async fn forget_prompts_for(app: &App, scopes: &[String]) {
 pub struct Draft {
     pub id: String,
     pub scope: String,
-    /// Для scope `team`: название команды, если бот состоит в нескольких.
-    pub team: String,
     pub kind: String,
     pub title: String,
     pub body: Option<String>,
@@ -1081,7 +1067,6 @@ impl Draft {
         Self {
             id: bare_id(&text("id")),
             scope: text("scope"),
-            team: text("team"),
             kind: text("kind"),
             title,
             body,
@@ -1097,7 +1082,7 @@ impl Draft {
 fn target_scope(draft: &Draft, actor: Option<&Bot>, rooms: &[Room]) -> Result<String, String> {
     Ok(match (draft.scope.trim(), actor) {
         ("shared", _) | ("", None) => SHARED.to_string(),
-        ("team", Some(bot)) => resolve_team(rooms, &bot.id, &draft.team)?,
+        ("team", Some(bot)) => resolve_team(rooms, &bot.id)?,
         (_, Some(bot)) => bot.id.clone(),
         (other, None) if is_room_scope(other) => {
             let id = &other[ROOM_PREFIX.len()..];
@@ -2378,7 +2363,7 @@ mod tests {
         let text = own_with_teams(&book, &rooms, "b1");
         assert!(text.contains("Сюжет картинки") && text.contains("«Картинки»") && !text.contains("Reddit"), "{text}");
         let multi = vec![room("r1", "Картинки", &["b1"], false), room("r2", "Reddit", &["b1"], false)];
-        assert_eq!(team_scopes_in(&multi, "b1"), ["room:r1", "room:r2"]);
+        assert_eq!(team_scopes_in(&multi, "b1"), ["room:r1"]);
         let archived = vec![room("r1", "Картинки", &["b1"], true)];
         assert!(team_scopes_in(&archived, "b1").is_empty(), "команда в архиве память не отдаёт");
     }
@@ -2397,12 +2382,10 @@ mod tests {
     #[test]
     fn a_bot_writes_to_its_team_and_never_to_a_foreign_room() {
         let rooms = vec![room("r1", "Картинки", &["b1"], false), room("r2", "Reddit", &["b3"], false), room("r3", "Две", &["b1"], false)];
-        // единственная команда — без названия; несколько — нужно название; без команды — понятная ошибка
-        assert_eq!(resolve_team(&rooms[..2], "b3", "").unwrap(), "room:r2");
-        assert!(resolve_team(&rooms, "b1", "").unwrap_err().contains("нескольких"));
-        assert_eq!(resolve_team(&rooms, "b1", "две").unwrap(), "room:r3");
-        assert!(resolve_team(&rooms, "b1", "Reddit").is_err(), "чужую команду назвать нельзя");
-        assert!(resolve_team(&rooms, "b7", "").unwrap_err().contains("self"));
+        // одна команда — её scope; без команды — понятная ошибка
+        assert_eq!(resolve_team(&rooms[..2], "b3").unwrap(), "room:r2");
+        assert_eq!(resolve_team(&rooms, "b1").unwrap(), "room:r1");
+        assert!(resolve_team(&rooms, "b7").unwrap_err().contains("self"));
         assert!(bot_may_touch(&rooms, "b1", "room:r1"));
         assert!(!bot_may_touch(&rooms, "b1", "room:r2"), "править факт чужой команды нельзя");
         assert!(!bot_may_touch(&rooms, "b1", "b9"));
