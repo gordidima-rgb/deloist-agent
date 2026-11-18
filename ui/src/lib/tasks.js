@@ -1,6 +1,18 @@
+import { tr } from './i18n.js';
+
 // Чистые правила экрана «Поручения» и раздела «Сделано, пока тебя не было» (данные — GET /api/tasks).
 const WEEK = 7 * 24 * 3600 * 1000;
 export const OPEN_STATES = ['queued', 'running', 'paused'];
+
+// Состояние поручения: тон значка и подпись.
+export const TASK_STATES = {
+  queued: ['neutral', tr('в очереди')],
+  running: ['ai', tr('работает')],
+  paused: ['sleep', tr('на паузе')],
+  done: ['done', tr('готово')],
+  error: ['error', tr('ошибка')],
+  interrupted: ['error', tr('прервана')],
+};
 
 export const isOpen = (task) => OPEN_STATES.includes(task.state);
 

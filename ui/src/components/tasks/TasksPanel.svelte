@@ -4,19 +4,11 @@
   import { Modal, Tabs, ListRow, Badge, Button, FileCards, EmptyState } from '../kit';
   import { tr } from '../../lib/i18n.js';
   import { whenText, numberRu } from '../../lib/when.js';
-  import { filterTasks, isOpen } from '../../lib/tasks.js';
+  import { filterTasks, isOpen, TASK_STATES } from '../../lib/tasks.js';
 
   // focus — задача, которую нужно раскрыть (например, из раздела «Сделано, пока тебя не было»).
   let { open = false, tasks = [], focus = '', oncancel, onopenfile, onclose } = $props();
 
-  const STATES = {
-    queued: ['neutral', tr('в очереди')],
-    running: ['ai', tr('работает')],
-    paused: ['sleep', tr('на паузе')],
-    done: ['done', tr('готово')],
-    error: ['error', tr('ошибка')],
-    interrupted: ['error', tr('прервана')],
-  };
   const STARTERS = { human: tr('человек'), routine: tr('рутина'), goal: tr('цель'), webhook: tr('вебхук'), bot: tr('бот') };
 
   let mode = $state('open');
@@ -61,7 +53,7 @@
     {#if shown.length}
       <ul class="k-lrows tp-list">
         {#each shown as task (task.id)}
-          {@const [tone, word] = STATES[task.state] || STATES.error}
+          {@const [tone, word] = TASK_STATES[task.state] || TASK_STATES.error}
           <ListRow class="tp-row" data-task={task.id} variant="chevron" bind:expanded={() => Boolean(expanded[task.id]), (value) => (expanded[task.id] = value)} title={task.text} sub={sub(task)}>
             {#snippet trailing()}<Badge {tone} text={word} />{/snippet}
             <div class="tp-body">

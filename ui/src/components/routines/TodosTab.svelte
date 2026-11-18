@@ -18,12 +18,17 @@
     editorFromRecurrence,
     matchesQuery,
     todayIso,
+    OWNERS,
+    filterByOwner,
   } from '../../lib/todos.js';
+  import { filterTasks, TASK_STATES } from '../../lib/tasks.js';
+  import { whenText } from '../../lib/when.js';
   import Composer from './Composer.svelte';
   import TodoCard from './TodoCard.svelte';
-import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } from '../kit';
+import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu, Tabs, Select, Badge } from '../kit';
 
-  let { api = defaultApi } = $props();
+  // onopentask(id) открывает окно «Поручения» на этом поручении между ботами.
+  let { api = defaultApi, onopentask } = $props();
 
   let todos = $state([]);
   let archived = $state([]);
@@ -31,6 +36,18 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
   let error = $state('');
   let today = $state(todayIso());
   let filter = $state('all');
+  const OWNER_KEY = 'deloist.todos.owner';
+  const storedOwner = () => {
+    try {
+      const saved = localStorage.getItem(OWNER_KEY);
+      return OWNERS.includes(saved) ? saved : 'mine';
+    } catch {
+      return 'mine';
+    }
+  };
+  let owner = $state(storedOwner()); // mine | bots | all
+  let botTasks = $state([]); // поручения между ботами (GET /api/tasks), только чтение
+  let executor = $state(''); // исполнитель новой задачи: пусто — я сам, иначе id бота
   let query = $state('');
   let view = $state('board'); // board | archive
   let selectedId = $state('');
@@ -55,12 +72,21 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
   const MAX_FILE = 10 * 1024 * 1024; // как у вложений чата (attach::MAX_BYTES)
   const MAX_FILES = 10;
 
-  const board = $derived(groupBoard(todos, { filter, query, today }));
+  const scoped = $derived(filterByOwner(todos, owner));
+  const board = $derived(groupBoard(scoped, { filter, query, today }));
+  const handoffs = $derived(owner === 'mine' ? [] : filterTasks(botTasks, 'week').filter((t) => !query.trim() || t.text.toLowerCase().includes(query.trim().toLowerCase())));
+  const ownerItems = $derived([
+    { id: 'mine', label: tr('Мои') },
+    { id: 'bots', label: tr('Ботов') },
+    { id: 'all', label: tr('Все') },
+  ]);
+  const executorOptions = $derived([{ value: '', label: tr('Я') }, ...bots.map((b) => ({ value: b.id, label: b.name }))]);
+  const botName = (id) => bots.find((b) => b.id === id)?.name || id;
   const counts = $derived(filterCounts(todos, today));
   const candidates = $derived(carryOverCandidates(todos, today));
   const selected = $derived(todos.find((t) => t.id === selectedId) || null);
   const archiveRows = $derived(archived.filter((t) => matchesQuery(t, query)));
-  const shown = $derived(BUCKETS.reduce((n, b) => n + board[b].open.length + board[b].done.length, 0));
+  const shown = $derived(BUCKETS.reduce((n, b) => n + board[b].open.length + board[b].done.length, 0) + handoffs.length);
 
   const bucketName = (b) => ({ key: tr('Главное'), active: tr('Актуальное'), someday: tr('Когда-нибудь') })[b];
   const filterName = (f) => ({ all: tr('Все'), today: tr('Сегодня'), overdue: tr('Просрочено'), nodue: tr('Без срока') })[f];
@@ -95,6 +121,24 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     }
   }
 
+  async function loadBotTasks() {
+    try {
+      const data = await api('/api/tasks');
+      if (Array.isArray(data?.tasks)) botTasks = data.tasks;
+    } catch {
+      botTasks = [];
+    }
+  }
+
+  function pickOwner(next) {
+    try {
+      localStorage.setItem(OWNER_KEY, next);
+    } catch {
+      // без хранилища выбор живёт до закрытия окна
+    }
+    if (next !== 'mine') loadBotTasks();
+  }
+
   async function loadArchive() {
     try {
       const list = await api('/api/todos/archive');
@@ -108,7 +152,9 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
   $effect(() => {
     load();
     loadBots();
+    if (owner !== 'mine') loadBotTasks();
     const onEvent = (e) => {
+      if (e.detail?.type === 'task_update' && owner !== 'mine') loadBotTasks();
       if (e.detail?.type !== 'todos_changed') return;
       load();
       if (view === 'archive') loadArchive();
@@ -123,7 +169,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
 
   // Фразу разбирает сервер: код, а где его мало — модель человека (todo_parse.rs); задача не теряется.
   function create(parsed) {
-    return api('/api/todos/from-text', { method: 'POST', body: { text: parsed.text, bucket: newBucket } });
+    return api('/api/todos/from-text', { method: 'POST', body: { text: parsed.text, bucket: newBucket, ...(executor ? { assignee: executor } : {}) } });
   }
 
   // Боты для «+Имя»: исполнителем бывает только бот (людей-исполнителей в данных нет).
@@ -394,9 +440,10 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
       </button>
     {/snippet}
     {#snippet meta()}
-      {#if due || todo.recurrence || progress.total}
+      {#if due || todo.recurrence || progress.total || todo.assignee}
         <span class="td-meta">
           {#if due}<span class="td-chip" class:td-chip--late={due.overdue && !todo.done}>{dueText(due)}</span>{/if}
+          {#if todo.assignee}<span class="td-chip">{tr('Исполнитель: {name}', { name: botName(todo.assignee) })}</span>{/if}
           {#if todo.recurrence}<span class="td-chip td-chip--repeat">{repeatText(todo.recurrence)}</span>{/if}
           {#if progress.total}<span class="td-chip" aria-label={tr('Чек-лист: {done} из {total}', progress)}>{progress.done}/{progress.total}</span>{/if}
         </span>
@@ -448,6 +495,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
       <div class="td-tools">
         <Button size="sm" variant="ghost" onclick={pickDate} aria-label={tr('Выбрать дату')}>{tr('Дата')}</Button>
         <input bind:this={dateInput} class="td-hidden-input" type="date" tabindex="-1" aria-hidden="true" onchange={(e) => { composer?.setDate(e.currentTarget.value); e.currentTarget.value = ''; }} />
+        <Select class="td-executor" options={executorOptions} bind:value={executor} aria-label={tr('Исполнитель')} />
         <Button size="sm" variant="ghost" onclick={() => (newBucket = nextBucket(newBucket))} aria-label={tr('Раздел новой задачи: {name}', { name: bucketName(newBucket) })}>
           {tr('Раздел: {name}', { name: bucketName(newBucket) })}
         </Button>
@@ -460,6 +508,10 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
       </div>
       <Button variant="primary" size="sm" loading={busy} disabled={!text.trim()} onclick={() => composer?.submit()}>{tr('Добавить')}</Button>
     </div>
+  </div>
+
+  <div class="td-owner">
+    <Tabs items={ownerItems} bind:value={owner} label={tr('Чьи задачи')} onchange={pickOwner} />
   </div>
 
   <div class="td-bar">
@@ -540,6 +592,25 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
             {/if}
           </section>
         {/each}
+        {#if handoffs.length}
+          <section class="td-section" aria-label={tr('Поручения между ботами')}>
+            <h4 class="td-h">{tr('Поручения между ботами')} <span class="td-count">{handoffs.length}</span></h4>
+            <ul class="k-lrows">
+              {#each handoffs as task (task.id)}
+                {@const [tone, word] = TASK_STATES[task.state] || TASK_STATES.error}
+                <ListRow
+                  class="td-row"
+                  title={task.text}
+                  titleClass="td-title"
+                  sub={[`${task.fromName} → ${task.toName}`, task.deadline ? tr('срок {when}', { when: whenText(task.deadline) }) : ''].filter(Boolean).join(' · ')}
+                  onclick={() => onopentask?.(task.id)}
+                >
+                  {#snippet trailing()}<Badge {tone} text={word} />{/snippet}
+                </ListRow>
+              {/each}
+            </ul>
+          </section>
+        {/if}
         {#if loaded && !shown}
           <p class="td-empty">{tr('Ничего не найдено')}</p>
         {/if}
@@ -547,7 +618,7 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     </div>
     {#if selected && view === 'board'}
       {#key selected.id}
-        <TodoCard todo={selected} {api} onsaved={put} onclose={() => (selectedId = '')} onarchive={archive} />
+        <TodoCard todo={selected} {api} {bots} onsaved={put} onclose={() => (selectedId = '')} onarchive={archive} />
       {/key}
     {/if}
   </div>
@@ -653,6 +724,10 @@ import { Button, IconButton, EmptyState, Icon, Chip, TextInput, ListRow, Menu } 
     outline: none;
     border-color: var(--k-brand);
     box-shadow: var(--k-focus);
+  }
+  .td-tools :global(.td-executor) {
+    min-width: 112px;
+    max-width: 160px;
   }
   .td-bar {
     display: flex;

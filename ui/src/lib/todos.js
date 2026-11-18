@@ -5,6 +5,15 @@ import { isoOf } from './composer.js';
 export const BUCKETS = ['key', 'active', 'someday'];
 export const FILTERS = ['all', 'today', 'overdue', 'nodue'];
 
+// Чьи задачи показывать: свои (без исполнителя), ботов (исполнитель — бот) или все.
+export const OWNERS = ['mine', 'bots', 'all'];
+
+export function filterByOwner(todos, owner) {
+  if (owner === 'mine') return (todos ?? []).filter((t) => !t.assignee);
+  if (owner === 'bots') return (todos ?? []).filter((t) => t.assignee);
+  return todos ?? [];
+}
+
 export const todayIso = (now = new Date()) => isoOf(now);
 
 export function addDays(iso, days) {

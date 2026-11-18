@@ -7,12 +7,13 @@
 import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon } from '../kit';
   import TodoRecurrence from './TodoRecurrence.svelte';
 
-  let { todo, api = defaultApi, onsaved, onclose, onarchive } = $props();
+  let { todo, api = defaultApi, bots = [], onsaved, onclose, onarchive } = $props();
 
   let title = $state(untrack(() => todo.title));
   let notes = $state(untrack(() => todo.notes || ''));
   let newItem = $state('');
   let bucket = $state(untrack(() => todo.bucket));
+  let assignee = $state(untrack(() => todo.assignee || ''));
   let autoClose = $state(untrack(() => (todo.auto_close_after_min ? String(todo.auto_close_after_min) : '')));
   let error = $state('');
   let chain = Promise.resolve();
@@ -22,6 +23,7 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
     { value: 'active', label: tr('Актуальное') },
     { value: 'someday', label: tr('Когда-нибудь') },
   ]);
+  const assigneeOptions = $derived([{ value: '', label: tr('Я') }, ...bots.map((b) => ({ value: b.id, label: b.name }))]);
   const autoOptions = $derived([
     { value: '', label: tr('Не закрывать само') },
     { value: '30', label: tr('Через 30 минут после срока') },
@@ -42,6 +44,7 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
         title = todo.title;
         notes = todo.notes || '';
         bucket = todo.bucket;
+        assignee = todo.assignee || '';
         autoClose = todo.auto_close_after_min ? String(todo.auto_close_after_min) : '';
       }
     });
@@ -68,6 +71,13 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
     const next = bucket;
     untrack(() => {
       if (next !== todo.bucket) save({ bucket: next });
+    });
+  });
+
+  $effect(() => {
+    const next = assignee;
+    untrack(() => {
+      if (next !== (todo.assignee || '')) save({ assignee: next || null });
     });
   });
 
@@ -134,6 +144,22 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
     <span class="tc-label">{tr('Раздел')}</span>
     <Select options={bucketOptions} bind:value={bucket} aria-label={tr('Раздел')} />
   </label>
+
+  <label class="tc-col">
+    <span class="tc-label">{tr('Исполнитель')}</span>
+    <Select options={assigneeOptions} bind:value={assignee} aria-label={tr('Исполнитель')} />
+    {#if todo.assignee && todo.handed_at}
+      <span class="tc-hint">{tr('Передано боту в чат')}</span>
+    {:else if todo.assignee}
+      <span class="tc-hint">{tr('Бот получит задачу в срок как сообщение от тебя.')}</span>
+    {/if}
+  </label>
+  {#if todo.bot_result}
+    <div class="tc-col">
+      <span class="tc-label">{tr('Итог бота')}</span>
+      <p class="tc-result">{todo.bot_result}</p>
+    </div>
+  {/if}
 
   <Field label={tr('Заметка')}>
     {#snippet children({ id, describedby, invalid })}
@@ -237,6 +263,12 @@ import { Button, IconButton, Field, TextInput, TextArea, Select, Checkbox, Icon 
   .tc-hint {
     color: var(--k-text-3);
     font: 400 var(--k-text-xs, 12px) / 1.4 var(--k-font-body, system-ui);
+  }
+  .tc-result {
+    margin: 0;
+    color: var(--k-text-2);
+    font: 400 var(--k-text-sm, 14px) / 1.45 var(--k-font-body, system-ui);
+    white-space: pre-wrap;
   }
   .tc-items {
     display: flex;

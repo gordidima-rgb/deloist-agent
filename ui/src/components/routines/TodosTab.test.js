@@ -11,6 +11,7 @@ import {
   recurrenceFromEditor,
   weekdayOf,
   addDays,
+  filterByOwner,
 } from '../../lib/todos.js';
 
 const TODAY = '2026-11-13';
@@ -245,5 +246,15 @@ describe('TodosTab', () => {
     date.dispatchEvent(new Event('change', { bubbles: true }));
     await drain();
     expect(host.querySelector('textarea.cmp-input').value).toBe('20.11.2026');
+  });
+});
+
+describe('whose tasks', () => {
+  const list = [todo({ id: 'm' }), todo({ id: 'b', assignee: 'bot_1' })];
+
+  it('mine keeps tasks without an assignee, bots keeps the bot ones, all keeps both', () => {
+    expect(filterByOwner(list, 'mine').map((t) => t.id)).toEqual(['m']);
+    expect(filterByOwner(list, 'bots').map((t) => t.id)).toEqual(['b']);
+    expect(filterByOwner(list, 'all').map((t) => t.id)).toEqual(['m', 'b']);
   });
 });

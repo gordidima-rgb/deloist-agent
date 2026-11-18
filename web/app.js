@@ -8648,7 +8648,7 @@ function setRoutineTab(id) {
   dropRoutineTabViews();
   if (id === 'reminders' && ui?.mountRemindersTab) remindersView = ui.mountRemindersTab($('#rt-pane-reminders'), reminderProps());
   if (id === 'habits' && ui?.mountHabitsTab) habitsView = ui.mountHabitsTab($('#rt-pane-habits'), { api, onopentelegram: openTelegramFromRoutines });
-  if (id === 'todos' && ui?.mountTodosTab) todosView = ui.mountTodosTab($('#rt-pane-todos'), { api });
+  if (id === 'todos' && ui?.mountTodosTab) todosView = ui.mountTodosTab($('#rt-pane-todos'), { api, onopentask: (id) => openTasks(id) });
   routineTabsView?.update({ value: id });
 }
 
