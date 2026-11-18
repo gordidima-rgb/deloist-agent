@@ -79,8 +79,17 @@ describe('RoutinesPane', () => {
     expect(onresume).toHaveBeenCalledWith('run_7');
   });
 
+  it('a routine paused by errors shows why and resumes by its own id', () => {
+    const onunpause = vi.fn();
+    render({ routines: [routine({ errorPaused: { label: 'на паузе: 3 ошибки подряд — нужен вход' } })], onunpause });
+    expect(host.textContent).toContain('на паузе: 3 ошибки подряд — нужен вход');
+    host.querySelector('.rc-unpause').click();
+    expect(onunpause).toHaveBeenCalledWith('r1');
+  });
+
   it('shows no pause controls on a normal routine', () => {
     render({ routines: [routine()] });
+    expect(host.querySelector('.rc-unpause')).toBeNull();
     expect(host.querySelector('.rc-resume')).toBeNull();
   });
 });

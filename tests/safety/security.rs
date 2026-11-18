@@ -3187,7 +3187,7 @@ async fn the_agent_key_cannot_delete_bots_rooms_or_touch_routines() {
         (reqwest::Method::PATCH, format!("/api/routines/{routine}")),
         (reqwest::Method::DELETE, format!("/api/routines/{routine}")),
     ] {
-        let body = json!({ "botId": bot, "title": "Чужая", "prompt": "делай что хочешь", "everyMinutes": 5, "enabled": false });
+        let body = json!({ "botId": bot, "title": "Чужая", "prompt": "делай что хочешь", "everyMinutes": 5, "enabled": false, "errorPaused": false });
         let response = call(method.clone(), path.clone(), body).await.unwrap();
         assert_eq!(response.status().as_u16(), 403, "ключ программы прошёл: {method} {path}");
     }

@@ -5,13 +5,13 @@
   import RoutineCard from './RoutineCard.svelte';
 
   /** routines: готовые модели карточек (см. RoutineCard); onnew() открывает форму новой рутины. */
-  let { routines = [], onrun, onresume, onquiet, ontoggle, ondelete, onnew } = $props();
+  let { routines = [], onrun, onresume, onunpause, onquiet, ontoggle, ondelete, onnew } = $props();
 </script>
 
 <div class="rp">
   <p class="rp-lead">{tr('Бот сам просыпается по расписанию и делает работу. Результат появится в его чате.')}</p>
   {#each routines as routine (routine.id)}
-    <RoutineCard {routine} {onrun} {onresume} {onquiet} {ontoggle} {ondelete} />
+    <RoutineCard {routine} {onrun} {onresume} {onunpause} {onquiet} {ontoggle} {ondelete} />
   {:else}
     <p class="rp-empty">{tr('Пока ни одной. Добавь первую, и бот начнёт работать сам.')}</p>
   {/each}

@@ -1998,7 +1998,7 @@ async fn needs(State(app): Shared) -> Response {
     // Ходы, которые оборвал перезапуск и которые ждут «Продолжить» (журнал запусков).
     // Запись, ждущая решения по карточке, отдельной строкой не идёт: у неё уже есть своя карточка.
     let interrupted = app.runs.needs().into_iter().filter(|run| app.turns.card_for_run(&run.id).is_none()).filter_map(|run| match run.state {
-        crate::runs::RunState::NeedsHuman { text, .. } => Some(json!({ "kind": "run", "id": run.id, "botId": run.bot_id, "text": text, "at": run.updated_ms })),
+        crate::runs::RunState::NeedsHuman { text, reason } => Some(json!({ "kind": "run", "id": run.id, "botId": run.bot_id, "text": text, "reason": reason, "at": run.updated_ms })),
         _ => None,
     });
     // Паузы: ждут срока, но человек может не ждать («Продолжить сейчас»).
