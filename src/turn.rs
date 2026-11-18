@@ -328,6 +328,12 @@ impl Turns {
         self.walk_chain(store, bot_id, fresh, &[]).0
     }
 
+    /// Режим и список «Всегда спрашивать» бота с цепочкой передач: так их видят карточки хода.
+    pub(crate) fn apply_chain(&self, store: &crate::store::Store, bot: &mut crate::store::Bot) {
+        bot.approval = self.effective_approval(store, &bot.id, &bot.approval);
+        bot.always_ask = self.effective_always_ask(store, &bot.id, &bot.always_ask);
+    }
+
     /// Список «Всегда спрашивать» с цепочкой передач: объединение списков бота и каждого, кто передал ему задачу.
     pub(crate) fn effective_always_ask(&self, store: &crate::store::Store, bot_id: &str, own: &[String]) -> Vec<String> {
         self.walk_chain(store, bot_id, "ask", own).1
@@ -2175,7 +2181,7 @@ fn run_turn_body(
         if let Some(floor) = &opts.approval_floor {
             bot.approval = tools::stricter(&bot.approval, floor);
         }
-        bot.always_ask = app.turns.effective_always_ask(&app.store, &bot.id, &bot.always_ask);
+        app.turns.apply_chain(&app.store, &mut bot);
         // Пол действует и там, где режим бота читают заново (мост ACP, карточки браузера): держим его на время хода.
         let _floor_guard = opts.approval_floor.as_ref().map(|floor| {
             let epoch = app.turns.set_turn_floor(&bot.id, floor);
@@ -3567,6 +3573,29 @@ mod tests {
 
 #[cfg(test)]
 mod floor_tests {
+    /// Цепочка A -> B -> C: у C список бота, списки B и A и то, что звено несёт с собой.
+    #[tokio::test]
+    async fn the_always_ask_lists_of_a_three_hop_chain_are_united() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-tmp").join(format!("deloist-chain-{}", std::process::id()));
+        let store = crate::store::Store::open(dir.clone()).await.unwrap();
+        let mut ids = Vec::new();
+        for (name, list) in [("A", "send"), ("B", "delete"), ("C", "files")] {
+            let bot = store.add_bot(&json!({ "name": name })).await.unwrap();
+            store.update_bot(&bot.id, &json!({ "alwaysAsk": [list] })).await.unwrap();
+            ids.push(bot.id);
+        }
+        let turns = Turns::default();
+        turns.set_delegation(&ids[1], &ids[0], "ask", vec!["command".into()], 1);
+        turns.set_delegation(&ids[2], &ids[1], "ask", vec!["pay".into()], 2);
+        let mut got = turns.effective_always_ask(&store, &ids[2], &["files".to_string()]);
+        got.sort();
+        assert_eq!(got, ["command", "delete", "files", "pay", "send"]);
+        let mut alone = turns.effective_always_ask(&store, &ids[0], &["send".to_string()]);
+        alone.sort();
+        assert_eq!(alone, ["send"], "у начала цепочки только свой список");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     use super::*;
 
     /// Открытый вопрос `ask_user` переживает перезапуск: после `Turns::open` он снова в списке «Нужен ты» и в карточках бота.

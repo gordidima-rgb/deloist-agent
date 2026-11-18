@@ -1811,17 +1811,20 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
     // Список «Всегда спрашивать» сильнее режима и сильнее разборов ниже. Вид берём так же, как у своих вызовов:
     // чужой MCP-инструмент — по имени (`mcp__сервер__инструмент`), команда — по `reach::command_place` и выпуску, удаление — по виду вызова.
     let always = !ours && {
-        let command_text = [release_text.as_str(), shell_command, title_command].into_iter().find(|t| !t.trim().is_empty()).unwrap_or_default();
-        let (name, scope_kind) = match &mcp {
-            Some((server, tool)) => (format!("mcp__{server}__{tool}"), crate::grants::risky_kind(&tool.replace('_', " ")).unwrap_or("")),
-            None if kind == "delete" => ("write_file".to_string(), "delete"),
-            None => {
-                let class = if releases { "publish" } else { crate::reach::command_place(command_text).map_or("", |(_, k)| k) };
-                (our_tool_for(kind).to_string(), class)
+        let check = |name: &str, class: &str| crate::tools::always_asks(bot, name, &Value::Null, Some(&crate::grants::Scope::new("acp", "", class, "call", "")));
+        // Любой текст команды делает вызов командой, что бы агент ни назвал видом (`read`, `edit`…).
+        let texts: Vec<&str> = [release_text.as_str(), shell_command, title_command].into_iter().filter(|t| !t.trim().is_empty()).collect();
+        match &mcp {
+            Some((server, tool)) => check(&format!("mcp__{server}__{tool}"), crate::grants::risky_kind(&tool.replace('_', " ")).unwrap_or("")),
+            None if !texts.is_empty() => {
+                let mut classes: Vec<&str> = texts.iter().map(|t| crate::reach::command_place(t).map_or("", |(_, k)| k)).collect();
+                classes.extend(releases.then_some("publish"));
+                classes.extend((kind == "delete").then_some("delete"));
+                classes.into_iter().any(|class| check("run_command", class))
             }
-        };
-        let scope = crate::grants::Scope::new("acp", "", scope_kind, "call", "");
-        crate::tools::always_asks(bot, &name, &Value::Null, Some(&scope))
+            None if kind == "delete" => check("write_file", "delete"),
+            None => check(our_tool_for(kind), ""),
+        }
     };
     let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || always || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
     // Команда только названием (Antigravity), которая по строгому разбору лишь читает: карточка не нужна, как у своего `run_command`.

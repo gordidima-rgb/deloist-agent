@@ -873,6 +873,17 @@ pub async fn share(app: &App, from: &Bot, target: &Bot, raw: &str) -> Result<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_task_restored_from_disk_keeps_the_senders_always_ask_list() {
+        let dir = temp("asks");
+        let tasks = Tasks::open(&dir);
+        tasks.begin(Task { asks: vec!["command".into(), "send".into()], ..task("t1", "a", "b", "сделай") }).unwrap();
+        drop(tasks);
+        let restored = Tasks::open(&dir).get("t1").expect("задача восстановлена");
+        assert_eq!(restored.asks, vec!["command".to_string(), "send".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn task(id: &str, from: &str, to: &str, text: &str) -> Task {

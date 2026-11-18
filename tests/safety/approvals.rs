@@ -1614,14 +1614,12 @@ async fn the_rights_summary_follows_the_mode() {
 async fn the_always_ask_list_asks_by_the_kind_of_a_real_call() {
     let (crew, fake, bot) = setup("ap-always-kinds", &[]).await;
     set_mode(&crew, &bot, "auto").await;
-    let todo = tool("delete_todo", json!({ "id": "nope" }));
+    // Команда удаления: вид берётся из `reach::command_place`. Без списка в «решай сам» её не спрашивают.
+    let rm_call = tool("run_command", json!({ "command": "rm -rf x" }));
+    assert!(turn(&crew, &fake, &bot, rm_call.clone(), None).await.is_none(), "список пуст: без карточки");
     crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["delete"] }))).await;
-    // delete_todo спрашивается и без списка; со списком карточка к тому же одноразовая.
-    let card = turn(&crew, &fake, &bot, todo, None).await.expect("[delete] спрашивает delete_todo");
-    assert_eq!(card["tool"], "delete_todo", "{card}");
-    assert_eq!(card["always"], false, "{card}");
     // Команда удаления: вид берётся из `reach::command_place`.
-    let rm = turn(&crew, &fake, &bot, tool("run_command", json!({ "command": "rm -rf x" })), None).await;
+    let rm = turn(&crew, &fake, &bot, rm_call, None).await;
     assert!(rm.is_some(), "[delete] спрашивает rm -rf");
     // Команда, которую разобрать нельзя (подстановка), — только вид `command`: при [delete] идёт без карточки.
     let opaque = turn(&crew, &fake, &bot, tool("run_command", json!({ "command": "echo %CD%" })), None).await;

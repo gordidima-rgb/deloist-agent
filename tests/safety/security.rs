@@ -4098,4 +4098,9 @@ async fn acp_foreign_mcp_send_tools_and_commands_follow_the_always_ask_list() {
     let rm = json!({ "toolCallId": "c1", "title": "rm -rf x", "kind": "execute", "rawInput": { "command": "rm -rf x" } });
     let (card, _) = acp_asks(&crew, &bot, rm).await;
     assert!(card.is_some(), "[delete] спрашивает rm -rf");
+    // Агент называет вид «read», но в rawInput лежит команда: она всё равно команда.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "alwaysAsk": ["command"] }))).await;
+    let disguised = json!({ "toolCallId": "c2", "title": "echo hi", "kind": "read", "rawInput": { "command": "echo hi" } });
+    let (card, _) = acp_asks(&crew, &bot, disguised).await;
+    assert!(card.is_some(), "[command] спрашивает команду под видом read");
 }

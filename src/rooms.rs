@@ -479,6 +479,10 @@ async fn answer(
     english: bool,
 ) -> (String, Option<String>) {
     let settings = app.store.settings();
+    // Ход в группе идёт по цепочке передач: режим и список «Всегда спрашивать» берём с ней, как в `run_turn_body`.
+    let mut chained = bot.clone();
+    app.turns.apply_chain(&app.store, &mut chained);
+    let bot = &chained;
     let memory = crate::memory::own_for_prompt(app, &bot.id).await;
     // Профиль и оглавление — снимок группы до сдвига окна; личная память — своя у отвечающего.
     let snapshot = crate::memory::prompt_memory(app, crate::store::Thread::Room(room_id)).await;
