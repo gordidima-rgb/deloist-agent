@@ -226,7 +226,7 @@ async fn an_interrupted_routine_continues_instead_of_starting_over() {
     assert!(!entries.iter().any(|e| e["status"] == "interrupted"), "перезапуск больше не «повтор с нуля»: {entries:?}");
     let state = second.ok("GET", "/api/state", None).await;
     let saved = state["routines"].as_array().unwrap().iter().find(|r| r["id"] == routine.as_str()).unwrap().clone();
-    assert_eq!(saved["retryAttempt"].as_i64().unwrap_or(0), 0, "{saved}");
+    assert_eq!(saved["failures"].as_u64().unwrap_or(0), 0, "{saved}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

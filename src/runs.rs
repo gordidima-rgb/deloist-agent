@@ -107,7 +107,7 @@ pub fn reason_of(error: &str) -> StopReason {
         StopReason::Stuck
     } else if is_limit_error(error) {
         StopReason::Limit
-    } else if matches!(api_status(error), Some(401 | 403)) || ["нужен вход", "нет ключа", "not logged in", "needs auth"].iter().any(|w| lower.contains(w)) {
+    } else if matches!(api_status(error), Some(401 | 403)) || ["нужен вход", "not logged in", "needs auth"].iter().any(|w| lower.contains(w)) {
         StopReason::Login
     } else if is_transient_model_error(error) {
         StopReason::Network
@@ -937,7 +937,7 @@ mod tests {
             ("API 401: Incorrect API key provided", StopReason::Login),
             ("API 403: forbidden", StopReason::Login),
             ("Агенту нужен вход (claude): вход не завершён за 5 минут", StopReason::Login),
-            ("нет ключа Anthropic: впиши его в настройках", StopReason::Login),
+            ("нет ключа Anthropic: впиши его в настройках", StopReason::Unknown),
             ("Агент молчал 20 минут — ход остановлен.", StopReason::Stuck),
             (RUN_TIMEOUT, StopReason::Stuck),
             ("API 400: invalid request", StopReason::Unknown),
