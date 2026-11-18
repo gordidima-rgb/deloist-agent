@@ -825,7 +825,7 @@
     'Напиши задачу. Перед опасным действием бот сначала спросит тебя.': 'Write a task. The bot will ask you before doing anything risky.',
     'Нужно разрешение: ': 'Permission needed: ',
     'В этой папке лежит сама программа. Боты команды смогут менять файлы проекта; данные программы, ключи и автозапуск остаются закрытыми. Разрешить?': 'This folder contains the program itself. The team bots will be able to change project files; the program data, keys and autostart stay closed. Allow?',
-    'от {name}': 'from {name}',
+    'Задача от': 'Task from',
     'Риск: низкий': 'Risk: low',
     'Риск: средний': 'Risk: medium',
     'Риск: высокий': 'Risk: high',

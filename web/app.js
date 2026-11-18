@@ -1504,23 +1504,41 @@ function routineRun(msg) {
 }
 
 function routineRunCard(msg, run) {
+  const icon = document.createElement('span');
+  icon.className = 'rt-run-icon';
+  icon.innerHTML = ic('repeat');
+  return foldCard(msg, icon, tr('Рутина'), run.title, run.prompt);
+}
+
+// Задача от другого бота: «Задача от бота «Имя» (не от человека…):» — пояснение для модели, в ленте его нет.
+function delegatedBody(text) {
+  return String(text || '').replace(/^Задача от бота «[^»]*»[^\n]*:\n/, '').trim();
+}
+
+function delegatedCard(msg, name) {
+  const bot = S.bots.find((b) => b.name === name) || null;
+  return foldCard(msg, taskAvatar(bot, name), tr('Задача от'), name, delegatedBody(msg.text));
+}
+
+// Свёрнутое сообщение в одну строку: значок, вид и название, первая строка текста; весь текст — по щелчку.
+function foldCard(msg, face, kind, title, body) {
   const card = document.createElement('details');
   card.className = 'rt-runcard';
   const summary = document.createElement('summary');
-  const gist = run.prompt.replace(/\s+/g, ' ').slice(0, 160);
+  const gist = body.replace(/\s+/g, ' ').slice(0, 160);
   summary.innerHTML = `
-    <span class="rt-run-icon">${ic('repeat')}</span>
     <span class="rt-run-text">
-      <span class="rt-run-title"><span class="rt-run-kind">${tr('Рутина')}</span>${escapeHtml(run.title)}</span>
+      <span class="rt-run-title"><span class="rt-run-kind">${escapeHtml(kind)}</span>${escapeHtml(title)}</span>
       ${gist ? `<span class="rt-run-gist">${escapeHtml(gist)}</span>` : ''}
     </span>
     <span class="rt-run-chev">${ic('chevron-down')}</span>`;
+  summary.prepend(face);
   summary.title = tr('Показать задание целиком');
   card.append(summary);
-  if (run.prompt) {
+  if (body) {
     const bubble = document.createElement('div');
     bubble.className = 'rt-run-body';
-    fillBubble(bubble, { ...msg, text: run.prompt });
+    fillBubble(bubble, { ...msg, text: body });
     card.append(bubble);
   }
   return card;
@@ -1543,9 +1561,9 @@ function messageRow(msg) {
   const col = document.createElement('div');
   col.className = 'msg-col';
 
-  // Задачу от другого бота видно в треде получателя: «от Скаут 2» (след передачи, карточки на неё нет).
+  // Задачу от другого бота видно в треде получателя свёрнутой карточкой с аватаром отправителя.
   const delegatedFrom = msg.role === 'user' && String(msg.source || '').startsWith('delegation:') ? String(msg.source).slice('delegation:'.length) : '';
-  const author = msg.name || (resumed ? tr('Продолжение задания') : delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
+  const author = msg.name || (resumed ? tr('Продолжение задания') : '');
   if (author) {
     const who = document.createElement('div');
     who.className = 'msg-author';
@@ -1559,6 +1577,8 @@ function messageRow(msg) {
   const run = routineRun(msg);
   if (run) {
     col.append(routineRunCard(msg, run));
+  } else if (delegatedFrom) {
+    col.append(delegatedCard(msg, delegatedFrom));
   } else if (shownText && shownText.trim()) {
     const bubble = document.createElement('div');
     bubble.className = `bubble${msg.error ? ' error' : ''}`;
