@@ -581,10 +581,13 @@ async fn a_queued_chat_after_a_night_delegation_is_not_treated_as_unattended() {
     let target = state["bots"][1]["id"].as_str().unwrap().to_string();
     let target_name = state["bots"][1]["name"].as_str().unwrap().to_string();
     crew.ok("POST", "/api/rooms", Some(json!({ "name": "Пара", "botIds": [bot, target], "lead": bot }))).await;
-    let gate = Arc::new(tokio::sync::Notify::new());
+    // Поручение идёт очередью: продолжение ведущего и ход получателя начинаются почти одновременно, в любом
+    // порядке. Каждому — свой «стоп», чтобы получатель был занят, кто бы ни пришёл первым.
+    let (gate, gate_other) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Notify::new()));
     *fake.script.lock().unwrap() = vec![
         Step::Tool("assign_task", json!({ "bot": target_name, "text": "сделай часть" })),
         Step::Hold(gate.clone()),
+        Step::Hold(gate_other.clone()),
     ];
     let created = crew
         .ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Ночь", "prompt": "работай", "everyMinutes": 60 })))
@@ -595,12 +598,13 @@ async fn a_queued_chat_after_a_night_delegation_is_not_treated_as_unattended() {
     // Делегат думает, человек пишет ему: сообщение в очереди.
     common::wait_until("делегат занят", 20, || {
         let fake = fake.clone();
-        async move { fake.requests.lock().unwrap().len() >= 2 }
+        async move { fake.requests.lock().unwrap().len() >= 3 }
     })
     .await;
     crew.say(&target, "из очереди").await;
     wait_queue(&crew, &target, 1).await;
     gate.notify_one();
+    gate_other.notify_one();
     wait_thread_text(&crew, &target, "из очереди").await;
     wait_queue(&crew, &target, 0).await;
 
