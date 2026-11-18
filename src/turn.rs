@@ -11,7 +11,8 @@ use serde_json::{json, Map, Value};
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::drivers::{acp, anthropic, cli, demo, gemini, is_context_error, is_limit_error, openai, DriverEvent, ToolCall, Usage};
+use crate::drivers::{acp, anthropic, cli, demo, gemini, is_context_error, openai, DriverEvent, ToolCall, Usage};
+use crate::runs::{reason_of, RunState, StopReason};
 use crate::store::{now, uid, Bot, Settings, Thread};
 use crate::tools::{self, exec_tool};
 use crate::App;
@@ -31,6 +32,8 @@ const QUESTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const UNATTENDED_WAIT: Duration = Duration::from_secs(5 * 60);
 /// Пять пауз из-за лимита подряд: лимит не отпускает, дальше решает человек.
 const MAX_LIMIT_PAUSES: u32 = 5;
+/// Сколько раз ход пробует достучаться до модели сам (2, 5, 10, 20, 30 с), прежде чем остановиться из-за связи.
+const MODEL_RECONNECTS: u32 = 5;
 const LIMIT_REACHED: &str = "дневной предел токенов исчерпан, рутина остановлена";
 const JOURNAL_TEXT_LIMIT: usize = 600;
 /// Что делегат обязан вернуть: короткий итог, а не отчёт на весь экран.
@@ -1857,6 +1860,47 @@ fn limit_pause(app: &App, bot_id: &str, choice: &ModelChoice, until: i64, englis
     Pause { state: crate::runs::RunState::Paused { until_ms: until, reason: crate::runs::StopReason::Limit, webhook: None, note: provider }, line }
 }
 
+/// Связь с провайдером оборвалась. Ход ничего не менял — повторим сами через 1, 5, 15 минут; менял — повторять вслепую нельзя, решает человек.
+fn network_pause(app: &App, bot_id: &str, choice: &ModelChoice, english: bool) -> Pause {
+    let provider = provider_name(choice);
+    let (acted, retries) = app.runs.network_state(bot_id);
+    if let Some(ms) = crate::runs::network_retry_ms(retries).filter(|_| !acted) {
+        let until = now() + ms;
+        let at = crate::scheduler::clock(until);
+        let line = if english { format!("No connection to {provider}: I will retry at {at}") } else { format!("Нет связи с {provider}: повторю в {at}") };
+        return Pause { state: RunState::Paused { until_ms: until, reason: StopReason::Network, webhook: None, note: provider }, line };
+    }
+    let text = match (acted, english) {
+        (true, false) => format!("Связь с {provider} оборвалась посреди работы. Проверь, что уже сделано, и нажми «Повторить»."),
+        (true, true) => format!("The connection to {provider} dropped mid-task. Check what is already done and press “Retry”."),
+        (false, false) => format!("Нет связи с {provider}. Нажми «Повторить», когда она вернётся."),
+        (false, true) => format!("No connection to {provider}. Press “Retry” when it is back."),
+    };
+    Pause { state: RunState::NeedsHuman { reason: StopReason::Network, text: text.clone() }, line: text }
+}
+
+/// Нужен вход в провайдера. Одна карточка на провайдера: если её уже ждёт другой бот, этот запуск просто закрывается.
+fn login_pause(app: &App, choice: &ModelChoice, english: bool) -> Pause {
+    let provider = provider_name(choice);
+    let text = if english { format!("Sign-in to {provider} needed") } else { format!("Нужен вход в {provider}") };
+    let (state, line) = if app.runs.login_waiting(&text) {
+        (RunState::Failed { reason: StopReason::Login, text: text.clone() }, format!("{text}: об этом уже сказано в «Нужен ты»."))
+    } else {
+        (RunState::NeedsHuman { reason: StopReason::Login, text: text.clone() }, format!("{text}. Войди и нажми «Продолжить»."))
+    };
+    Pause { state, line }
+}
+
+/// Сколько запуск без человека может идти: рутина 3 часа, ход цели 12.
+fn run_time_limit_ms(opts: &TurnOptions) -> Option<i64> {
+    let hours = match (&opts.run, &opts.routine) {
+        (Some(_), _) => 12,
+        (None, Some(_)) => 3,
+        _ => return None,
+    };
+    Some(hours * crate::schedule::hour_ms())
+}
+
 /// Предел токенов: дневной — до полуночи, месячный бота — до 1-го числа.
 fn budget_pause(month: bool, english: bool) -> Pause {
     let local = chrono::Local::now();
@@ -2326,7 +2370,11 @@ fn run_turn_body(
             let mut continuations = 0;
             let mut nudged_finish = false;
             let mut assistant_texts: Vec<String> = Vec::new();
+            let time_limit = run_time_limit_ms(&opts);
             for step in 0..MAX_STEPS {
+                if time_limit.is_some_and(|limit| now() - started_at > limit) {
+                    return Err(crate::runs::RUN_TIMEOUT.to_string());
+                }
                 // Живой разговор человек видит и может остановить сам, а ночью следить некому.
                 if unattended && crate::scheduler::over_limit(&app) {
                     if !journaled {
@@ -2430,7 +2478,7 @@ fn run_turn_body(
                         }
                     }
                     // Только API-модель: у внешних CLI/ACP действия уже могли выполниться внутри драйвера.
-                    let retryable = current.is_metered() && crate::drivers::is_transient_model_error(&message);
+                    let retryable = current.is_metered() && retry_count < MODEL_RECONNECTS && crate::drivers::is_transient_model_error(&message);
                     let try_fallback = fallback.is_some() && fallback_model.is_none() && retry_count >= 2;
                     if retryable && !cancel.is_cancelled() && !try_fallback {
                         let delay = crate::drivers::retry_delay(retry_count);
@@ -2446,18 +2494,35 @@ fn run_turn_body(
                         continue;
                     }
                     // Один переход за ход: если и запасная упала, ход падает с её ошибкой.
-                    let limited = !cancel.is_cancelled() && is_limit_error(&message);
-                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none() && limited) else {
-                        if limited && journaled {
-                            // Запасной нет или и она упала: ход ждёт сброса, а не проваливается.
-                            let until = limit_until(&app, &current, &message, app.runs.pauses(&bot_id));
-                            app.rest.set(&current.key(), until);
-                            pause = Some(limit_pause(&app, &bot_id, &current, until, app.store.settings().ui_lang == "en"));
-                            return Ok(());
+                    let reason = reason_of(&message);
+                    let can_switch = !cancel.is_cancelled() && matches!(reason, StopReason::Limit | StopReason::Network);
+                    let Some(spare) = fallback.as_ref().filter(|_| fallback_model.is_none() && can_switch) else {
+                        // Запасной нет или и она упала: ход без провала ждёт сброса, связи или входа, а не проваливается.
+                        if journaled && !cancel.is_cancelled() {
+                            let english = app.store.settings().ui_lang == "en";
+                            match reason {
+                                StopReason::Limit => {
+                                    let until = limit_until(&app, &current, &message, app.runs.pauses(&bot_id));
+                                    app.rest.set(&current.key(), until);
+                                    pause = Some(limit_pause(&app, &bot_id, &current, until, english));
+                                    return Ok(());
+                                }
+                                StopReason::Network => {
+                                    pause = Some(network_pause(&app, &bot_id, &current, english));
+                                    return Ok(());
+                                }
+                                StopReason::Login => {
+                                    pause = Some(login_pause(&app, &current, english));
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
                         }
                         return Err(message);
                     };
-                    app.rest.set(&main.key(), limit_until(&app, &main, &message, 0));
+                    if reason == StopReason::Limit {
+                        app.rest.set(&main.key(), limit_until(&app, &main, &message, 0));
+                    }
                     app.turns.emit(json!({
                         "type": "model_switched", "botId": bot_id, "turnId": turn_id,
                         "from": main.label(), "to": spare.label(), "reason": shorten(&message, 200),
@@ -2705,7 +2770,8 @@ fn run_turn_body(
                 (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
                 (None, false) if pause.is_some() => pause.as_ref().map(|p| p.state.clone()).unwrap_or(crate::runs::RunState::Done),
                 _ if waiting.is_some() => crate::runs::RunState::NeedsHuman { reason: crate::runs::StopReason::Human, text: waiting.clone().unwrap_or_default() },
-                (Some(message), false) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Unknown, text: shorten(message, JOURNAL_TEXT_LIMIT) },
+                (Some(message), false) => crate::runs::RunState::Failed { reason: reason_of(message), text: shorten(message, JOURNAL_TEXT_LIMIT) },
+                (None, false) if last_finish_status.as_deref() == Some("failed") => crate::runs::RunState::Failed { reason: StopReason::Check, text: shorten(&final_text, JOURNAL_TEXT_LIMIT) },
                 (None, false) => crate::runs::RunState::Done,
             };
             // Неиспользованное разовое разрешение живёт, пока жив запуск.
@@ -2778,12 +2844,20 @@ fn run_turn_body(
         }));
 
         if let Some(routine) = &opts.routine {
-            let status = match failure.as_deref() {
+            let status = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
                 _ if aborted => "stopped",
-                Some(_) => "failed",
-                None if matches!(&pause, Some(Pause { state: crate::runs::RunState::Paused { .. }, .. })) => "paused",
-                None if pause.is_some() || waiting.is_some() => "needs",
-                None => completion::status_from_finish(last_finish_status.as_deref(), quiet, missed.is_empty()),
+                (Some(_), _) => "failed",
+                (None, Some(RunState::Paused { .. })) => "paused",
+                (None, Some(RunState::Failed { .. })) => "failed",
+                (None, Some(_)) => "needs",
+                (None, None) if waiting.is_some() => "needs",
+                (None, None) => completion::status_from_finish(last_finish_status.as_deref(), quiet, missed.is_empty()),
+            };
+            // Почему запуск не удался: подпись в журнале и счёт серии ошибок рутины.
+            let stop = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
+                (Some(message), _) => Some(reason_of(message)),
+                (None, Some(RunState::Paused { reason, .. } | RunState::NeedsHuman { reason, .. } | RunState::Failed { reason, .. })) => Some(*reason),
+                _ => (status == "failed").then_some(StopReason::Check),
             };
             let summary = if let Some(f) = failure.as_deref() {
                 shorten(f, JOURNAL_TEXT_LIMIT)
@@ -2808,8 +2882,11 @@ fn run_turn_body(
             if let Some(model) = &fallback_model {
                 entry["fallback"] = json!(model);
             }
+            if let Some(reason) = stop.filter(|r| r.is_failure()) {
+                entry["reason"] = json!(reason);
+            }
             app.ledger.append_journal(&entry).await;
-            crate::scheduler::routine_finished(&app, routine, &bot_id, status, started_at).await;
+            crate::scheduler::routine_finished(&app, routine, &bot_id, status, stop).await;
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
         }

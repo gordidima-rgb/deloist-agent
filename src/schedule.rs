@@ -114,31 +114,23 @@ pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
     next_run_with(routine, now_ms, local, to_ms)
 }
 
-/// Рутина не дошла до «выполнено»: повторяем через 5, 10, 15, 30, 60 минут, дальше 2, 4, 8… часов.
-/// `attempt` — номер повтора, начиная с 1.
-pub fn retry_delay_minutes(attempt: u32) -> i64 {
-    match attempt {
-        0 | 1 => 5,
-        2 => 10,
-        3 => 15,
-        4 => 30,
-        5 => 60,
-        n => 60 * 2i64.pow((n - 5).min(10)),
+/// Час для ожиданий рутин (занятый бот, пауза после ошибок). В отладочной сборке `CREW_TEST_HOUR_MS` ужимает его для проверок.
+pub fn hour_ms() -> i64 {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("CREW_TEST_HOUR_MS").ok().and_then(|v| v.parse().ok()) {
+            return ms;
+        }
     }
+    3_600_000
 }
 
-/// Сколько рутина пытается выполниться после первой неудачи, прежде чем сдаться с ошибкой.
-pub const RETRY_WINDOW_MS: i64 = 24 * 3_600_000;
-
-/// Когда повторить: по лестнице, но не позже конца суток и не позже обычного следующего запуска.
-/// `None` — сутки прошли, пора сдаться.
-pub fn retry_at(attempt: u32, since_ms: i64, now_ms: i64, regular_next_ms: i64) -> Option<i64> {
-    let deadline = since_ms + RETRY_WINDOW_MS;
-    if now_ms >= deadline {
-        return None;
+/// Как редко рутина запускается после неудач подряд: от 3 — не чаще раза в час, от 6 — раза в 4 часа.
+pub fn failure_gap_ms(failures: u32) -> i64 {
+    match failures {
+        0..=2 => 0,
+        3..=5 => hour_ms(),
+        _ => 4 * hour_ms(),
     }
-    let at = (now_ms + retry_delay_minutes(attempt) * 60_000).min(deadline);
-    Some(if regular_next_ms > now_ms { at.min(regular_next_ms) } else { at })
 }
 
 /// Расчёт срока с подставляемыми часами пояса: так его можно проверить на переводе часов в любой стране.
@@ -636,21 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_ladder_grows_then_doubles() {
-        let ladder: Vec<i64> = (1..=9).map(retry_delay_minutes).collect();
-        assert_eq!(ladder, vec![5, 10, 15, 30, 60, 120, 240, 480, 960]);
-    }
-
-    #[test]
-    fn retry_stops_after_a_day_and_never_passes_it() {
-        let day = RETRY_WINDOW_MS;
-        // Обычный следующий запуск далеко: решает лестница.
-        assert_eq!(retry_at(1, 0, 1_000, 10 * day), Some(1_000 + 5 * 60_000));
-        // Шаг перепрыгнул бы сутки: последняя попытка ровно на границе.
-        assert_eq!(retry_at(9, 0, day - 60_000, 10 * day), Some(day));
-        // Сутки прошли: сдаёмся.
-        assert_eq!(retry_at(10, 0, day, 10 * day), None);
-        // Частая рутина: свой срок раньше повтора.
-        assert_eq!(retry_at(5, 0, 1_000, 1_000 + 30 * 60_000), Some(1_000 + 30 * 60_000));
+    fn failures_slow_a_routine_down() {
+        assert_eq!([0, 2, 3, 5, 6, 40].map(failure_gap_ms), [0, 0, 3_600_000, 3_600_000, 4 * 3_600_000, 4 * 3_600_000]);
     }
 }

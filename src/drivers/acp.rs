@@ -710,10 +710,11 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         },
         Err(_) if turn.cancelled => stopped(),
         Err(CallError::Rpc(error)) => {
-            if needs_auth(&error) {
+            let login = needs_auth(&error);
+            if login {
                 sessions.remove(req.thread);
             }
-            Err(format!("агент вернул ошибку: {}", rpc_message(&error)))
+            Err(format!("{}: {}", if login { "Агенту нужен вход" } else { "агент вернул ошибку" }, rpc_message(&error)))
         }
         Err(CallError::Closed) | Err(CallError::Timeout) => {
             let tail = agent.stderr_tail();

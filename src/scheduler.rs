@@ -128,10 +128,11 @@ pub fn clock(ms: i64) -> String {
     chrono::Local.timestamp_millis_opt(ms).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
 }
 
-/// Ход рутины кончился: статус по итогу, повтор по лестнице, через сутки неудач — ошибка. Всё, что не «выполнено», человек видит строкой в чате бота.
-pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str, status: &str, started_at: i64) {
+/// Ход рутины кончился: статус по итогу, ошибка растит серию. Реже — после 3 и 6 ошибок подряд, а три «вечные» ошибки
+/// ставят рутину на паузу: человеку одна строка в чате на всю серию, дальше «Возобновить».
+pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str, status: &str, reason: Option<crate::runs::StopReason>) {
     use crate::store::RoutineOutcome;
-    let outcome = match app.store.finish_routine_run(&routine.id, status, started_at).await {
+    let outcome = match app.store.finish_routine_run(&routine.id, status, reason).await {
         Ok(outcome) => outcome,
         Err(e) => {
             eprintln!("[routine] {}: {e}", routine.title);
@@ -140,37 +141,30 @@ pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str
     };
     let english = app.store.settings().ui_lang == "en";
     let title = &routine.title;
-    let text = match &outcome {
-        RoutineOutcome::Done => return,
-        RoutineOutcome::Retry { at, attempt } => {
-            let at = clock(*at);
-            let n = attempt + 1;
-            if english {
-                format!("Routine “{title}” did not finish. Retrying at {at} (attempt {n}).")
-            } else {
-                format!("Рутина «{title}» не выполнена. Повторю в {at} (попытка {n}).")
-            }
+    let Some(r) = app.store.routine(&routine.id) else { return };
+    let why = r.stop_reason.map(|reason| reason.label(english)).unwrap_or_default();
+    match outcome {
+        RoutineOutcome::Done => {}
+        RoutineOutcome::Failed { failures: n @ (3 | 6) } => {
+            let gap = if n == 3 { if english { "once an hour" } else { "раз в час" } } else if english { "once in 4 hours" } else { "раз в 4 часа" };
+            let text = if english { format!("{n} failures in a row ({why}): runs no more often than {gap}.") } else { format!("Ошибок подряд: {n} ({why}) — запускаю не чаще, чем {gap}.") };
+            note(app, &r, "paused", &text).await;
         }
-        RoutineOutcome::GaveUp { attempts } => {
+        RoutineOutcome::Failed { .. } => {}
+        RoutineOutcome::PausedByErrors { failures } => {
             let text = if english {
-                format!("Routine “{title}” has not finished for a day, attempts: {attempts}. Marked as an error; the next run follows the schedule.")
+                format!("Routine “{title}” is paused: {failures} failures in a row — {why}. Press “Resume” in the routines list when it is fixed.")
             } else {
-                format!("Рутина «{title}» не выполнилась за сутки, попыток: {attempts}. Ставлю ошибку, дальше — по расписанию.")
+                format!("Рутина «{title}» на паузе: {failures} ошибки подряд — {why}. Когда исправишь, нажми «Возобновить» в списке рутин.")
             };
-            if let Some(r) = app.store.routine(&routine.id) {
-                note(app, &r, "gave_up", &text).await;
+            note(app, &r, "paused", &text).await;
+            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": text, "at": now(), "error": true, "routineId": routine.id });
+            if let Err(e) = app.store.append_message(bot_id, entry.clone()).await {
+                eprintln!("[routine] {title}: {e}");
             }
-            text
+            app.turns.emit(json!({ "type": "message", "botId": bot_id, "message": entry }));
         }
-    };
-    let entry = json!({
-        "id": uid("msg"), "role": "assistant", "text": text, "at": now(),
-        "error": matches!(outcome, RoutineOutcome::GaveUp { .. }), "routineId": routine.id,
-    });
-    if let Err(e) = app.store.append_message(bot_id, entry.clone()).await {
-        eprintln!("[routine] {title}: {e}");
     }
-    app.turns.emit(json!({ "type": "message", "botId": bot_id, "message": entry }));
 }
 
 /// Рутина числится «идёт», а живого хода у неё нет: запись журнала о нём потеряна (старая версия, стёртый файл).
@@ -228,9 +222,17 @@ async fn tick(app: &Arc<App>) {
             let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;
             continue;
         }
-        // Пропущенные запуски — по правилу рутины. Повтор после неудачи идёт по своему сроку, даже вне окна.
+        // Три «вечные» ошибки подряд: ждём «Возобновить», срок только отмечаем.
+        if routine.error_paused {
+            if routine.last_status.as_deref() != Some("skipped") {
+                note(app, &routine, "paused", "Запуск пропущен: рутина на паузе из-за ошибок подряд.").await;
+            }
+            let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
+            continue;
+        }
+        // Пропущенные запуски — по правилу рутины.
         let mut late_ms = 0;
-        if routine.retry_attempt == 0 {
+        {
             let missed = crate::schedule::missed(&routine, now());
             let catch_up = routine.catch_up == "last" && missed.last_slot_ms.is_some_and(|slot| now() - slot <= crate::schedule::CATCH_UP_MS);
             let dropped = missed.count - u32::from(catch_up);
@@ -251,7 +253,11 @@ async fn tick(app: &Arc<App>) {
         // на всю ночь, и бот не должен простаивать из-за нажатого вечером «стоп».
         let queue_waits = app.queues.count(&routine.bot_id) > 0 && !app.queues.is_paused(&routine.bot_id);
         if app.turns.is_busy(&routine.bot_id) || queue_waits {
-            app.store.delay_routine(&routine.id, 5 * 60_000);
+            // Ждём бота по 5 минут, но не дольше часа: дальше запуск пропущен, а в журнале сказано почему.
+            if !app.store.wait_for_bot(&routine.id) {
+                note(app, &routine, "busy", "Бот был занят больше часа: запуск пропущен, жду следующего срока.").await;
+                let _ = app.store.reschedule_routine(&routine.id, "busy").await;
+            }
             continue;
         }
         if over_limit(app) {

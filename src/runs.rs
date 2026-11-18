@@ -46,7 +46,7 @@ pub enum StepState {
     Err,
 }
 
-/// Почему запуск остановился. Задача про повторы добавит свои причины.
+/// Почему запуск остановился: от причины зависит, ждать, повторять или звать человека.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
@@ -57,7 +57,69 @@ pub enum StopReason {
     /// Бот сам ждёт времени или вебхука (`await_event`).
     Event,
     Human,
+    /// Связь, таймаут, 5xx, перегрузка: пройдёт само.
+    Network,
+    /// Нужен вход в провайдера (агент просит войти, ключ не подошёл).
+    Login,
+    /// Проверка не прошла: бот сам закрыл ход итогом «не получилось».
+    Check,
+    /// Застрял: агент молчал или запуск шёл дольше положенного.
+    Stuck,
     Unknown,
+}
+
+impl StopReason {
+    /// Ошибка, которая сама не пройдёт: серия таких в рутине ставит её на паузу.
+    pub fn is_lasting(self) -> bool {
+        matches!(self, Self::Login | Self::Check | Self::Unknown)
+    }
+
+    /// Ошибка хода (а не пауза, лимит или ожидание человека): растит серию неудач рутины.
+    pub fn is_failure(self) -> bool {
+        matches!(self, Self::Network | Self::Login | Self::Check | Self::Stuck | Self::Unknown)
+    }
+
+    /// Причина словами для человека (строка в чате, журнал).
+    pub fn label(self, english: bool) -> &'static str {
+        match (self, english) {
+            (Self::Network, false) => "сеть",
+            (Self::Network, true) => "network",
+            (Self::Login, false) => "нужен вход",
+            (Self::Login, true) => "sign-in needed",
+            (Self::Check, false) => "проверка не прошла",
+            (Self::Check, true) => "a check failed",
+            (Self::Stuck, false) => "застрял",
+            (Self::Stuck, true) => "stuck",
+            (_, false) => "неизвестная ошибка",
+            (_, true) => "unknown error",
+        }
+    }
+}
+
+/// Запуск шёл дольше положенного (`TurnOptions`: рутина 3 ч, цель 12 ч).
+pub const RUN_TIMEOUT: &str = "Превышено время запуска";
+
+/// Причина остановки по тексту ошибки хода — единственное место, где ошибку разбирают.
+pub fn reason_of(error: &str) -> StopReason {
+    use crate::drivers::{api_status, is_limit_error, is_transient_model_error};
+    let lower = error.to_lowercase();
+    if error.starts_with(RUN_TIMEOUT) || lower.contains("молчал") {
+        StopReason::Stuck
+    } else if is_limit_error(error) {
+        StopReason::Limit
+    } else if matches!(api_status(error), Some(401 | 403)) || ["нужен вход", "нет ключа", "not logged in", "needs auth"].iter().any(|w| lower.contains(w)) {
+        StopReason::Login
+    } else if is_transient_model_error(error) {
+        StopReason::Network
+    } else {
+        StopReason::Unknown
+    }
+}
+
+/// Через сколько повторить после обрыва связи: 1, 5, 15 минут, дальше решает человек.
+pub fn network_retry_ms(retries: u32) -> Option<i64> {
+    let minute = crate::schedule::hour_ms() / 60;
+    [1, 5, 15].get(retries as usize).map(|m| m * minute)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -134,6 +196,12 @@ pub struct Run {
     /// Об этой паузе уже сказано уведомлением Windows.
     #[serde(default)]
     pub notified: bool,
+    /// Ход уже что-то менял (шаг не из чтения): после обрыва связи его не повторяют сами.
+    #[serde(default)]
+    pub acted: bool,
+    /// Сколько раз ход уже вставал на паузу из-за связи: после третьей — «Нужен ты».
+    #[serde(default)]
+    pub retries: u32,
 }
 
 /// Из какого состояния запись берут на продолжение.
@@ -167,6 +235,8 @@ impl Run {
             forced: false,
             resume_text: None,
             notified: false,
+            acted: false,
+            retries: 0,
         }
     }
 
@@ -212,7 +282,12 @@ impl Run {
         let last = self.steps.last().map(|s| s.label.as_str()).unwrap_or("начало хода");
         let tail = self.steps.len().saturating_sub(NOTE_STEPS);
         let done: Vec<&str> = self.steps[tail..].iter().filter(|s| s.state == StepState::Ok).map(|s| s.label.as_str()).collect();
-        let mut text = format!("Тебя прервал перезапуск программы на шаге «{last}».");
+        let cause = match &self.state {
+            RunState::NeedsHuman { reason: StopReason::Network, .. } => "Связь с провайдером оборвалась",
+            RunState::NeedsHuman { reason: StopReason::Login, .. } => "Нужен был вход в провайдера, теперь он выполнен",
+            _ => "Тебя прервал перезапуск программы",
+        };
+        let mut text = format!("{cause} на шаге «{last}».");
         if !done.is_empty() {
             text.push_str(&format!(" Уже сделано: {}.", done.join("; ")));
         }
@@ -309,8 +384,10 @@ impl Runs {
             if matches!(state, RunState::Done) {
                 run.steps.clear();
             }
-            if matches!(state, RunState::Paused { reason: StopReason::Limit, .. }) {
-                run.pauses += 1;
+            match state {
+                RunState::Paused { reason: StopReason::Limit, .. } => run.pauses += 1,
+                RunState::Paused { reason: StopReason::Network, .. } => run.retries += 1,
+                _ => {}
             }
             run.forced = false;
             run.resume_text = None;
@@ -351,6 +428,7 @@ impl Runs {
             // Строгий класс остаётся: позднее обновление строки не делает внешнее действие безобидным.
             let stricter = effect > step.effect;
             step.effect = step.effect.max(effect);
+            run.acted |= step.effect > Effect::Read;
             set_step(run, call_id, state) || stricter
         });
     }
@@ -407,6 +485,17 @@ impl Runs {
     /// Сколько раз идущий ход бота уже вставал на паузу из-за лимита.
     pub fn pauses(&self, bot_id: &str) -> u32 {
         self.on_active_read(bot_id, |r| r.pauses).unwrap_or(0)
+    }
+
+    /// Ход идущего бота: менял ли он что-то и сколько раз уже ждал связь.
+    pub fn network_state(&self, bot_id: &str) -> (bool, u32) {
+        self.on_active_read(bot_id, |r| (r.acted, r.retries)).unwrap_or((true, 0))
+    }
+
+    /// Какой-то запуск уже ждёт входа в этого провайдера: второй карточки «Нужен ты» не нужно.
+    pub fn login_waiting(&self, text: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.items.iter().any(|r| matches!(&r.state, RunState::NeedsHuman { reason: StopReason::Login, text: t } if t == text))
     }
 
     /// Человек велел идущему ходу продолжать, не глядя на отдых модели.
@@ -469,6 +558,7 @@ impl Runs {
 }
 
 fn push_step(run: &mut Run, call_id: &str, label: &str, effect: Effect, state: StepState) {
+    run.acted |= effect > Effect::Read;
     run.steps.push(Step { call_id: call_id.into(), label: label.chars().take(LABEL_CHARS).collect(), effect, state });
     note_external(run, call_id);
     let extra = run.steps.len().saturating_sub(MAX_STEPS);
@@ -646,6 +736,7 @@ fn resume_text(run: &Run, data: Option<&str>) -> String {
 {data}"),
         (RunState::Paused { reason: StopReason::Event, .. }, None) => "Срок ожидания вышел — продолжай задание с того места, где остановился.".into(),
         (RunState::Paused { reason: StopReason::Budget, .. }, None) => "Предел токенов сбросился — продолжай задание с того места, где остановился.".into(),
+        (RunState::Paused { reason: StopReason::Network, .. }, None) => "Связь с провайдером оборвалась и вернулась — продолжай задание с того места, где остановился.".into(),
         _ => "Лимит сбросился — продолжай задание с того места, где остановился.".into(),
     }
 }
@@ -763,7 +854,7 @@ async fn settle_origin(app: &Arc<App>, run: &Run, status: &str, text: &str) {
     match &run.origin {
         Origin::Routine { id, title } | Origin::Webhook { id, title } | Origin::Goal { id, title, .. } => {
             let routine = RoutineRef { id: id.clone(), title: title.clone() };
-            crate::scheduler::routine_finished(app, &routine, &run.bot_id, status, run.started_ms).await;
+            crate::scheduler::routine_finished(app, &routine, &run.bot_id, status, None).await;
             if let Origin::Goal { run: goal_run, .. } = &run.origin {
                 crate::goals::finished(app, &run.bot_id, &Some(goal_run.clone()), status).await;
             }
@@ -829,6 +920,43 @@ mod tests {
         let run = Run::new("bot", origin, &TurnOptions::default());
         assert_eq!(run.options().run, Some(crate::goals::Run::CheckIn));
         assert!(run.options().routine.is_some());
+    }
+
+    #[test]
+    fn the_error_text_tells_why_a_run_stopped() {
+        let table = [
+            ("API 429: Rate limit exceeded", StopReason::Limit),
+            ("API 402: Grok Build usage balance", StopReason::Limit),
+            ("The free OpenCode models reached their usage limit", StopReason::Limit),
+            ("quota exceeded for this key", StopReason::Limit),
+            ("API 503: провайдер не ответил", StopReason::Network),
+            ("API 408: timeout", StopReason::Network),
+            ("error sending request: connection refused", StopReason::Network),
+            ("dns error: no such host", StopReason::Network),
+            ("server overloaded", StopReason::Network),
+            ("API 401: Incorrect API key provided", StopReason::Login),
+            ("API 403: forbidden", StopReason::Login),
+            ("Агенту нужен вход (claude): вход не завершён за 5 минут", StopReason::Login),
+            ("нет ключа Anthropic: впиши его в настройках", StopReason::Login),
+            ("Агент молчал 20 минут — ход остановлен.", StopReason::Stuck),
+            (RUN_TIMEOUT, StopReason::Stuck),
+            ("API 400: invalid request", StopReason::Unknown),
+            ("Ошибка инструмента: файл не найден", StopReason::Unknown),
+            ("остановлено", StopReason::Unknown),
+        ];
+        for (text, reason) in table {
+            assert_eq!(reason_of(text), reason, "{text}");
+        }
+    }
+
+    #[test]
+    fn only_an_untouched_run_waits_for_the_network_on_its_own() {
+        let mut run = run_with(vec![("чтение", Effect::Read, StepState::Ok)]);
+        assert!(!run.acted, "чтение ничего не меняет");
+        push_step(&mut run, "w", "запись", Effect::Local, StepState::Started);
+        assert!(run.acted);
+        let minute = crate::schedule::hour_ms() / 60;
+        assert_eq!([0, 1, 2, 3].map(network_retry_ms), [Some(minute), Some(5 * minute), Some(15 * minute), None]);
     }
 
     #[test]
