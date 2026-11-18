@@ -46,6 +46,11 @@ async fn note(app: &Arc<App>, routine: &Routine, status: &str, text: &str) {
     app.turns.emit(json!({ "type": "journal", "entry": entry }));
 }
 
+/// Запуск не состоялся (почта не ответила, бот не стартовал): строка в журнале рутин.
+pub async fn note_failure(app: &Arc<App>, routine: &Routine, text: &str) {
+    note(app, routine, "failed", text).await;
+}
+
 /// Дневной предел токенов исчерпан. Спрашивают только те, кто идёт без человека (рутины, цели, процессы):
 /// упёрся — это и есть остановка, её запоминаем для кольца в доке.
 pub fn over_limit(app: &App) -> bool {
@@ -78,6 +83,11 @@ pub async fn run_routine(app: &Arc<App>, routine: &Routine, unattended: bool) ->
 
 /// Тот же запуск, но с другой пометкой источника в журнале (например «device:iPhone», когда рутину запустили с устройства).
 pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str, late_ms: i64) -> Result<(), crate::turn::StartError> {
+    run_routine_with(app, routine, unattended, source, late_ms, "").await
+}
+
+/// Запуск с дописанными данными (новые письма триггера почты: `mail::check_trigger`).
+pub async fn run_routine_with(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str, late_ms: i64, extra: &str) -> Result<(), crate::turn::StartError> {
     let late_prefix = if late_ms > 0 {
         let h = late_ms / 3_600_000;
         let m = (late_ms % 3_600_000) / 60_000;
@@ -130,6 +140,7 @@ pub async fn run_routine_as(app: &Arc<App>, routine: &Routine, unattended: bool,
     if let Err(e) = app.store.mark_routine_run(&routine.id, true).await {
         eprintln!("[routine] {}: {e}", routine.title);
     }
+    text.push_str(extra);
     let started = start_turn(app, &routine.bot_id, &text, opts);
     if started.is_err() {
         if let Err(e) = app.store.set_routine_status(&routine.id, "error").await {
@@ -284,6 +295,11 @@ async fn tick(app: &Arc<App>) {
         }
         if over_limit(app) {
             pause_for_budget(app, &routine).await;
+            continue;
+        }
+        // Рутина с почтовым триггером: сначала ящик, ход — только если пришли подходящие письма.
+        if let Some(trigger) = app.mail.trigger(&routine.id) {
+            crate::mail::tick_routine(app, routine, trigger);
             continue;
         }
         if let Err(e) = run_routine_as(app, &routine, true, "routine", late_ms).await {

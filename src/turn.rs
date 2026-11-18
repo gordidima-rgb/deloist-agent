@@ -1475,6 +1475,8 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
     if opts.unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
+    // Отправители писем прошлого хода больше не «этого хода» для автоработы почты.
+    app.mail.forget_turn(bot_id);
     if let Some(run) = &opts.run {
         crate::goals::begin_run(bot_id, run.clone());
     }

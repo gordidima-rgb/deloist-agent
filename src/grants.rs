@@ -885,6 +885,8 @@ pub fn scope_for(app: &crate::App, bot: &crate::store::Bot, name: &str, args: &V
             }
         }
         "generate_image" => Scope::new(name, ANYWHERE, "pay", "call", ""),
+        // Письмо от имени человека: вид `send`, каждое — отдельное решение (`mail::scope`).
+        _ if crate::mail::is_tool(name) => crate::mail::scope(app, bot, name, args),
         _ if name.starts_with("mcp__") => {
             let (server, tool) = crate::mcp::split_name(name)?;
             let kind = risky_kind(&tool.replace('_', " ")).unwrap_or("");

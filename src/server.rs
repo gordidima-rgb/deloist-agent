@@ -2669,6 +2669,23 @@ async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum:
     };
     // Кнопку нажал человек, он и ответит на карточки. Без него запускает только расписание.
     let attended = body.get("attended").and_then(Value::as_bool).unwrap_or(true);
+    // Почтовый триггер: кнопка тоже смотрит ящик; писем нет — бот узнаёт об этом из задания.
+    if let (Some(trigger), Some(routine)) = (app.mail.trigger(&id), app.store.routine(&id)) {
+        let (extra, commit) = match crate::mail::check_trigger(&app, &routine, &trigger).await {
+            Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => (text, Some((senders, uid_validity, last_uid))),
+            Ok(crate::mail::Check::Nothing) => ("\n\nНовых подходящих писем нет.".to_string(), None),
+            Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("почта: {e}")),
+        };
+        return match crate::scheduler::run_routine_with(&app, &routine, !attended, "routine", 0, &extra).await {
+            Ok(()) => {
+                if let Some((senders, validity, last)) = commit {
+                    crate::mail::commit(&app, &id, &routine.bot_id, &senders, validity, last);
+                }
+                ok(json!({ "ok": true, "routine": app.store.routine(&id) }))
+            }
+            Err(e) => fail(StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), &e.message),
+        };
+    }
     match crate::scheduler::run_now(&app, &id, !attended).await {
         Ok(routine) => ok(json!({ "ok": true, "routine": routine })),
         Err(e) => fail(StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), &e.message),
@@ -2808,10 +2825,70 @@ async fn patch_routine(State(app): Shared, Path(id): Path<String>, body: axum::b
 
 async fn remove_routine(State(app): Shared, Path(id): Path<String>) -> Response {
     match app.store.remove_routine(&id).await {
-        Ok(true) => ok(json!({ "ok": true })),
+        Ok(true) => {
+            app.mail.remove_trigger(&id);
+            ok(json!({ "ok": true }))
+        }
         Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
         Err(e) => io_fail(e),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Почта ботов (`/api/mail…` — только окно человека, `guard::human_only`)
+// ---------------------------------------------------------------------------
+
+fn mail_reply(result: Result<Value, crate::mail::ApiError>) -> Response {
+    match result {
+        Ok(v) => ok(v),
+        Err(crate::mail::ApiError::Bad(m)) => fail(StatusCode::BAD_REQUEST, m),
+        Err(crate::mail::ApiError::NotFound(m)) => fail(StatusCode::NOT_FOUND, m),
+        Err(crate::mail::ApiError::Upstream(m)) => fail(StatusCode::BAD_GATEWAY, m),
+    }
+}
+
+async fn mail_overview(State(app): Shared) -> Response {
+    ok(crate::mail::overview(&app))
+}
+
+async fn mail_create(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    mail_reply(crate::mail::create(&app, &body).await.map(|a| json!({ "account": a })))
+}
+
+async fn mail_patch(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    mail_reply(crate::mail::patch(&app, &id, &body).await.map(|a| json!({ "account": a })))
+}
+
+async fn mail_remove(State(app): Shared, Path(id): Path<String>) -> Response {
+    mail_reply(crate::mail::remove(&app, &id).await)
+}
+
+async fn mail_check(State(app): Shared, Path(id): Path<String>) -> Response {
+    mail_reply(crate::mail::check(&app, &id).await)
+}
+
+async fn mail_put_trigger(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    mail_reply(crate::mail::put_trigger(&app, &id, &body).await.map(|t| json!({ "trigger": t })))
+}
+
+async fn mail_remove_trigger(State(app): Shared, Path(id): Path<String>) -> Response {
+    ok(json!({ "ok": app.mail.remove_trigger(&id) }))
+}
+
+async fn mail_sent(State(app): Shared) -> Response {
+    ok(json!({ "sent": app.mail.sent(200) }))
 }
 
 // ---------------------------------------------------------------------------
@@ -4337,6 +4414,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/routines", post(add_routine))
         .route("/api/routines/{id}", axum::routing::patch(patch_routine).merge(delete(remove_routine)))
         .route("/api/routines/{id}/run", post(run_routine_now))
+        .route("/api/mail", get(mail_overview))
+        .route("/api/mail/accounts", post(mail_create))
+        .route("/api/mail/accounts/{id}", axum::routing::patch(mail_patch).merge(delete(mail_remove)))
+        .route("/api/mail/accounts/{id}/check", post(mail_check))
+        .route("/api/mail/triggers/{id}", axum::routing::put(mail_put_trigger).merge(delete(mail_remove_trigger)))
+        .route("/api/mail/sent", get(mail_sent))
         .route("/api/routines/{id}/test-reminder", post(test_reminder))
         .route("/api/goals", post(add_goal))
         .route("/api/goals/{id}", axum::routing::patch(patch_goal).merge(delete(remove_goal)))

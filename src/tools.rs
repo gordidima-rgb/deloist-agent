@@ -371,7 +371,7 @@ pub fn is_read_only(name: &str) -> bool {
     // `ask_user` и так обращается к человеку. `remember` меняет память бота, это уже запись.
     // `save_script` и `run_script` сами ничего не делают: сохранять можно только под согласие человека, а каждый шаг
     // скрипта идёт через обычную проверку и карточки (`turn::execute_call_in`).
-    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "finish_turn" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "read_help" | "save_script" | "run_script" | "await_event")
+    matches!(name, "list_files" | "read_file" | "list_bots" | "browser_page" | "browser_show_to_human" | "browser_logins" | "ask_user" | "finish_turn" | "recall" | "search_history" | "read_history" | "read_skill" | "workspace_graph" | "list_routines" | "team_memory_review" | "list_workflows" | "read_workflow" | "read_workflow_runs" | "list_habits" | "list_todos" | "offer_specialist" | "propose_team" | "propose_bot_change" | "propose_routine" | "propose_rule" | "search_catalog" | "read_help" | "save_script" | "run_script" | "await_event" | "mail_accounts" | "mail_search" | "mail_read")
 }
 
 /// Какой из двух режимов осторожнее. Передача задачи не должна снижать осторожность:
@@ -415,6 +415,10 @@ pub async fn tool_defs_with_mcp(app: &Arc<App>) -> Value {
     }
     if crate::image::ready(app) {
         extra.push(crate::image::tool_def());
+    }
+    // Почта: инструменты есть, только когда человек подключил хотя бы один ящик.
+    if app.mail.any_account() {
+        extra.extend(crate::mail::defs());
     }
     extra.extend(crate::mcp::tool_defs(app).await);
     if let Some(list) = all.as_array_mut() {
@@ -515,6 +519,10 @@ pub fn needs_approval_for(app: &App, bot: &Bot, name: &str, args: &Value) -> boo
     }
     if crate::goal_tools::is_goal_tool(name) {
         return crate::goal_tools::needs_approval(app, bot, name, args);
+    }
+    // Почта: чтение без карточки, отправка — карточка, кроме автоработы с разрешёнными адресатами (`mail::needs_approval`).
+    if crate::mail::is_tool(name) {
+        return crate::mail::needs_approval(app, bot, name, args);
     }
     let store = &app.store;
     // Секреты отбиваются при выполнении в любом режиме, карточка тут не нужна: разрешить их нельзя.
@@ -1118,6 +1126,7 @@ mod approval_tests {
 pub fn label(name: &str) -> &str {
     match name {
         n if crate::team_tasks::is_tool(n) => crate::team_tasks::label(n),
+        n if crate::mail::is_tool(n) => crate::mail::label(n),
         "run_command" => "команда в оболочке",
         "ask_user" => "вопрос человеку",
         "finish_turn" => "итог хода",
@@ -1868,6 +1877,7 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
 
         routine if crate::routine_tools::is_routine_tool(routine) => crate::routine_tools::exec(app, bot, routine, args).await,
 
+        mail if crate::mail::is_tool(mail) => crate::mail::exec(app, bot, mail, args).await,
         wait if crate::runs::is_wait_tool(wait) => crate::runs::exec_wait(app, bot, args),
 
         flow if crate::workflow_tools::is_tool(flow) => crate::workflow_tools::exec(app, bot, flow, args).await,

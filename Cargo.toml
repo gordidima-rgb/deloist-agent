@@ -26,6 +26,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "native-tls"] }
 tokio-util = "0.7"
+# Почта ботов: TLS тем же native-tls, что у reqwest (уже в дереве); разбор писем MIME — mail-parser без зависимостей.
+tokio-native-tls = "0.3"
+mail-parser = { version = "1", default-features = false }
 # Снимок экрана в PNG и голос в JSON: обе на чистом Rust и уже были в дереве зависимостей.
 png = "0.17"
 base64 = "0.22"

@@ -3942,6 +3942,75 @@ async fn the_program_key_cannot_rebuild_a_team_or_make_one_with_an_orchestrator(
 }
 
 #[tokio::test]
+async fn the_agent_key_cannot_touch_mail_and_the_password_stays_secret() {
+    let crew = Crew::start("mail-agent").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let call = |method: reqwest::Method, path: &str, body: Option<Value>| {
+        let mut request = crew.client.request(method, format!("{}{path}", crew.base)).bearer_auth(&token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        request.send()
+    };
+    let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Почтальон", "role": "р" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    // Человек подключает ящик (без проверки входа: сети в тесте нет).
+    let secret = "app-pass-very-secret-77";
+    let created = crew
+        .ok(
+            "POST",
+            "/api/mail/accounts",
+            Some(json!({ "address": "me@corp.ru", "imapHost": "127.0.0.1", "imapPort": 1143, "imapTls": "none", "smtpHost": "127.0.0.1", "smtpPort": 1025, "smtpTls": "none", "password": secret, "check": false, "bots": [bot] })),
+        )
+        .await;
+    let id = created["account"]["id"].as_str().unwrap().to_string();
+    assert_eq!(created["account"]["hasPassword"], true);
+    assert!(!created.to_string().contains(secret), "пароль в ответе: {created}");
+    let listed = crew.ok("GET", "/api/mail", None).await;
+    assert!(!listed.to_string().contains(secret));
+    let on_disk = std::fs::read_to_string(crew.data_dir.join("mail.json")).unwrap();
+    assert!(!on_disk.contains(secret), "пароль в mail.json");
+    assert!(!std::fs::read_to_string(crew.data_dir.join("state.json")).unwrap_or_default().contains(secret));
+    // Без шифрования — только сервер этого компьютера.
+    let (status, _) = crew.send("PATCH", &format!("/api/mail/accounts/{id}"), Some(json!({ "imapHost": "imap.evil.ru" }))).await;
+    assert_eq!(status, 400, "открытый IMAP на чужой сервер");
+    // Сменили сервер или порт без пароля: старый пароль ушёл бы на новый адрес.
+    let (status, _) = crew.send("PATCH", &format!("/api/mail/accounts/{id}"), Some(json!({ "smtpPort": 2525 }))).await;
+    assert_eq!(status, 400, "смена порта без пароля");
+    let (status, _) = crew.send("PATCH", &format!("/api/mail/accounts/{id}"), Some(json!({ "login": "other" }))).await;
+    assert_eq!(status, 400, "смена логина без пароля");
+    // Подпись и списки пароль не трогают; ответ PATCH пароля не содержит.
+    let patched = crew.ok("PATCH", &format!("/api/mail/accounts/{id}"), Some(json!({ "label": "Работа", "authserv": ["mx.corp.ru"] }))).await;
+    assert!(!patched.to_string().contains(secret), "пароль в ответе PATCH: {patched}");
+    assert_eq!(patched["account"]["authserv"], json!(["mx.corp.ru"]));
+    assert_eq!(patched["account"]["hasPassword"], true);
+
+    // Ключ программы (скрипт бота) не видит ящики и не включает себе автоработу и белый список.
+    let refused = [
+        call(reqwest::Method::GET, "/api/mail", None).await.unwrap(),
+        call(reqwest::Method::POST, "/api/mail/accounts", Some(json!({ "address": "x@evil.ru", "password": "p", "check": false }))).await.unwrap(),
+        call(reqwest::Method::PATCH, &format!("/api/mail/accounts/{id}"), Some(json!({ "autoBots": [bot], "allow": ["@evil.ru"] }))).await.unwrap(),
+        call(reqwest::Method::DELETE, &format!("/api/mail/accounts/{id}"), None).await.unwrap(),
+        call(reqwest::Method::POST, &format!("/api/mail/accounts/{id}/check"), None).await.unwrap(),
+        call(reqwest::Method::PUT, "/api/mail/triggers/rt1", Some(json!({ "accountId": id }))).await.unwrap(),
+        call(reqwest::Method::GET, "/api/mail/sent", None).await.unwrap(),
+        call(reqwest::Method::DELETE, "/api/mail/triggers/rt1", None).await.unwrap(),
+        // Варианты записи пути не обходят защиту.
+        call(reqwest::Method::GET, "/API/mail", None).await.unwrap(),
+        call(reqwest::Method::GET, "/api/mail/", None).await.unwrap(),
+        call(reqwest::Method::POST, "//api/mail/accounts", Some(json!({ "address": "x@evil.ru", "password": "p", "check": false }))).await.unwrap(),
+        call(reqwest::Method::GET, "/api/./mail", None).await.unwrap(),
+        call(reqwest::Method::GET, "/api/mail/%2e%2e/mail", None).await.unwrap(),
+    ];
+    for response in refused {
+        assert_eq!(response.status().as_u16(), 403, "ключ программы прошёл в почту: {}", response.url());
+    }
+    let after = crew.ok("GET", "/api/mail", None).await;
+    assert_eq!(after["accounts"][0]["autoBots"], json!([]), "авторабота осталась выключенной");
+    assert_eq!(after["accounts"][0]["allow"], json!([]));
+}
+
+#[tokio::test]
 async fn the_program_key_cannot_edit_memory_facts_by_hand() {
     let crew = Crew::start("memory-facts-agent").await;
     let made = crew.ok("POST", "/api/memory/facts", Some(json!({ "title": "Любит крепкий кофе" }))).await;

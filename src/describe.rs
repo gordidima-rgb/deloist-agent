@@ -498,6 +498,14 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
             d.text = ph!(format!("{me}: {summary}"), format!("{me}: {summary}"));
             d.details = crate::workflow_tools::full_summary(app, name, args);
         }
+        "mail_send" | "mail_draft" => {
+            let (ru, en, detail) = crate::mail::describe(app, bot, name, args);
+            d.class = if name == "mail_send" { "send" } else { "create" };
+            d.place = "outside";
+            d.risk = if name == "mail_send" { "high" } else { "low" };
+            d.text = ph!(format!("{me} хочет {ru}"), format!("{me} wants to {en}"));
+            d.details = detail;
+        }
         "generate_image" => {
             d.class = "spend";
             d.risk = "medium";

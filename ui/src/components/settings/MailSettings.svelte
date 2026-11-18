@@ -3,16 +3,7 @@
   // почтовые триггеры рутин и журнал отправленного. Пароль приложения живёт только в поле ввода
   // и в запросе: обратно сервер его не отдаёт.
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import TextArea from '../kit/TextArea.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
-  import Checkbox from '../kit/Checkbox.svelte';
-  import Switch from '../kit/Switch.svelte';
-  import Badge from '../kit/Badge.svelte';
-  import EmptyState from '../kit/EmptyState.svelte';
+  import { Section, Field, TextInput, TextArea, Select, Button, Checkbox, Switch, Badge, EmptyState } from '../kit';
   import { toast } from '../../lib/toast.js';
   import { tr } from '../../lib/i18n.js';
 
