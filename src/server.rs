@@ -551,6 +551,9 @@ struct WhatsNewQuery {
     /// `all=1` — весь журнал изменений, а не только новое с прошлого раза.
     #[serde(default)]
     all: String,
+    /// Язык интерфейса: `en` — английский журнал, иначе русский.
+    #[serde(default)]
+    lang: String,
 }
 
 const WHATS_NEW_IMAGES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/whats_new_images.rs"));
@@ -565,11 +568,12 @@ async fn whats_new_image(Path(name): Path<String>) -> Response {
 
 async fn whats_new(Query(q): Query<WhatsNewQuery>) -> Response {
     let current = env!("CARGO_PKG_VERSION");
+    let changelog = crate::changelog::for_lang(&q.lang);
     if !q.all.is_empty() && q.all != "0" {
-        let sections = crate::changelog::parse(crate::changelog::CHANGELOG);
+        let sections = crate::changelog::parse(changelog);
         return ok(json!({ "current": current, "from": "", "all": true, "sections": sections }));
     }
-    let (current, from, sections) = crate::changelog::since(crate::changelog::CHANGELOG, current, &q.from);
+    let (current, from, sections) = crate::changelog::since(changelog, current, &q.from);
     ok(json!({ "current": current, "from": from, "sections": sections }))
 }
 

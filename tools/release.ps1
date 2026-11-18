@@ -1,7 +1,7 @@
 # Выпуск новой версии: сборка, подпись и загрузка в открытый репозиторий выпусков.
 # Версия берётся из Cargo.toml: подними её там и закоммить до запуска.
 #
-#   pwsh -NoProfile -File tools\release.ps1                        (заметки: раздел версии из CHANGELOG.md)
+#   pwsh -NoProfile -File tools\release.ps1                        (заметки: раздел версии из CHANGELOG.en.md и CHANGELOG.md)
 #   pwsh -NoProfile -File tools\release.ps1 -Notes "Одна строка"   (свои заметки вместо раздела)
 #
 # Закрытый ключ лежит вне репозитория. Без него новые версии не поставятся ни у кого.
@@ -23,22 +23,27 @@ if ($LASTEXITCODE -ne 0) { throw 'Проверка специалистов ка
 
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
 $tag = "v$version"
-# Заметки выпуска: без -Notes берём раздел этой версии из CHANGELOG.md. Они уходят в подписанное описание
-# (окно «Что нового» показывает их до перезапуска) и в тело выпуска на GitHub. Строки-картинки убираем:
-# старая копия программы файла картинки ещё не знает.
+# Заметки выпуска: без -Notes берём раздел этой версии из CHANGELOG.en.md и CHANGELOG.md — сначала английский,
+# потом русский, каждый под меткой <!-- lang:xx --> (окно «Что нового» до перезапуска берёт блок своего языка,
+# GitHub метки не показывает). Они уходят в подписанное описание и в тело выпуска на GitHub. Строки-картинки
+# убираем: старая копия программы файла картинки ещё не знает.
 $notesFile = Join-Path ([IO.Path]::GetTempPath()) "deloist-notes-$version.md"
-if ($Notes) {
-  $notesText = $Notes
-} else {
+function Get-Section([string]$file) {
   $inSection = $false
-  $lines = foreach ($line in (Get-Content -Encoding UTF8 (Join-Path $root 'CHANGELOG.md'))) {
+  $lines = foreach ($line in (Get-Content -Encoding UTF8 (Join-Path $root $file))) {
     if ($line -match '^## \[') { $inSection = ($line -match ('^## \[' + [regex]::Escape($version) + '\]')) ; continue }
     if ($inSection -and $line -notmatch '^\s*!\[') { $line }
   }
-  $notesText = (($lines -join "`n").Trim())
-  if (-not $notesText) { throw "В CHANGELOG.md нет раздела [$version]: допиши его или передай -Notes." }
+  $text = (($lines -join "`n").Trim())
+  if (-not $text) { throw "В $file нет раздела [$version]: допиши его или передай -Notes." }
+  $text
 }
-if ([Text.Encoding]::UTF8.GetByteCount($notesText) -gt 16384) { throw 'Заметки длиннее 16 КБ: сократи раздел CHANGELOG.md.' }
+if ($Notes) {
+  $notesText = $Notes
+} else {
+  $notesText = "<!-- lang:en -->`n" + (Get-Section 'CHANGELOG.en.md') + "`n`n<!-- lang:ru -->`n" + (Get-Section 'CHANGELOG.md')
+}
+if ([Text.Encoding]::UTF8.GetByteCount($notesText) -gt 16384) { throw 'Заметки длиннее 16 КБ: сократи раздел CHANGELOG.md и его перевод.' }
 [IO.File]::WriteAllText($notesFile, $notesText, (New-Object Text.UTF8Encoding($false)))
 gh release view $tag --repo $Repo 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) { throw "Выпуск $tag уже есть: подними версию в Cargo.toml." }

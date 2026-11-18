@@ -1,4 +1,4 @@
-// Разбор CHANGELOG.md: какие версии вышли после указанной.
+// Разбор CHANGELOG.md (и его перевода CHANGELOG.en.md): какие версии вышли после указанной.
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -9,6 +9,12 @@ pub struct WhatsNewSection {
 }
 
 pub const CHANGELOG: &str = include_str!("../CHANGELOG.md");
+pub const CHANGELOG_EN: &str = include_str!("../CHANGELOG.en.md");
+
+/// Журнал на языке интерфейса: английский для `en`, иначе русский.
+pub fn for_lang(lang: &str) -> &'static str {
+    if lang == "en" { CHANGELOG_EN } else { CHANGELOG }
+}
 
 pub fn parse(text: &str) -> Vec<WhatsNewSection> {
     let lines: Vec<&str> = text.lines().collect();
@@ -116,6 +122,14 @@ mod tests {
         assert_eq!(from, "0.3.0");
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].version, "0.3.1");
+    }
+
+    #[test]
+    fn english_changelog_has_the_same_releases() {
+        let heads = |text| parse(text).into_iter().map(|s| (s.version, s.date)).collect::<Vec<_>>();
+        assert_eq!(heads(CHANGELOG_EN), heads(CHANGELOG), "CHANGELOG.en.md must translate every release of CHANGELOG.md");
+        assert_eq!(for_lang("en"), CHANGELOG_EN);
+        assert_eq!(for_lang("ru"), CHANGELOG);
     }
 
     #[test]

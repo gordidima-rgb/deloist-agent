@@ -121,9 +121,13 @@ export function buildFullList(sections) {
 /**
  * Заметки из подписанного описания версии. Это либо раздел CHANGELOG целиком (с заголовком `## [x] — дата` или без),
  * либо старая строка в одну фразу. Возвращает список разделов того же вида, что отдаёт /api/whats-new.
+ * После 0.4.4 заметки двуязычные: блоки `<!-- lang:en -->` и `<!-- lang:ru -->` (их пишет tools/release.ps1),
+ * берём блок языка интерфейса.
  */
-export function parseNotes(notes, version = '') {
-  const text = String(notes ?? '').trim();
+export function parseNotes(notes, version = '', lang = 'ru') {
+  const all = String(notes ?? '');
+  const block = all.match(new RegExp(`<!-- lang:${lang === 'en' ? 'en' : 'ru'} -->([\\s\\S]*?)(?=<!-- lang:|$)`));
+  const text = (block ? block[1] : all).trim();
   if (!text) return [];
   if (!/^#{2,3}\s/m.test(text)) return [{ version, date: '', markdown: `### Добавлено\n\n- ${text.replace(/\s*\n\s*/g, ' ')}` }];
   const out = [];

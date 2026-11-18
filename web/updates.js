@@ -201,7 +201,7 @@ window.DeloistUpdates = (() => {
   function showNotes() {
     const app = snapshot?.app;
     if (!app || !openWhatsNew) return;
-    const sections = window.DeloistUI.parseNotes(app.notes, app.latest);
+    const sections = window.DeloistUI.parseNotes(app.notes, app.latest, window.LANG);
     openWhatsNew({ current: app.latest, from: snapshot.current, sections });
   }
 

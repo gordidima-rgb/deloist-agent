@@ -143,6 +143,9 @@ async fn the_whole_changelog_is_served_and_images_stay_inside_their_folder() {
     assert!(all["sections"].as_array().unwrap().len() > 3, "{all}");
     let some = crew.ok("GET", "/api/whats-new?from=0.3.6", None).await;
     assert!(some["sections"].as_array().unwrap().len() < all["sections"].as_array().unwrap().len());
+    let en = crew.ok("GET", "/api/whats-new?all=1&lang=en", None).await;
+    assert_eq!(en["sections"].as_array().unwrap().len(), all["sections"].as_array().unwrap().len());
+    assert_ne!(en["sections"][0]["markdown"], all["sections"][0]["markdown"], "lang=en must serve the English changelog");
     for name in ["..%2f..%2fCargo.toml", "%2e%2e%5cCargo.toml", "nope.png"] {
         let (status, _) = crew.send("GET", &format!("/api/whats-new/image/{name}"), None).await;
         assert_eq!(status, 404, "{name}");

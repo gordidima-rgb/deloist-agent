@@ -101,6 +101,11 @@ describe('parseNotes', () => {
   it('returns nothing for empty notes', () => {
     expect(parseNotes('  ', '1')).toEqual([]);
   });
+  it('picks the block of the interface language from bilingual notes', () => {
+    const notes = '<!-- lang:en -->\n### Added\n\n- **A.** english\n\n<!-- lang:ru -->\n### Добавлено\n\n- **А.** русский';
+    expect(buildPages(parseNotes(notes, '0.4.5', 'en')).pages[0].items[0].text).toBe('english');
+    expect(buildPages(parseNotes(notes, '0.4.5', 'ru')).pages[0].items[0].text).toBe('русский');
+  });
 });
 
 describe('mergeSections / buildFullList', () => {

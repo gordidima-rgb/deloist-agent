@@ -7879,6 +7879,11 @@ function openKnowMe() {
   });
 }
 
+// Журнал изменений на языке интерфейса.
+function whatsNewApi(query = '') {
+  return api('/api/whats-new?lang=' + window.LANG + query);
+}
+
 // Окно «Что нового». Полный журнал берётся с сервера по ссылке «Все изменения».
 function openWhatsNew(data) {
   if (!window.DeloistUI?.mountWhatsNew) return;
@@ -7893,7 +7898,7 @@ function openWhatsNew(data) {
     from: data?.from || '',
     sections: data?.sections || [],
     startAll: Boolean(data?.all),
-    loadAll: async () => (await api('/api/whats-new?all=1')).sections || [],
+    loadAll: async () => (await whatsNewApi('&all=1')).sections || [],
     onclose: () => {
       try { whatsNewHandle?.destroy(); } catch {}
       whatsNewHandle = null;
@@ -9265,7 +9270,7 @@ function bindUi() {
   const wnBtn = $('#upd-whatsnew');
   if (wnBtn) wnBtn.addEventListener('click', async () => {
     try {
-      const data = await api('/api/whats-new');
+      const data = await whatsNewApi();
       openWhatsNew(data);
     } catch (err) {
       toast(err.message, 5000);
@@ -10288,7 +10293,7 @@ async function boot() {
       if (!currentVersion) return;
       const last = S.settings?.lastSeenVersion || '';
       if (last && last !== currentVersion) {
-        const wn = await api('/api/whats-new?from=' + encodeURIComponent(last));
+        const wn = await whatsNewApi('&from=' + encodeURIComponent(last));
         openWhatsNew(wn);
       }
       if (last !== currentVersion) {
