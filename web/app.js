@@ -1091,6 +1091,63 @@ function paintWorkNow(kind, text) {
   if (now.textContent !== text) now.textContent = text;
 }
 
+// Живой ход: под строкой «Работает» — последние шесть шагов, остальные одной строкой «ещё N шагов».
+const LIVE_STEPS = 6;
+
+function paintLiveSteps(group) {
+  if (!group?.isConnected || !group.classList.contains('is-live')) return;
+  let box = group.querySelector(':scope > .work-live');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'work-live';
+    group.querySelector('summary').after(box);
+  }
+  const nodes = $$('.work-body .tool', group);
+  const rows = nodes.slice(-LIVE_STEPS).map((node) => {
+    const row = document.createElement('div');
+    row.className = 'tool work-step';
+    row.dataset.status = node.dataset.status;
+    row.append(...[...node.querySelector('summary').children].filter((c) => !c.classList.contains('t-chev')).map((c) => c.cloneNode(true)));
+    return row;
+  });
+  if (nodes.length > LIVE_STEPS) {
+    const more = document.createElement('div');
+    more.className = 'work-more';
+    more.textContent = CrewToolLabels.more(nodes.length - LIVE_STEPS, plural);
+    rows.unshift(more);
+  }
+  box.replaceChildren(...rows);
+}
+
+function durText(ms) {
+  return ms >= 60_000
+    ? tr('{n} мин', { n: Math.round(ms / 60_000) })
+    : tr('{n} с', { n: (ms / 1000).toLocaleString(window.LOCALE, { maximumFractionDigits: ms < 10_000 ? 1 : 0 }) });
+}
+
+// Ход кончился: строка группы называет сделанное — «Работал 29 с · прочитал 2 файла, искал 3 раза».
+// Время и расход хода (stats) приходят позже, с turn_end, и дописываются в ту же строку.
+function sealWork(group, stats = {}) {
+  group.querySelector(':scope > .work-live')?.remove();
+  const nodes = $$('.work-body .tool', group);
+  const calls = nodes.map((node) => node._call).filter(Boolean);
+  if (!calls.length) return;
+  const failed = nodes.filter((node) => ['error', 'denied', 'timeout'].includes(node.dataset.status)).length;
+  const head = stats.ms >= 1000 ? tr('Работал {t}', { t: durText(stats.ms) }) : tr('Работал');
+  const bits = [head, CrewToolLabels.summary(calls, plural)];
+  if (failed) bits.push(tr('с ошибкой: {n}', { n: failed }));
+  const summary = group.querySelector('summary');
+  summary.querySelector('span').textContent = bits.filter(Boolean).join(' · ');
+  group.classList.toggle('has-failed', failed > 0);
+  let meta = summary.querySelector('.work-meta');
+  if (stats.meta && !meta) {
+    meta = document.createElement('span');
+    meta.className = 'work-meta';
+    summary.append(meta);
+  }
+  if (meta) meta.textContent = stats.meta || '';
+}
+
 function calmWork() {
   for (const group of $$('.work-group.is-live', messagesEl())) group.classList.remove('is-live');
 }
@@ -1107,15 +1164,20 @@ function appendInFeed(node) {
   if (!open) return;
   workGroup = null;
   open.classList.remove('is-live');
-  if (!open.querySelector('.work-body').children.length) open.remove();
+  const empty = !open.querySelector('.work-body').children.length;
+  if (empty) open.remove();
   ensureWorkGroup();
   splitLive(open);
+  if (!empty) sealWork(open);
   paintWorkNow('think', tr('Думает'));
 }
 
 function finishWorkGroup() {
   calmWork();
-  if (workGroup && !workGroup.querySelector('.work-body').children.length) workGroup.remove();
+  if (workGroup?.isConnected) {
+    if (workGroup.querySelector('.work-body').children.length) sealWork(workGroup);
+    else workGroup.remove();
+  }
   workGroup = null;
 }
 
@@ -1337,7 +1399,6 @@ function toolNode(call) {
   d.className = 'tool';
   d.dataset.status = call.status || 'running';
   d.dataset.callId = call.id || '';
-  d.dataset.family = CrewToolLabels.family(call);
   d._call = call;
   const summary = document.createElement('summary');
   const _plain = CrewToolLabels.plainName(call.name);
@@ -1373,54 +1434,6 @@ function toolNode(call) {
     });
   }
   return d;
-}
-
-// Подряд идущие шаги одной семьи сворачиваются в одну строку: «Работает в браузере · 12 шагов · example.com».
-function groupNode(family) {
-  const g = document.createElement('details');
-  g.className = 'tool-grp';
-  g.dataset.family = family;
-  const summary = document.createElement('summary');
-  summary.innerHTML = ICONS.chev + '<span class="t-label"></span><span class="t-target"></span><span class="t-status"></span>';
-  const body = document.createElement('div');
-  body.className = 'tool-grp-body';
-  g.append(summary, body);
-  return g;
-}
-
-function refreshGroup(g) {
-  if (!g) return;
-  const leaves = [...g.querySelectorAll('.tool')];
-  const n = leaves.length;
-  const first = leaves[0];
-  const label = g.dataset.family === 'browser' ? tr('Работает в браузере') : first?.querySelector('.t-label')?.textContent || '';
-  const hosts = [...g.querySelectorAll('.tool[data-family="browser"] .t-target')].map((el) => el.textContent).filter((s) => /^[\w-]+(\.[\w-]+)+$/.test(s));
-  const host = hosts[hosts.length - 1] || '';
-  const meta = n + ' ' + plural(n, 'шаг', 'шага', 'шагов') + (host ? ' · ' + host : '');
-  const statuses = leaves.map((el) => el.dataset.status);
-  const status = ['running', 'waiting', 'error', 'denied', 'timeout'].find((s) => statuses.includes(s)) || 'ok';
-  g.dataset.status = status;
-  g.querySelector('summary .t-label').textContent = label;
-  g.querySelector('summary .t-target').textContent = meta;
-  g.querySelector('summary .t-status').textContent = statusLabel(status);
-}
-
-// Добавляет шаг в список; если предыдущий шаг той же семьи, они становятся одной группой.
-function addTool(tools, node) {
-  const last = tools.lastElementChild;
-  const family = node.dataset.family;
-  if (last && family && last.dataset.family === family) {
-    let group = last;
-    if (!last.classList.contains('tool-grp')) {
-      group = groupNode(family);
-      last.replaceWith(group);
-      group.querySelector('.tool-grp-body').append(last);
-    }
-    group.querySelector('.tool-grp-body').append(node);
-    refreshGroup(group);
-    return;
-  }
-  tools.append(node);
 }
 
 // Ошибка говорит по-человечески, что случилось и что делать. Ответ сервера остаётся ниже как есть.
@@ -1497,7 +1510,7 @@ function routineRunCard(msg, run) {
 
 function messageRow(msg) {
   if (msg.role === 'compacted') return compactedRow(msg);
-  if (msg.role === 'task') return taskRow(msg);
+  if (msg.role === 'task') return taskRow(msg) || document.createDocumentFragment();
   const row = document.createElement('div');
   // Заметка продолжения (после перезапуска, лимита, ожидания, решения человека) — от имени программы, а не человека.
   const resumed = msg.role === 'user' && msg.source === 'resume';
@@ -1586,7 +1599,7 @@ function toolsNode(calls) {
   tools.className = 'tools';
   for (const call of calls) {
     if (CrewToolLabels.hidden(call)) continue;
-    addTool(tools, toolNode(call));
+    tools.append(toolNode(call));
   }
   return tools;
 }
@@ -1818,37 +1831,94 @@ function taskAvatar(bot, name) {
   return face;
 }
 
-// Длинный отчёт свёрнут до нескольких строк: целиком — по кнопке.
-const TASK_TEXT_FOLD = 320;
+// Передача задачи — одна строка-карточка в чате того, кто её дал: кому, статус, «Стоп», пока задача открыта,
+// итог (длинный свёрнут) и шаги получателя по раскрытию. Рождается, когда бот отдал задачу (assign_task),
+// меняется по task_update и закрывается строкой роли task (task_done / room_message). Шаги берём у team.js.
+const HANDOFF_FOLD = 1400;
+const HANDOFF_STATES = {
+  queued: ['neutral', tr('в очереди')],
+  running: ['ai', tr('работает')],
+  paused: ['sleep', tr('на паузе')],
+  done: ['done', tr('готово')],
+  error: ['error', tr('ошибка')],
+  interrupted: ['error', tr('прервана')],
+};
+const HANDOFF_OPEN = ['queued', 'running', 'paused'];
+const handoffs = new Map(); // taskId → задача, пока она открыта
+const taskStates = new Map(); // taskId → последнее task_update: карточка могла родиться позже события
 
-function taskRow(msg) {
+function handoffRow(t) {
   const row = document.createElement('div');
-  row.className = `task-line task-line--${msg.state === 'done' ? 'done' : 'failed'}`;
-  row.dataset.id = msg.id || '';
-  const bot = msg.to ? botById(msg.to) : null;
-  const name = msg.toName || bot?.name || '';
-  row.append(taskAvatar(bot, name));
+  row.dataset.taskId = t.id;
+  const bot = t.to ? botById(t.to) : null;
+  row._t = t;
+  row._open = false;
+  row._avatar = taskAvatar(bot, t.toName || bot?.name || '');
+  t.row = row;
+  paintHandoff(row);
+  return row;
+}
+
+function handoffSteps(detail) {
+  const list = document.createElement('ul');
+  list.className = 'task-line-steps';
+  for (const step of detail.steps) {
+    const li = document.createElement('li');
+    li.dataset.status = step.status;
+    const label = document.createElement('span');
+    label.textContent = step.label;
+    li.append(label);
+    if (step.arg) {
+      const arg = document.createElement('span');
+      arg.className = 'task-line-arg';
+      arg.textContent = step.arg;
+      li.append(arg);
+    }
+    list.append(li);
+  }
+  return list;
+}
+
+function paintHandoff(row) {
+  const t = row._t;
+  const bot = t.to ? botById(t.to) : null;
+  const name = t.toName || bot?.name || '';
+  const [tone, word] = HANDOFF_STATES[t.state] || HANDOFF_STATES.error;
+  const open = HANDOFF_OPEN.includes(t.state);
+  row.className = `task-line task-line--${open ? 'open' : t.state === 'done' ? 'done' : 'failed'}`;
+  row.dataset.id = t.msgId || '';
 
   const body = document.createElement('div');
   body.className = 'task-line-body';
   const head = document.createElement('div');
   head.className = 'task-line-head';
-  head.textContent = msg.state === 'done'
-    ? tr('{name}: задача выполнена', { name })
-    : msg.state === 'interrupted'
-      ? tr('{name}: задача прервана', { name })
-      : tr('{name}: задача не выполнена', { name });
+  const who = document.createElement('span');
+  who.textContent = name;
+  const badge = document.createElement('span');
+  badge.className = `k-badge k-badge--${tone}`;
+  badge.textContent = word;
+  head.append(who, badge);
   body.append(head);
+
+  const detail = window.DeloistTeam?.detail(t.from, t.to);
+  const now = t.state === 'running' ? detail?.cur : '';
+  const note = now || t.brief;
+  if (note) {
+    const line = document.createElement('div');
+    line.className = 'task-line-brief';
+    line.textContent = note;
+    body.append(line);
+  }
 
   const actions = document.createElement('div');
   actions.className = 'task-line-actions';
-  if (msg.text) {
+  if (t.text) {
     const text = document.createElement('div');
     text.className = 'task-line-text';
     // Как обычный ответ бота: ссылки на файлы в его папке открываются в ящике «Файлы».
-    text.innerHTML = md(msg.text);
+    text.innerHTML = md(t.text);
     body.append(text);
-    if (String(msg.text).length > TASK_TEXT_FOLD) {
+    if (String(t.text).length > HANDOFF_FOLD) {
       text.classList.add('is-folded');
       const more = document.createElement('button');
       more.type = 'button';
@@ -1862,7 +1932,7 @@ function taskRow(msg) {
     }
   }
   // Файлы результата — ссылками: щелчок открывает файл у подчинённого.
-  const files = (Array.isArray(msg.files) ? msg.files : []).filter((path) => window.DeloistUI.workspaceRef(path));
+  const files = (Array.isArray(t.files) ? t.files : []).filter((path) => window.DeloistUI.workspaceRef(path));
   if (files.length) {
     const list = document.createElement('div');
     list.className = 'task-line-files';
@@ -1878,19 +1948,95 @@ function taskRow(msg) {
     }
     body.append(list);
   }
+  if (t.state === 'running' && t.to) {
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.className = 'k-btn k-btn--sm k-btn--ghost';
+    stop.innerHTML = ICONS.stop;
+    stop.append(tr('Стоп'));
+    stop.addEventListener('click', async () => {
+      stop.disabled = true;
+      try {
+        await api(`/api/bots/${encodeURIComponent(t.to)}/stop`, { method: 'POST' });
+      } catch (err) {
+        stop.disabled = false;
+        toast(err.message);
+      }
+    });
+    actions.append(stop);
+  }
+  if (detail?.total) {
+    const steps = document.createElement('button');
+    steps.type = 'button';
+    steps.className = 'k-btn k-btn--sm k-btn--ghost';
+    steps.setAttribute('aria-expanded', String(row._open));
+    steps.textContent = tr('Шаги: {n}', { n: detail.total });
+    steps.addEventListener('click', () => {
+      row._open = !row._open;
+      paintHandoff(row);
+    });
+    actions.append(steps);
+  }
   if (bot) {
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'k-btn k-btn--sm';
-    open.innerHTML = ic('chat-bubble');
-    open.append(tr('Открыть чат'));
-    open.title = tr('Посмотреть, как {name} сделал задачу', { name });
-    open.addEventListener('click', () => selectBot(bot.id));
-    actions.append(open);
+    const chat = document.createElement('button');
+    chat.type = 'button';
+    chat.className = 'k-btn k-btn--sm';
+    chat.innerHTML = ic('chat-bubble');
+    chat.append(tr('Открыть чат'));
+    chat.title = tr('Посмотреть, как {name} сделал задачу', { name });
+    chat.addEventListener('click', () => selectBot(bot.id));
+    actions.append(chat);
   }
   if (actions.childElementCount) body.append(actions);
-  row.append(body);
-  return row;
+  if (row._open && detail?.total) body.append(handoffSteps(detail));
+  row.replaceChildren(row._avatar, body);
+}
+
+// Бот отдал задачу: строка «в очереди» появляется сразу, номер задачи — в ответе инструмента.
+function openHandoff(ev, call) {
+  const id = /taskId\s+([\w-]+)/.exec(String(ev.result || ''))?.[1];
+  if (!id || handoffs.has(id)) return;
+  const name = String(call.args?.bot || '').trim();
+  const to = S.bots.find((b) => b.name.toLowerCase() === name.toLowerCase());
+  const t = { id, from: ev.botId, room: ev.roomId || '', to: to?.id || '', toName: name, state: taskStates.get(id) || 'queued', brief: clip(String(call.args?.text || ''), 140) };
+  handoffs.set(id, t);
+  dropEmpty();
+  appendInFeed(handoffRow(t));
+}
+
+// Задача не выдана (нет такого бота, не в команде, слишком длинная): человек видит это в ленте, а не только в свёрнутом шаге.
+function failedHandoff(call, result) {
+  const t = { id: '', from: '', to: '', toName: String(call.args?.bot || '').trim(), state: 'error', text: clip(String(result || ''), 300) };
+  appendInFeed(handoffRow(t));
+}
+
+function setHandoff(id, patch) {
+  const t = handoffs.get(id);
+  if (!t) return;
+  Object.assign(t, patch);
+  if (t.row.isConnected) paintHandoff(t.row);
+}
+
+// Строка роли task — итог. Если карточка этой задачи на экране, она закрывается на месте; иначе (история, другой чат) возвращается новая.
+function taskRow(msg) {
+  const open = handoffs.get(msg.taskId);
+  handoffs.delete(msg.taskId);
+  const t = { id: msg.taskId || '', from: open?.from || '', room: open?.room || '', to: msg.to || '', toName: msg.toName || '', state: msg.state, text: msg.text, files: msg.files, brief: open?.brief || '', msgId: msg.id };
+  if (open?.row.isConnected) {
+    open.row._t = t;
+    t.row = open.row;
+    paintHandoff(t.row);
+    return null;
+  }
+  return handoffRow(t);
+}
+
+// Лента перерисована (другой чат, перечитали историю): открытые задачи этого бота возвращаются на место.
+function restoreHandoffs() {
+  for (const t of handoffs.values()) {
+    if (t.row.isConnected || t.room || inRoom() || t.from !== S.currentId) continue;
+    appendInFeed(handoffRow(t));
+  }
 }
 
 function compactedRow(msg) {
@@ -2193,12 +2339,12 @@ function renderThread(messages) {
     if (avatar) S.avatars.set('empty', avatar);
     else $('#empty-avatar').remove();
     if (bot) showIntro(bot.id);
-    window.DeloistTeam?.restore();
+    restoreHandoffs();
     return;
   }
   S.turnMs = window.DeloistUI.turnDurations(messages);
   for (const m of messages) appendThreadMessage(m);
-  window.DeloistTeam?.restore();
+  restoreHandoffs();
   scrollBottom(true);
 }
 
@@ -2627,7 +2773,7 @@ function renderRoomThread(messages) {
   }
   S.turnMs = window.DeloistUI.turnDurations(messages);
   for (const m of messages) appendThreadMessage(m);
-  window.DeloistTeam?.restore();
+  restoreHandoffs();
   scrollBottom(true);
 }
 
@@ -2637,7 +2783,8 @@ function upsertRoomMessage(msg) {
   if (msg.role === 'task') {
     if (!old) {
       dropEmpty();
-      appendInFeed(taskRow(msg));
+      const row = taskRow(msg);
+      if (row) appendInFeed(row);
       scrollBottom();
     }
     return;
@@ -3056,6 +3203,13 @@ function appendDelta(ev) {
   scrollBottom();
 }
 
+// Что шаг делает сейчас: строка «работает» у группы и подпись в карточке хода.
+function paintCallNow(call) {
+  const plain = CrewToolLabels.plainName(call.name);
+  const target = (plain === 'run_script' || plain === 'save_script') ? scriptTarget(String(call.args?.name || '')) : CrewToolLabels.target(call);
+  paintWorkNow(workKind(plain), CrewToolLabels.liveText(call, CrewToolLabels.label(call), target));
+}
+
 // Строка хода агента появляется сразу и обновляется по мере работы.
 function showActivity(ev) {
   const live = startLive(ev.turnId, ev.step);
@@ -3067,20 +3221,16 @@ function showActivity(ev) {
   }
   const call = ev.call || {};
   if (CrewToolLabels.hidden(call)) return;
-  const _plain = CrewToolLabels.plainName(call.name);
-  const target = (_plain === 'run_script' || _plain === 'save_script') ? scriptTarget(String(call.args?.name || '')) : CrewToolLabels.target(call);
-  const label = CrewToolLabels.label(call);
-  paintWorkNow(workKind(CrewToolLabels.plainName(call.name)), CrewToolLabels.liveText(call, label, target));
+  paintCallNow(call);
   const fresh = toolNode(call);
   const old = call.id ? tools.querySelector('.tool[data-call-id="' + CSS.escape(String(call.id)) + '"]') : null;
   if (old) {
-    const group = old.closest('.tool-grp');
     fresh.open = old.open;
     old.replaceWith(fresh);
-    refreshGroup(group);
   } else {
-    addTool(tools, fresh);
+    tools.append(fresh);
   }
+  paintLiveSteps(workGroup);
   scrollBottom();
 }
 
@@ -3133,23 +3283,33 @@ function finalizeLive(ev) {
   scrollBottom();
 }
 
-// Итог хода: сколько шагов, токенов и какая доля входа пришла из кэша.
+// Последняя группа шагов этого хода: от неё до последнего сообщения человека.
+function turnWorkGroup() {
+  const rows = [...messagesEl().children];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i].matches('.msg.user')) return null;
+    if (rows[i].matches('.work-group')) return rows[i];
+  }
+  return null;
+}
+
+// Итог хода: время, токены и доля кэша. Если были шаги — дописывается в строку «Работал …» над ответом (одна строка, не две),
+// без шагов — тонкая строка сама по себе.
 function turnStats(ev, card) {
   const usage = ev.usage || {};
-  const bits = [];
-  const steps = Number(ev.steps || card?.steps || 0);
-  if (steps > 0) bits.push(`${steps} ${plural(steps, 'шаг', 'шага', 'шагов')}`);
+  const meta = [];
   const tokens = Number(usage.prompt || 0) + Number(usage.completion || 0);
-  if (tokens > 0) bits.push(`${numberRu(tokens)} ${plural(tokens, 'токен', 'токена', 'токенов')}`);
+  if (tokens > 0) meta.push(`${numberRu(tokens)} ${plural(tokens, 'токен', 'токена', 'токенов')}`);
   if (Number(usage.prompt) > 0 && Number(usage.cached) > 0) {
-    bits.push(tr('из кэша {n}%', { n: Math.round((Number(usage.cached) / Number(usage.prompt)) * 100) }));
+    meta.push(tr('из кэша {n}%', { n: Math.round((Number(usage.cached) / Number(usage.prompt)) * 100) }));
   }
   const ms = Number(ev.ms || card?.ms || 0);
-  if (ms >= 1000) {
-    bits.push(ms >= 60_000
-      ? tr('{n} мин', { n: Math.round(ms / 60_000) })
-      : tr('{n} с', { n: (ms / 1000).toLocaleString(window.LOCALE, { maximumFractionDigits: 1 }) }));
+  const group = turnWorkGroup();
+  if (group) {
+    sealWork(group, { ms, meta: meta.join(' · ') });
+    return;
   }
+  const bits = ms >= 1000 ? [durText(ms), ...meta] : meta;
   const failed = Number(card?.failed || 0);
   if (!bits.length) return;
   const el = document.createElement('div');
@@ -3178,7 +3338,7 @@ function updateTool(ev) {
   }
   const spent = stepTrack(ev.callId, ev.status);
   if (spent != null && status && !node.querySelector('.t-dur')) status.before(stepDurNode(spent));
-  refreshGroup(node.closest('.tool-grp'));
+  paintLiveSteps(node.closest('.work-group'));
   const body = node.querySelector('.tool-body');
   if (body && ev.result) {
     const res = document.createElement('pre');
@@ -3187,6 +3347,13 @@ function updateTool(ev) {
     node.open = ev.status !== 'ok';
   }
   if (ev.status === 'ok') feedMade(node._call, ev.result);
+  if (CrewToolLabels.plainName(node._call?.name) === 'assign_task') {
+    if (ev.status === 'ok') openHandoff(ev, node._call);
+    else if (['error', 'denied', 'timeout'].includes(ev.status) && !node.dataset.handoffFailed) {
+      node.dataset.handoffFailed = '1';
+      failedHandoff(node._call, ev.result);
+    }
+  }
   scrollBottom();
 }
 
@@ -3217,7 +3384,6 @@ function approvalDetail(detail) {
 function setToolStatus(node, status) {
   node.dataset.status = status;
   $('.t-status', node).textContent = statusLabel(status);
-  refreshGroup(node.closest('.tool-grp'));
 }
 
 // Подтверждения от браузерных инструментов несут русские строки сервера: переводим по строкам, кроме просьбы к человеку.
@@ -3846,35 +4012,16 @@ function switchedLine(ev) {
   modelLine(tr('Основная модель недоступна, продолжаю на {name}', { name: ev.to }), ev.reason);
 }
 
-function delegateLine(ev, done = false) {
-  if (done) {
-    const last = messagesEl().lastElementChild;
-    if (last?.dataset.delegate === String(ev.to)) {
-      const tokens = Number(ev.tokens);
-      last.textContent = tokens > 0
-        ? tr('{name} ответил · {n} тыс. токенов', { name: ev.target, n: (tokens / 1000).toLocaleString(window.LOCALE, { maximumFractionDigits: 1 }) })
-        : tr('{name} ответил', { name: ev.target });
-      last.dataset.delegate = '';
-      return;
-    }
-  }
-  const card = cardShell(tr('Передал задачу: {name}', { name: `<b>${escapeHtml(ev.target)}</b>` }), 'card delegate');
-  card.dataset.delegate = String(ev.to);
-}
-
 // Панель «Команда» (team.js): дерево ведущего и помощников вместо отдельных строк о передаче.
 window.DeloistTeam?.init({
   bot: botById,
-  isHere: (id) => (inRoom() ? S.roomActive.get(S.view.id)?.botId === id : S.currentId === id),
-  place: (node) => {
-    dropEmpty();
-    appendInFeed(node);
-    scrollBottom();
-  },
-  stop: (id) => api(`/api/bots/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
   openBot: (id) => selectBot(id),
   refreshTeam: () => scheduleTeam(),
   toolLabel: (name) => CrewToolLabels.label(name),
+  // Шаги получателя меняются: открытая карточка передачи перерисуется.
+  changed: (from, to) => {
+    for (const t of handoffs.values()) if (t.from === from && t.to === to && t.row.isConnected) paintHandoff(t.row);
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -4069,6 +4216,12 @@ function handleEvent(ev) {
       } else {
         removeTyping();
         finalizeLive(ev);
+        // Шаги своих инструментов приходят сообщением с вызовами: ход идёт, и последние шаги показываем живыми.
+        const running = (ev.message.toolCalls || []).filter((call) => !CrewToolLabels.hidden(call)).pop();
+        if (running) {
+          paintCallNow(running);
+          paintLiveSteps(workGroup);
+        }
       }
       (S.threads.get(ev.botId) || S.threads.set(ev.botId, []).get(ev.botId)).push(ev.message);
       break;
@@ -4098,25 +4251,23 @@ function handleEvent(ev) {
       closeCard(ev);
       break;
 
+    case 'task_update':
+      taskStates.set(ev.taskId, ev.state);
+      setHandoff(ev.taskId, { state: ev.state });
+      break;
+
     case 'task_done':
       // Строка о закрытой задаче: в личном чате ведущего, ход ведущего она не запускает.
       if (mine && !ev.roomId) {
         dropEmpty();
-        appendInFeed(taskRow(ev.message));
+        const row = taskRow(ev.message);
+        if (row) appendInFeed(row);
         (S.threads.get(ev.botId) || S.threads.set(ev.botId, []).get(ev.botId)).push(ev.message);
         scrollBottom();
       } else if (!mine) {
         S.unread.add(ev.botId);
         renderSidebar();
       }
-      break;
-
-    case 'delegate_start':
-      if (!window.DeloistTeam && (mine || roomCard)) delegateLine(ev);
-      break;
-
-    case 'delegate_end':
-      if (!window.DeloistTeam && (mine || roomCard)) delegateLine(ev, true);
       break;
 
     case 'specialist_offer':

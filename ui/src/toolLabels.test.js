@@ -71,3 +71,27 @@ describe('target', () => {
     expect(S.target({ args: { apiKey: 'secret', pattern: 'pat' } })).toBe('pat');
   });
 });
+
+describe('summary', () => {
+  const plural = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
+  const calls = (...names) => names.map((name) => ({ name }));
+
+  it('counts steps by kind and says it in words', () => {
+    expect(S.summary(calls('read_file', 'read_file', 'web_search', 'web_search', 'web_search'), plural)).toBe('прочитал 2 файла, искал 3 раза');
+  });
+
+  it('treats browser steps and agent kinds like their web and file equivalents', () => {
+    const list = [{ name: 'mcp__b__browser_nav' }, { name: 'x', kind: 'edit' }, { name: 'y', kind: 'execute' }, { name: 'z', kind: 'think' }];
+    expect(S.summary(list, plural)).toBe('открыл 1 страницу, записал 1 файл, запустил 1 команду');
+  });
+
+  it('shows the three biggest kinds and folds the rest into "ещё N"', () => {
+    const list = calls('read_file', 'read_file', 'read_file', 'web_search', 'web_search', 'web_fetch', 'write_file', 'run_command', 'add_todo');
+    expect(S.summary(list, plural)).toBe('прочитал 3 файла, искал 2 раза, открыл 1 страницу, ещё 3 шага');
+  });
+
+  it('skips hidden tools and is empty without steps', () => {
+    expect(S.summary(calls('tool_search'), plural)).toBe('');
+    expect(S.summary([], plural)).toBe('');
+  });
+});

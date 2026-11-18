@@ -554,9 +554,9 @@ code { font-family: var(--font-mono); font-size: var(--k-text-sm); background: v
 .msg-when { margin-left: 6px; font-size: var(--k-text-xs); line-height: 1.4; color: var(--k-text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tools { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; border-radius: var(--k-radius-md); background: var(--k-surface); box-shadow: 0 0 0 1px var(--k-line); }
 .tools:empty { display: none; }
-.tools > .tool > summary, .tools > .tool-grp > summary { padding: 0 8px; }
+.tools > .tool > summary { padding: 0 8px; }
 .tools > * + * { box-shadow: 0 -1px 0 var(--k-line); }
-.tools > .tool > summary:hover, .tools > .tool-grp > summary:hover { background: var(--k-surface-2); }
+.tools > .tool > summary:hover { background: var(--k-surface-2); }
 /* Промежуточные шаги остаются доступны, но не заполняют ленту. */
 .work-group { width: 100%; min-width: 0; color: var(--k-text-2); }
 .work-group > summary {
@@ -587,13 +587,24 @@ code { font-family: var(--font-mono); font-size: var(--k-text-sm); background: v
 /* Свёрнутый «Ход работы» прячет только технику (шаги, служебные строки). Слова бота человеку остаются на виду по порядку:
    закрытое содержимое details показываем (::details-content) и убираем из него всё, кроме текста ответов. */
 .work-group:not([open])::details-content { content-visibility: visible; block-size: auto; }
-.work-group:not([open]) .work-body .tools,
+.work-group:not([open]) .work-body .tools:not(:has(> .tool:is([data-status="error"], [data-status="denied"], [data-status="timeout"]))),
+.work-group:not([open]) .work-body .tool:not([data-status="error"], [data-status="denied"], [data-status="timeout"]),
 .work-group:not([open]) .work-body .msg-meta,
 .work-group:not([open]) .work-body .msg-actions,
-.work-group:not([open]) .work-body .msg:not(:has(.bubble:not(:empty))) { display: none; }
-.work-group:not([open]) .work-body:not(:has(.bubble:not(:empty))) { display: none; }
+.work-group:not([open]) .work-body .msg:not(:has(.bubble:not(:empty), .tool:is([data-status="error"], [data-status="denied"], [data-status="timeout"]))) { display: none; }
+.work-group:not([open]) .work-body:not(:has(.bubble:not(:empty), .tool:is([data-status="error"], [data-status="denied"], [data-status="timeout"]))) { display: none; }
 /* Свёрнуто — видны только слова человеку: они стоят как обычный ответ бота, без линии шагов и серого цвета. */
 .work-group:not([open]) .work-body { margin: 8px 0 0; padding: 0; border-left: 0; color: var(--k-text); }
+/* Итог хода в той же строке: «Работал 29 с · прочитал 2 файла» и справа расход (токены, кэш). Пока ход идёт, расхода нет. */
+.work-group > summary > span:first-of-type { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.work-meta { flex: none; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--k-text-3); }
+.work-group.is-live .work-meta { display: none; }
+.work-group.has-failed > summary > span:first-of-type { color: var(--k-danger-text); }
+/* Живой ход: последние шесть шагов под строкой «работает» и «ещё N шагов» над ними. Раскрытая группа показывает все шаги сама. */
+.work-live { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0 var(--k-space-3); padding: 0 0 0 var(--k-space-4); border-left: 1px solid var(--k-line); }
+.work-group[open] > .work-live { display: none; }
+.work-step { display: flex; align-items: center; gap: var(--k-space-2); min-height: 24px; padding: 0 8px; color: var(--k-text-2); }
+.work-more { padding: 0 8px; font-size: var(--k-text-xs); color: var(--k-text-3); }
 
 
 /* Служебная строка под ответом: модель, расход и доля кэша. Тише текста, но читаема. */
@@ -619,7 +630,7 @@ code { font-family: var(--font-mono); font-size: var(--k-text-sm); background: v
 
 /* Шаг работы: одна строка «что, над чем, как прошло». Подробности раскрываются. */
 .tool { font-size: var(--text-sm); max-width: 100%; min-width: 0; }
-.tool > summary, .tool-grp > summary {
+.tool > summary {
   display: flex;
   align-items: center;
   gap: var(--k-space-2);
@@ -629,27 +640,23 @@ code { font-family: var(--font-mono); font-size: var(--k-text-sm); background: v
   list-style: none;
   color: var(--k-text-2);
 }
-.tool > summary:focus-visible, .tool-grp > summary:focus-visible { outline: none; box-shadow: var(--k-focus); }
-.tool > summary::-webkit-details-marker, .tool-grp > summary::-webkit-details-marker { display: none; }
-.tool > summary:hover .t-label, .tool-grp > summary:hover .t-label { color: var(--k-text); }
+.tool > summary:focus-visible { outline: none; box-shadow: var(--k-focus); }
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary:hover .t-label { color: var(--k-text); }
 .t-chev { color: var(--k-text-3); transition: transform var(--k-dur-base, 160ms) var(--k-ease-out, ease); }
 details[open] > summary .t-chev { transform: rotate(90deg); }
-.tool-grp { font-size: var(--k-text-sm); max-width: 100%; }
-.tool-grp .t-label { font-weight: 600; color: var(--k-text); flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tool-grp > summary .t-target { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--k-text-xs); color: var(--k-text-3); }
-.tool-grp-body { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 4px var(--k-space-2); padding-left: var(--k-space-3); border-left: 2px solid var(--k-line); }
 /* Шаг без подробностей: раскрывать нечего, стрелку прячем. */
 .tool-body:empty { display: none; }
 .tool:has(> .tool-body:empty) > summary { cursor: default; }
 .tool:has(> .tool-body:empty) > summary .t-chev { visibility: hidden; }
-.tool .t-chev, .tool-grp .t-chev { width: 14px; height: 14px; }
+.tool .t-chev { width: 14px; height: 14px; }
 .tool .t-label { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; color: var(--k-text); }
 .tool .t-target { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--k-font-mono); font-size: var(--k-text-xs); color: var(--k-text-3); }
 /* Номер факта и «Отменить» в строке записи в память: кнопки кита, в строку встают без растяжения. */
 .tool > summary .mem-id, .tool > summary .mem-undo { flex: none; font-family: var(--k-font-mono); }
 /* Статус шага: слово и значок. Готово — тихо, с оранжевой галкой; идёт — оранжевый круг; ждёт тебя — оранжевая точка; отказ и ошибка — красные. */
-.tool .t-status, .tool-grp > summary .t-status { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: var(--k-text-xs); color: var(--k-text-3); }
-.tool .t-status::before, .tool-grp > summary .t-status::before {
+.tool .t-status { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: var(--k-text-xs); color: var(--k-text-3); }
+.tool .t-status::before {
   content: "";
   flex: none;
   width: 12px;
@@ -658,25 +665,15 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
   -webkit-mask: var(--step-ico) center / contain no-repeat;
   mask: var(--step-ico) center / contain no-repeat;
 }
-.tool, .tool-grp {
+.tool {
   --step-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E");
   --step-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
-.tool[data-status="ok"] .t-status::before, .tool-grp[data-status="ok"] > summary .t-status::before { color: var(--k-brand); }
-.tool[data-status="error"] .t-status,
-.tool[data-status="denied"] .t-status,
-.tool[data-status="timeout"] .t-status,
-.tool-grp[data-status="error"] > summary .t-status,
-.tool-grp[data-status="denied"] > summary .t-status,
-.tool-grp[data-status="timeout"] > summary .t-status { color: var(--k-danger-text); font-weight: 600; }
-.tool[data-status="error"] .t-status::before,
-.tool[data-status="denied"] .t-status::before,
-.tool[data-status="timeout"] .t-status::before,
-.tool-grp[data-status="error"] > summary .t-status::before,
-.tool-grp[data-status="denied"] > summary .t-status::before,
-.tool-grp[data-status="timeout"] > summary .t-status::before { -webkit-mask-image: var(--step-x); mask-image: var(--step-x); }
-.tool[data-status="running"] .t-status, .tool-grp[data-status="running"] > summary .t-status { color: var(--k-brand-text); }
-.tool[data-status="running"] .t-status::before, .tool-grp[data-status="running"] > summary .t-status::before {
+.tool[data-status="ok"] .t-status::before { color: var(--k-brand); }
+.tool[data-status="error"] .t-status, .tool[data-status="denied"] .t-status, .tool[data-status="timeout"] .t-status { color: var(--k-danger-text); font-weight: 600; }
+.tool[data-status="error"] .t-status::before, .tool[data-status="denied"] .t-status::before, .tool[data-status="timeout"] .t-status::before { -webkit-mask-image: var(--step-x); mask-image: var(--step-x); }
+.tool[data-status="running"] .t-status { color: var(--k-brand-text); }
+.tool[data-status="running"] .t-status::before {
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -687,9 +684,9 @@ details[open] > summary .t-chev { transform: rotate(90deg); }
   mask: none;
   animation: spin 0.8s linear infinite;
 }
-.tool[data-status="waiting"] .t-status, .tool-grp[data-status="waiting"] > summary .t-status { color: var(--k-brand-text); font-weight: 600; }
-.tool[data-status="waiting"] .t-status::before, .tool-grp[data-status="waiting"] > summary .t-status::before { width: 8px; height: 8px; border-radius: 50%; background: var(--k-ember); -webkit-mask: none; mask: none; box-shadow: 0 0 6px 1px color-mix(in srgb, var(--k-brand) 70%, transparent); }
-@media (prefers-reduced-motion: reduce) { .tool[data-status="running"] .t-status::before, .tool-grp[data-status="running"] > summary .t-status::before { animation: none; } }
+.tool[data-status="waiting"] .t-status { color: var(--k-brand-text); font-weight: 600; }
+.tool[data-status="waiting"] .t-status::before { width: 8px; height: 8px; border-radius: 50%; background: var(--k-ember); -webkit-mask: none; mask: none; box-shadow: 0 0 6px 1px color-mix(in srgb, var(--k-brand) 70%, transparent); }
+@media (prefers-reduced-motion: reduce) { .tool[data-status="running"] .t-status::before { animation: none; } }
 .tool-body { padding: var(--space-1) 0 var(--space-2) var(--k-space-6); }
 .tool-body pre, .card pre {
   margin: 0 0 6px;
@@ -1851,7 +1848,13 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 .task-line-text { max-width: 72ch; overflow-wrap: anywhere; }
 .task-line-text > :first-child { margin-top: 0; }
 .task-line-text > :last-child { margin-bottom: 0; }
-.task-line-text.is-folded { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.task-line-text.is-folded { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; overflow: hidden; }
+.task-line-head { display: flex; align-items: center; gap: var(--k-space-2); }
+.task-line-brief { max-width: 72ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--k-text-xs); color: var(--k-text-3); }
+.task-line-steps { display: flex; flex-direction: column; gap: 2px; margin: var(--k-space-1) 0 0; padding: 0 0 0 var(--k-space-3); list-style: none; border-left: 1px solid var(--k-line); font-size: var(--k-text-xs); }
+.task-line-steps li { display: flex; align-items: baseline; gap: var(--k-space-2); min-width: 0; }
+.task-line-steps li[data-status="bad"] { color: var(--k-danger-text); }
+.task-line-arg { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--k-font-mono); color: var(--k-text-3); }
 .task-line-files { display: flex; flex-wrap: wrap; gap: var(--k-space-2); }
 .task-line-file { display: inline-flex; align-items: center; gap: var(--k-space-1); padding: var(--k-space-1) var(--k-space-2); border: 1px solid var(--k-line); border-radius: var(--k-radius-sm); color: var(--k-text); font-size: var(--k-text-xs); text-decoration: none; }
 .task-line-file:hover { background: var(--k-surface-2); }
@@ -3304,7 +3307,7 @@ body.split-on #chat-head, .pane-mode #chat-head { container: chathead / inline-s
 }
 
 /* ==================================================================== Команда за работой
-   Дерево ведущего и помощников в чате (web/team.js): кольцо состояния, живой шаг, ветки в 1px.
+   Живое дерево ведущего и помощников на экране «Команда» (web/team.js): кольцо состояния, живой шаг, ветки в 1px.
    Движение короткое; при prefers-reduced-motion остаётся только смена состояния. */
 :root {
   --tm-ok: var(--k-brand);
@@ -3316,47 +3319,9 @@ body.split-on #chat-head, .pane-mode #chat-head { container: chathead / inline-s
   --tm-bad: var(--k-danger);
   --tm-idle: #7d7f84;
 }
-.tm-card {
-  width: min(640px, 100%);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--k-radius-md);
-  background: var(--color-bg-surface);
-  box-shadow: var(--arc-card-shadow);
-  overflow: hidden;
-}
-.tm-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 40px;
-  padding: 0 12px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-primary);
-  font: inherit;
-  font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--arc-t);
-}
-.tm-head:hover { background: var(--arc-hover); }
-.tm-head:focus-visible, .tm-main:focus-visible, .tm-stop:focus-visible, .tm-livecard:focus-visible { outline: 2px solid var(--color-brand-primary); outline-offset: -2px; }
-.tm-ico { width: 16px; height: 16px; flex: none; color: var(--color-text-secondary); }
-.tm-title { font-weight: 700; }
-.tm-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
-.tm-chev { width: 14px; height: 14px; flex: none; color: var(--color-text-muted); transform: rotate(90deg); transition: transform 220ms var(--arc-ease); }
-.tm-card.is-collapsed .tm-chev { transform: none; }
 
-/* Высота раскрывается через grid: без измерений в JS. */
-.tm-collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 240ms var(--arc-ease); }
-.tm-collapse.is-closed { grid-template-rows: 0fr; }
-.tm-collapse > .tm-inner { min-height: 0; overflow: hidden; }
-
-.tm-tree { position: relative; padding: 4px 12px 8px; }
-.tm-lead, .tm-row { display: flex; align-items: center; height: 36px; border-radius: var(--radius-sm); }
-.tm-lead { gap: 8px; padding: 0 8px; }
-.tm-lead[data-busy="1"] .tm-av { box-shadow: 0 0 0 2px var(--color-bg-surface), 0 0 0 3px var(--arc-pri); }
+.tm-main:focus-visible, .tm-livecard:focus-visible { outline: 2px solid var(--color-brand-primary); outline-offset: -2px; }
+.tm-row { display: flex; align-items: center; height: 36px; border-radius: var(--radius-sm); }
 .tm-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
 .tm-row .tm-name { max-width: 55%; }
 .tm-av {
@@ -3373,7 +3338,6 @@ body.split-on #chat-head, .pane-mode #chat-head { container: chathead / inline-s
   line-height: 1;
   transition: box-shadow 260ms var(--arc-spring);
 }
-.tm-got > .tm-av, .tm-got > .tm-row .tm-av { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tm-ok) 40%, transparent); }
 
 /* Ветки: у каждого узла вертикаль слева и короткий отвод к его строке. Центр аватара ведущего — x=18. */
 .tm-kids { margin-left: var(--k-space-4); padding-left: 16px; }
@@ -3438,25 +3402,8 @@ body.split-on #chat-head, .pane-mode #chat-head { container: chathead / inline-s
 .tm-main:hover, .tm-livecard:hover .tm-row { background: var(--arc-hover); }
 span.tm-main { cursor: inherit; }
 .tm-step { flex: 1 1 0; min-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); color: var(--color-text-muted); }
-.tm-time, .tm-foot { font-family: var(--k-font-mono, ui-monospace, monospace); font-size: var(--k-text-xs); font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.tm-time { font-family: var(--k-font-mono, ui-monospace, monospace); font-size: var(--k-text-xs); font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
 .tm-time { flex: none; }
-.tm-stop {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  margin-right: 4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--k-text-lg);
-  line-height: 1;
-  cursor: pointer;
-  transition: background var(--arc-t), color var(--arc-t);
-}
-.tm-stop:hover { background: var(--arc-hover); color: var(--tm-bad); }
-.tm-stop[hidden] { display: none; }
-.tm-stop.is-wait { opacity: 0.4; cursor: default; }
 
 /* Кольцо 18px: крутится, пока помощник работает; в конце — отметка в заливке. */
 .tm-ringwrap { display: inline-flex; width: 18px; height: 18px; flex: none; }
@@ -3479,24 +3426,6 @@ span.tm-main { cursor: inherit; }
 
 .tm-node[data-state="done"] > .tm-row .tm-step { color: var(--color-text-secondary); }
 .tm-node[data-state="failed"] > .tm-row .tm-step { color: var(--tm-bad); }
-
-/* Раскрытая строка: задача, шаги, отчёт. */
-.tm-detailwrap { margin-left: var(--k-space-6); }
-.tm-detail { padding: 2px 8px var(--k-space-3); display: grid; gap: 4px; }
-.tm-cap { margin-top: 6px; font-size: var(--k-text-micro); font-weight: 700; letter-spacing: 0.02em; color: var(--color-text-muted); }
-.tm-task, .tm-report, .tm-none { margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--color-text-secondary); overflow-wrap: anywhere; }
-.tm-report { padding: 8px var(--k-space-3); border-radius: var(--radius-sm); background: var(--color-bg-surface-soft); color: var(--color-text-primary); }
-.tm-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.tm-s { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--text-sm); color: var(--color-text-secondary); }
-.tm-sdot { width: 6px; height: 6px; flex: none; align-self: center; border-radius: 50%; background: var(--tm-idle); }
-.tm-s-ok .tm-sdot { background: var(--tm-ok); }
-.tm-s-bad .tm-sdot { background: var(--tm-bad); }
-.tm-s-run .tm-sdot { background: var(--arc-pri); animation: tm-blink 1s ease-in-out infinite; }
-.tm-sarg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--k-font-mono, ui-monospace, monospace); font-size: var(--k-text-xs); color: var(--color-text-muted); }
-@keyframes tm-blink { 50% { opacity: 0.35; } }
-
-.tm-foot { padding: 0 20px 12px; }
-.tm-dot { position: absolute; left: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--arc-pri); pointer-events: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--arc-pri) 18%, transparent); }
 
 /* Экран «Команда»: компактная версия, пока кто-то работает. */
 .tm-live { margin-top: var(--space-5); }
@@ -3524,11 +3453,10 @@ span.tm-main { cursor: inherit; }
 
 @media (max-width: 520px) {
   .tm-time { display: none; }
-  .tm-tree { padding-inline: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .tm-collapse, .tm-chev, .tm-av, .tm-main, .tm-stop { transition: none; }
-  .tm-ring-arc, .tm-ring, .tm-s-run .tm-sdot { animation: none; }
+  .tm-av, .tm-main { transition: none; }
+  .tm-ring-arc, .tm-ring { animation: none; }
   .tm-node[data-state="working"] > .tm-row::before, .tm-node[data-state="queued"] > .tm-row::before, .tm-node[data-state="working"] > .tm-row::after { animation: none; }
   .tm-node[data-state="working"] .tm-ring-arc { stroke-dasharray: 22 22; }
 }

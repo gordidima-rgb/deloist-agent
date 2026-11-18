@@ -41,7 +41,6 @@ const MAX_FILES: usize = 5;
 /// Файл для передачи не больше этого.
 pub const MAX_SHARE_BYTES: u64 = 20 * 1024 * 1024;
 const SUMMARY_CHARS: usize = 1_500;
-const LINE_CHARS: usize = 300;
 const NOTE_CHARS: usize = 300;
 const KEEP_MS: i64 = 24 * 3600 * 1000;
 const KEEP_OLD_MS: i64 = 7 * 24 * 3600 * 1000;
@@ -586,7 +585,7 @@ async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: V
     // Строка в ленте ведущего: сам он не просыпается, итог ему отдаёт task_status.
     let entry = json!({
         "role": "task", "taskId": task.id, "state": task.state, "to": task.to, "toName": task.to_name,
-        "text": one_line(&task.summary, LINE_CHARS), "files": task.result_files,
+        "text": task.summary, "files": task.result_files,
     });
     // Задача выдана из чата команды: строка о конце ложится туда, где человек её и ждёт.
     if !task.room.is_empty() && app.store.room(&task.room).is_some_and(|r| r.bot_ids.contains(&task.from)) {

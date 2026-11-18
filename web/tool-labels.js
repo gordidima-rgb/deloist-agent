@@ -1,6 +1,6 @@
 // Подписи шагов инструментов для чата: русская фраза для каждого известного инструмента
-// (английский — в web/i18n.js), имя без префикса MCP, «над чем» работает шаг, семья для группировки,
-// признак служебного инструмента и текст живого шага. Подключается перед app.js.
+// (английский — в web/i18n.js), имя без префикса MCP, «над чем» работает шаг, признак служебного
+// инструмента, текст живого шага и итог хода словами. Подключается перед app.js.
 (() => {
   const getName = (call) => (typeof call === 'string' ? call : (call && call.name) || '');
 
@@ -193,12 +193,6 @@
     return '';
   }
 
-  function family(call) {
-    const plain = plainName(getName(call));
-    if (plain === 'remember') return '';
-    return plain.startsWith('browser_') ? 'browser' : plain;
-  }
-
   function hidden(call) {
     const name = getName(call);
     const base = plainName(name).toLowerCase();
@@ -215,5 +209,48 @@
     return !shown || lbl.includes(shown) ? lbl : lbl + ' ' + shown;
   }
 
-  window.CrewToolLabels = { label, target, family, hidden, liveText, plainName };
+  // Что сделал ход, словами: «прочитал 2 файла, искал 3 раза». Мысли (`think`) и скрытые шаги не считаем.
+  const SUMMARY = {
+    read: ['прочитал {n} файл', 'прочитал {n} файла', 'прочитал {n} файлов'],
+    search: ['искал {n} раз', 'искал {n} раза', 'искал {n} раз'],
+    web: ['открыл {n} страницу', 'открыл {n} страницы', 'открыл {n} страниц'],
+    write: ['записал {n} файл', 'записал {n} файла', 'записал {n} файлов'],
+    run: ['запустил {n} команду', 'запустил {n} команды', 'запустил {n} команд'],
+    task: ['передал {n} задачу', 'передал {n} задачи', 'передал {n} задач'],
+    other: ['ещё {n} шаг', 'ещё {n} шага', 'ещё {n} шагов'],
+  };
+  const SUMMARY_SHOWN = 3;
+
+  function kindOf(call) {
+    const plain = plainName(getName(call));
+    const kind = call && call.kind;
+    if (kind === 'think') return '';
+    if (plain === 'read_file' || plain === 'list_files' || kind === 'read') return 'read';
+    if (/^(web_search|search_|recall)/.test(plain) || kind === 'search') return 'search';
+    if (plain === 'web_fetch' || plain.startsWith('browser_') || kind === 'fetch') return 'web';
+    if (plain === 'write_file' || kind === 'edit' || kind === 'delete' || kind === 'move') return 'write';
+    if (plain === 'run_command' || plain === 'run_script' || kind === 'execute') return 'run';
+    if (plain === 'assign_task') return 'task';
+    return 'other';
+  }
+
+  // `plural(n, one, few, many)` приходит из app.js: там правила числа для обоих языков.
+  const phrase = (kind, n, plural) => plural(n, ...SUMMARY[kind]).replace('{n}', n);
+  const more = (n, plural) => phrase('other', n, plural);
+
+  function summary(calls, plural) {
+    const counts = {};
+    for (const call of calls) {
+      const kind = hidden(call) ? '' : kindOf(call);
+      if (kind) counts[kind] = (counts[kind] || 0) + 1;
+    }
+    const named = Object.keys(SUMMARY).filter((k) => k !== 'other' && counts[k]);
+    const shown = [...named].sort((a, b) => counts[b] - counts[a]).slice(0, SUMMARY_SHOWN);
+    const rest = (counts.other || 0) + named.filter((k) => !shown.includes(k)).reduce((sum, k) => sum + counts[k], 0);
+    const parts = named.filter((k) => shown.includes(k)).map((k) => phrase(k, counts[k], plural));
+    if (rest) parts.push(more(rest, plural));
+    return parts.join(', ');
+  }
+
+  window.CrewToolLabels = { label, target, hidden, liveText, plainName, summary, more };
 })();

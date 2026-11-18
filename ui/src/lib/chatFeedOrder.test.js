@@ -1,8 +1,15 @@
 // Лента хода идёт по времени: шаги -> карточка -> шаги даёт группу, карточку, группу.
 // Код живёт в web/app.js (старый DOM-экран), тест вырезает блок и запускает его с заглушками.
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const labels = readFileSync(resolve(process.cwd(), '../web/tool-labels.js'), 'utf8');
+const plural = (n, one, few, many) => (n === 1 ? one : n < 5 ? few : many);
+
+beforeAll(() => {
+  new Function(labels).call(window);
+});
 
 const source = readFileSync(resolve(process.cwd(), '../web/app.js'), 'utf8');
 const block = source.slice(source.indexOf('let workGroup = null;'), source.indexOf('function clearMessages()'));
@@ -13,12 +20,12 @@ function feed() {
   document.body.replaceChildren(root);
   const S = { live: null };
   const api = new Function(
-    'messagesEl', 'ICONS', 'tr', '$$', 'turnCard', 'S', 'md', 'scrollBottom', 'startLive',
-    `${block}\n${liveBlock}\nreturn { ensureWorkGroup, paintWorkNow, appendInFeed, finishWorkGroup, appendDelta, group: () => workGroup };`,
+    'messagesEl', 'ICONS', 'tr', '$$', 'turnCard', 'S', 'md', 'scrollBottom', 'startLive', 'plural',
+    `${block}\n${liveBlock}\nreturn { ensureWorkGroup, paintWorkNow, appendInFeed, finishWorkGroup, appendDelta, paintLiveSteps, sealWork, group: () => workGroup };`,
   )(
     () => root,
     { chev: '<i></i>' },
-    (s) => s,
+    (s, vars) => String(s).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? vars[k] : m)),
     (sel, r = document) => [...r.querySelectorAll(sel)],
     { status() {} },
     S,
@@ -37,6 +44,7 @@ function feed() {
       S.live = { turnId, step, row, col, bubble, text: '' };
       return S.live;
     },
+    plural,
   );
   const step = (text) => {
     const row = document.createElement('div');
@@ -45,12 +53,25 @@ function feed() {
     api.ensureWorkGroup().querySelector('.work-body').append(row);
     api.paintWorkNow('act', text);
   };
+  const tool = (name, status = 'ok', args = {}) => {
+    const node = document.createElement('details');
+    node.className = 'tool';
+    node.dataset.status = status;
+    node._call = { id: name + Math.random(), name, args, status };
+    node.innerHTML = '<summary><i class="t-chev"></i><span class="t-label">' + name + '</span><span class="t-status">' + status + '</span></summary>';
+    const row = document.createElement('div');
+    row.className = 'msg bot';
+    row.append(node);
+    api.ensureWorkGroup().querySelector('.work-body').append(row);
+    api.paintWorkNow('act', name);
+    return node;
+  };
   const card = (name) => {
     const c = document.createElement('div');
     c.className = 'card ' + name;
     api.appendInFeed(c);
   };
-  return { root, api, step, card };
+  return { root, api, step, card, tool };
 }
 
 const shape = (root) => [...root.children].map((e) => (e.classList.contains('work-group') ? 'group' + (e.classList.contains('is-live') ? '*' : '') : e.className.split(' ')[1]));
@@ -111,9 +132,11 @@ describe('collapsed work log keeps the bot prose visible', () => {
   it('shows the closed details content and hides only tools, meta and rows without a bubble', () => {
     expect(rule('.work-group:not([open])::details-content').join(' ')).toContain('content-visibility: visible');
     const hidden = rule('.work-group:not([open]) .work-body').join(' ');
-    expect(hidden).toContain('.tools');
+    expect(hidden).toContain('.tools:not(:has(');
     expect(hidden).toContain('.msg-meta');
-    expect(hidden).toContain('.msg:not(:has(.bubble:not(:empty)))');
+    expect(hidden).toContain('.msg:not(:has(.bubble:not(:empty)');
+    // упавший шаг остаётся на виду и в свёрнутом ходе
+    expect(hidden).toContain('data-status="error"');
     expect(hidden).not.toMatch(/\.bubble\s*[,{][^}]*display:\s*none/);
   });
 
@@ -126,5 +149,43 @@ describe('collapsed work log keeps the bot prose visible', () => {
     const body = api.group().querySelector('.work-body');
     expect(body.querySelector('.bubble').closest('.tools')).toBeNull();
     expect(body.querySelector('.tools')).not.toBeNull();
+  });
+});
+
+describe('turn summary row', () => {
+  it('names what the turn did in one row when a group ends, and merges the turn stats into it', () => {
+    const { root, tool, api } = feed();
+    tool('read_file');
+    tool('read_file');
+    tool('web_search');
+    tool('web_search');
+    tool('web_search');
+    api.finishWorkGroup();
+    const label = () => root.querySelector('.work-group > summary span').textContent;
+    expect(label()).toBe('Работал · прочитал 2 файла, искал 3 раза');
+    api.sealWork(root.querySelector('.work-group'), { ms: 29000, meta: '1 200 токенов' });
+    expect(label()).toBe('Работал {t} · прочитал 2 файла, искал 3 раза'.replace('{t}', '{n} с'.replace('{n}', (29).toLocaleString(window.LOCALE))));
+    expect(root.querySelector('.work-meta').textContent).toBe('1 200 токенов');
+  });
+
+  it('marks failed steps in the row', () => {
+    const { root, tool, api } = feed();
+    tool('run_command');
+    tool('run_command', 'error');
+    api.finishWorkGroup();
+    const group = root.querySelector('.work-group');
+    expect(group.classList.contains('has-failed')).toBe(true);
+    expect(group.querySelector('summary span').textContent).toContain('с ошибкой: 1');
+  });
+
+  it('shows the last six steps while running and counts the rest', () => {
+    const { root, tool, api } = feed();
+    for (let i = 0; i < 9; i += 1) tool('read_file');
+    api.paintLiveSteps(api.group());
+    const live = root.querySelector('.work-live');
+    expect(live.querySelectorAll('.work-step').length).toBe(6);
+    expect(live.querySelector('.work-more').textContent).toBe('ещё 3 шага');
+    api.finishWorkGroup();
+    expect(root.querySelector('.work-live')).toBeNull();
   });
 });
