@@ -1019,7 +1019,8 @@ fn classify(word: &Word, cwd: Option<&Path>, ctx: &Ctx) -> Place {
     match cwd {
         // В своей папке секретов нет. В папке проекта они могут быть (`data` рядом с Cargo.toml):
         // там путь проверяется целиком.
-        Some(dir) if dir.starts_with(&ctx.homes[0]) && !leaves => Place::Home,
+        // В общей папке команды инструкции для агентов и сценарии не «свои»: проверка идёт как в папке проекта.
+        Some(dir) if dir.starts_with(&ctx.homes[0]) && !leaves && !(is_team_folder(&ctx.homes[0]) && project_guard_reason(&dir.join(text)).is_some()) => Place::Home,
         Some(dir) => place_of(real_path(&dir.join(text)), ctx),
         None => Place::Unknown,
     }
@@ -1037,13 +1038,20 @@ fn place_of(real: Option<PathBuf>, ctx: &Ctx) -> Place {
     }
 }
 
+/// Общая папка команды: `workspaces/team_<id>`. В ней инструкции для агентов и сценарии читают все боты команды,
+/// поэтому писать туда можно только с карточкой, как в папку проекта.
+pub fn is_team_folder(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("team_")) && path.parent().and_then(Path::file_name).is_some_and(|n| n == "workspaces")
+}
+
 fn at_home(path: &Path, ctx: &Ctx) -> bool {
     ctx.homes.iter().enumerate().any(|(i, home)| {
         path.starts_with(home)
-            && (i == 0
-                || (!ctx.strict.contains(home)
-                    && !ctx.program_roots.iter().any(|r| path.starts_with(r))
-                    && project_guard_reason(path).is_none()))
+            && if i == 0 {
+                !(is_team_folder(home) && project_guard_reason(path).is_some())
+            } else {
+                !ctx.strict.contains(home) && !ctx.program_roots.iter().any(|r| path.starts_with(r)) && project_guard_reason(path).is_none()
+            }
     })
 }
 

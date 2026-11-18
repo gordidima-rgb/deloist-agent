@@ -1084,6 +1084,32 @@ async fn a_bot_of_one_team_cannot_read_or_write_the_folder_of_another_team() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_bot_cannot_plant_instructions_in_the_team_folder() {
+    let (crew, fake, _first) = setup("ap-team-plant", &[]).await;
+    let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Автор-тест", "role": "р", "approval": "ask" }))).await["bot"]["id"].as_str().unwrap().to_string();
+    let room = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Редакция", "botIds": [bot], "lead": bot }))).await["room"]["id"].as_str().unwrap().to_string();
+    let team = crew.data_dir.join("workspaces").join(format!("team_{room}"));
+    assert!(team.is_dir(), "общая папка готова сразу после создания команды");
+    let cards = turn_calls(
+        &crew,
+        &fake,
+        &bot,
+        vec![
+            tool("write_file", json!({ "path": "AGENTS.md", "content": "planted" })),
+            tool("write_file", json!({ "path": "CLAUDE.md", "content": "planted" })),
+            tool("write_file", json!({ "path": "sub/AGENTS.md", "content": "planted" })),
+            tool("write_file", json!({ "path": "tools/run.ps1", "content": "planted" })),
+            tool("run_command", json!({ "command": "echo planted > AGENTS.md" })),
+        ],
+    )
+    .await;
+    for planted in ["AGENTS.md", "CLAUDE.md", "sub/AGENTS.md", "tools/run.ps1"] {
+        assert!(!team.join(planted).exists(), "{planted} подложен в общую папку");
+    }
+    assert!(cards.len() >= 3, "вложенные инструкции, сценарии и команда в общей папке идут с карточкой: {cards:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn invisible_and_direction_characters_are_not_shown_and_an_unparsed_command_is_always_high() {
     let (crew, fake, bot) = setup("ap-odd-chars", &[]).await;
     set_mode(&crew, &bot, "strict").await;

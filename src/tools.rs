@@ -607,7 +607,7 @@ pub(crate) fn special_write_guard(app: &App, bot_id: &str, raw: &str) -> bool {
     // Invalid or forbidden targets are rejected by the file operation itself.
     let Ok((path, _)) = write_target(app, bot_id, raw) else { return false };
     let real = crate::reach::real_path(&path).unwrap_or(path);
-    let project = homes(app, bot_id).iter().any(|p| real.starts_with(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())));
+    let project = homes(app, bot_id).iter().any(|p| real.starts_with(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))) || team_guarded(&app.store.workspace(bot_id), &real);
     crate::reach::auto_exec_reason(&real).is_some() || !crate::reach::single_link_or_missing(&real)
         || (project && crate::reach::project_guard_reason(&real).is_some())
 }
@@ -1022,17 +1022,25 @@ pub(crate) fn write_target(app: &App, bot_id: &str, raw: &str) -> Result<(std::p
     Ok(target)
 }
 
+/// Файл в общей папке команды, который читается как указание или запускается сам (`project_guard_reason`).
+fn team_guarded(workspace: &Path, path: &Path) -> bool {
+    crate::reach::is_team_folder(&std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf())) && crate::reach::project_guard_reason(path).is_some()
+}
+
 /// memory.md и brain.md в корне папки любого бота пишет только программа: память — через `remember`
 /// (там проверки и журнал), правила — карточкой `propose_rule`.
 pub(crate) fn memory_file_refusal(app: &App, path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_string_lossy().to_lowercase();
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if matches!(name.as_str(), "agents.md" | "claude.md") && crate::reach::is_team_folder(&canon(path.parent()?)) {
+        return Some("AGENTS.md и CLAUDE.md общей папки команды собирает программа: их читают все боты как указания. Свои заметки клади в другой файл");
+    }
     let message = match name.as_str() {
         "memory.md" => "memory.md — твоя память: пиши в неё через remember (forget — убрать запись), а не write_file",
         "brain.md" => "brain.md — правила от человека: их меняет только человек, предложи правило через propose_rule",
         _ => return None,
     };
     let workspaces = app.store.data_dir().join("workspaces");
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let parent = path.parent()?;
     let in_workspace = canon(parent.parent()?) == canon(&workspaces) || parent.parent() == Some(workspaces.as_path());
     in_workspace.then_some(message)
@@ -1048,7 +1056,7 @@ fn write_target_raw(app: &App, bot_id: &str, raw: &str) -> Result<(std::path::Pa
         });
     }
     if !crate::reach::is_absolute_like(raw) {
-        return store.safe_path(bot_id, raw).map(|path| { let flagged = flagged_target(&path); (path, flagged) });
+        return store.safe_path(bot_id, raw).map(|path| { let flagged = flagged_target(&path) || team_guarded(&store.workspace(bot_id), &path); (path, flagged) });
     }
     if !plain_components(raw) {
         return Err(format!("{raw}: потоки файла, двоеточие и имена устройств в пути не принимаются"));
@@ -1066,7 +1074,7 @@ fn write_target_raw(app: &App, bot_id: &str, raw: &str) -> Result<(std::path::Pa
     }
     let home = std::fs::canonicalize(&workspace).unwrap_or(workspace);
     if real.starts_with(&home) {
-        let flagged = flagged_target(&real);
+        let flagged = flagged_target(&real) || team_guarded(&home, &real);
         return Ok((real, flagged));
     }
     // Папки проектов (checkout, общие папки команд) хранятся без `\?\`, а `real` канонический: сравниваем канонические.
