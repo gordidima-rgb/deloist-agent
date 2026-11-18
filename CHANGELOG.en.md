@@ -4,6 +4,76 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-11-19
+
+Teams and a readable flow of work: you see what a bot is doing and whom it handed what; a bot belongs to one team
+with a shared folder and browser; routines and tasks repeat like in the Deloist planner.
+
+### Team
+
+- **One bot, one team.** A bot can't be added to a second team. A bot that was in several teams stays, after the
+  update, in the one it leads (among equals, the larger one); the others get a line about the move. History search,
+  team memory, folders and the roster see only that team. «Bring in a specialist» offers specialists of the own team
+  and free ones; undecided cards survive a restart.
+- **Shared team folder and browser.** A team bot works in `workspaces/team_<id>`; personal `memory.md`, `brain.md`
+  and the program-built `AGENTS.md` and `CLAUDE.md` stay with the bot. A member's files are copied into the shared
+  folder once, on joining, without overwriting. Agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
+  similar) can't be written there; scripts and autorun files need a card. In the shared folder a bot can change or
+  delete teammates' files without a card — it is a shared folder.
+- One team browser with shared sign-ins; each bot has its own tabs and can't see or touch another bot's tab. While
+  waiting for a card a bot doesn't hold the browser. When the browser owner leaves, the shared browser closes, another
+  member becomes the owner, and the leaver keeps its own profile.
+
+### Hand-offs
+
+- **One way to hand work over.** The synchronous `delegate` is gone: a hand-off is always a task (`assign_task`), the
+  sender doesn't wait, the result comes back as one update. A task may have a deadline; when it passes, the sender gets
+  a line. A short question to a teammate is `ask_teammate`: answered in the same turn, at most two per turn; at most 8
+  hand-offs per request of yours.
+- Other bots' results arrive as data, not instructions. The sender's rights (mode, «always ask», chain folders) travel
+  with the task and survive the queue and a restart.
+- **Hand-offs in full view.** The «Hand-offs» window: who handed what to whom, state, deadline, who started it (you,
+  a routine, a bot), tokens, result and files; «Cancel» for any open one. «Needs you» shows «Done while you were away».
+  A result file is a card with «Open».
+- **Bot tasks in the to-do list.** A «Mine / Bots / All» switch; when creating a task — «Assignee: me or a bot». A task
+  assigned to a bot goes to it as your message when due, and the bot's result is written into the task. A bot can't use
+  the to-do list to assign a task to another bot.
+
+### Chat
+
+- **Human step labels** for every tool, without `mcp__…` and service `ToolSearch`; the step's target (file, site,
+  query) next to it, secrets hidden.
+- **Short chat.** After a turn its steps fold into one line «Worked 29 s · read 2 files, searched 3×»; the last 6 stay
+  live while it runs. A hand-off is one card line for the requester: to whom, state, «Stop», result folded after
+  1400 characters.
+- **Claude Code helpers are visible.** When a Claude Code bot calls its own subagent, the chat shows «Helper: …» with
+  its state (working / in the background / done) and its steps on expand.
+
+### Routines and tasks
+
+- **Repeats like in the Deloist planner** — one rule for routines and tasks: every day, weekdays, every Tuesday, every
+  2 weeks, a day of the month, the last day, «3rd Saturday», «last Friday», once a year («3rd Saturday of September»).
+- **«Start from a date»** and **«Once»** for routines: a routine doesn't wake before the date; a one-time routine turns
+  itself off after running. Bots set these as fields instead of hiding a date in the prompt. Old «time + weekdays»
+  routines are converted automatically.
+
+### Rights and files
+
+- **«What the bot may do without asking»** on the bot screen, in plain words: mode, sites, messengers, what is always
+  asked.
+- **An «Always ask» list** (commands, sending, publishing, payments, deleting, passing files, changing bots): works in
+  any mode and along the whole hand-off chain, is not overridden by «always allow» rules; only you can change it.
+- **One attachment layout:** copies from other bots go to `attachments/<date>/from-<bot>/` and are removed after
+  30 days; your own attachments are never removed.
+
+### Mail
+
+- **Mail as a bot channel.** IMAP/SMTP mailboxes (Yandex, Mail.ru, Gmail, your own server); the app password is kept
+  in secrets and never shown to the bot. A letter becomes a task only from a trusted sender and only with a DKIM/DMARC
+  signature verified by your mail server; other letters are data. Sending without a card — only to allow-listed
+  addresses and at most 20 an hour; a new address gets a card with the full text. A routine mail trigger wakes the model
+  only when a matching letter arrives.
+
 ## [0.4.4] — 2026-11-18
 
 Tasks now get finished: restarting the app, a model limit, a switched-off computer or a silent human
