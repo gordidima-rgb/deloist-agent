@@ -1782,6 +1782,7 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
     let mut floored = fresh.as_ref().unwrap_or(req.bot).clone();
     // Пол осторожности передачи: человек мог включить «Свободу действий» получателю, но задача пришла от бота, который спрашивает.
     floored.approval = req.app.turns.effective_approval(&req.app.store, &req.bot.id, &floored.approval);
+    floored.always_ask = req.app.turns.effective_always_ask(&req.app.store, &req.bot.id, &floored.always_ask);
     let bot = &floored;
     if turn.approval_policy.as_ref().is_some_and(|old| crate::tools::stricter(old, &bot.approval) != *old) {
         turn.allowed_paths.clear();
@@ -1807,9 +1808,21 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
         (crate::tools::autorun_path(p) && bot.approval != "auto")
             || crate::tools::needs_approval_for(req.app, bot, "write_file", &json!({"path":p.to_string_lossy()})));
     let conflicting_known = known.is_some() && safe_known.is_none();
-    // Список «Всегда спрашивать» сильнее режима и сильнее разборов ниже: команда и удаление агента спрашиваются каждый раз.
-    let delete_scope = (kind == "delete").then(|| crate::grants::Scope::new("acp", "", "delete", "delete", ""));
-    let always = !ours && crate::tools::always_asks(bot, our_tool_for(kind), &Value::Null, delete_scope.as_ref());
+    // Список «Всегда спрашивать» сильнее режима и сильнее разборов ниже. Вид берём так же, как у своих вызовов:
+    // чужой MCP-инструмент — по имени (`mcp__сервер__инструмент`), команда — по `reach::command_place` и выпуску, удаление — по виду вызова.
+    let always = !ours && {
+        let command_text = [release_text.as_str(), shell_command, title_command].into_iter().find(|t| !t.trim().is_empty()).unwrap_or_default();
+        let (name, scope_kind) = match &mcp {
+            Some((server, tool)) => (format!("mcp__{server}__{tool}"), crate::grants::risky_kind(&tool.replace('_', " ")).unwrap_or("")),
+            None if kind == "delete" => ("write_file".to_string(), "delete"),
+            None => {
+                let class = if releases { "publish" } else { crate::reach::command_place(command_text).map_or("", |(_, k)| k) };
+                (our_tool_for(kind).to_string(), class)
+            }
+        };
+        let scope = crate::grants::Scope::new("acp", "", scope_kind, "call", "");
+        crate::tools::always_asks(bot, &name, &Value::Null, Some(&scope))
+    };
     let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || always || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
     // Команда только названием (Antigravity), которая по строгому разбору лишь читает: карточка не нужна, как у своего `run_command`.
     if ask && !always && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
@@ -2016,6 +2029,7 @@ async fn write_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
     let content = params["content"].as_str().ok_or("нет содержимого файла")?;
     let mut bot = req.app.store.bot(&req.bot.id).unwrap_or_else(|| req.bot.clone());
     bot.approval = req.app.turns.effective_approval(&req.app.store, &bot.id, &bot.approval);
+    bot.always_ask = req.app.turns.effective_always_ask(&req.app.store, &bot.id, &bot.always_ask);
     if turn.approval_policy.as_ref().is_some_and(|old| crate::tools::stricter(old, &bot.approval) != *old) {
         turn.allowed_paths.clear();
     }

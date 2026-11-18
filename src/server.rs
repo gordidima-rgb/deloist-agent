@@ -1047,6 +1047,7 @@ async fn browser_tool(State(app): Shared, Path(id): Path<String>, headers: axum:
     let Some(mut bot) = app.store.bot(&id) else { return fail(StatusCode::NOT_FOUND, "бот не найден") };
     // Мост берёт бота из хранилища: пол осторожности передачи, рутины или цели накладываем здесь, чтобы карточки не мягчели.
     bot.approval = app.turns.effective_approval(&app.store, &id, &bot.approval);
+    bot.always_ask = app.turns.effective_always_ask(&app.store, &id, &bot.always_ask);
     let name = body["name"].as_str().unwrap_or_default();
     if !crate::tools::is_bridge_tool(name) {
         return fail(StatusCode::BAD_REQUEST, "неизвестный инструмент моста");

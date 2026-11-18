@@ -471,28 +471,42 @@ pub const ALWAYS_ASK_KINDS: [(&str, &str); 7] = [
     ("bots", "создание и правка ботов, рутин и процессов"),
 ];
 
-/// Какой из видов `ALWAYS_ASK_KINDS` у вызова. `scope` — область карточки, если она уже есть: у браузера и ACP вид берётся из неё.
-fn ask_kind(name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> Option<&'static str> {
+/// Какие из видов `ALWAYS_ASK_KINDS` у вызова (их может быть несколько). Сначала по имени своих инструментов,
+/// потом вид из области карточки (`scope.kind`: сайт, команда по `reach::command_place`, MCP, ACP).
+/// Чужой MCP-инструмент, не объявленный читающим, считается отправкой, публикацией, оплатой и удалением сразу.
+/// Команду с подстановкой или интерпретатором разобрать нельзя: у неё только вид `command`.
+fn ask_kinds(name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> Vec<&'static str> {
+    let mut kinds = Vec::new();
     if name == "run_command" {
-        return Some("command");
+        kinds.push("command");
     }
     if name == "share_file" || (name == "assign_task" && args.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())) {
-        return Some("files");
+        kinds.push("files");
     }
     if matches!(name, "create_bot" | "update_bot") || (crate::routine_tools::is_routine_tool(name) && name != "list_routines") || crate::workflow_tools::is_mutating(name) {
-        return Some("bots");
+        kinds.push("bots");
     }
-    let kind = match scope {
+    if name.starts_with("delete_") || name.starts_with("archive_") {
+        kinds.push("delete");
+    }
+    if name == "generate_image" {
+        kinds.push("pay");
+    }
+    if crate::mcp::split_name(name).is_some() && !crate::mcp::is_read_only(name) {
+        kinds.extend(["send", "publish", "pay", "delete"]);
+    }
+    let by_scope = match scope {
         Some(scope) => scope.kind.as_str(),
         None if is_read_only(name) => "",
         None => crate::grants::risky_kind(&name.replace('_', " ")).unwrap_or(""),
     };
-    ["send", "publish", "pay", "delete"].into_iter().find(|k| *k == kind)
+    kinds.extend(["send", "publish", "pay", "delete"].into_iter().filter(|k| *k == by_scope));
+    kinds
 }
 
 /// Спрашивает ли бот этот вызов всегда, в любом режиме, по списку «Всегда спрашивать» (`Bot.always_ask`).
 pub fn always_asks(bot: &Bot, name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> bool {
-    !bot.always_ask.is_empty() && ask_kind(name, args, scope).is_some_and(|kind| bot.always_ask.iter().any(|k| k == kind))
+    !bot.always_ask.is_empty() && ask_kinds(name, args, scope).iter().any(|kind| bot.always_ask.iter().any(|k| k == kind))
 }
 
 /// То же с учётом аргументов. В режиме «спрашивать» своя папка и чтение где угодно идут
@@ -2039,6 +2053,24 @@ mod always_ask_tests {
         }
         assert!(always_asks(&bot(&["delete"]), "delete_todo", &json!({}), None));
         assert!(!always_asks(&bot(&["delete"]), "list_todos", &json!({}), None), "чтение не спрашиваем");
+    }
+
+    #[test]
+    fn archive_and_delete_tools_are_deletes_even_with_an_empty_scope() {
+        let scope = Scope::new("delete_todo", "*", "", "call", "");
+        for name in ["delete_todo", "archive_habit", "delete_goal", "delete_routine", "delete_workflow"] {
+            assert!(always_asks(&bot(&["delete"]), name, &json!({}), Some(&scope)), "{name}");
+        }
+        assert!(always_asks(&bot(&["pay"]), "generate_image", &json!({}), None));
+    }
+
+    #[test]
+    fn unknown_external_mcp_tools_count_as_send_publish_pay_delete() {
+        let scope = Scope::new("mcp__srv__do_it", "srv", "", "call", "do_it");
+        for kind in ["send", "publish", "pay", "delete"] {
+            assert!(always_asks(&bot(&[kind]), "mcp__srv__do_it", &Value::Null, Some(&scope)), "{kind}");
+        }
+        assert!(!always_asks(&bot(&["command", "files", "bots"]), "mcp__srv__do_it", &Value::Null, Some(&scope)));
     }
 
     #[test]

@@ -193,7 +193,7 @@ pub struct Turns {
     /// Глубина цепочки передач, в которой сейчас работает бот (0 — задачу дал человек). Мост ACP зовёт `delegate` без глубины.
     delegation_depth: Mutex<HashMap<String, (u64, u32)>>,
     /// Кто передал задачу боту и какой режим вопросов был у него: пол осторожности получателя на время хода (бот, режим).
-    delegation_from: Mutex<HashMap<String, (u64, String, String)>>,
+    delegation_from: Mutex<HashMap<String, (u64, String, String, Vec<String>)>>,
     /// Пол осторожности любого хода с `approval_floor` (передача, рутина, цель): ключ — бот, значение — режим.
     turn_floor: Mutex<HashMap<String, (u64, String)>>,
     /// Номер записи пола: сторож старого хода не трогает пол нового.
@@ -320,12 +320,24 @@ impl Turns {
 
     /// Бот, передавший задачу, пока `bot_id` работает по передаче.
     pub(crate) fn delegation_sender(&self, bot_id: &str) -> Option<String> {
-        self.delegation_from.lock().unwrap().get(bot_id).map(|(_, from, _)| from.clone())
+        self.delegation_from.lock().unwrap().get(bot_id).map(|(_, from, _, _)| from.clone())
     }
 
     /// Режим вопросов с полом осторожности передачи: свежий режим бота никогда не мягче режима того, кто передал задачу.
     pub(crate) fn effective_approval(&self, store: &crate::store::Store, bot_id: &str, fresh: &str) -> String {
+        self.walk_chain(store, bot_id, fresh, &[]).0
+    }
+
+    /// Список «Всегда спрашивать» с цепочкой передач: объединение списков бота и каждого, кто передал ему задачу.
+    pub(crate) fn effective_always_ask(&self, store: &crate::store::Store, bot_id: &str, own: &[String]) -> Vec<String> {
+        self.walk_chain(store, bot_id, "ask", own).1
+    }
+
+    /// Один обход цепочки передач для режима и для списка «Всегда спрашивать».
+    fn walk_chain(&self, store: &crate::store::Store, bot_id: &str, fresh: &str, own: &[String]) -> (String, Vec<String>) {
         let mut result = fresh.to_string();
+        let mut asks: Vec<String> = own.to_vec();
+        let add = |asks: &mut Vec<String>, list: &[String]| asks.extend(list.iter().filter(|k| !asks.contains(k)).cloned().collect::<Vec<_>>());
         if let Some((_, floor)) = self.turn_floor.lock().unwrap().get(bot_id) {
             result = tools::stricter(&result, floor);
         }
@@ -334,16 +346,20 @@ impl Turns {
         let mut seen = std::collections::HashSet::new();
         seen.insert(current.clone());
         // Вся цепочка передач: пол каждого звена и свежий режим каждого отправителя; петля или пропавший бот — самый строгий режим.
-        while let Some((_, sender, floor)) = chain.get(&current) {
+        while let Some((_, sender, floor, carried)) = chain.get(&current) {
             result = tools::stricter(&result, floor);
-            if !seen.insert(sender.clone()) { return "strict".to_string(); }
+            add(&mut asks, carried);
+            if !seen.insert(sender.clone()) { return ("strict".to_string(), asks); }
             match store.bot(sender) {
-                Some(bot) => result = tools::stricter(&result, &bot.approval),
-                None => return "strict".to_string(),
+                Some(bot) => {
+                    result = tools::stricter(&result, &bot.approval);
+                    add(&mut asks, &bot.always_ask);
+                }
+                None => return ("strict".to_string(), asks),
             }
             current = sender.clone();
         }
-        result
+        (result, asks)
     }
 
     /// Записать пол осторожности хода; возвращает номер записи для `clear_floor`.
@@ -354,10 +370,10 @@ impl Turns {
     }
 
     /// Записать след передачи (кто, какой режим, глубина) для получателя.
-    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, depth: u32) -> u64 {
+    pub(crate) fn set_delegation(&self, bot_id: &str, from: &str, mode: &str, asks: Vec<String>, depth: u32) -> u64 {
         let epoch = self.floor_epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.delegation_depth.lock().unwrap().insert(bot_id.to_string(), (epoch, depth));
-        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string()));
+        self.delegation_from.lock().unwrap().insert(bot_id.to_string(), (epoch, from.to_string(), mode.to_string(), asks));
         epoch
     }
 
@@ -374,7 +390,7 @@ impl Turns {
         }
         drop(depth);
         let mut from = self.delegation_from.lock().unwrap();
-        if from.get(bot_id).is_some_and(|(e, _, _)| *e == epoch) {
+        if from.get(bot_id).is_some_and(|(e, _, _, _)| *e == epoch) {
             from.remove(bot_id);
         }
     }
@@ -706,7 +722,8 @@ async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>)
     }
     // «Всегда спрашивать»: карточки браузера и ACP приходят сюда без аргументов вызова, вид берётся из места (`scope.kind`) и имени.
     // Такой вызов не берёт ни правило, ни разговор и не предлагает «запомнить»; позднее «да» на ровно этот вызов (`take_once`) работает.
-    if let Some(bot) = app.store.bot(bot_id) {
+    if let Some(mut bot) = app.store.bot(bot_id) {
+        bot.always_ask = app.turns.effective_always_ask(&app.store, bot_id, &bot.always_ask);
         let tool = question.tool;
         question.scope = question.scope.take().map(|scope| if crate::tools::always_asks(&bot, tool, &Value::Null, Some(&scope)) { scope.once_only() } else { scope });
     }
@@ -2158,6 +2175,7 @@ fn run_turn_body(
         if let Some(floor) = &opts.approval_floor {
             bot.approval = tools::stricter(&bot.approval, floor);
         }
+        bot.always_ask = app.turns.effective_always_ask(&app.store, &bot.id, &bot.always_ask);
         // Пол действует и там, где режим бота читают заново (мост ACP, карточки браузера): держим его на время хода.
         let _floor_guard = opts.approval_floor.as_ref().map(|floor| {
             let epoch = app.turns.set_turn_floor(&bot.id, floor);
@@ -3135,6 +3153,8 @@ pub fn delegate_to_bot(
 pub struct Carried {
     /// Режим подтверждений отправителя с учётом всей цепочки передач на тот момент.
     pub floor: String,
+    /// Список «Всегда спрашивать» отправителя с цепочкой передач на тот момент.
+    pub asks: Vec<String>,
     /// Отправитель работал без человека (рутина, ночь).
     pub unattended: bool,
     /// Командная задача, ради которой идёт ход: по ней ход попадает в журнал запусков. Пусто — не ведётся.
@@ -3210,7 +3230,11 @@ pub fn delegate_to_bot_with(
         // Получатель не видит нашу переписку: бриф несёт всё нужное и просит короткий итог.
         let brief = format!("{}\n\n{DELEGATION_TAIL}", framed_brief(&from.name, &task, carried.is_some()));
         // Пол отправителя: цепочка A(ask) -> B(auto) -> C не теряет вопросов A (в `floor` уже весь путь и свежие режимы).
-        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, depth + 1);
+        let mut asks = app.turns.effective_always_ask(&app.store, &from.id, &fresh_from.always_ask);
+        if let Some(c) = &carried {
+            asks.extend(c.asks.iter().filter(|k| !asks.contains(k)).cloned().collect::<Vec<_>>());
+        }
+        let epoch = app.turns.set_delegation(&target.id, &from.id, &floor, asks, depth + 1);
         let _delegation_guard = FloorGuard { app: app.clone(), bot_id: target.id.clone(), epoch };
         let (text, tokens) = run_turn_body(app.clone(), target.clone(), brief, Vec::new(), opts, cancel).await;
         drop(_delegation_guard);
@@ -3580,10 +3604,10 @@ mod floor_tests {
         let store = crate::store::Store::open(dir.clone()).await.unwrap();
         let turns = Turns::default();
         let old = turns.set_turn_floor("bot", "ask");
-        let old_delegation = turns.set_delegation("bot", "sender", "ask", 1);
+        let old_delegation = turns.set_delegation("bot", "sender", "ask", Vec::new(), 1);
         // Новый ход того же бота: свои записи.
         let newer = turns.set_turn_floor("bot", "strict");
-        let newer_delegation = turns.set_delegation("bot", "other", "strict", 2);
+        let newer_delegation = turns.set_delegation("bot", "other", "strict", Vec::new(), 2);
         turns.clear_floor("bot", old);
         turns.clear_floor("bot", old_delegation);
         assert_eq!(turns.effective_approval(&store, "bot", "auto"), "strict", "пол нового хода пропал");

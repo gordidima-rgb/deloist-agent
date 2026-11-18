@@ -72,6 +72,8 @@ pub struct Task {
     pub result_files: Vec<String>,
     /// Режим подтверждений отправителя в момент выдачи (с цепочкой передач): к запуску его ход уже кончился.
     pub floor: String,
+    /// Список «Всегда спрашивать» отправителя в момент выдачи (с цепочкой передач).
+    pub asks: Vec<String>,
     /// Отправитель работал без человека.
     pub unattended: bool,
     /// Глубина цепочки передач отправителя в момент выдачи.
@@ -395,6 +397,7 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
         state: "queued".into(),
         created: now(),
         floor: app.turns.effective_approval(&app.store, &from.id, &fresh.approval),
+        asks: app.turns.effective_always_ask(&app.store, &from.id, &fresh.always_ask),
         unattended: app.turns.is_unattended(&from.id),
         depth: start_depth,
         room: app.turns.conv_of(&from.id).and_then(|c| c.strip_prefix("room:").map(str::to_string)).unwrap_or_default(),
@@ -482,7 +485,7 @@ async fn run(app: Arc<App>, id: String) {
         } else if let Some(run) = &pending {
             text = format!("{text}\n\n{}", run.continuation_note());
         }
-        let carried = crate::turn::Carried { floor: task.floor.clone(), unattended: task.unattended, task_id: id.clone(), resume: pending.map(|r| r.id) };
+        let carried = crate::turn::Carried { floor: task.floor.clone(), asks: task.asks.clone(), unattended: task.unattended, task_id: id.clone(), resume: pending.map(|r| r.id) };
         match crate::turn::delegate_to_bot_with(app.clone(), from, target.clone(), text, task.depth, Some(carried)).await {
             Err(e) if e.ends_with(crate::turn::BUSY_SUFFIX) => {
                 app.tasks.update(&id, |t| t.state = "queued".into());
