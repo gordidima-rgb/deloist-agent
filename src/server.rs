@@ -4115,6 +4115,7 @@ const PROVIDERS_JS: &str = include_str!("../web/providers.js");
 const SCREEN_JS: &str = include_str!("../web/screen.js");
 const TEAM_JS: &str = include_str!("../web/team.js");
 const TURN_CARD_JS: &str = include_str!("../web/turn-card.js");
+const TOOL_LABELS_JS: &str = include_str!("../web/tool-labels.js");
 const USER_CHROME_JS: &str = include_str!("../web/user-chrome.js");
 const MESSENGERS_JS: &str = include_str!("../web/messengers.js");
 const I18N_JS: &str = include_str!("../web/i18n.js");
@@ -4172,6 +4173,7 @@ async fn web(method: Method, uri: Uri) -> Response {
         "/screen.js" => (SCREEN_JS.as_bytes(), "text/javascript; charset=utf-8"),
         "/team.js" => (TEAM_JS.as_bytes(), "text/javascript; charset=utf-8"),
         "/turn-card.js" => (TURN_CARD_JS.as_bytes(), "text/javascript; charset=utf-8"),
+        "/tool-labels.js" => (TOOL_LABELS_JS.as_bytes(), "text/javascript; charset=utf-8"),
         "/user-chrome.js" => (USER_CHROME_JS.as_bytes(), "text/javascript; charset=utf-8"),
         "/messengers.js" => (MESSENGERS_JS.as_bytes(), "text/javascript; charset=utf-8"),
         "/i18n.js" => (I18N_JS.as_bytes(), "text/javascript; charset=utf-8"),
