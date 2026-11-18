@@ -1515,17 +1515,26 @@ function delegatedBody(text) {
   return String(text || '').replace(/^Задача от бота «[^»]*»[^\n]*:\n/, '').trim();
 }
 
+// Отправитель начинает бриф строкой-заголовком (описание `delegate`): она и есть название карточки.
+const TASK_HEADING_MAX = 80;
+
 function delegatedCard(msg, name) {
   const bot = S.bots.find((b) => b.name === name) || null;
-  return foldCard(msg, taskAvatar(bot, name), tr('Задача от'), name, delegatedBody(msg.text));
+  const body = delegatedBody(msg.text);
+  const [first, ...rest] = body.split('\n');
+  const heading = first.trim().replace(/[.:]$/, '');
+  if (rest.join('').trim() && heading && heading.length <= TASK_HEADING_MAX) {
+    return foldCard(msg, taskAvatar(bot, name), name, heading, rest.join('\n').trim(), '');
+  }
+  return foldCard(msg, taskAvatar(bot, name), tr('Задача от'), name, body);
 }
 
-// Свёрнутое сообщение в одну строку: значок, вид и название, первая строка текста; весь текст — по щелчку.
-function foldCard(msg, face, kind, title, body) {
+// Свёрнутое сообщение: значок, вид и название, под ними начало текста (`lead`, пусто — без строки); весь текст — по щелчку.
+function foldCard(msg, face, kind, title, body, lead = body) {
   const card = document.createElement('details');
   card.className = 'rt-runcard';
   const summary = document.createElement('summary');
-  const gist = body.replace(/\s+/g, ' ').slice(0, 160);
+  const gist = lead.replace(/\s+/g, ' ').slice(0, 160);
   summary.innerHTML = `
     <span class="rt-run-text">
       <span class="rt-run-title"><span class="rt-run-kind">${escapeHtml(kind)}</span>${escapeHtml(title)}</span>
