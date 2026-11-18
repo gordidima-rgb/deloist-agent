@@ -514,6 +514,7 @@ impl Turns {
         let ids: Vec<String> = self.approvals.lock().unwrap().iter().filter(|(_, a)| a.payload["conv"] == conv).map(|(k, _)| k.clone()).collect();
         for id in ids {
             if let Some(item) = self.take_approval(&id) {
+                self.drop_once(&item.bot_id, item.run.as_deref());
                 self.emit(json!({ "type": "approval_closed", "botId": item.bot_id, "id": id, "status": "denied" }));
                 if let Some(tx) = item.tx {
                     let _ = tx.send(Reply::Deny);
@@ -2543,6 +2544,11 @@ fn run_turn_body(
                 (Some(message), false) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Unknown, text: shorten(message, JOURNAL_TEXT_LIMIT) },
                 (None, false) => crate::runs::RunState::Done,
             };
+            // Неиспользованное разовое разрешение живёт, пока жив запуск.
+            let ended = !matches!(state, crate::runs::RunState::NeedsHuman { .. });
+            if let (true, Some(run)) = (ended, app.runs.active_id(&bot_id)) {
+                app.turns.drop_once(&bot_id, Some(&run));
+            }
             app.runs.close(&bot_id, state);
         }
         // Резерв считает дни от последнего законченного хода, а не от создания бота.
@@ -2732,7 +2738,7 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         // Текст карточки собирает программа (`describe`); слова бота (`purpose`) идут отдельной строкой.
         // Браузерные инструменты спрашивают сами, своими словами: к ним описание не липнем.
         let human = (!call.name.starts_with("browser_")).then(|| crate::describe::call(app, bot, &call.name, &call.args));
-        let mut detail = human.as_ref().map(|h| h.details.clone()).unwrap_or_else(|| serde_json::to_string_pretty(&call.args).unwrap_or_default());
+        let mut detail = human.as_ref().map(|h| h.details.clone()).unwrap_or_else(|| crate::describe::cap_masked(&serde_json::to_string_pretty(&call.args).unwrap_or_default()));
         let touch = crate::keys::call_touch(&call.name, &call.args);
         let secret_title = touch.as_ref().map(|t| t.title());
         if touch.is_some() {

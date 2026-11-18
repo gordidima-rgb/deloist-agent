@@ -21,7 +21,13 @@ struct Setup {
 
 impl Setup {
     async fn new(name: &str, env: Value, approval: &str) -> Self {
-        let crew = Crew::start_with_env(name, &[("OPENAI_API_KEY", "sk-test-secret")]).await;
+        Self::with_crew_env(name, env, approval, &[]).await
+    }
+
+    async fn with_crew_env(name: &str, env: Value, approval: &str, crew_env: &[(&str, &str)]) -> Self {
+        let mut vars = vec![("OPENAI_API_KEY", "sk-test-secret")];
+        vars.extend_from_slice(crew_env);
+        let crew = Crew::start_with_env(name, &vars).await;
         let log = crew.data_dir.join("fake-acp.log");
         let mut acp_env = json!({ "FAKE_ACP_LOG": log.display().to_string() });
         if let (Some(target), Some(extra)) = (acp_env.as_object_mut(), env.as_object()) {
@@ -611,4 +617,34 @@ async fn each_team_and_the_personal_chat_get_their_own_agent_session() {
     assert!(ta.contains("секрет-альфа") && !ta.contains("секрет-бета") && !ta.contains("секрет-личный"), "разговор альфы: {ta}");
     assert!(tb.contains("секрет-бета") && !tb.contains("секрет-альфа") && !tb.contains("секрет-личный"), "разговор беты: {tb}");
     assert!(tp.contains("секрет-личный"), "разговор личного чата: {tp}");
+}
+
+const SHORT_WAIT: &[(&str, &str)] = &[("CREW_TEST_APPROVAL_WAIT_MS", "300")];
+
+#[tokio::test]
+async fn an_unanswered_card_cancels_the_agent_instead_of_rejecting_the_call() {
+    let s = Setup::with_crew_env("acp-unanswered", json!({}), "ask", SHORT_WAIT).await;
+    let (_, answer) = s.turn(r#"разреши-вызов {"toolCallId":"x1","title":"Команда","kind":"execute","rawInput":{"command":"echo hi"}}"#).await;
+    assert!(!answer.contains("разрешение: no") && !answer.contains("разрешение: yes"), "агенту не ответили «да» или «нет»: {answer}");
+    assert_eq!(s.count("session/cancel"), 1, "ход агента отменён, а не отклонён вызов");
+    let needs = s.crew.ok("GET", "/api/needs", None).await;
+    assert_eq!(needs["count"], 1, "карточка осталась: {needs}");
+    assert_eq!(needs["items"][0]["kind"], "approval");
+}
+
+#[tokio::test]
+async fn a_late_allow_covers_the_approved_raw_call_and_not_one_that_only_looks_the_same() {
+    let s = Setup::with_crew_env("acp-exact", json!({}), "ask", SHORT_WAIT).await;
+    // Скрытый параметр `env` в карточке не виден: подробности у обоих вызовов одинаковые.
+    s.turn(r#"разреши-вызов {"toolCallId":"x1","title":"Команда","kind":"execute","rawInput":{"command":"echo hi","env":{"A":"1"}}}"#).await;
+    let first = s.crew.find_event(|e| e["type"] == "approval").unwrap();
+    s.crew.clear_events();
+    s.crew.ok("POST", &format!("/api/approvals/{}", first["id"].as_str().unwrap()), Some(json!({ "answer": "once" }))).await;
+    let second = s.crew.wait_event("карточка на похожий вызов", |e| e["type"] == "approval").await;
+    assert_eq!(second["detail"], first["detail"], "карточки выглядят одинаково");
+    s.crew.ok("POST", &format!("/api/approvals/{}", second["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
+    s.crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
+    assert_eq!(s.crew.count_events(|e| e["type"] == "approval"), 1, "одобренный вызов прошёл без новой карточки");
+    let answer = s.last_answer().await;
+    assert!(answer.contains("повтор: первый yes, второй no"), "{answer}");
 }

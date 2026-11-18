@@ -276,7 +276,8 @@ async fn ask(app: &Arc<App>, bot: &Bot, tool: &str, title: &str, detail: &str, s
             remote = crate::grants::Remote::No;
         }
     }
-    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None, exact: None };
+    let exact = crate::turn::call_key(tool, &serde_json::json!({ "scope": scope, "detail": detail, "danger": danger }));
+    let question = Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: ASK_TIMEOUT, scope: Some(scope), room: None, danger, sensitive: false, remote, human: None, exact: Some(exact) };
     if request_confirmation(app, &bot.id, question).await {
         Ok(())
     } else {
@@ -1843,7 +1844,7 @@ async fn human(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
             sensitive: false,
             remote: crate::grants::Remote::No,
             human: None,
-            exact: None,
+            exact: Some(crate::turn::call_key("browser_human", &serde_json::json!(message))),
         },
     )
     .await;
@@ -1913,7 +1914,7 @@ async fn capture_key(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value)
             sensitive: false,
             remote: crate::grants::Remote::No,
             human: None,
-            exact: None,
+            exact: Some(crate::turn::call_key("browser_capture_key", &serde_json::json!({ "provider": provider, "key": key }))),
         },
     )
     .await;

@@ -157,6 +157,14 @@ impl Run {
         }
     }
 
+    /// Что записано в состоянии «ждёт человека».
+    pub fn wait_text(&self) -> String {
+        match &self.state {
+            RunState::NeedsHuman { text, .. } => text.clone(),
+            _ => String::new(),
+        }
+    }
+
     /// Первое сообщение продолжения: что прервало, что уже сделано, что нельзя повторять.
     pub fn continuation_note(&self) -> String {
         let last = self.steps.last().map(|s| s.label.as_str()).unwrap_or("начало хода");
@@ -342,6 +350,12 @@ impl Runs {
         self.inner.lock().unwrap().items.iter().filter(|r| matches!(r.state, RunState::NeedsHuman { .. })).cloned().collect()
     }
 
+    /// Ход командной задачи, который остановился и ждёт человека (карточка без ответа).
+    pub fn waiting_for_task(&self, task_id: &str) -> Option<Run> {
+        let inner = self.inner.lock().unwrap();
+        inner.items.iter().find(|r| matches!(r.state, RunState::NeedsHuman { .. }) && matches!(&r.origin, Origin::Team { task_id: t } if t == task_id)).cloned()
+    }
+
     /// Прерванный ход командной задачи, который уже решено продолжать: его подхватит `team_tasks::run`.
     pub fn pending_for_task(&self, task_id: &str) -> Option<Run> {
         let inner = self.inner.lock().unwrap();
@@ -435,7 +449,7 @@ pub async fn recover(app: &Arc<App>) {
 /// Запустить ход продолжения. Командную задачу запускает её собственный путь (она ждёт в очереди задач).
 fn launch(app: &Arc<App>, run: &Run, note: &str) -> Result<(), String> {
     if let Origin::Team { task_id } = &run.origin {
-        return crate::team_tasks::requeue(app, task_id);
+        return crate::team_tasks::requeue(app, task_id, note);
     }
     crate::turn::start_turn(app, &run.bot_id, note, run.options()).map_err(|StartError { message, .. }| message)
 }
@@ -484,6 +498,7 @@ pub fn waiting_text(title: &str) -> String {
 
 /// Запись закрыта без продолжения.
 async fn close_stopped(app: &Arc<App>, run: &Run, why: &str) {
+    app.turns.drop_once(&run.bot_id, Some(&run.id));
     app.runs.update(&run.id, |r| r.state = RunState::Failed { reason: StopReason::Human, text: why.to_string() });
     app.turns.emit(json!({ "type": "state_changed" }));
     settle_origin(app, run, "stopped", why).await;

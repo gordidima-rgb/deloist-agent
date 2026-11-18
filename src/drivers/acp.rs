@@ -1828,15 +1828,12 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: touch.is_some(),
                 remote: crate::grants::Remote::No,
                 human: Some(human),
-                exact: None,
+                exact: Some(crate::turn::call_key("acp", &json!({ "rawInput": call["rawInput"], "kind": kind, "paths": paths }))),
             },
         );
-        tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => {
-                turn.cancelled = true;
-                return cancelled;
-            }
+        match answer_unless_cancelled(question, cancel, turn).await {
+            Some(answer) => answer,
+            None => return cancelled,
         }
     };
     if allowed {
@@ -1853,6 +1850,21 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
             None => cancelled,
         }
     }
+}
+
+/// Ответ человека на карточку. `None` — ход отменён: «Стоп» или карточка осталась без ответа (`ask_human` тогда отменяет ход
+/// и просит «нет»): агенту не отвечаем ни «да», ни «нет», он не должен успеть сделать ещё шаг.
+async fn answer_unless_cancelled(question: impl std::future::Future<Output = bool>, cancel: &CancellationToken, turn: &mut TurnState) -> Option<bool> {
+    let answer = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        answer = question => Some(answer),
+    };
+    if cancel.is_cancelled() {
+        turn.cancelled = true;
+        return None;
+    }
+    answer
 }
 
 /// Путь агента (обычно абсолютный) — в путь внутри воркспейса бота. Всё, что снаружи, — ошибка.
@@ -1936,12 +1948,9 @@ async fn read_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, canc
         let detail = format!("Агент хочет прочитать файл с ключами: {}", touch.label);
         let question = crate::turn::request_confirmation(req.app, &req.bot.id, crate::turn::Confirmation {
             tool: "read_file", title: &title, detail: &detail, allow_label: None, deny_label: None,
-            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None, exact: None,
+            timeout: crate::turn::APPROVAL_TIMEOUT, scope: Some(touch.scope("read_file")), room: None, danger: false, sensitive: true, remote: crate::grants::Remote::No, human: None, exact: Some(crate::turn::call_key("read_file", &json!(raw))),
         });
-        let allowed = tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => { turn.cancelled = true; false }
-        };
+        let allowed = answer_unless_cancelled(question, cancel, turn).await.unwrap_or(false);
         if !allowed {
             sink(DriverEvent::Activity(json!({ "id": "acp-secret-read-denied", "name": "Разрешение", "kind": "permission", "status": "denied" })));
             return Err("человек не разрешил чтение файла с ключами".into());
@@ -2011,16 +2020,10 @@ async fn write_file(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
                 sensitive: false,
                 remote: crate::grants::Remote::No,
                 human: Some(human),
-                exact: None,
+                exact: Some(crate::turn::call_key("write_file", &json!({ "path": raw, "content": content }))),
             },
         );
-        let allowed = tokio::select! {
-            answer = question => answer,
-            _ = cancel.cancelled() => {
-                turn.cancelled = true;
-                false
-            }
-        };
+        let allowed = answer_unless_cancelled(question, cancel, turn).await.unwrap_or(false);
         if !allowed {
             return Err("человек не разрешил запись файла".into());
         }

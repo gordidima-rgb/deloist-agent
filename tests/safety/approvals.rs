@@ -1271,6 +1271,11 @@ fn runs_file(crew: &Crew) -> Vec<Value> {
     serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runs.json")).unwrap_or_else(|_| "[]".into())).unwrap()
 }
 
+/// Записи журнала, которые ведут задачи команды (ход ведущего человека сюда не входит).
+fn team_runs(crew: &Crew) -> Vec<Value> {
+    runs_file(crew).into_iter().filter(|r| r["origin"].get("team").is_some()).collect()
+}
+
 fn texts(thread: &Value) -> Vec<String> {
     thread["messages"].as_array().cloned().unwrap_or_default().iter().filter_map(|m| m["text"].as_str().map(str::to_string)).collect()
 }
@@ -1445,4 +1450,115 @@ async fn a_card_without_a_decision_reminds_once() {
     assert_eq!(reminders(), 1, "второго напоминания нет");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&sink);
+}
+
+// ---------------------------------------------------------------------------
+// Задача команды: карточка у исполнителя
+// ---------------------------------------------------------------------------
+
+/// Модель, у которой свой сценарий на каждого бота: ведущий и исполнитель работают одновременно.
+#[derive(Clone, Default)]
+struct Named {
+    scripts: Arc<Mutex<std::collections::HashMap<String, Vec<Value>>>>,
+    requests: Arc<Mutex<Vec<(String, Value)>>>,
+}
+
+async fn named_completions(State(fake): State<Named>, body: Bytes) -> Response {
+    let request: Value = serde_json::from_slice(&body).unwrap();
+    if request.get("tools").is_none() {
+        return Json(json!({ "choices": [{ "message": say("{\"ops\": []}") }] })).into_response();
+    }
+    let system = request["messages"][0]["content"].as_str().unwrap_or_default().to_string();
+    let who = if system.contains("Ты — Бета") { "beta" } else { "alpha" }.to_string();
+    fake.requests.lock().unwrap().push((who.clone(), request));
+    let message = {
+        let mut scripts = fake.scripts.lock().unwrap();
+        let list = scripts.entry(who).or_default();
+        if list.is_empty() { say("готово") } else { list.remove(0) }
+    };
+    Json(json!({ "choices": [{ "message": message }] })).into_response()
+}
+
+struct TeamSetup {
+    crew: Crew,
+    fake: Named,
+    alpha: String,
+    dir: PathBuf,
+}
+
+async fn team_setup(name: &str) -> TeamSetup {
+    let fake = Named::default();
+    let router = Router::new().route("/v1/chat/completions", post(named_completions)).with_state(fake.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let crew = Crew::start_with_env(name, SHORT).await;
+    crew.ok("PUT", "/api/settings", Some(json!({ "driver": "api", "baseUrl": format!("http://127.0.0.1:{port}/v1"), "apiKey": "k" }))).await;
+    crew.listen().await;
+    let mut ids = Vec::new();
+    for (bot, role, mode) in [("Альфа", "ведущий", "auto"), ("Бета", "картинки", "ask")] {
+        let id = crew.ok("POST", "/api/bots", Some(json!({ "name": bot, "role": role, "approval": mode }))).await["bot"]["id"].as_str().unwrap().to_string();
+        ids.push(id);
+    }
+    crew.ok("POST", "/api/rooms", Some(json!({ "name": "Редакция", "botIds": [ids[0], ids[1]], "lead": ids[0] }))).await;
+    TeamSetup { crew, fake, alpha: ids[0].clone(), dir: outside(name) }
+}
+
+impl TeamSetup {
+    fn tasks(&self) -> Vec<Value> {
+        serde_json::from_str(&std::fs::read_to_string(self.crew.data_dir.join("team_tasks.json")).unwrap_or_else(|_| "[]".into())).unwrap()
+    }
+
+    fn script(&self, who: &str, steps: Vec<Value>) {
+        self.fake.scripts.lock().unwrap().insert(who.to_string(), steps);
+    }
+
+    fn beta_saw(&self, text: &str) -> bool {
+        self.fake.requests.lock().unwrap().iter().filter(|(who, _)| who == "beta").any(|(_, r)| r.to_string().contains(text))
+    }
+
+    /// Исполнитель упёрся в карточку без ответа: задача закрыта как прерванная, запись ждёт человека.
+    async fn start_and_wait_for_the_card(&self, file: &std::path::Path) -> String {
+        self.script("alpha", vec![tool("assign_task", json!({ "bot": "Бета", "text": "сделай запись" })), say("поручил")]);
+        self.script("beta", vec![write(file), say("это не должно прозвучать")]);
+        self.crew.clear_events();
+        self.crew.say(&self.alpha, "поручи").await;
+        let card = self.crew.wait_event("карточка исполнителя", |e| e["type"] == "approval").await;
+        common::wait_until("задача прервана", 30, || async { self.tasks().first().is_some_and(|t| t["state"] == "interrupted") }).await;
+        assert_eq!(team_runs(&self.crew)[0]["state"]["kind"], "needs_human");
+        card["id"].as_str().unwrap().to_string()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_team_task_continues_on_the_same_run_after_a_late_allow() {
+    let t = team_setup("ap-team-allow").await;
+    let file = t.dir.join("a").join("x.txt");
+    let id = t.start_and_wait_for_the_card(&file).await;
+    t.script("beta", vec![write(&file), say("записал")]);
+    t.crew.clear_events();
+    t.crew.ok("POST", &format!("/api/approvals/{id}"), Some(json!({ "answer": "once" }))).await;
+    common::wait_until("задача закончена", 40, || async { t.tasks().first().is_some_and(|t| t["state"] == "done") }).await;
+    assert!(file.exists(), "разрешённый вызов выполнен");
+    assert_eq!(t.crew.count_events(|e| e["type"] == "approval"), 0, "разовое разрешение подошло: запись та же, новой карточки нет");
+    assert!(t.beta_saw("Человек разрешил:"), "исполнитель получил решение");
+    let runs = team_runs(&t.crew);
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0]["state"]["kind"], "done");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_team_task_hears_a_late_deny_and_does_not_ask_again() {
+    let t = team_setup("ap-team-deny").await;
+    let file = t.dir.join("a").join("x.txt");
+    let id = t.start_and_wait_for_the_card(&file).await;
+    t.script("beta", vec![say("обошёлся без записи")]);
+    t.crew.clear_events();
+    t.crew.ok("POST", &format!("/api/approvals/{id}"), Some(json!({ "answer": "deny" }))).await;
+    common::wait_until("задача закончена", 40, || async { t.tasks().first().is_some_and(|t| t["state"] == "done") }).await;
+    assert!(!file.exists());
+    assert!(t.beta_saw("Человек запретил:"), "исполнитель получил запрет и пояснение");
+    assert_eq!(t.crew.count_events(|e| e["type"] == "approval"), 0);
+    let _ = std::fs::remove_dir_all(&t.dir);
 }

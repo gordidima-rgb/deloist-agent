@@ -80,6 +80,8 @@ pub struct Task {
     pub room: String,
     /// Ведущему уже сказали об итоге в его следующем ходу (системная заметка).
     pub noted: bool,
+    /// Первое сообщение продолжения (решение человека по карточке или заметка об обрыве): уходит исполнителю после брифа.
+    pub carry: String,
 }
 
 impl Task {
@@ -474,10 +476,11 @@ async fn run(app: Arc<App>, id: String) {
         // Ход, который оборвал перезапуск: продолжаем его запись, а не начинаем задачу с нуля.
         let pending = app.runs.pending_for_task(&id);
         let mut text = brief(&task);
-        if let Some(run) = &pending {
-            text = format!("{text}
-
-{}", run.continuation_note());
+        // Решение человека или заметка об обрыве; без них (старт программы) заметку собирает сама запись.
+        if !task.carry.is_empty() {
+            text = format!("{text}\n\n{}", task.carry);
+        } else if let Some(run) = &pending {
+            text = format!("{text}\n\n{}", run.continuation_note());
         }
         let carried = crate::turn::Carried { floor: task.floor.clone(), unattended: task.unattended, task_id: id.clone(), resume: pending.map(|r| r.id) };
         match crate::turn::delegate_to_bot_with(app.clone(), from, target.clone(), text, task.depth, Some(carried)).await {
@@ -487,6 +490,12 @@ async fn run(app: Arc<App>, id: String) {
             }
             Err(e) => {
                 finish(&app, &id, "error", e, Vec::new()).await;
+                return;
+            }
+            Ok(_) if app.runs.waiting_for_task(&id).is_some() => {
+                // Исполнитель ждёт человека: задача не закончена, её продолжит решение по карточке.
+                let wait = app.runs.waiting_for_task(&id).map(|r| r.wait_text()).unwrap_or_default();
+                finish(&app, &id, "interrupted", wait, Vec::new()).await;
                 return;
             }
             Ok(text) => {
@@ -500,7 +509,7 @@ async fn run(app: Arc<App>, id: String) {
 }
 
 /// Поставить в очередь задачу, ход которой человек решил продолжить (она закрыта как прерванная).
-pub fn requeue(app: &Arc<App>, id: &str) -> Result<(), String> {
+pub fn requeue(app: &Arc<App>, id: &str, note: &str) -> Result<(), String> {
     let task = app.tasks.get(id).ok_or("задачи уже нет")?;
     // На старте задача уже в очереди: её возьмёт `resume`.
     if task.state == "queued" {
@@ -509,6 +518,7 @@ pub fn requeue(app: &Arc<App>, id: &str) -> Result<(), String> {
     app.tasks.update(id, |t| {
         t.state = "queued".into();
         t.finished = 0;
+        t.carry = note.to_string();
     });
     tokio::spawn(run(app.clone(), id.to_string()));
     Ok(())
@@ -525,6 +535,7 @@ async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: V
         t.finished = now();
         t.summary = clip(&summary, SUMMARY_CHARS);
         t.result_files = files;
+        t.carry.clear();
     }) else {
         return;
     };

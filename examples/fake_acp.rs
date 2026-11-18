@@ -316,9 +316,36 @@ fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
         chunk(io, session, &format!("разрешение: {picked}"));
         return if cancelled { "cancelled" } else { "end_turn" };
     }
+    // После позднего «да» агент повторяет запомненный вызов, а следом такой же с другим скрытым параметром:
+    // «первый» разрешён разово, «второй» должен спрашивать заново.
+    if text.contains("Человек разрешил:") {
+        let last = std::env::var("FAKE_ACP_LOG").ok().and_then(|p| std::fs::read_to_string(format!("{p}.last")).ok());
+        if let Some(call) = last.and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+            let mut other = call.clone();
+            other["rawInput"]["env"] = json!({ "A": "другой" });
+            let mut picks = Vec::new();
+            for call in [call, other] {
+                let reply = io.ask(
+                    "session/request_permission",
+                    json!({ "sessionId": session, "toolCall": call, "options": [
+                        { "optionId": "yes", "name": "Разрешить", "kind": "allow_once" },
+                        { "optionId": "no", "name": "Запретить", "kind": "reject_once" },
+                    ] }),
+                    &mut cancelled,
+                );
+                let outcome = &reply["result"]["outcome"];
+                picks.push(if outcome["outcome"] == "selected" { outcome["optionId"].as_str().unwrap_or("?").to_string() } else { "cancelled".into() });
+            }
+            chunk(io, session, &format!("повтор: первый {}, второй {}", picks[0], picks[1]));
+            return "end_turn";
+        }
+    }
     // «разреши-вызов {json}» — запрос разрешения с произвольным `toolCall` (так проверяются карточки и MCP-вызовы).
     if let Some(raw) = text.lines().find(|l| l.contains("разреши-вызов ")).and_then(|l| l.split("разреши-вызов ").nth(1)) {
         let call: Value = serde_json::from_str(raw.trim()).unwrap_or_else(|_| json!({}));
+        if let Ok(path) = std::env::var("FAKE_ACP_LOG") {
+            let _ = std::fs::write(format!("{path}.last"), call.to_string());
+        }
         let reply = io.ask(
             "session/request_permission",
             json!({
