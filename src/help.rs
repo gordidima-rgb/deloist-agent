@@ -70,6 +70,18 @@ mod tests {
     }
 
     #[test]
+    fn every_tool_has_a_label() {
+        let source = include_str!("../web/tool-labels.js");
+        let defs = crate::tools::tool_defs();
+        let mut names: Vec<&str> = defs.as_array().unwrap().iter().filter_map(|d| d["function"]["name"].as_str()).collect();
+        names.extend(CONDITIONAL);
+        let missing: Vec<&str> = names.into_iter().filter(|n| {
+            !source.contains(&format!("\"{n}\"")) && !source.contains(&format!("{n}:"))
+        }).collect();
+        assert!(missing.is_empty(), "нет подписи для: {missing:?}");
+    }
+
+    #[test]
     fn every_section_is_reachable_and_unknown_topics_list_them() {
         let all = sections();
         assert!(all.len() >= 12, "разделов: {}", all.len());

@@ -1134,110 +1134,11 @@ function clearMessages() {
   requestAnimationFrame(() => requestAnimationFrame(() => delete host.dataset.history));
 }
 
-const TOOL_LABELS = {
-  list_files: tr('Смотрит файлы'),
-  read_file: tr('Читает файл'),
-  write_file: tr('Записывает файл'),
-  run_command: tr('Запускает команду'),
-  web_fetch: tr('Открывает адрес'),
-  web_search: tr('Ищет в интернете'),
-  remember: tr('Запоминает'),
-  recall: tr('Ищет в памяти'),
-  read_skill: tr('Читает навык'),
-  save_skill: tr('Сохраняет навык'),
-  save_script: tr('Сохраняет скрипт'),
-  run_script: tr('Запускает скрипт'),
-  delegate: tr('Передаёт задачу'),
-  assign_task: tr('Даёт задачу участнику'),
-  task_status: tr('Смотрит задачи'),
-  team_status: tr('Смотрит команду'),
-  share_file: tr('Передаёт файл'),
-  list_bots: tr('Смотрит команду'),
-  create_bot: tr('Создаёт бота'),
-  update_bot: tr('Настраивает бота'),
-  browser_nav: tr('Открывает страницу'),
-  browser_page: tr('Читает страницу'),
-  browser_mouse: tr('Двигает мышью'),
-  browser_keyboard: tr('Печатает'),
-  browser_devtools: tr('Смотрит в отладчик'),
-  browser_human: tr('Зовёт тебя в браузер'),
-  browser_show_to_human: tr('Просит посмотреть на экран'),
-};
-
-// Агенты ACP зовут наш браузер через MCP: «mcp.deloist_browser.browser_page» → «browser_page».
-const plainName = (name) => String(name || "").replace(/^mcp(?:\.|__)[a-z0-9_-]+?(?:\.|__)(?=(?:browser_|web_|delegate$|list_bots$|remember$|recall$|assign_task$|task_status$|team_status$|share_file$))/i, "");
-// Внешний агент (ACP) называет шаг своим заголовком: «Execute `<весь скрипт>`», «Write `путь` (unreadable, no preview)»,
-// а иногда кладёт туда обрывок JSON. В строку шага и в карточку хода такое не годится: берём короткую подпись по виду шага (kind).
-const STEP_KIND_LABELS = {
-  execute: tr('Запускает команду'),
-  edit: tr('Записывает файл'),
-  read: tr('Читает файл'),
-  search: tr('Ищет'),
-  fetch: tr('Открывает адрес'),
-  think: tr('Думает'),
-  delete: tr('Удаляет файл'),
-  move: tr('Переносит файл'),
-};
-const MESSY_TITLE = /^[\s{["]|[{}`\r\n]|":/;
-function agentLabel(call) {
-  const name = String(call.name || '').trim();
-  const kind = STEP_KIND_LABELS[call.kind];
-  if (kind && (MESSY_TITLE.test(name) || /^(execute|write|edit|read|delete|move|fetch)\b/i.test(name))) return kind;
-  if (!name || name.length > 60 || MESSY_TITLE.test(name)) return kind || tr('Выполняет шаг');
-  return name;
-}
-const toolLabel = (call) => TOOL_LABELS[plainName(call.name)] || TOOL_LABELS[call.name] || agentLabel(call);
-// Семья шага: все браузерные шаги идут одной строкой, остальные собираются по имени инструмента.
-const toolFamily = (call) => {
-  const plain = plainName(call.name);
-  // Запись в память — всегда своя строка: в группе «3 шага» не видно, что и куда записано.
-  if (plain === 'remember') return '';
-  return plain.startsWith('browser_') ? 'browser' : plain;
-};
-
-const hostOf = (url) => {
-  try {
-    return new URL(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : 'https://' + url).hostname.replace(/^www\./, '');
-  } catch {
-    return String(url || '').slice(0, 40);
-  }
-};
-
+// clip остаётся здесь: используется по всему app.js.
 const clip = (value, n = 60) => {
   const s = String(value ?? '').replace(/\s+/g, ' ').trim();
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 };
-
-// Что шаг делает «над чем», из аргументов вызова (у агентов ACP они приходят из rawInput). Пусто, если сказать нечего.
-function toolTarget(call) {
-  const args = call.args || {};
-  const plain = plainName(call.name);
-  const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
-  if (plain === 'browser_nav') return args.url ? hostOf(str(args.url)) : '';
-  if (plain === 'web_search') return clip(str(args.query) || str(args.q));
-  if (plain === 'web_fetch') return args.url ? hostOf(str(args.url)) : '';
-  if (plain === 'run_script' || plain === 'save_script') return scriptTarget(str(args.name));
-  if (plain === 'browser_mouse') return clip(str(args.label) || str(args.selector) || (args.ref ? '#' + str(args.ref) : ''));
-  if (plain === 'browser_keyboard') {
-    const typed = str(args.text);
-    if (typed) {
-      // Пароли и ключи в строку шага не попадают.
-      const secret = /passw|парол|secret|token|cvv|card|карт/i.test(str(args.label) + ' ' + str(args.selector));
-      return secret ? '••••••' : '«' + clip(typed, 40) + '»';
-    }
-    return clip(str(args.keys));
-  }
-  const value = args.command || args.path || args.url || args.query || args.bot || args.name || args.bot_id || '';
-  return typeof value === 'string' ? clip(value, 200) : '';
-}
-
-// Текст текущего шага для карточки хода и строки «Ход работы»: короткая подпись и, если есть, над чем. Код команды не показываем.
-function liveStepText(call, label, target) {
-  const isFile = /^(read_file|write_file|list_files)$/.test(plainName(call.name)) || call.kind === 'edit' || call.kind === 'read';
-  if (!target || call.kind === 'execute' || plainName(call.name) === 'run_command') return label;
-  const shown = (isFile ? target.split(/[\\/]/).pop() : target).slice(0, 48);
-  return !shown || label.includes(shown) ? label : label + ' ' + shown;
-}
 
 // Скрипты ботов: название и то, что скрипт делает, показываем в строке шага вместо голого «run_script».
 const scriptsInfo = new Map();
@@ -1289,7 +1190,7 @@ function stepDurNode(ms) {
 }
 
 // Рутина или задача, которую завёл бот: под строкой шага показываем карточку, как в окне «Задачи и автоматизация».
-const madeKind = (call) => ({ create_routine: 'routine', add_todo: 'todo' })[plainName(call.name)] || '';
+const madeKind = (call) => ({ create_routine: 'routine', add_todo: 'todo' })[CrewToolLabels.plainName(call.name)] || '';
 
 function madeRoutine(args, result) {
   const id = /\brt_[0-9a-f]+/i.exec(result || '')?.[0] || '';
@@ -1367,7 +1268,7 @@ const MEMORY_PLACES = {
 // Что бот записал, из ответа `remember` («Записано [m18] в общую память …: «название». [журнал: mem_…]»).
 // Тот же разбор для ботов на API и для внешних агентов (ACP): у обоих ответ приходит текстом.
 function rememberNote(call) {
-  if (plainName(call.name) !== 'remember' || call.status !== 'ok') return null;
+  if (CrewToolLabels.plainName(call.name) !== 'remember' || call.status !== 'ok') return null;
   const text = String(call.result || '');
   const unchanged = /^Факт \[(m\d+)\] уже такой/.exec(text);
   if (unchanged) return { id: unchanged[1], title: '', place: '', label: tr('Уже было записано'), entry: '' };
@@ -1436,11 +1337,12 @@ function toolNode(call) {
   d.className = 'tool';
   d.dataset.status = call.status || 'running';
   d.dataset.callId = call.id || '';
-  d.dataset.family = toolFamily(call);
+  d.dataset.family = CrewToolLabels.family(call);
   d._call = call;
   const summary = document.createElement('summary');
-  const target = toolTarget(call);
-  summary.innerHTML = ICONS.chev + '<span class="t-label" title="' + escapeHtml(clip(call.name, 160)) + '">' + escapeHtml(toolLabel(call)) + '</span>' + (target ? '<span class="t-target" title="' + escapeHtml(target) + '">' + escapeHtml(target) + '</span>' : '') + '<span class="t-status">' + statusLabel(call.status) + '</span>';
+  const _plain = CrewToolLabels.plainName(call.name);
+  const target = (_plain === 'run_script' || _plain === 'save_script') ? scriptTarget(String(call.args?.name || '')) : CrewToolLabels.target(call);
+  summary.innerHTML = ICONS.chev + '<span class="t-label" title="' + escapeHtml(clip(call.name, 160)) + '">' + escapeHtml(CrewToolLabels.label(call)) + '</span>' + (target ? '<span class="t-target" title="' + escapeHtml(target) + '">' + escapeHtml(target) + '</span>' : '') + '<span class="t-status">' + statusLabel(call.status) + '</span>';
   const spent = stepTrack(call.id, call.status);
   if (spent != null) summary.querySelector('.t-status').before(stepDurNode(spent));
   const body = document.createElement('div');
@@ -1459,7 +1361,7 @@ function toolNode(call) {
   d.append(summary, body);
   decorateRemember(d);
   // Скрипт, которого нет в списке (его только что построили), подтягиваем и дописываем описание в готовую строку.
-  const plain = plainName(call.name);
+  const plain = CrewToolLabels.plainName(call.name);
   if ((plain === 'run_script' || plain === 'save_script') && call.args?.name && !scriptAbout(call.args.name)) {
     loadScripts().then(() => {
       const el = d.querySelector('.t-target');
@@ -1682,7 +1584,10 @@ function messageCalls(msg) {
 function toolsNode(calls) {
   const tools = document.createElement('div');
   tools.className = 'tools';
-  for (const call of calls) addTool(tools, toolNode(call));
+  for (const call of calls) {
+    if (CrewToolLabels.hidden(call)) continue;
+    addTool(tools, toolNode(call));
+  }
   return tools;
 }
 
@@ -3161,9 +3066,11 @@ function showActivity(ev) {
     live.col.insertBefore(tools, live.bubble);
   }
   const call = ev.call || {};
-  const target = toolTarget(call);
-  const label = toolLabel(call);
-  paintWorkNow(workKind(plainName(call.name)), liveStepText(call, label, target));
+  if (CrewToolLabels.hidden(call)) return;
+  const _plain = CrewToolLabels.plainName(call.name);
+  const target = (_plain === 'run_script' || _plain === 'save_script') ? scriptTarget(String(call.args?.name || '')) : CrewToolLabels.target(call);
+  const label = CrewToolLabels.label(call);
+  paintWorkNow(workKind(CrewToolLabels.plainName(call.name)), CrewToolLabels.liveText(call, label, target));
   const fresh = toolNode(call);
   const old = call.id ? tools.querySelector('.tool[data-call-id="' + CSS.escape(String(call.id)) + '"]') : null;
   if (old) {
@@ -3967,7 +3874,7 @@ window.DeloistTeam?.init({
   stop: (id) => api(`/api/bots/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
   openBot: (id) => selectBot(id),
   refreshTeam: () => scheduleTeam(),
-  toolLabel: (name) => TOOL_LABELS[plainName(name)] || TOOL_LABELS[name] || plainName(name),
+  toolLabel: (name) => CrewToolLabels.label(name),
 });
 
 // ---------------------------------------------------------------------------

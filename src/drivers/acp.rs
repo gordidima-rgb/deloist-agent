@@ -1654,7 +1654,7 @@ fn activity_of(update: &Value) -> Option<Value> {
         args.insert("url".into(), json!(url));
     }
     // Короткие поля запроса: по ним чат показывает, что именно искали, нажимали, печатали (без вложенных данных).
-    for key in ["action", "query", "q", "text", "keys", "ref", "selector", "label"] {
+    for key in ["action", "pattern", "path", "file_path", "query", "q", "text", "keys", "ref", "selector", "label", "description"] {
         match &update["rawInput"][key] {
             Value::String(s) if !s.is_empty() => {
                 args.insert(key.into(), json!(s.chars().take(200).collect::<String>()));
@@ -2245,8 +2245,12 @@ mod tests {
         assert_eq!(a["id"], "acp-t1");
         assert_eq!(a["status"], "running");
         assert_eq!(a["args"]["path"], "C:\\w\\notes.txt");
-        let search = activity_of(&json!({ "sessionUpdate": "tool_call", "toolCallId": "t2", "rawInput": { "query": "цены", "ref": 7, "nested": { "a": 1 } } })).unwrap();
+        let search = activity_of(&json!({ "sessionUpdate": "tool_call", "toolCallId": "t2", "rawInput": { "query": "цены", "pattern": "pat", "path": "p.txt", "file_path": "fp.txt", "description": "desc", "ref": 7, "nested": { "a": 1 } } })).unwrap();
         assert_eq!(search["args"]["query"], "цены");
+        assert_eq!(search["args"]["pattern"], "pat");
+        assert_eq!(search["args"]["path"], "p.txt");
+        assert_eq!(search["args"]["file_path"], "fp.txt");
+        assert_eq!(search["args"]["description"], "desc");
         assert_eq!(search["args"]["ref"], "7");
         assert!(search["args"].get("nested").is_none());
         let done = activity_of(&json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed" })).unwrap();
