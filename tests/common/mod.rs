@@ -124,7 +124,12 @@ impl Crew {
         rand::thread_rng().fill_bytes(&mut seed);
         let key = SigningKey::from_bytes(&seed);
         let pubkey = hex(key.verifying_key().as_bytes());
-        let mut vars: Vec<(&str, &str)> = vec![("CREW_GATEWAY_PUBKEY", pubkey.as_str()), ("CREW_USER_ID", USER), ("CREW_PUBLIC_ORIGIN", ORIGIN)];
+        // Вне Windows облако без ключа шифрования секретов не стартует (на Windows ключ даёт DPAPI); свой ключ теста важнее.
+        let mut master = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut master);
+        let master = hex(&master);
+        let mut vars: Vec<(&str, &str)> =
+            vec![("CREW_GATEWAY_PUBKEY", pubkey.as_str()), ("CREW_USER_ID", USER), ("CREW_PUBLIC_ORIGIN", ORIGIN), ("CREW_SECRETS_KEY", master.as_str())];
         vars.extend(env.iter().copied());
         let mut crew = Self::spawn_at(data_dir, &vars).await;
 

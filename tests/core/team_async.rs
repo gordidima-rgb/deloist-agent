@@ -328,8 +328,13 @@ async fn files_are_copied_only_from_the_own_folder_under_the_rules() {
     std::fs::write(ws.join("big.bin"), vec![0u8; 21 * 1024 * 1024]).unwrap();
     std::fs::write(t.crew.data_dir.join("outside.txt"), "снаружи").unwrap();
     // Junction внутри папки: ведёт в её же подпапку, но ссылки не передаём.
-    let junction = std::process::Command::new("cmd").args(["/C", "mklink", "/J", &ws.join("link").to_string_lossy(), &ws.join("real").to_string_lossy()]).output().unwrap();
-    assert!(junction.status.success(), "junction не создан: {}", String::from_utf8_lossy(&junction.stdout));
+    #[cfg(windows)]
+    {
+        let junction = std::process::Command::new("cmd").args(["/C", "mklink", "/J", &ws.join("link").to_string_lossy(), &ws.join("real").to_string_lossy()]).output().unwrap();
+        assert!(junction.status.success(), "junction не создан: {}", String::from_utf8_lossy(&junction.stdout));
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(ws.join("real"), ws.join("link")).unwrap();
     let absolute = ws.join("report.txt").to_string_lossy().to_string();
     let outside = t.crew.data_dir.join("outside.txt").to_string_lossy().to_string();
     let out = t
@@ -432,7 +437,7 @@ fn request_texts(t: &Team, who: &str) -> Vec<String> {
 async fn queued_task_keeps_the_assigners_floor_and_depth() {
     let t = team("async-floor", 4000).await;
     t.crew.ok("PATCH", &format!("/api/bots/{}", t.alpha), Some(json!({ "approval": "ask" }))).await;
-    let outside = r"C:\Users\Public\wave2-floor-test.txt";
+    let outside = if cfg!(windows) { r"C:\Users\Public\wave2-floor-test.txt" } else { "/tmp/wave2-floor-test.txt" };
     let _ = std::fs::remove_file(outside);
     let write = script(&[("write_file", json!({ "path": outside, "content": "x" }))]);
     let out = t
