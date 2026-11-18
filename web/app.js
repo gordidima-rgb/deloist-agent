@@ -7316,6 +7316,7 @@ let telegramView = null;
 let discordView = null;
 let slackView = null;
 let mailView = null;
+let watchView = null;
 let vaultView = null;
 let cloudView = null;
 
@@ -7376,6 +7377,7 @@ function loadSubscreen(subId) {
   if (subId === 'discord') mountDiscordSettings();
   if (subId === 'slack') mountSlackSettings();
   if (subId === 'mail') mountMailSettings();
+  if (subId === 'watch') mountWatchSettings();
   if (subId === 'vault') mountVaultSettings();
   if (subId === 'devices') mountDevicesSettings();
   if (subId === 'cloud') mountCloudSettings();
@@ -7432,6 +7434,19 @@ function mountMailSettings() {
   };
   if (mailView) mailView.update(props);
   else mailView = window.DeloistUI.mountMailSettings(host, props);
+}
+
+// Экран «Сторож страниц»: страницы, за которыми следит рутина; монтируем один раз.
+function mountWatchSettings() {
+  const host = $('#sub-watch');
+  if (!host || !window.DeloistUI?.mountWatchSettings) return;
+  const props = {
+    api,
+    routines: S.routines,
+    onchanged: () => refreshState(),
+  };
+  if (watchView) watchView.update(props);
+  else watchView = window.DeloistUI.mountWatchSettings(host, props);
 }
 
 // Экран «Облако»: машина Instabox. Секреты остаются на ПК, окно получает только состояние.
@@ -7491,6 +7506,7 @@ const SETTINGS_LINKS = {
   discord: { label: tr('Discord'), sub: tr('Писать боту из личных сообщений Discord') },
   slack: { label: tr('Slack'), sub: tr('Писать боту из личных сообщений Slack') },
   mail: { label: tr('Почта'), sub: tr('Ящики ботов: читать и отправлять письма') },
+  watch: { label: tr('Сторож страниц'), sub: tr('Рутина просыпается, когда на странице появились новые записи') },
   cloud: { label: tr('Облако'), sub: tr('Боты в облаке, даже когда компьютер выключен') },
   vault: { label: tr('Менеджер паролей'), sub: tr('Bitwarden и 1Password: бот входит на сайты сам') },
   devices: { label: tr('Устройства'), sub: tr('Телефон, второй ПК и боты других ваших ПК') },
@@ -8210,6 +8226,7 @@ const STATUS_LABELS = {
   paused: tr('на паузе'),
   skipped: tr('пропущено: компьютер спал'),
   no_mail: tr('нет новых писем'),
+  no_change: tr('на страницах нового нет'),
   error: tr('не запустилась'),
   no_change: tr('без изменений'),
   running: tr('идёт'),
