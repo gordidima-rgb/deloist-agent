@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопрос или обсуждение / Question
+    url: https://github.com/gordidima-rgb/deloist-agent/discussions
+    about: Как что-то сделать, идеи на обсуждение
+  - name: Telegram
+    url: https://t.me/deloist_app
+    about: Новости и чат пользователей
+  - name: Уязвимость / Security report
+    url: https://github.com/gordidima-rgb/deloist-agent/security/policy
+    about: Только приватно, не в открытых задачах
