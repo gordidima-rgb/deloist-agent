@@ -236,7 +236,7 @@ fn bot_files(app: &App) -> Vec<bot_file::BotFile> {
         .bots()
         .into_iter()
         .map(|b| {
-            let dir = app.store.workspace(&b.id);
+            let dir = app.store.personal_workspace(&b.id);
             bot_file::BotFile { id: b.id, name: b.name, path: dir.join(bot_file::FILE), main: dir.join(crate::turn::MAIN_FILE) }
         })
         .collect()

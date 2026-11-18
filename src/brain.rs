@@ -23,7 +23,7 @@ pub const LIMIT: usize = 4_000;
 const HEAD: &str = "# Правила от человека";
 
 pub fn path(app: &App, bot_id: &str) -> PathBuf {
-    app.store.workspace(bot_id).join(FILE)
+    app.store.personal_workspace(bot_id).join(FILE)
 }
 
 fn rule_text(line: &str) -> Option<&str> {
