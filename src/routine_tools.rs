@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
+use chrono::{Local, NaiveDate};
+use crate::dates_ru;
 use crate::store::{Bot, Routine};
 use crate::{schedule, App};
 
@@ -29,8 +31,11 @@ pub fn defs() -> Vec<Value> {
     };
     let schedule_fields = || {
         json!({
-            "at": { "type": "string", "description": "Время запуска ЧЧ:ММ по часам человека: «09:00». Вместе с days — по каким дням. Либо at, либо every_minutes." },
+            "at": { "type": "string", "description": "Время запуска ЧЧ:ММ по часам человека: «09:00». Вместе с days или recurrence — по каким дням. Либо at, либо every_minutes." },
             "days": { "type": "array", "items": { "type": "integer" }, "description": "Дни недели, 1 — понедельник … 7 — воскресенье. Будни — [1,2,3,4,5]; один день — [3]. Пусто или не указано — каждый день." },
+            "recurrence": { "type": "object", "description": "Правило повтора: {freq: daily|weekly|monthly|yearly, interval, weekdays:[1..7], monthday, nth (1..4 или -1 для monthly/yearly при одном дне недели), month (1..12 для yearly)}. Примеры: каждый вторник — {freq:weekly, weekdays:[2]}; 3-я суббота сентября — {freq:yearly, month:9, weekdays:[6], nth:3}; раз в год 5 марта — {freq:yearly, month:3, monthday:5}." },
+            "start_date": { "type": "string", "description": "YYYY-MM-DD: не раньше этой даты (местное время)." },
+            "once_at": { "type": "string", "description": "YYYY-MM-DD HH:MM местного времени, в будущем: запустить один раз, затем выключить. Пример: один раз 2 декабря 10:00." },
             "every_minutes": { "type": "integer", "description": "Повторять каждые N минут, не реже 5: час — 60. Вместо at." },
             "every_max_minutes": { "type": "integer", "description": "Для every_minutes: случайный интервал — каждый раз срок выпадает между every_minutes и этим числом (40 и 80 — от 40 до 80 мин), чтобы запуски не шли ровной сеткой, как у человека. 0 — ровный интервал." },
             "window_from": { "type": "string", "description": "Для every_minutes: работать только с этого часа, ЧЧ:ММ. Окно может переходить через полночь (22:00–07:00). Нужны оба поля окна." },
@@ -53,7 +58,8 @@ pub fn defs() -> Vec<Value> {
         ),
         function(
             "create_routine",
-            "Создать рутину: в нужное время ты сам проснёшься и выполнишь prompt. Раз в месяц по числу рутина не умеет. \
+            "Создать рутину: в нужное время ты сам проснёшься и выполнишь prompt. \
+             Примеры: каждый вторник; 3-я суббота сентября; один раз 2 декабря 10:00. \
              Называй человеку расписание и время следующего запуска из ответа. Без bot_id рутина твоя. \
              Обещаешь сделать что-то позже или регулярно — сначала поставь рутину (или шаг в свою через update_routine), иначе не обещай.",
             with(json!({
@@ -177,6 +183,40 @@ pub(crate) fn schedule_patch(args: &Value) -> Result<Map<String, Value>, String>
             out.insert(field.into(), json!(v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой ЧЧ:ММ"))?.trim()));
         }
     }
+    if let Some(v) = args.get("recurrence").filter(|v| !v.is_null()) {
+        let rec: dates_ru::Recurrence = serde_json::from_value(v.clone()).map_err(|e| format!("поле recurrence: {e}"))?;
+        dates_ru::validate_recurrence(&rec)?;
+        out.insert("recurrence".into(), v.clone());
+    }
+    if let Some(v) = args.get("start_date").filter(|v| !v.is_null()) {
+        let s = v.as_str().ok_or("поле start_date должно быть строкой YYYY-MM-DD")?.trim();
+        let date = NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| "поле start_date: формат YYYY-MM-DD".to_string())?;
+        let today = Local::now().date_naive();
+        if date < today {
+            return Err("start_date не может быть в прошлом".into());
+        }
+        out.insert("startOn".into(), json!(s));
+    }
+    if let Some(v) = args.get("once_at").filter(|v| !v.is_null()) {
+        let ms = if let Some(s) = v.as_str() {
+            let s = s.trim();
+            let naive = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").map_err(|_| "поле once_at: формат «YYYY-MM-DD HH:MM»".to_string())?;
+            let local_dt = naive.and_local_timezone(Local).single().ok_or("поле once_at: неоднозначное местное время")?;
+            let ms = local_dt.timestamp_millis();
+            if ms <= chrono::Utc::now().timestamp_millis() {
+                return Err("once_at должно быть в будущем".into());
+            }
+            ms
+        } else if let Some(n) = v.as_i64() {
+            if n <= chrono::Utc::now().timestamp_millis() {
+                return Err("once_at должно быть в будущем".into());
+            }
+            n
+        } else {
+            return Err("поле once_at: строка «YYYY-MM-DD HH:MM» или число миллисекунд".into());
+        };
+        out.insert("onceAt".into(), json!(ms));
+    }
     if let Some(v) = args.get("catch_up").filter(|v| !v.is_null()) {
         out.insert("catchUp".into(), json!(v.as_str().ok_or("поле catch_up должно быть строкой: last или skip")?.trim()));
     }
@@ -263,8 +303,9 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             };
             let mut input = schedule_patch(args)?;
             let has_at = input.get("at").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
-            if !has_at && !input.contains_key("everyMinutes") {
-                return Err("не сказано когда: укажи at (время ЧЧ:ММ) или every_minutes".into());
+            let has_once = input.contains_key("onceAt");
+            if !has_at && !input.contains_key("everyMinutes") && !has_once {
+                return Err("не сказано когда: укажи at (время ЧЧ:ММ), every_minutes или once_at".into());
             }
             check_window(input.get("windowFrom").and_then(Value::as_str).unwrap_or_default(), input.get("windowTo").and_then(Value::as_str).unwrap_or_default())?;
             input.insert("botId".into(), json!(target.id));
@@ -401,5 +442,28 @@ mod tests {
         assert!(check_window("22:00", "").is_err());
         assert!(check_window("22:00", "07:00").is_ok());
         assert!(check_window("", "").is_ok());
+    }
+
+    #[test]
+    fn yearly_nth_weekday_patch_gives_the_september_saturday() {
+        let rule = json!({ "freq": "yearly", "month": 9, "weekdays": [6], "nth": 3 });
+        let patch = schedule_patch(&json!({ "at": "09:00", "recurrence": rule.clone() })).unwrap();
+        assert_eq!(patch["at"], "09:00");
+        assert_eq!(patch["recurrence"], rule);
+        let rec: dates_ru::Recurrence = serde_json::from_value(patch["recurrence"].clone()).unwrap();
+        let r = Routine { at: "09:00".into(), recurrence: Some(rec), ..Routine::default() };
+        let now = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(10, 0, 0).unwrap();
+        let expected = NaiveDate::from_ymd_opt(2026, 9, 19).unwrap().and_hms_opt(9, 0, 0).unwrap();
+        assert_eq!(schedule::next_after(&r, now), expected);
+    }
+
+    #[test]
+    fn start_and_once_dates_in_the_past_are_refused() {
+        let yesterday = Local::now().date_naive().pred_opt().unwrap().format("%Y-%m-%d").to_string();
+        let past_start = schedule_patch(&json!({ "at": "09:00", "start_date": yesterday })).unwrap_err();
+        assert!(past_start.contains("прошлом"), "{past_start}");
+        let past_once = (Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d %H:%M").to_string();
+        let past_once_error = schedule_patch(&json!({ "once_at": past_once })).unwrap_err();
+        assert!(past_once_error.contains("будущем"), "{past_once_error}");
     }
 }

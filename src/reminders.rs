@@ -43,7 +43,7 @@ fn lead_ms(routine: &Routine) -> i64 {
 
 /// Момент разового напоминания в мс; 0 — разового нет.
 fn once_at(routine: &Routine) -> i64 {
-    routine.extra.get("onceAt").and_then(Value::as_i64).unwrap_or(0)
+    routine.once_at
 }
 
 pub fn channels_of(routine: &Routine) -> Vec<String> {
@@ -62,12 +62,8 @@ pub fn or_windows(list: Vec<String>) -> Vec<String> {
 }
 
 /// Срок отправки, если считать от `now_ms`: момент события минус опережение.
-/// Разовое — по `onceAt`; повторяющееся — следующий по `at` и `days` (та же математика, что у рутин).
+/// Разовое и повторяющееся считаются через schedule::next_run_ms (одна дата).
 pub fn schedule_from(routine: &Routine, now_ms: i64) -> i64 {
-    let once = once_at(routine);
-    if once > 0 {
-        return once - lead_ms(routine);
-    }
     schedule::next_run_ms(routine, now_ms) - lead_ms(routine)
 }
 
@@ -94,10 +90,7 @@ pub fn apply(routine: &mut Routine, input: &Value) {
         routine.extra.insert("channels".into(), json!(wanted));
     }
     if let Some(value) = input.get("onceAt") {
-        match value.as_i64().filter(|ms| *ms > 0) {
-            Some(ms) => routine.extra.insert("onceAt".into(), json!(ms)),
-            None => routine.extra.remove("onceAt"),
-        };
+        routine.once_at = value.as_i64().filter(|ms| *ms > 0).unwrap_or(0);
     }
 }
 
@@ -359,7 +352,7 @@ mod tests {
     #[test]
     fn one_off_uses_its_date_minus_lead() {
         let mut r = reminder("", 60);
-        r.extra.insert("onceAt".into(), json!(ms(5, 12, 0)));
+        r.once_at = ms(5, 12, 0);
         assert_eq!(schedule_from(&r, ms(2, 8, 0)), ms(5, 11, 0));
     }
 

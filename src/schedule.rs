@@ -3,6 +3,7 @@
 
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 
+use crate::dates_ru;
 use crate::store::{Bot, Routine};
 
 /// Последний пропущенный запуск догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
@@ -77,8 +78,39 @@ fn next_allowed_start(routine: &Routine, after: NaiveDateTime) -> NaiveDateTime 
     after + Duration::days(1)
 }
 
+/// Что делать со сроком после окончания запуска: разовый выключается, повторяющийся получает следующий срок.
+pub fn finish(routine: &mut Routine, now_ms: i64) {
+    if routine.once_at > 0 {
+        routine.enabled = false;
+        routine.next_run = 0;
+    } else {
+        routine.next_run = next_run_ms(routine, now_ms);
+    }
+}
+
 pub fn next_after(routine: &Routine, now: NaiveDateTime) -> NaiveDateTime {
     if let Some(at) = parse_time(&routine.at) {
+        // Повтор по правилу dates_ru: дата из правила, время — из `at`.
+        if let Some(rule) = &routine.recurrence {
+            let start_on = routine.start_on.trim();
+            let start_date = if start_on.is_empty() {
+                None
+            } else {
+                NaiveDate::parse_from_str(start_on, "%Y-%m-%d").ok()
+            };
+            let base = start_date.map_or(now.date(), |d| d.max(now.date()));
+            // первая дата ряда >= base, с учётом уже прошедшего времени сегодня
+            let cand_date = if dates_ru::is_occurrence(rule, base)
+                && (base > now.date() || at > now.time())
+            {
+                base
+            } else {
+                let prev = base.pred_opt().unwrap_or(base);
+                dates_ru::next_occurrence_not_before(rule, prev, base)
+            };
+            let cand_date = if cand_date < base { base } else { cand_date };
+            return cand_date.and_time(at);
+        }
         let mut date = now.date();
         for _ in 0..=8 {
             let candidate = date.and_time(at);
@@ -111,6 +143,9 @@ fn to_ms(at: NaiveDateTime) -> i64 {
 }
 
 pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
+    if routine.once_at > 0 {
+        return routine.once_at;
+    }
     next_run_with(routine, now_ms, interval_minutes(routine, rand::random::<f64>()), local, to_ms)
 }
 
@@ -658,5 +693,67 @@ mod tests {
     #[test]
     fn failures_slow_a_routine_down() {
         assert_eq!([0, 2, 3, 5, 6, 40].map(failure_gap_ms), [0, 0, 3_600_000, 3_600_000, 4 * 3_600_000, 4 * 3_600_000]);
+    }
+
+    fn moment(y: i32, m: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, day).unwrap().and_hms_opt(hour, minute, 0).unwrap()
+    }
+
+    fn weekly_wednesday() -> dates_ru::Recurrence {
+        dates_ru::Recurrence {
+            freq: dates_ru::Freq::Weekly,
+            interval: 1,
+            weekdays: vec![3],
+            monthday: None,
+            nth: None,
+            month: None,
+        }
+    }
+
+    #[test]
+    fn start_on_holds_the_first_run_of_a_weekly_rule() {
+        let r = Routine {
+            at: "10:00".into(),
+            start_on: "2026-12-02".into(),
+            recurrence: Some(weekly_wednesday()),
+            ..routine(60)
+        };
+        // 18 ноября — среда: без startOn срок был бы 25 ноября.
+        assert_eq!(next_after(&r, moment(2026, 11, 18, 8, 0)), moment(2026, 12, 2, 10, 0));
+    }
+
+    #[test]
+    fn a_past_start_on_does_not_hold_the_first_run() {
+        let r = Routine {
+            at: "10:00".into(),
+            start_on: "2026-01-01".into(),
+            recurrence: Some(weekly_wednesday()),
+            ..routine(60)
+        };
+        assert_eq!(next_after(&r, moment(2026, 11, 18, 8, 0)), moment(2026, 11, 18, 10, 0));
+    }
+
+    #[test]
+    fn once_at_is_the_moment_itself() {
+        let moment_ms = to_ms(moment(2026, 12, 2, 10, 0));
+        let r = Routine { once_at: moment_ms, ..routine(60) };
+        assert_eq!(next_run_ms(&r, to_ms(moment(2026, 11, 18, 8, 0))), moment_ms);
+    }
+
+    #[test]
+    fn a_finished_once_routine_is_disabled_and_has_no_next_run() {
+        let mut r = Routine {
+            once_at: to_ms(moment(2026, 12, 2, 10, 0)),
+            next_run: to_ms(moment(2026, 12, 2, 10, 0)),
+            ..routine(60)
+        };
+        finish(&mut r, to_ms(moment(2026, 12, 2, 10, 1)));
+        assert!(!r.enabled);
+        assert_eq!(r.next_run, 0);
+
+        let mut repeated = Routine { at: "09:00".into(), ..routine(60) };
+        finish(&mut repeated, to_ms(at(2, 9, 0)));
+        assert!(repeated.enabled);
+        assert_eq!(repeated.next_run, to_ms(at(3, 9, 0)));
     }
 }

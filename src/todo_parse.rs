@@ -695,10 +695,92 @@ mod tests {
         assert_eq!(two.clarify, None, "два дела со временем и датой — без вопроса");
         let routine = with_clarify(vec![dated.clone(), dated.clone(), dated], "model");
         assert_eq!(routine.clarify, Some(Clarify { kind: "routine" }), "три дела со временем без повтора — спросить про рутину");
-        let daily = Recurrence { freq: dates_ru::Freq::Daily, interval: 1, weekdays: vec![], monthday: None };
+        let daily = Recurrence { freq: dates_ru::Freq::Daily, interval: 1, weekdays: vec![], monthday: None, nth: None, month: None };
         let repeated = Draft { due_date: Some(tomorrow_iso()), recurrence: Some(daily), ..timed("г") };
         let with_repeat = with_clarify(vec![repeated.clone(), repeated.clone(), repeated], "model");
         assert_eq!(with_repeat.clarify, None, "повторяющиеся дела рутину не спрашивают");
+    }
+
+    fn expected_draft(title: &str, date: Option<&str>, time: Option<&str>, recurrence: Option<Recurrence>) -> Draft {
+        Draft {
+            title: title.into(),
+            bucket: Bucket::Active,
+            due_date: date.map(str::to_string),
+            due_time: time.map(str::to_string),
+            notes: String::new(),
+            recurrence,
+            items: Vec::new(),
+            assignee: None,
+            auto_close_after_min: None,
+            address: None,
+            phone: None,
+        }
+    }
+
+    fn rule(freq: dates_ru::Freq, weekdays: &[u8], monthday: Option<u8>, nth: Option<i8>, month: Option<u8>) -> Recurrence {
+        Recurrence { freq, interval: 1, weekdays: weekdays.to_vec(), monthday, nth, month }
+    }
+
+    #[test]
+    fn code_parser_reads_every_third_saturday() {
+        let draft = code_draft("каждую третью субботу", today(), nine());
+        assert_eq!(draft, expected_draft(
+            "Каждую",
+            None,
+            None,
+            Some(rule(dates_ru::Freq::Monthly, &[6], None, Some(3), None)),
+        ));
+    }
+
+    #[test]
+    fn code_parser_reads_the_third_saturday_of_september() {
+        let draft = code_draft("3-я суббота сентября", today(), nine());
+        assert_eq!(draft, expected_draft(
+            "3-я суббота сентября",
+            None,
+            None,
+            Some(rule(dates_ru::Freq::Yearly, &[6], None, Some(3), Some(9))),
+        ));
+    }
+
+    #[test]
+    fn code_parser_reads_the_last_friday_of_the_month() {
+        let draft = code_draft("последнюю пятницу месяца", today(), nine());
+        assert_eq!(draft, expected_draft(
+            "последнюю пятницу месяца",
+            None,
+            None,
+            Some(rule(dates_ru::Freq::Monthly, &[5], None, Some(-1), None)),
+        ));
+    }
+
+    #[test]
+    fn code_parser_reads_a_yearly_date_both_ways() {
+        let expected = expected_draft(
+            "раз в год 5 марта",
+            None,
+            None,
+            Some(rule(dates_ru::Freq::Yearly, &[], Some(5), None, Some(3))),
+        );
+        for text in ["раз в год 5 марта", "каждый год 5 марта"] {
+            let mut want = expected.clone();
+            want.title = text.into();
+            assert_eq!(code_draft(text, today(), nine()), want, "{text}");
+        }
+    }
+
+    #[test]
+    fn code_parser_reads_a_start_date_from_s() {
+        let draft = code_draft("с 2 декабря", today(), nine());
+        assert_eq!(draft, expected_draft("с 2 декабря", Some("2026-12-02"), None, None));
+    }
+
+    #[test]
+    fn code_parser_reads_a_once_moment_without_a_repeat() {
+        let text = "2 декабря в 10:00 один раз";
+        let draft = code_draft(text, today(), nine());
+        assert_eq!(draft, expected_draft(text, Some("2026-12-02"), Some("10:00"), None));
+        assert!(dates_ru::parse(text, today(), nine()).once, "метка «один раз» не потерялась");
     }
 
     #[test]

@@ -1297,7 +1297,7 @@ mod tests {
     }
 
     fn weekly(weekdays: Vec<u8>) -> Option<Recurrence> {
-        Some(Recurrence { freq: dates_ru::Freq::Weekly, interval: 1, weekdays, monthday: None })
+        Some(Recurrence { freq: dates_ru::Freq::Weekly, interval: 1, weekdays, monthday: None, nth: None, month: None })
     }
 
     fn at(hh: u32, mm: u32) -> i64 {
@@ -1446,7 +1446,7 @@ mod tests {
 
     #[test]
     fn missed_instances_are_not_caught_up() {
-        let rule = Some(Recurrence { freq: dates_ru::Freq::Weekly, interval: 1, weekdays: vec![3], monthday: None });
+        let rule = Some(Recurrence { freq: dates_ru::Freq::Weekly, interval: 1, weekdays: vec![3], monthday: None, nth: None, month: None });
         let base = Todo { recurrence: rule, due_date: Some("2026-09-02".into()), ..task("Зал") };
         let day_of = next_instance_day(&base, day("2026-09-10")).unwrap();
         assert_eq!(day_of, day("2026-09-16"), "среды 2 и 9 сентября пропущены, не догоняются");

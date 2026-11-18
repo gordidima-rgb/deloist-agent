@@ -39,6 +39,10 @@ pub struct Recurrence {
     pub weekdays: Vec<u8>,
     #[serde(default, deserialize_with = "de_monthday")]
     pub monthday: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nth: Option<i8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub month: Option<u8>,
 }
 
 fn one() -> u32 {
@@ -58,6 +62,30 @@ fn de_monthday<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> 
     Ok(Option::<i64>::deserialize(d)?
         .filter(|m| (1..=31).contains(m))
         .map(|m| m as u8))
+}
+
+/// Неверный `nth` или `month` не срезаем молча: правило обязано пройти `validate_recurrence`.
+pub fn validate_recurrence(rule: &Recurrence) -> Result<(), String> {
+    if let Some(n) = rule.nth {
+        if !(n == -1 || (1..=4).contains(&n)) {
+            return Err("nth: 1..4 или -1".into());
+        }
+        if rule.freq != Freq::Monthly && rule.freq != Freq::Yearly {
+            return Err("nth только для monthly или yearly".into());
+        }
+        if norm_of(rule).len() != 1 {
+            return Err("nth требует ровно один день недели".into());
+        }
+    }
+    if let Some(m) = rule.month {
+        if !(1..=12).contains(&m) {
+            return Err("month: 1..12".into());
+        }
+        if rule.freq != Freq::Yearly {
+            return Err("month только для yearly".into());
+        }
+    }
+    Ok(())
 }
 
 /// Дни недели: 1..=7, без повторов, по возрастанию.
@@ -104,6 +132,30 @@ fn add_months(d: NaiveDate, months: u32, day: u32) -> NaiveDate {
     clamp_day(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, day)
 }
 
+/// Дата n-го заданного дня недели в месяце (n=1..=4 или -1 = последний).
+fn nth_weekday_of_month(year: i32, month: u32, target_wd: u8, nth: i8) -> NaiveDate {
+    if nth == -1 {
+        let mut d = clamp_day(year, month, 31);
+        while wd_num(d) != target_wd {
+            d = d.pred_opt().expect("месяц не пустой");
+        }
+        d
+    } else {
+        let mut d = NaiveDate::from_ymd_opt(year, month, 1).expect("месяц от 1 до 12");
+        while wd_num(d) != target_wd {
+            d = d.succ_opt().expect("месяц не пустой");
+        }
+        d.checked_add_days(Days::new(((nth as i64 - 1) * 7) as u64))
+            .expect("дата в допустимом диапазоне")
+    }
+}
+
+fn nth_applicable(rule: &Recurrence) -> bool {
+    (rule.freq == Freq::Monthly || rule.freq == Freq::Yearly)
+        && rule.nth.is_some()
+        && norm_of(rule).len() == 1
+}
+
 fn weekdays_of(rule: &Recurrence, reference: NaiveDate) -> Vec<u8> {
     let wd = norm_of(rule);
     if wd.is_empty() {
@@ -116,7 +168,7 @@ fn weekdays_of(rule: &Recurrence, reference: NaiveDate) -> Vec<u8> {
 /// Первый срок ряда, не раньше `today`.
 pub fn first_due(rule: &Recurrence, today: NaiveDate) -> NaiveDate {
     match rule.freq {
-        Freq::Daily | Freq::Yearly => today,
+        Freq::Daily => today,
         Freq::Weekly => {
             let wd = weekdays_of(rule, today);
             (0..7)
@@ -125,12 +177,48 @@ pub fn first_due(rule: &Recurrence, today: NaiveDate) -> NaiveDate {
                 .unwrap_or(today)
         }
         Freq::Monthly => {
-            let day = rule.monthday.map_or(today.day(), u32::from);
-            let this = clamp_day(today.year(), today.month(), day);
-            if this >= today {
-                this
+            if nth_applicable(rule) {
+                let wd = norm_of(rule)[0];
+                let nth = rule.nth.unwrap();
+                let this = nth_weekday_of_month(today.year(), today.month(), wd, nth);
+                if this >= today {
+                    this
+                } else {
+                    let total = today.year() * 12 + today.month0() as i32 + 1;
+                    nth_weekday_of_month(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, wd, nth)
+                }
             } else {
-                add_months(today, 1, day)
+                let day = rule.monthday.map_or(today.day(), u32::from);
+                let this = clamp_day(today.year(), today.month(), day);
+                if this >= today {
+                    this
+                } else {
+                    add_months(today, 1, day)
+                }
+            }
+        }
+        Freq::Yearly => {
+            if nth_applicable(rule) || rule.month.is_some() || rule.monthday.is_some() {
+                let month = rule.month.map(u32::from).unwrap_or(today.month());
+                let wd = if nth_applicable(rule) { Some(norm_of(rule)[0]) } else { None };
+                let nth = rule.nth;
+                let make = |year: i32| {
+                    if let (Some(w), Some(n)) = (wd, nth) {
+                        nth_weekday_of_month(year, month, w, n)
+                    } else if let Some(day) = rule.monthday {
+                        clamp_day(year, month, u32::from(day))
+                    } else {
+                        clamp_day(year, month, today.day())
+                    }
+                };
+                let this = make(today.year());
+                if this >= today {
+                    this
+                } else {
+                    make(today.year() + 1)
+                }
+            } else {
+                today
             }
         }
     }
@@ -167,22 +255,75 @@ pub fn next_occurrence_not_before(rule: &Recurrence, after: NaiveDate, today: Na
             }
         }
         Freq::Monthly => {
-            let day = rule.monthday.map_or(after.day(), u32::from);
-            let mut c = add_months(after, step, day);
-            while c <= after || c < today {
-                c = add_months(c, step, day);
+            if nth_applicable(rule) {
+                let wd = norm_of(rule)[0];
+                let nth = rule.nth.unwrap();
+                let mut total = after.year() * 12 + after.month() as i32 - 1;
+                loop {
+                    let y = total.div_euclid(12);
+                    let m = total.rem_euclid(12) as u32 + 1;
+                    let cand = nth_weekday_of_month(y, m, wd, nth);
+                    if cand > after && cand >= today {
+                        return cand;
+                    }
+                    total += step as i32;
+                    if total > after.year() * 12 + after.month() as i32 - 1 + 1200 {
+                        break;
+                    }
+                }
+                // fallback
+                plus_days(after, 1)
+            } else {
+                let day = rule.monthday.map_or(after.day(), u32::from);
+                let mut c = add_months(after, step, day);
+                while c <= after || c < today {
+                    c = add_months(c, step, day);
+                }
+                c
             }
-            c
         }
         Freq::Yearly => {
-            let year = |y: i32| clamp_day(y, after.month(), after.day());
-            let mut c = year(after.year() + step as i32);
-            while c <= after || c < today {
-                c = year(c.year() + step as i32);
+            if nth_applicable(rule) || rule.month.is_some() || rule.monthday.is_some() {
+                let month = rule.month.map(u32::from).unwrap_or(after.month());
+                let wd = if nth_applicable(rule) { Some(norm_of(rule)[0]) } else { None };
+                let nth = rule.nth;
+                let make = |year: i32| {
+                    if let (Some(w), Some(n)) = (wd, nth) {
+                        nth_weekday_of_month(year, month, w, n)
+                    } else if let Some(day) = rule.monthday {
+                        clamp_day(year, month, u32::from(day))
+                    } else {
+                        clamp_day(year, month, after.day())
+                    }
+                };
+                let mut y = after.year();
+                loop {
+                    let cand = make(y);
+                    if cand > after && cand >= today {
+                        return cand;
+                    }
+                    y += step as i32;
+                    if y > after.year() + 1000 {
+                        break;
+                    }
+                }
+                plus_days(after, 1)
+            } else {
+                let year = |y: i32| clamp_day(y, after.month(), after.day());
+                let mut c = year(after.year() + step as i32);
+                while c <= after || c < today {
+                    c = year(c.year() + step as i32);
+                }
+                c
             }
-            c
         }
     }
+}
+
+/// Проходит ли дата по правилу как срок ряда (для расписания рутин).
+pub fn is_occurrence(rule: &Recurrence, date: NaiveDate) -> bool {
+    let prev = date.pred_opt().unwrap_or(date);
+    next_occurrence_not_before(rule, prev, date) == date
 }
 
 // ---------- подписи ----------
@@ -298,6 +439,8 @@ pub struct Parsed {
     pub due_time: Option<NaiveTime>,
     pub recurrence: Option<Recurrence>,
     pub spans: Vec<Span>,
+    /// В фразе сказано «один раз»: срок один, повтора нет.
+    pub once: bool,
     /// Код нашёл всё, что просила фраза, и в ней не осталось неясного. Тогда модель не нужна.
     pub complete: bool,
 }
@@ -306,6 +449,7 @@ enum Payload {
     Date(NaiveDate),
     Time(NaiveTime),
     Repeat(Recurrence),
+    Once,
 }
 
 /// Совпадение в байтах текста; переводится в символы только при выдаче.
@@ -327,13 +471,16 @@ const P_WEEKEND: &str = r"(?i)по\s+выходным";
 const P_DAILY: &str = r"(?i)ежедневн\p{L}*";
 const P_WEEKLY: &str = r"(?i)еженедельн\p{L}*";
 const P_YEARLY: &str = r"(?i)ежегодн\p{L}*";
+const P_YEARLY_DATE: &str = r"(?i)(?:кажд\p{L}*\s+год\p{L}*|раз\p{L}*\s+в\s+год\p{L}*|ежегодн\p{L}*)\s+(\d{1,2})\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[йяе]\p{L}*|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*)";
+const P_NTH: &str = r"(?i)(последн\p{L}*|перв\p{L}*|втор\p{L}*|трет\p{L}*|четв[её]рт\p{L}*|четверт\p{L}*|\d{1,2}(?:-?[а-яёa-z]*)?)\s+({WD})(?:\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[йяе]\p{L}*|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*|месяца|месяц))?";
 const P_MONTH: &str = r"(?i)(?:ежемесячн\p{L}*|кажд\p{L}*\s+месяц\p{L}*)(?:\s+(\d{1,2})-?го)?";
+const P_ONCE: &str = r"(?i)один\s+раз|однократно|разово";
 const P_EVERY: &str = r"(?i)кажд\p{L}*\s+(?:({NUM})\s+)?({UNIT})";
 const P_RAZ: &str = r"(?i)раз\p{L}*\s+в\s+(?:({NUM})\s+)?({UNIT})";
 const P_IN: &str = r"(?i)через\s+(\d+\s+)?(дн\p{L}*|недел\p{L}*|месяц\p{L}*)";
 const P_WEEKDAY: &str = r"(?i)в(?:о)?\s+((?:следующ\p{L}*|этот|эту|ближайш\p{L}*)\s+)?({WD})";
 const P_REL: &str = r"(?i)(сегодня|завтра|послезавтра)";
-const P_MONTHNAME: &str = r"(?i)(\d{1,2})\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[йяе]\p{L}*|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*)";
+const P_MONTHNAME: &str = r"(?i)(?:с\s+)?(\d{1,2})\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[йяе]\p{L}*|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*)";
 const P_DATE_YEAR: &str = r"(?i)(?:начиная\s+с\s+)?(\d{1,2})[./](\d{1,2})[./](\d{2,4})(?:\s*г\.?)?";
 const P_DATE_NOYEAR: &str = r"(?i)(?:начиная\s+с\s+)?(\d{1,2})\.(\d{1,2})";
 const P_NAMED: &str = r"(?i)(?:в\s+)?(полдень|полночь)";
@@ -388,6 +535,18 @@ fn scan(text: &str, pattern: &'static str, out: &mut Vec<Hit>, mut f: impl FnMut
     }
 }
 
+fn parse_nth(word: &str) -> Option<i8> {
+    let w = word.to_lowercase();
+    if w.starts_with("послед") { return Some(-1); }
+    if w.starts_with("перв") { return Some(1); }
+    if w.starts_with("втор") { return Some(2); }
+    if w.starts_with("трет") { return Some(3); }
+    if w.starts_with("четв") { return Some(4); }
+    let digits: String = w.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let n: i8 = digits.parse().ok()?;
+    (1..=4).contains(&n).then_some(n)
+}
+
 fn wd_of_word(word: &str) -> Option<u8> {
     const STEMS: [(&str, u8); 7] = [
         ("понедельник", 1),
@@ -424,7 +583,7 @@ fn at(h: u32, m: u32) -> Option<Payload> {
 }
 
 fn repeat(freq: Freq, interval: u32, weekdays: Vec<u8>, monthday: Option<u8>) -> Payload {
-    Payload::Repeat(Recurrence { freq, interval, weekdays, monthday })
+    Payload::Repeat(Recurrence { freq, interval, weekdays, monthday, nth: None, month: None })
 }
 
 fn freq_of_unit(unit: &str) -> Freq {
@@ -467,6 +626,40 @@ fn repeat_hits(text: &str, out: &mut Vec<Hit>) {
     scan(text, P_DAILY, out, |_| Some(repeat(Freq::Daily, 1, vec![], None)));
     scan(text, P_WEEKLY, out, |_| Some(repeat(Freq::Weekly, 1, vec![], None)));
     scan(text, P_YEARLY, out, |_| Some(repeat(Freq::Yearly, 1, vec![], None)));
+    // «каждый год 5 марта», «раз в год 5 марта» — годовой повтор с месяцем и числом
+    scan(text, P_YEARLY_DATE, out, |c| {
+        let day: u8 = c.get(1)?.as_str().parse().ok()?;
+        let month = month_of_word(c.get(2)?.as_str())? as u8;
+        if !(1..=31).contains(&day) { return None; }
+        Some(Payload::Repeat(Recurrence {
+            freq: Freq::Yearly,
+            interval: 1,
+            weekdays: vec![],
+            monthday: Some(day),
+            nth: None,
+            month: Some(month),
+        }))
+    });
+    // «каждую 3-ю субботу», «третью субботу сентября», «последнюю пятницу месяца»
+    scan(text, P_NTH, out, |c| {
+        let nth = parse_nth(c.get(1)?.as_str())?;
+        let wd = wd_of_word(c.get(2)?.as_str())?;
+        let month_word = c.get(3).map(|m| m.as_str()).unwrap_or("");
+        let month = if month_word.is_empty() || month_word.to_lowercase().starts_with("месяц") {
+            None
+        } else {
+            month_of_word(month_word).map(|m| m as u8)
+        };
+        let freq = if month.is_some() { Freq::Yearly } else { Freq::Monthly };
+        Some(Payload::Repeat(Recurrence {
+            freq,
+            interval: 1,
+            weekdays: vec![wd],
+            monthday: None,
+            nth: Some(nth),
+            month,
+        }))
+    });
     // раньше P_EVERY: «каждый месяц 5-го» — месячный повтор с числом
     scan(text, P_MONTH, out, |c| {
         let md = c
@@ -477,6 +670,11 @@ fn repeat_hits(text: &str, out: &mut Vec<Hit>) {
     });
     scan(text, P_EVERY, out, |c| Some(interval_unit(c.get(1), c.get(2)?.as_str())));
     scan(text, P_RAZ, out, |c| Some(interval_unit(c.get(1), c.get(2)?.as_str())));
+    // «… в 10:00 один раз» — метка разового срока; «один раз в год» остаётся повтором.
+    scan(text, P_ONCE, out, |c| {
+        let tail = text[c.get(0)?.end()..].trim_start().to_lowercase();
+        (!tail.starts_with("в ")).then_some(Payload::Once)
+    });
 }
 
 fn interval_unit(num: Option<Match<'_>>, unit: &str) -> Payload {
@@ -657,9 +855,14 @@ pub fn parse(text: &str, today: NaiveDate, _now: NaiveTime) -> Parsed {
     let mut due_date = None;
     let mut due_time = None;
     let mut recurrence = None;
+    let mut once = false;
     let mut spans = Vec::with_capacity(kept.len());
     for h in &kept {
         let kind = match &h.payload {
+            Payload::Once => {
+                once = true;
+                continue;
+            }
             Payload::Date(d) => {
                 if due_date.is_none() {
                     due_date = Some(*d);
@@ -699,7 +902,7 @@ pub fn parse(text: &str, today: NaiveDate, _now: NaiveTime) -> Parsed {
         && !re(P_STRAY).is_match(&leftover)
         && !looks_like_several(text, &leftover);
 
-    Parsed { title, due_date, due_time, recurrence, spans, complete }
+    Parsed { title, due_date, due_time, recurrence, spans, once, complete }
 }
 
 /// JSON для маршрута: даты `YYYY-MM-DD`, время `HH:MM`, повтор как в `Recurrence`.
@@ -716,7 +919,7 @@ pub fn to_json(p: &Parsed) -> Value {
             json!({ "start": s.start, "end": s.end, "kind": kind })
         })
         .collect();
-    json!({
+    let mut value = json!({
         "title": p.title,
         "due_date": p.due_date.map(|d| d.format("%Y-%m-%d").to_string()),
         "due_time": p.due_time.map(|t| t.format("%H:%M").to_string()),
@@ -724,7 +927,11 @@ pub fn to_json(p: &Parsed) -> Value {
         "label": p.recurrence.as_ref().map(|r| label(r, "ru")),
         "spans": spans,
         "complete": p.complete,
-    })
+    });
+    if p.once {
+        value["once"] = json!(true);
+    }
+    value
 }
 
 /// Поле сообщения человека с заметкой о сроках. Заметка ложится в ленту вместе с сообщением,
@@ -787,7 +994,7 @@ mod tests {
     }
 
     fn rr(freq: Freq, interval: u32, wd: &[u8], md: Option<u8>) -> Recurrence {
-        Recurrence { freq, interval, weekdays: wd.to_vec(), monthday: md }
+        Recurrence { freq, interval, weekdays: wd.to_vec(), monthday: md, nth: None, month: None }
     }
 
     /// Опорная дата TS-тестов: 2026-06-18, четверг.
@@ -1296,5 +1503,100 @@ mod tests {
         let n = note("завтра в 10:00 сделать отчёт", d(2026, 11, 16), tm(9, 0)).unwrap();
         assert!(n.contains("«завтра в 10:00» = 2026-11-17 10:00 (Вт)"), "{n}");
         assert!(note("просто текст", d(2026, 11, 16), tm(9, 0)).is_none());
+    }
+
+    // ---- одно правило повтора для задач и рутин ----
+
+    #[test]
+    fn third_saturday_of_september_follows_from_the_rule() {
+        let rule = Recurrence {
+            freq: Freq::Yearly,
+            interval: 1,
+            weekdays: vec![6],
+            monthday: None,
+            nth: Some(3),
+            month: Some(9),
+        };
+        assert_eq!(nth_weekday_of_month(2026, 9, 6, 3), d(2026, 9, 19));
+        assert_eq!(first_due(&rule, d(2026, 1, 1)), d(2026, 9, 19));
+        assert_eq!(next_occurrence(&rule, d(2026, 9, 19)), d(2027, 9, 18));
+    }
+
+    #[test]
+    fn last_friday_of_november_is_found_backwards() {
+        assert_eq!(nth_weekday_of_month(2026, 11, 5, -1), d(2026, 11, 27));
+        let rule = Recurrence {
+            freq: Freq::Monthly,
+            interval: 1,
+            weekdays: vec![5],
+            monthday: None,
+            nth: Some(-1),
+            month: None,
+        };
+        assert_eq!(first_due(&rule, d(2026, 11, 1)), d(2026, 11, 27));
+        assert_eq!(next_occurrence(&rule, d(2026, 11, 27)), d(2026, 12, 25));
+    }
+
+    #[test]
+    fn yearly_february_29_uses_the_last_day_in_a_non_leap_year() {
+        let rule = Recurrence {
+            freq: Freq::Yearly,
+            interval: 1,
+            weekdays: vec![],
+            monthday: Some(29),
+            nth: None,
+            month: Some(2),
+        };
+        assert_eq!(first_due(&rule, d(2027, 1, 1)), d(2027, 2, 28));
+        assert_eq!(next_occurrence(&rule, d(2024, 2, 29)), d(2025, 2, 28));
+    }
+
+    #[test]
+    fn every_two_weeks_on_tuesday_skips_a_week() {
+        // 1 сентября 2026 — вторник.
+        let rule = Recurrence {
+            freq: Freq::Weekly,
+            interval: 2,
+            weekdays: vec![2],
+            monthday: None,
+            nth: None,
+            month: None,
+        };
+        assert!(is_occurrence(&rule, d(2026, 9, 1)));
+        assert_eq!(next_occurrence(&rule, d(2026, 9, 1)), d(2026, 9, 15));
+        assert_eq!(next_occurrence(&rule, d(2026, 9, 15)), d(2026, 9, 29));
+    }
+
+    #[test]
+    fn once_marker_reaches_the_route_without_turning_a_repeat_into_a_one_off() {
+        let parsed = p("позвонить 2 декабря в 10:00 один раз");
+        assert!(parsed.once);
+        assert_eq!(to_json(&parsed)["once"], json!(true));
+        let repeated = p("один раз в год 5 марта");
+        assert!(!repeated.once);
+        assert_eq!(repeated.recurrence.map(|r| r.freq), Some(Freq::Yearly));
+    }
+
+    #[test]
+    fn invalid_nth_is_a_validation_error() {
+        let mut rule = Recurrence {
+            freq: Freq::Monthly,
+            interval: 1,
+            weekdays: vec![6],
+            monthday: None,
+            nth: Some(5),
+            month: None,
+        };
+        assert!(validate_recurrence(&rule).is_err(), "5-й недели в месяце не бывает");
+        rule.nth = Some(0);
+        assert!(validate_recurrence(&rule).is_err());
+        rule.nth = Some(3);
+        rule.weekdays = vec![2, 4];
+        assert!(validate_recurrence(&rule).is_err(), "nth — ровно один день недели");
+        rule.weekdays = vec![6];
+        assert!(validate_recurrence(&rule).is_ok());
+        let from_json: Recurrence = serde_json::from_value(json!({"freq": "monthly", "weekdays": [6], "nth": 5})).unwrap();
+        assert_eq!(from_json.nth, Some(5), "неверное значение не срезается молча");
+        assert!(validate_recurrence(&from_json).is_err());
     }
 }

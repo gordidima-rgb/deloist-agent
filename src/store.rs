@@ -474,6 +474,15 @@ pub struct Routine {
     pub at: String,
     /// Дни недели, 1 — понедельник. Пусто — каждый день.
     pub days: Vec<i64>,
+    /// Повтор по тому же правилу, что у задач (dates_ru::Recurrence). Пусто — нет правила.
+    #[serde(default)]
+    pub recurrence: Option<crate::dates_ru::Recurrence>,
+    /// Не раньше этой даты (YYYY-MM-DD, местное время), пусто — без ограничения.
+    #[serde(default, rename = "startOn")]
+    pub start_on: String,
+    /// Разовый запуск в миллисекундах; 0 — повторяющийся.
+    #[serde(default, rename = "onceAt")]
+    pub once_at: i64,
     /// Окно работы, может переходить через полночь: «22:00»–«07:00». Пусто — всегда.
     pub window_from: String,
     pub window_to: String,
@@ -552,6 +561,9 @@ impl Default for Routine {
             every_max_minutes: 0,
             at: String::new(),
             days: Vec::new(),
+            recurrence: None,
+            start_on: String::new(),
+            once_at: 0,
             window_from: String::new(),
             window_to: String::new(),
             enabled: true,
@@ -1235,6 +1247,19 @@ fn apply_schedule(routine: &mut Routine, input: &Value) {
     if let Some(to) = input.get("windowTo").and_then(Value::as_str) {
         routine.window_to = to.trim().to_string();
     }
+    if let Some(v) = input.get("recurrence") {
+        if v.is_null() {
+            routine.recurrence = None;
+        } else if let Ok(rec) = serde_json::from_value(v.clone()) {
+            routine.recurrence = Some(rec);
+        }
+    }
+    if let Some(v) = input.get("startOn").or_else(|| input.get("start_on")) {
+        routine.start_on = v.as_str().unwrap_or_default().trim().to_string();
+    }
+    if let Some(v) = input.get("onceAt").or_else(|| input.get("once_at")) {
+        routine.once_at = v.as_i64().unwrap_or(0);
+    }
 }
 
 fn minutes(v: Option<&Value>) -> i64 {
@@ -1485,6 +1510,43 @@ fn fix_room_lead(room: &mut Room) {
     }
 }
 
+/// Старые расписания переводим на общее правило (at+days -> recurrence, extra.onceAt -> once_at).
+/// Возвращает, менялось ли что-то: по этому флагу состояние дописывается на диск.
+fn migrate_routines(state: &mut State) -> bool {
+    let mut changed = false;
+    for r in &mut state.routines {
+        if !r.at.is_empty() && r.recurrence.is_none() {
+            r.recurrence = Some(if r.days.is_empty() {
+                crate::dates_ru::Recurrence {
+                    freq: crate::dates_ru::Freq::Daily,
+                    interval: 1,
+                    weekdays: vec![],
+                    monthday: None,
+                    nth: None,
+                    month: None,
+                }
+            } else {
+                crate::dates_ru::Recurrence {
+                    freq: crate::dates_ru::Freq::Weekly,
+                    interval: 1,
+                    weekdays: r.days.iter().map(|d| *d as u8).collect(),
+                    monthday: None,
+                    nth: None,
+                    month: None,
+                }
+            });
+            r.days.clear();
+            changed = true;
+        }
+        if let Some(ms) = r.extra.get("onceAt").and_then(Value::as_i64) {
+            r.once_at = ms;
+            r.extra.remove("onceAt");
+            changed = true;
+        }
+    }
+    changed
+}
+
 impl Store {
     pub async fn open(data_dir: PathBuf) -> std::io::Result<Self> {
         for sub in ["threads", "memory", "workspaces", "tmp", "rooms"] {
@@ -1510,6 +1572,9 @@ impl Store {
         };
         if state.version == 0 {
             state.version = 1;
+        }
+        if migrate_routines(&mut state) {
+            must_write = true;
         }
         // Модель уже настроена руками до появления экрана «Собери команду»: человеку он не нужен.
         if !state.settings.team_onboarded && state.settings.driver != "demo" {
@@ -2893,7 +2958,7 @@ impl Store {
             if reminders::is_reminder(r) {
                 reminders::apply(r, patch);
             }
-            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null())) || patch.get("onceAt").is_some();
+            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
             // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
             if rescheduled || !r.enabled || r.hook {
                 r.failures = 0;
@@ -2938,7 +3003,7 @@ impl Store {
             r.busy_since = 0;
             // «Готово» ставит только конец хода: до него рутина «идёт», а обрыв перезапуском виден при старте.
             r.last_status = Some(if ok { "running" } else { "error" }.to_string());
-            r.next_run = schedule::next_run_ms(r, now());
+            schedule::finish(r, now());
         }
         self.persist().await
     }
@@ -2991,7 +3056,7 @@ impl Store {
                 return Ok(());
             };
             r.last_status = Some(status.to_string());
-            r.next_run = schedule::next_run_ms(r, now());
+            schedule::finish(r, now());
         }
         self.persist().await
     }
@@ -4589,6 +4654,48 @@ mod tests {
         assert_eq!(store.browser_owner("b2"), "b2");
         assert_eq!(store.browser_owner("b3"), "b3", "бот вне команды — свой браузер");
         assert!(dir.join("browser").join("team_r1.owner").is_file());
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn load_migrates_old_routine_schedules_once() {
+        let dir = temp_dir("routine-migrate");
+        let legacy = json!({
+            "version": 1,
+            "routines": [
+                { "id": "r1", "botId": "b1", "title": "Срез", "prompt": "собери", "at": "09:00", "days": [3] },
+                { "id": "r2", "botId": "b1", "title": "Звонок", "prompt": "позвони", "onceAt": 1_800_000_000_000_i64 }
+            ]
+        });
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("state.json"), legacy.to_string()).await.unwrap();
+        let store = Store::open(dir.clone()).await.unwrap();
+        let migrated = store.routine("r1").unwrap();
+        assert_eq!(migrated.recurrence, Some(crate::dates_ru::Recurrence {
+            freq: crate::dates_ru::Freq::Weekly,
+            interval: 1,
+            weekdays: vec![3],
+            monthday: None,
+            nth: None,
+            month: None,
+        }));
+        assert!(migrated.days.is_empty());
+        let loaded_once = store.routine("r2").unwrap();
+        assert_eq!(loaded_once.once_at, 1_800_000_000_000);
+        assert!(!loaded_once.extra.contains_key("onceAt"));
+
+        let mut state = State::default();
+        let mut reminder = Routine { id: "r2".into(), ..Routine::default() };
+        reminder.extra.insert("onceAt".into(), json!(1_800_000_000_000_i64));
+        state.routines.push(reminder);
+        assert!(migrate_routines(&mut state));
+        assert_eq!(state.routines[0].once_at, 1_800_000_000_000);
+        assert!(!state.routines[0].extra.contains_key("onceAt"));
+        assert!(!migrate_routines(&mut state), "вторая миграция ничего не меняет");
+
+        let saved = tokio::fs::read_to_string(dir.join("state.json")).await.unwrap();
+        let _ = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(tokio::fs::read_to_string(dir.join("state.json")).await.unwrap(), saved);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }
