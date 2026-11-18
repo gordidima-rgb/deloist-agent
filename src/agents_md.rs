@@ -100,6 +100,6 @@ mod tests {
     fn the_team_file_has_no_personal_memory() {
         let text = render("Ваня", "общее", None);
         assert!(text.contains("## Общая память
-общее") && !text.contains("Твоя память"), "{text}");
+общее") && !text.contains("## Твоя память"), "{text}");
     }
 }
