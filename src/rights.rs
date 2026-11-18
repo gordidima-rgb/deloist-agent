@@ -47,11 +47,6 @@ pub fn summary(app: &App, bot: &Bot) -> Value {
     }
     // Что спрашивается в любом режиме, даже в «Свободе действий».
     asks.push("в любом режиме: выпуск наружу (push, релиз, зеркало), файлы с ключами и ключи SSH, автозапуск, .git и программы".into());
-    for (id, label) in tools::ALWAYS_ASK_KINDS {
-        if bot.always_ask.iter().any(|k| k == id) {
-            asks.push(format!("всегда спрашивает (по вашему списку): {label}"));
-        }
-    }
     let never = vec!["служебные файлы и секреты программы: команды, которые к ним тянутся, отклоняются".to_string()];
     let messengers: Vec<Value> = app.turns.messengers.entries(&bot.id).into_iter().map(|m| {
         let rules = crate::messengers::RULES.iter().map(|r| format!("{} — {}", r.label().to_lowercase(), level_text(m["rules"][r.key()].as_str().unwrap_or("ask")))).collect::<Vec<_>>();

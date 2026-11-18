@@ -7,6 +7,7 @@
   import { untrack } from 'svelte';
 import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, Switch, Checkbox, RadioGroup, Button, IconButton, Modal, Icon, ListRow } from '../kit';
   import { tr } from '../../lib/i18n.js';
+  import { serverText } from '../../lib/api.js';
 
   let {
     bot,
@@ -18,6 +19,7 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
     mountLook,
     mountModel,
     contextInfo,
+    rightsInfo,
     onsave,
     ondelete,
     onpet,
@@ -38,6 +40,10 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
   let level = $state(start.modelLevel || '');
   let effort = $state(start.effort || 'medium');
   let approval = $state(start.approval || 'ask');
+  // «Всегда спрашивать»: виды действий, которые бот спрашивает в любом режиме (см. tools::ALWAYS_ASK_KINDS).
+  let alwaysAsk = $state([...(start.alwaysAsk || [])]);
+  // Сводка прав словами с сервера (src/rights.rs): обновляется после каждого сохранения.
+  let rights = $state(null);
   // Порог сжатия в процентах окна. Пока ползунок не тронут и у бота нет своего значения, работает прежний режим
   // (`contextMode`): сохранение профиля его не меняет и ничего не удорожает молча.
   const COMPACT_DEFAULT = 60;
@@ -135,6 +141,23 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
     return now ? tr('сейчас: {model}', { model: now }) : tr('сейчас: как в настройках');
   });
 
+  $effect(() => {
+    if (status === 'saving') return;
+    let alive = true;
+    Promise.resolve(rightsInfo?.())
+      .then((next) => {
+        if (alive) rights = next || null;
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  });
+  function toggleAsk(id, on) {
+    alwaysAsk = on ? [...alwaysAsk.filter((k) => k !== id), id] : alwaysAsk.filter((k) => k !== id);
+  }
+  const sentences = $derived(rights ? [...rights.allowed.map((t) => [tr('Без спроса'), t]), ...rights.asks.map((t) => [tr('Спросит'), t]), ...rights.never.map((t) => [tr('Не сделает'), t])] : []);
+
   const sites = $derived(bot.browserSites || []);
   const sitesLine = $derived(sites.length ? tr('Разрешено сайтов: {n}', { n: sites.length }) : tr('Пока ни одного. Бот спросит, когда понадобится.'));
   const googleDone = $derived(bot.googleSignIn === 'done');
@@ -191,6 +214,7 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
       modelLevel: level,
       effort,
       approval,
+      alwaysAsk: [...alwaysAsk],
       // Порог уходит, только если человек его двигал: иначе остаётся прежний режим.
       ...(touched ? { compactAtPercent: percent } : {}),
       monthlyTokenLimit: Math.max(0, Math.floor(Number(String(monthLimit).replace(/[\s_]/g, ''))) || 0) || null,
@@ -366,6 +390,24 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
   <SettingsCard title={tr('Разрешения')} icon="shield-check">
     <RadioGroup variant="cards" name="dp-approval" legend={tr('Когда бот спрашивает тебя')} options={approvalOptions} bind:value={approval} />
 
+    {#if rights}
+      <div class="dp-rights" id="dp-rights">
+        <p class="dp-note">{serverText(rights.modeText)}</p>
+        {#if rights.floorText}<p class="dp-note">{serverText(rights.floorText)}</p>{/if}
+        <ul class="dp-sentences">
+          {#each sentences as [kind, text] (kind + text)}
+            <li><b>{kind}:</b> {serverText(text)}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+    <div class="dp-ask" id="dp-always-ask">
+      <p class="dp-note">{tr('Всегда спрашивать: в любом режиме, даже в «Никогда», и без «запомнить».')}</p>
+      {#each rights?.alwaysAsk || [] as kind (kind.id)}
+        <Checkbox label={serverText(kind.label)} checked={alwaysAsk.includes(kind.id)} onchange={(on) => toggleAsk(kind.id, on)} />
+      {/each}
+    </div>
+
     <ul class="k-lrows">
       <ListRow icon="link" title={tr('Сайты')} sub={sitesLine} variant={sites.length ? 'chevron' : 'plain'} bind:expanded={openSites} id="dp-sites-row">
         {#snippet children()}
@@ -451,6 +493,8 @@ import { SettingsCard, FieldRow, InfoTip, TextInput, TextArea, Select, Slider, S
   .dp-count.is-over { color: var(--k-attention-text); }
 
   .dp-compact__warn { color: var(--k-attention-text); }
+  .dp-sentences { margin: 0; padding: 0 0 0 var(--k-space-4); color: var(--k-text-2); font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); }
+  .dp-ask { display: flex; flex-direction: column; gap: var(--k-space-2); }
   .dp-note { margin: 0; color: var(--k-text-3); font: 400 var(--k-text-sm) / var(--k-leading-body) var(--k-font-body); }
 
   .dp-activity { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow-y: auto; color: var(--k-text-2); font: 400 var(--k-text-xs) / 1.5 var(--k-font-body); }

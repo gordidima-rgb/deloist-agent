@@ -232,6 +232,26 @@ describe('DrawerProfile form', () => {
     expect(onsave.mock.calls[0][0].approval).toBe('auto');
   });
 
+  it('shows the rights summary and saves the always-ask list', async () => {
+    const onsave = vi.fn(async () => true);
+    const rights = {
+      mode: 'ask', modeText: 'Режим-текст', allowed: ['читать файлы и искать'], asks: ['создавать и править ботов'], never: ['секреты'],
+      alwaysAsk: [{ id: 'command', label: 'запуск команд', on: false }, { id: 'pay', label: 'оплата и платные вызовы', on: true }],
+    };
+    mount({ bot: { id: 'b1', name: 'К', alwaysAsk: ['pay'] }, onsave, rightsInfo: async () => rights });
+    await waitFor(() => expect(host.querySelector('#dp-rights')).not.toBeNull());
+    const text = host.querySelector('#dp-rights').textContent;
+    expect(text).toContain('Режим-текст');
+    expect(text).toContain('читать файлы и искать');
+    expect(text).toContain('создавать и править ботов');
+    const boxes = [...host.querySelectorAll('#dp-always-ask input[type="checkbox"]')];
+    expect(boxes.map((b) => b.checked)).toEqual([false, true]);
+    boxes[0].checked = true;
+    boxes[0].dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor(() => expect(onsave).toHaveBeenCalledTimes(1));
+    expect(onsave.mock.calls[0][0].alwaysAsk).toEqual(['pay', 'command']);
+  });
+
   it('opens the sites list inline and revokes a site', async () => {
     const onrevokesite = vi.fn();
     mount({ bot: { id: 'b1', name: 'К', browserSites: ['example.com'] }, onrevokesite });

@@ -6119,6 +6119,13 @@ function renderProfile(bot, body) {
         return null;
       }
     },
+    rightsInfo: async () => {
+      try {
+        return await api(`/api/bots/${bot.id}/rights`);
+      } catch {
+        return null;
+      }
+    },
     onpet: (on) => setPet(bot.id, on),
     ongoogle: async () => {
       try {
