@@ -1316,6 +1316,8 @@ async fn the_program_key_gets_403_for_tasks_list() {
     let key = passport["token"].as_str().unwrap();
     let status = crew.client.get(format!("{}/api/tasks", crew.base)).bearer_auth(key).send().await.unwrap().status().as_u16();
     assert_eq!(status, 403, "GET /api/tasks должен быть закрыт для ключа программы");
+    let status = crew.client.post(format!("{}/api/tasks/task_1/cancel", crew.base)).bearer_auth(key).send().await.unwrap().status().as_u16();
+    assert_eq!(status, 403, "отмена задачи — только человеку в окне");
 }
 
 #[tokio::test]

@@ -46,6 +46,7 @@ export { default as ListRow } from './layout/ListRow.svelte';
 // media
 export { default as Avatar } from './media/Avatar.svelte';
 export { default as Icon } from './media/Icon.svelte';
+export { default as FileCards } from './media/FileCards.svelte';
 
 // Угли, этап B3: статичная метка, сетка-переключатель, состояние сохранения.
 export { default as Tag } from './status/Tag.svelte';

@@ -821,7 +821,7 @@ pub async fn dismiss(app: &Arc<App>, id: &str) -> Result<(), String> {
         return Err("ход ждёт решения по карточке".into());
     }
     let run = app.runs.get(id).filter(|r| matches!(r.state, RunState::NeedsHuman { .. } | RunState::Paused { .. })).ok_or("запись уже не ждёт человека")?;
-    close_stopped(app, &run, "отменено человеком").await;
+    close_stopped(app, &run, "Отменено человеком").await;
     Ok(())
 }
 

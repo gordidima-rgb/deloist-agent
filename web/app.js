@@ -1831,6 +1831,18 @@ function taskAvatar(bot, name) {
   return face;
 }
 
+// Файл из папки бота (ссылка в ответе, карточка результата задачи): открываем его в ящике «Файлы», путь проверяет сервер.
+async function openWorkspaceFile(path) {
+  const ref = window.DeloistUI.workspaceRef(path);
+  if (!ref || !botById(ref.owner)) {
+    toast(tr('Файл лежит вне папок ботов, открыть его здесь нельзя'));
+    return;
+  }
+  if (S.currentId !== ref.owner || inRoom()) await selectBot(ref.owner);
+  S.openFile = ref.rel;
+  openDrawer('files');
+}
+
 // Передача задачи — одна строка-карточка в чате того, кто её дал: кому, статус, «Стоп», пока задача открыта,
 // итог (длинный свёрнут) и шаги получателя по раскрытию. Рождается, когда бот отдал задачу (assign_task),
 // меняется по task_update и закрывается строкой роли task (task_done / room_message). Шаги берём у team.js.
@@ -1931,24 +1943,16 @@ function paintHandoff(row) {
       actions.append(more);
     }
   }
-  // Файлы результата — ссылками: щелчок открывает файл у подчинённого.
+  // Файлы результата — карточками: «Открыть» показывает файл в ящике «Файлы» его хозяина.
+  row._files?.destroy();
+  row._files = null;
   const files = (Array.isArray(t.files) ? t.files : []).filter((path) => window.DeloistUI.workspaceRef(path));
   if (files.length) {
     const list = document.createElement('div');
-    list.className = 'task-line-files';
-    for (const path of files) {
-      const link = document.createElement('a');
-      link.href = window.DeloistUI.fileHref(path);
-      link.className = 'md-file task-line-file';
-      link.dataset.file = path;
-      link.title = path;
-      link.innerHTML = ic('file-text');
-      link.append(String(path).split(/[\\/]/).pop());
-      list.append(link);
-    }
     body.append(list);
+    row._files = window.DeloistUI.mountFileCards(list, { files, onopen: openWorkspaceFile });
   }
-  if (t.state === 'running' && t.to) {
+  if (open && t.id) {
     const stop = document.createElement('button');
     stop.type = 'button';
     stop.className = 'k-btn k-btn--sm k-btn--ghost';
@@ -1957,10 +1961,10 @@ function paintHandoff(row) {
     stop.addEventListener('click', async () => {
       stop.disabled = true;
       try {
-        await api(`/api/bots/${encodeURIComponent(t.to)}/stop`, { method: 'POST' });
+        await api(`/api/tasks/${encodeURIComponent(t.id)}/cancel`, { method: 'POST' });
       } catch (err) {
         stop.disabled = false;
-        toast(err.message);
+        toast(trServer(err.message));
       }
     });
     actions.append(stop);
@@ -4414,6 +4418,7 @@ let needsItems = [];
 let boardWorking = [];
 let boardWaiting = [];
 let needsTimer = null;
+let taskList = []; // все поручения (GET /api/tasks): окно «Поручения» и раздел «Сделано, пока тебя не было»
 
 function refreshNeedsSoon() {
   clearTimeout(needsTimer);
@@ -4422,14 +4427,16 @@ function refreshNeedsSoon() {
 
 async function refreshNeeds() {
   try {
-    const data = await api('/api/needs');
+    const [data, tasks] = await Promise.all([api('/api/needs'), api('/api/tasks')]);
     needsItems = data.items || [];
     boardWorking = data.working || [];
     boardWaiting = data.waiting || [];
+    taskList = tasks.tasks || [];
   } catch {
     return;
   }
   renderNeeds();
+  renderTasks();
 }
 
 // «на паузе до 14:00 (лимит)»: срок и причина паузы запуска из журнала.
@@ -4491,17 +4498,47 @@ function boardSections() {
     ...S.bots.filter((b) => S.unread.has(b.id)).map((b) => ({ id: `bot:${b.id}`, ref: { botId: b.id }, where: b.name })),
     ...S.rooms.filter((r) => S.roomsUnread.has(r.id)).map((r) => ({ id: `room:${r.id}`, ref: { roomId: r.id }, where: r.name })),
   ];
+  const away = window.DeloistUI.tasks.awayTasks(taskList, awaySince()).map((task) => ({
+    id: `task:${task.id}`, ref: { taskId: task.id }, where: `${task.fromName} → ${task.toName}`,
+    meta: task.state === 'done' ? '' : HANDOFF_STATES[task.state]?.[1] || '', title: (task.summary || task.text).slice(0, 100),
+    actions: [{ key: 'open', label: tr('Открыть') }],
+  }));
   return [
     { key: 'needs', title: tr('Нужен ты'), items: needs },
+    { key: 'away', title: tr('Сделано, пока тебя не было'), items: away, action: tr('Скрыть') },
     { key: 'working', title: tr('В работе'), items: working },
     { key: 'waiting', title: tr('Ждёт'), items: waiting },
     { key: 'unread', title: tr('Непрочитанные'), items: unread },
   ];
 }
 
+// Метка «ушёл»: когда окно скрылось в последний раз; 0 — раздел «Сделано, пока тебя не было» уже закрыт. Только в этом окне.
+const AWAY_KEY = 'deloist.awaySince';
+function awaySince() {
+  try {
+    const raw = localStorage.getItem(AWAY_KEY);
+    return raw === null ? undefined : Number(raw);
+  } catch {
+    return undefined;
+  }
+}
+function setAwaySince(ms) {
+  try {
+    localStorage.setItem(AWAY_KEY, String(ms));
+  } catch {
+    // Без хранилища раздел просто не запоминает закрытие.
+  }
+}
+function markAway() {
+  if (document.visibilityState !== 'hidden') return renderNeeds();
+  const stored = awaySince();
+  if (stored !== undefined) setAwaySince(window.DeloistUI.tasks.leftAt(stored));
+}
+
 async function pickBoard(key, entry) {
   const item = entry.ref;
   if (key === 'needs') return openNeed(item);
+  if (key === 'away') return openTasks(item.taskId);
   $('#needs-list').hidden = true;
   renderNeeds();
   if (item.roomId && roomById(item.roomId)) await selectRoom(item.roomId);
@@ -4526,7 +4563,35 @@ function renderNeeds() {
   btn.setAttribute('aria-expanded', String(!list.hidden));
   if (list.hidden) return;
   if (needsBoardView) needsBoardView.update({ sections });
-  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard, onaction: (item, key) => runAction(item.ref.id, key) });
+  else needsBoardView = window.DeloistUI.mountNeedsBoard(list, { sections, onpick: pickBoard, onaction: (item, key) => (item.ref.taskId ? openTasks(item.ref.taskId) : runAction(item.ref.id, key)), onsection: () => { setAwaySince(0); renderNeeds(); } });
+}
+
+// Окно «Поручения» (кит, ui/src/components/tasks): список из taskList, «Отменить» идёт в POST /api/tasks/{id}/cancel.
+let tasksView = null;
+
+function renderTasks() {
+  const btn = $('#btn-tasks');
+  if (btn) btn.hidden = !taskList.length;
+  if (tasksView) tasksView.update({ tasks: taskList });
+}
+
+function openTasks(focus = '') {
+  if (!window.DeloistUI?.mountTasksPanel) return;
+  const props = {
+    open: true, tasks: taskList, focus,
+    onclose: () => { tasksView.update({ open: false, focus: '' }); },
+    oncancel: async (task) => {
+      try {
+        await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST' });
+      } catch (err) {
+        toast(trServer(err.message));
+      }
+      await refreshNeeds();
+    },
+    onopenfile: (path) => { tasksView.update({ open: false }); openWorkspaceFile(path); },
+  };
+  if (tasksView) tasksView.update(props);
+  else tasksView = window.DeloistUI.mountTasksPanel(document.body, props);
 }
 
 // «Продолжить» или «Отменить» для хода, который оборвал перезапуск (карточка «Нужен ты» и строка в чате).
@@ -4819,7 +4884,7 @@ async function loadActivity(botId) {
 }
 
 function onPermissionEvent(ev) {
-  if (['approval', 'approval_closed', 'question', 'question_closed', 'turn_start', 'turn_end', 'queue_updated', 'task_update'].includes(ev.type)) refreshNeedsSoon();
+  if (['approval', 'approval_closed', 'question', 'question_closed', 'turn_start', 'turn_end', 'queue_updated', 'task_update', 'task_done'].includes(ev.type)) refreshNeedsSoon();
   if (ev.type === 'turn_start' || ev.type === 'turn_end') renderQueue();
   if (ev.type === 'permissions_changed') {
     refreshGrantsLine();
@@ -9150,6 +9215,9 @@ function bindUi() {
       toast(err.message, 5000);
     }
   });
+  $('#btn-tasks')?.addEventListener('click', () => openTasks());
+  document.addEventListener('visibilitychange', markAway);
+  window.addEventListener('blur', markAway);
   $('#btn-needs')?.addEventListener('click', () => {
     $('#needs-list').hidden = !$('#needs-list').hidden;
     renderNeeds();
@@ -9210,18 +9278,11 @@ function bindUi() {
     });
   }
   // Ссылка на файл из ответа бота: открываем его в ящике «Файлы» (путь проверяет сервер), а не по file:.
-  $('#messages').addEventListener('click', async (e) => {
+  $('#messages').addEventListener('click', (e) => {
     const link = e.target.closest('a.md-file');
     if (!link) return;
     e.preventDefault();
-    const ref = window.DeloistUI.workspaceRef(link.dataset.file);
-    if (!ref || !botById(ref.owner)) {
-      toast(tr('Файл лежит вне папок ботов, открыть его здесь нельзя'));
-      return;
-    }
-    if (S.currentId !== ref.owner || inRoom()) await selectBot(ref.owner);
-    S.openFile = ref.rel;
-    openDrawer('files');
+    openWorkspaceFile(link.dataset.file);
   });
   // Пока окно закрыто, группы не должны выглядеть открытыми: иначе «Мой Chrome»
   // продолжает опрашивать состояние в фоне.

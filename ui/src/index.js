@@ -47,6 +47,8 @@ import DrawerGoals from './components/drawer/DrawerGoals.svelte';
 import DrawerFiles from './components/drawer/DrawerFiles.svelte';
 import BotList from './components/sidebar/BotList.svelte';
 import NeedsBoard from './components/sidebar/NeedsBoard.svelte';
+import TasksPanel from './components/tasks/TasksPanel.svelte';
+import { awayTasks, leftAt } from './lib/tasks.js';
 import InstaboxCard from './components/sidebar/InstaboxCard.svelte';
 import InstaboxRing from './components/sidebar/InstaboxRing.svelte';
 import { instaboxFeed } from './lib/instabox.js';
@@ -58,7 +60,7 @@ import HabitsTab from './components/routines/HabitsTab.svelte';
 import Report from './components/report/Report.svelte';
 import { bindReportEntry } from './lib/reportEntry.js';
 
-import { Button, IconButton, Field, TextInput, TextArea, Select, Switch, Checkbox, RadioGroup, Slider, Modal, Section, Row, ListItem, Avatar, Tabs, Chip, Badge, EmptyState, Spinner, Skeleton, Tooltip, InfoTip, SettingsCard, FieldRow, Toast, SplitView, Toolbar } from './components/kit';
+import { Button, IconButton, Field, TextInput, TextArea, Select, Switch, Checkbox, RadioGroup, Slider, Modal, Section, Row, ListItem, Avatar, Tabs, Chip, Badge, EmptyState, Spinner, Skeleton, Tooltip, InfoTip, SettingsCard, FieldRow, Toast, SplitView, Toolbar, FileCards } from './components/kit';
 import KitGallery from './components/kit/KitGallery.svelte';
 
 import { iconSvg } from './lib/modelPicker.js';
@@ -157,6 +159,10 @@ window.DeloistUI = {
   mountBotList: (target, props) => mountComponent(BotList, target, props),
   // Доска под «Нужен ты»: что ждёт тебя, что в работе, что ждёт в очереди и что не прочитано.
   mountNeedsBoard: (target, props) => mountComponent(NeedsBoard, target, props),
+  // Окно «Поручения» и карточки файлов результата; правила «сделано, пока тебя не было» — lib/tasks.js.
+  mountTasksPanel: (target, props) => mountComponent(TasksPanel, target, props),
+  mountFileCards: (target, props) => mountComponent(FileCards, target, props),
+  tasks: { awayTasks, leftAt },
   // Бесплатный сервер Instabox: карточка над нижним меню и кружок в ряду лимитов.
   mountInstaboxCard: (target, props) => mountComponent(InstaboxCard, target, props),
   mountInstaboxRing: (target, props) => mountComponent(InstaboxRing, target, props),

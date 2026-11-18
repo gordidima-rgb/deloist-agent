@@ -1855,10 +1855,6 @@ body.side-collapsed .usage-rings { flex-direction: column; align-items: center; 
 .task-line-steps li { display: flex; align-items: baseline; gap: var(--k-space-2); min-width: 0; }
 .task-line-steps li[data-status="bad"] { color: var(--k-danger-text); }
 .task-line-arg { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--k-font-mono); color: var(--k-text-3); }
-.task-line-files { display: flex; flex-wrap: wrap; gap: var(--k-space-2); }
-.task-line-file { display: inline-flex; align-items: center; gap: var(--k-space-1); padding: var(--k-space-1) var(--k-space-2); border: 1px solid var(--k-line); border-radius: var(--k-radius-sm); color: var(--k-text); font-size: var(--k-text-xs); text-decoration: none; }
-.task-line-file:hover { background: var(--k-surface-2); }
-.task-line-file .i { width: 14px; height: 14px; }
 .task-line-actions { display: flex; flex-wrap: wrap; gap: var(--k-space-2); margin-top: var(--k-space-1); }
 .task-line-actions .i { width: 14px; height: 14px; }
 

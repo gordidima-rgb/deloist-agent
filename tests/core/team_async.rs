@@ -714,3 +714,28 @@ async fn deadline_validation_and_tasks_list_expose_started_by_and_tokens() {
     let task = list["tasks"].as_array().unwrap().iter().find(|x| x["id"] == id).unwrap();
     assert!(task["tokens"].as_u64().unwrap_or(0) > 0, "{task}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_human_cancels_a_queued_and_a_running_task_and_only_open_ones() {
+    let t = team("async-cancel", 12_000).await;
+    let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Бета", "text": "долго" })), ("assign_task", json!({ "bot": "Бета", "text": "следом" }))]).await;
+    let (running, queued) = (task_id(&out[0]), task_id(&out[1]));
+    common::wait_until("первая идёт", 20, || async { t.task_state(&running).await == "running" }).await;
+    assert_eq!(t.task_state(&queued).await, "queued");
+    // Ждущая закрывается сразу и больше не запускается.
+    t.crew.ok("POST", &format!("/api/tasks/{queued}/cancel"), None).await;
+    let stored = t.tasks_file().into_iter().find(|x| x["id"] == queued).unwrap();
+    assert_eq!(stored["state"], "interrupted", "{stored}");
+    assert_eq!(stored["summary"], "Отменено человеком", "{stored}");
+    // Идущая: останавливается только её ход, итог — «прервана».
+    t.crew.ok("POST", &format!("/api/tasks/{running}/cancel"), None).await;
+    common::wait_until("остановлена", 20, || async { t.task_state(&running).await == "interrupted" }).await;
+    let stored = t.tasks_file().into_iter().find(|x| x["id"] == running).unwrap();
+    assert_eq!(stored["summary"], "Отменено человеком", "{stored}");
+    assert_eq!(t.task_state(&queued).await, "interrupted");
+    // Закрытую и чужую не отменить.
+    for id in [running.as_str(), "task_nope"] {
+        let (status, _) = t.crew.send("POST", &format!("/api/tasks/{id}/cancel"), None).await;
+        assert!(matches!(status, 404 | 409), "{id}: {status}");
+    }
+}

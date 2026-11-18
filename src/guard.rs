@@ -653,6 +653,7 @@ fn human_only(path: &str) -> bool {
         || path.starts_with("/api/account/export")
         || path.starts_with("/api/account/delete")
     || path == "/api/tasks"
+    || (path.starts_with("/api/tasks/") && path.ends_with("/cancel"))
 }
 
 /// Привычки меняет и отмечает только человек в окне. Бот отмечает свои привычки инструментом

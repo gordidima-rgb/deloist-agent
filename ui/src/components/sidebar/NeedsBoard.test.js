@@ -36,3 +36,12 @@ describe('NeedsBoard', () => {
     expect(onpick).toHaveBeenCalledWith('unread', { id: 'x', where: 'Гамма' });
   });
 });
+
+describe('NeedsBoard section action', () => {
+  it('shows a header button and reports the section key', () => {
+    const onsection = vi.fn();
+    render({ sections: [{ key: 'away', title: 'Сделано', action: 'Скрыть', items: [{ id: 't', where: 'А → Б' }] }], onsection });
+    host.querySelector('.nb-section-action').click();
+    expect(onsection).toHaveBeenCalledWith('away');
+  });
+});

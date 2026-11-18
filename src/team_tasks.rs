@@ -106,6 +106,9 @@ pub struct Task {
     /// Уже написали строку о просрочке.
     #[serde(default)]
     pub overdue_noted: bool,
+    /// Человек отменил идущую задачу: ход остановлен, итог запишет `finish` как «прервана».
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 impl Task {
@@ -564,6 +567,10 @@ async fn run(app: Arc<App>, id: String) {
     let deadline = Instant::now() + QUEUE_WAIT;
     loop {
         let Some(task) = app.tasks.get(&id) else { return };
+        // Пока задача ждала, её закрыли (отмена человеком): запускать нечего.
+        if task.state != "queued" {
+            return;
+        }
         let (Some(from), Some(target)) = (app.store.bot(&task.from), app.store.bot(&task.to)) else {
             finish(&app, &id, "error", "бота больше нет в команде".into(), Vec::new(), 0).await;
             return;
@@ -659,6 +666,7 @@ pub async fn finish_interrupted(app: &Arc<App>, id: &str, text: &str) {
 
 async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: Vec<String>, tokens: u64) {
     let Some(task) = app.tasks.update(id, |t| {
+        let (state, summary) = if std::mem::take(&mut t.cancelled) { ("interrupted", CANCELLED.to_string()) } else { (state, summary) };
         t.state = state.into();
         t.finished = now();
         t.summary = clip(&summary, SUMMARY_CHARS);
@@ -668,8 +676,41 @@ async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: V
     }) else {
         return;
     };
-    app.tasks.journal_event(&task, state, tokens);
+    app.tasks.journal_event(&task, &task.state, tokens);
+    app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": task.state }));
     post_task_line(app, &task, &task.summary).await;
+}
+
+const CANCELLED: &str = "Отменено человеком";
+
+/// Человек отменяет открытую задачу. Ждущая и стоящая на паузе закрываются сразу; идущая — остановкой хода получателя,
+/// но только если он занят именно ею (иначе «Стоп» оборвал бы чужую работу).
+async fn cancel(app: &Arc<App>, id: &str) -> Result<(), (StatusCode, &'static str)> {
+    let task = app.tasks.get(id).ok_or((StatusCode::NOT_FOUND, "задачи нет"))?;
+    match task.state.as_str() {
+        "queued" => finish(app, id, "interrupted", CANCELLED.into(), Vec::new(), 0).await,
+        "paused" => match app.runs.paused().into_iter().find(|r| matches!(&r.origin, crate::runs::Origin::Team { task_id } if task_id == id)) {
+            Some(run) => crate::runs::dismiss(app, &run.id).await.map_err(|_| (StatusCode::CONFLICT, "ход ждёт решения по карточке"))?,
+            None => finish(app, id, "interrupted", CANCELLED.into(), Vec::new(), 0).await,
+        },
+        "running" => {
+            let own = app.runs.active_id(&task.to).and_then(|run| app.runs.get(&run)).is_some_and(|r| matches!(&r.origin, crate::runs::Origin::Team { task_id } if task_id == id));
+            if !own {
+                return Err((StatusCode::CONFLICT, "получатель сейчас занят другим"));
+            }
+            app.tasks.update(id, |t| t.cancelled = true);
+            app.turns.stop_turn(&task.to);
+        }
+        _ => return Err((StatusCode::CONFLICT, "задача уже закрыта")),
+    }
+    Ok(())
+}
+
+async fn cancel_route(State(app): State<Arc<App>>, axum::extract::Path(id): axum::extract::Path<String>) -> Response {
+    match cancel(&app, &id).await {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
+        Err((status, message)) => (status, Json(json!({ "error": message }))).into_response(),
+    }
 }
 
 async fn post_task_line(app: &Arc<App>, task: &Task, text: &str) {
@@ -1096,7 +1137,7 @@ async fn list_route(State(app): State<Arc<App>>, Query(q): Query<TasksQuery>) ->
 }
 
 pub fn routes() -> axum::Router<Arc<App>> {
-    axum::Router::new().route("/api/tasks", axum::routing::get(list_route))
+    axum::Router::new().route("/api/tasks", axum::routing::get(list_route)).route("/api/tasks/{id}/cancel", axum::routing::post(cancel_route))
 }
 
 #[cfg(test)]
