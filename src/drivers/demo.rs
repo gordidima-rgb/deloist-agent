@@ -115,7 +115,9 @@ pub async fn run(bot: &Bot, messages: &[Value], english: bool, cancel: &Cancella
         return say(&text, cancel, sink).await;
     }
 
-    if let Some((tool, intro)) = pick(content, english) {
+    // Просьбу ищем в последнем сообщении человека: после него в историю ложатся служебные записки (итоги задач).
+    let request = messages.iter().rev().find(|m| m.get("role").and_then(Value::as_str) == Some("user")).and_then(|m| m.get("content")).and_then(Value::as_str).unwrap_or(content);
+    if let Some((tool, intro)) = pick(request, english) {
         say(&intro, cancel, &mut *sink).await?;
         sink(DriverEvent::Tool(tool));
         return Ok(());
