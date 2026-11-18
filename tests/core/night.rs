@@ -428,6 +428,21 @@ async fn a_missed_decision_makes_a_quiet_answer_visible() {
     assert!(messages.iter().any(|m| m["text"] == "[рутина] Проверка\nпроверь сайт"), "{messages:?}");
 }
 
+/// 17.11.2026: бот спросил человека и дальше молча отвечал «Тихо» — карточка рутины горела галочкой 10 часов.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_run_while_a_question_waits_shows_the_routine_needs_the_human() {
+    let (crew, fake, bot) = setup("night-quiet-asking", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
+    *fake.script.lock().unwrap() = vec![tool("ask_user", json!({ "question": "Продолжать комментарии?" })), finish("nothing", "")];
+    let id = add_routine(&crew, &bot, json!({})).await;
+    let first = run_and_wait(&crew, &id, json!({ "attended": false })).await;
+    assert_eq!(first["status"], "needs", "{first}");
+
+    *fake.script.lock().unwrap() = vec![finish("nothing", "")];
+    let second = run_and_wait(&crew, &id, json!({ "attended": false })).await;
+    assert_eq!(second["status"], "needs", "вопрос без ответа — не галочка: {second}");
+    assert_eq!(second["text"], "Ждёт ответа на вопрос в «Нужен ты».", "{second}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fallback_turn_is_not_quiet() {
     let main = Fake::default();

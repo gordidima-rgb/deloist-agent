@@ -283,6 +283,11 @@ impl Turns {
         Some(item)
     }
 
+    /// У бота есть вопрос без ответа в «Нужен ты».
+    pub fn has_question(&self, bot_id: &str) -> bool {
+        self.asked.lock().unwrap().iter().any(|q| q.bot_id == bot_id)
+    }
+
     pub fn question(&self, id: &str) -> Option<Asked> {
         self.asked.lock().unwrap().iter().find(|q| q.id == id).cloned()
     }
@@ -1229,7 +1234,7 @@ fn system_prompt(bot: &Bot, workspace: &std::path::Path, parts: &PromptParts<'_>
     if parts.unattended {
         lines.push(
             "Это рутина, человека рядом может не быть. Если действие не разрешили или никто не ответил, не ищи обход: \
-             сделай то, что можно без него, и в конце коротко напиши, что получилось и какое решение ждёт человека."
+             сделай то, что можно без него, и в конце коротко напиши, что получилось.              Решение, которое ждёт человека, спрашивай через ask_user: вопрос останется в его списке «Нужен ты»,              а текст в чате рутины он может не увидеть. Пропуск работы из-за ожидания человека — это не «сообщать нечего»."
                 .to_string(),
         );
         if parts.tools {
@@ -2884,6 +2889,8 @@ fn run_turn_body(
         }));
 
         if let Some(routine) = &opts.routine {
+            // Бот ждёт ответа на свой вопрос: запуск не «успешный», даже если сказать нечего.
+            let asking = app.turns.has_question(&bot_id);
             let status = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
                 _ if aborted => "stopped",
                 (Some(_), _) => "failed",
@@ -2891,7 +2898,7 @@ fn run_turn_body(
                 (None, Some(RunState::Failed { .. })) => "failed",
                 (None, Some(_)) => "needs",
                 (None, None) if waiting.is_some() => "needs",
-                (None, None) => completion::status_from_finish(last_finish_status.as_deref(), quiet, missed.is_empty()),
+                (None, None) => completion::status_from_finish(last_finish_status.as_deref(), quiet, missed.is_empty() && !asking),
             };
             // Почему запуск не удался: подпись в журнале и счёт серии ошибок рутины.
             let stop = match (failure.as_deref(), pause.as_ref().map(|p| &p.state)) {
@@ -2905,6 +2912,8 @@ fn run_turn_body(
                 p.line.clone()
             } else if let Some(text) = &waiting {
                 text.clone()
+            } else if asking && (quiet || said_nothing) {
+                "Ждёт ответа на вопрос в «Нужен ты».".to_string()
             } else if quiet {
                 String::new()
             } else if opts.quiet && said_nothing {
