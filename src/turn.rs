@@ -2226,7 +2226,7 @@ fn run_turn_body(
             }
 
             // Заметка продолжения после перезапуска: модель читает её как сообщение, а человеку она показана служебной строкой.
-            let entry_source = if opts.resume.is_some() { "restart" } else { source.as_str() };
+            let entry_source = if opts.resume.is_some() { "resume" } else { source.as_str() };
             let mut user_entry = json!({ "role": "user", "text": user_text, "source": entry_source });
             if !attachments.is_empty() {
                 user_entry["attachments"] = json!(attachments);

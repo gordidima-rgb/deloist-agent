@@ -159,7 +159,7 @@ async fn an_external_step_without_a_result_waits_for_the_human_and_continues_on_
     second.ok("POST", &format!("/api/runs/{}/continue", item["id"].as_str().unwrap()), None).await;
     let messages = wait_thread(&second, &bot, "проверил и дошёл до конца").await;
     let note = messages.iter().find(|m| m["role"] == "user").expect("заметка продолжения");
-    assert_eq!(note["source"], "restart", "служебная строка, а не слова человека: {note}");
+    assert_eq!(note["source"], "resume", "служебная строка, а не слова человека: {note}");
     assert!(note["text"].as_str().unwrap().contains("прошёл ли он — неизвестно"), "{note}");
     common::wait_until("запись закрыта", 20, || async { runs_file(&dir)[0]["state"]["kind"] == "done" }).await;
     let needs = second.ok("GET", "/api/needs", None).await;

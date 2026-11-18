@@ -857,7 +857,7 @@
     'предел токенов': 'token limit',
     'ждёт события': 'waiting for an event',
     'Продолжить сейчас': 'Resume now',
-    'Программа перезапущена': 'App restarted',
+    'Продолжение задания': 'Task continues',
     'Нужен ты': 'Needs you',
     'Разрешено в этом разговоре: {what}': 'Allowed in this conversation: {what}',
     'Разрешено в разговоре': 'Allowed in this conversation',

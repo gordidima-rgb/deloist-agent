@@ -1601,9 +1601,9 @@ function messageRow(msg) {
   if (msg.role === 'compacted') return compactedRow(msg);
   if (msg.role === 'task') return taskRow(msg);
   const row = document.createElement('div');
-  // Заметка продолжения после перезапуска пишется от имени программы, а не человека.
-  const restart = msg.role === 'user' && msg.source === 'restart';
-  row.className = `msg ${msg.role === 'user' && !restart ? 'user' : 'bot'}`;
+  // Заметка продолжения (после перезапуска, лимита, ожидания, решения человека) — от имени программы, а не человека.
+  const resumed = msg.role === 'user' && msg.source === 'resume';
+  row.className = `msg ${msg.role === 'user' && !resumed ? 'user' : 'bot'}`;
   row.dataset.id = msg.id || '';
   // Для содержания разговора: время и имена файлов человеческого сообщения.
   if (msg.role === 'user') {
@@ -1616,7 +1616,7 @@ function messageRow(msg) {
 
   // Задачу от другого бота видно в треде получателя: «от Скаут 2» (след передачи, карточки на неё нет).
   const delegatedFrom = msg.role === 'user' && String(msg.source || '').startsWith('delegation:') ? String(msg.source).slice('delegation:'.length) : '';
-  const author = msg.name || (restart ? tr('Программа перезапущена') : delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
+  const author = msg.name || (resumed ? tr('Продолжение задания') : delegatedFrom ? tr('от {name}', { name: delegatedFrom }) : '');
   if (author) {
     const who = document.createElement('div');
     who.className = 'msg-author';
