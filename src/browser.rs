@@ -14,6 +14,7 @@ use futures_util::future::join_all;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::cdp::Cdp;
 use crate::fetch::is_public_ip;
@@ -443,6 +444,21 @@ impl Tabs {
         }
     }
 
+    /// Открылась страница: она достаётся тому, кто её открыл, — хозяину страницы-родителя или боту, держащему браузер.
+    /// Текущей она становится только у своего хозяина: вкладка, которую открыл чужой бот или человек, не уводит
+    /// текущую вкладку того, кто сейчас работает.
+    pub fn page_opened(&mut self, target: &str, opener: Option<&str>) {
+        self.order.push(target.to_string());
+        let who = opener.and_then(|o| self.owner.get(o).cloned()).filter(|o| !o.is_empty()).unwrap_or_else(|| self.active_bot.clone());
+        self.owner.insert(target.to_string(), who.clone());
+        if self.active_bot.is_empty() || who == self.active_bot {
+            if self.current.is_some() {
+                self.new_tab = true;
+            }
+            self.current = Some(target.to_string());
+        }
+    }
+
     /// Код бота выполнился во вкладке `target` на странице с этим адресом.
     pub fn mark_script_ran(&mut self, target: &str, urls: &[&str]) {
         if let Some(page) = self.pages.get_mut(target) {
@@ -571,6 +587,8 @@ pub struct Session {
     pub relay: Option<Arc<crate::user_chrome::BotRelay>>,
     /// Один вызов бота за раз: см. `lease`.
     lease_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Кто держит замок сейчас и его охранник: на время карточки для человека замок отпускается (`suspend`).
+    held: Mutex<Option<(String, tokio::sync::OwnedMutexGuard<()>)>>,
 }
 
 impl Session {
@@ -765,6 +783,7 @@ impl Session {
             shown: AtomicBool::new(false),
             relay,
             lease_lock: Arc::new(tokio::sync::Mutex::new(())),
+            held: Mutex::new(None),
         }))
     }
 
@@ -773,10 +792,32 @@ impl Session {
     }
 
     /// Браузер на время одного вызова бота. Браузер команды один, а вкладки у каждого бота свои: пока вызов идёт,
-    /// другой бот ждёт, а текущей становится вкладка этого бота (новая, если своей ещё нет). Первая вкладка при
-    /// запуске достаётся тому, кто пришёл первым.
-    pub async fn lease(self: &Arc<Self>, bot_id: &str) -> Lease {
-        let guard = self.lease_lock.clone().lock_owned().await;
+    /// другой бот ждёт (не дольше `LEASE_WAIT`), а текущей становится вкладка этого бота (новая, если своей ещё нет).
+    /// Первая вкладка при запуске достаётся тому, кто пришёл первым. Ход остановлен — ожидание прерывается.
+    pub async fn lease(self: &Arc<Self>, bot_id: &str, cancel: &CancellationToken) -> Result<Lease, String> {
+        self.take_lock(bot_id, cancel, Some(LEASE_WAIT)).await?;
+        self.claim_tab(bot_id).await;
+        Ok(Lease { session: self.clone(), bot: bot_id.to_string() })
+    }
+
+    async fn take_lock(&self, bot_id: &str, cancel: &CancellationToken, wait: Option<Duration>) -> Result<(), String> {
+        let limit = async {
+            match wait {
+                Some(wait) => tokio::time::sleep(wait).await,
+                None => std::future::pending().await,
+            }
+        };
+        let guard = tokio::select! {
+            guard = self.lease_lock.clone().lock_owned() => guard,
+            _ = cancel.cancelled() => return Err("ход остановлен".into()),
+            _ = limit => return Err(TEAM_BROWSER_BUSY.into()),
+        };
+        *self.held.lock().unwrap() = Some((bot_id.to_string(), guard));
+        Ok(())
+    }
+
+    /// Текущей становится вкладка бота; своей нет — открывается новая.
+    async fn claim_tab(&self, bot_id: &str) {
         let need_new = self.tabs.lock().unwrap().claim(bot_id);
         if need_new {
             let _ = self.cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await;
@@ -787,7 +828,28 @@ impl Session {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
-        Lease { _guard: guard, tabs: self.tabs.clone(), bot: bot_id.to_string() }
+    }
+
+    /// Бот ждёт человека (карточка): браузер отпускается, чтобы товарищи по команде не стояли в очереди.
+    /// Ответ — держал ли бот браузер; тогда после ответа его нужно вернуть (`resume`).
+    pub fn suspend(&self, bot_id: &str) -> bool {
+        let mut held = self.held.lock().unwrap();
+        if held.as_ref().is_some_and(|(bot, _)| bot == bot_id) {
+            *held = None;
+            let mut tabs = self.tabs.lock().unwrap();
+            if let Some(id) = tabs.current.clone() {
+                tabs.bot_current.insert(bot_id.to_string(), id);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Бот снова берёт браузер после ответа человека: ждёт своей очереди (без предела) и возвращается в свою вкладку.
+    pub async fn resume(&self, bot_id: &str, cancel: &CancellationToken) {
+        if self.take_lock(bot_id, cancel, None).await.is_ok() {
+            self.claim_tab(bot_id).await;
+        }
     }
 
     /// Показать человеку вкладку этого бота, не мешая тому, кто держит браузер сейчас. Занят другой бот — ничего не
@@ -1192,14 +1254,7 @@ async fn pump(cdp: Arc<Cdp>, tabs: Arc<Mutex<Tabs>>, mut events: mpsc::Unbounded
                     {
                         let mut state = tabs.lock().unwrap();
                         state.by_session.insert(session.clone(), target.clone());
-                        state.order.push(target.clone());
-                        if state.current.is_some() {
-                            state.new_tab = true;
-                        }
-                        state.current = Some(target.clone());
-                        // Вкладка достаётся тому, кто её открыл: боту, держащему браузер, или хозяину страницы-родителя.
-                        let who = info["openerId"].as_str().and_then(|o| state.owner.get(o).cloned()).filter(|o| !o.is_empty()).unwrap_or_else(|| state.active_bot.clone());
-                        state.owner.insert(target.clone(), who);
+                        state.page_opened(&target, info["openerId"].as_str());
                         if let Some(opener) = info["openerId"].as_str() {
                             state.inherit_taint(opener, &target);
                         }
@@ -1371,25 +1426,37 @@ fn page_event(page: &mut Page, method: &str, params: &Value) {
 
 /// Браузер, занятый одним ботом на время вызова. При отпускании запоминает его текущую вкладку.
 pub struct Lease {
-    _guard: tokio::sync::OwnedMutexGuard<()>,
-    tabs: Arc<Mutex<Tabs>>,
+    session: Arc<Session>,
     bot: String,
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let mut tabs = self.tabs.lock().unwrap();
-        if let Some(id) = tabs.current.clone() {
-            tabs.bot_current.insert(self.bot.clone(), id);
+        {
+            let mut tabs = self.session.tabs.lock().unwrap();
+            if let Some(id) = tabs.current.clone() {
+                tabs.bot_current.insert(self.bot.clone(), id);
+            }
+        }
+        // Замок отпускается, только если он ещё этого бота: после `suspend` его мог взять другой.
+        let mut held = self.session.held.lock().unwrap();
+        if held.as_ref().is_some_and(|(bot, _)| *bot == self.bot) {
+            *held = None;
         }
     }
 }
 
+/// Сколько бот ждёт чужой вызов в общем браузере команды.
+const LEASE_WAIT: Duration = Duration::from_secs(60);
+pub const TEAM_BROWSER_BUSY: &str = "браузер команды занят другим ботом: подожди и повтори";
+
+const TEAM_KEY: &str = "team_";
+
 #[derive(Default)]
 pub struct Browsers {
-    /// Ключ — владелец браузера (`Store::browser_owner`): боты одной команды делят один браузер с общими входами.
+    /// Ключ — бот (свой браузер) или `team_<команда>|<владелец>`: боты одной команды делят один браузер с общими входами.
     sessions: tokio::sync::Mutex<HashMap<String, Arc<Session>>>,
-    /// Бот → владелец браузера, у которого он работает (заполняется при первом обращении).
+    /// Бот → ключ его сеанса (заполняется при каждом обращении).
     owners: Mutex<HashMap<String, String>>,
     images: Mutex<HashMap<String, Vec<u8>>>,
 }
@@ -1397,41 +1464,71 @@ pub struct Browsers {
 impl Browsers {
     /// Браузер бота: запускается при первой нужде и заново, если человек его закрыл.
     pub async fn session(&self, store: &Store, bot_id: &str) -> Result<Arc<Session>, String> {
-        let bot_id = self.remember_owner(store, bot_id);
-        let bot_id = bot_id.as_str();
+        self.close_stale(store).await;
+        let (key, owner) = self.route(store, bot_id);
         let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get(bot_id) {
+        if let Some(session) = sessions.get(&key) {
             if session.alive() {
                 session.touch();
                 return Ok(session.clone());
             }
         }
         // Мёртвую сессию закрываем до новой: иначе её окно и профиль останутся занятыми.
-        if let Some(dead) = sessions.remove(bot_id) {
+        if let Some(dead) = sessions.remove(&key) {
             dead.close().await;
         }
-        let session = Session::launch(store, bot_id).await?;
-        sessions.insert(bot_id.to_string(), session.clone());
+        let session = Session::launch(store, &owner).await?;
+        sessions.insert(key, session.clone());
         Ok(session)
     }
 
-    /// Чей браузер у бота. Общий с командой — только собственный Chrome программы: Chrome человека со своими
-    /// согласиями и фильтром у каждого бота свой.
-    fn remember_owner(&self, store: &Store, bot_id: &str) -> String {
-        let owner = store.browser_owner(bot_id);
+    /// Чей браузер у бота: ключ сеанса и бот, чей профиль его держит. Общий с командой — только собственный Chrome
+    /// программы: Chrome человека со своими согласиями и фильтром у каждого бота свой. Ключ общего сеанса включает
+    /// команду и владельца: сменился состав или владелец — это другой сеанс, а старый закрывает `close_stale`.
+    fn route(&self, store: &Store, bot_id: &str) -> (String, String) {
         let own_chrome = |id: &str| !crate::cloud::active() && crate::user_chrome::wanted(store, id);
-        let owner = if own_chrome(bot_id) || own_chrome(&owner) { bot_id.to_string() } else { owner };
-        self.owners.lock().unwrap().insert(bot_id.to_string(), owner.clone());
-        owner
+        let shared = store.team_of(bot_id).filter(|_| !own_chrome(bot_id)).and_then(|room| {
+            let owner = store.team_browser_owner(&room).filter(|o| !own_chrome(o))?;
+            Some((format!("{TEAM_KEY}{}|{owner}", room.id), owner))
+        });
+        let (key, owner) = shared.unwrap_or_else(|| (bot_id.to_string(), bot_id.to_string()));
+        self.owners.lock().unwrap().insert(bot_id.to_string(), key.clone());
+        (key, owner)
+    }
+
+    /// Закрывает общие сеансы, которым больше нет места: команда в архиве или удалена, её владелец браузера сменился
+    /// (вышел из команды: у него остаётся его профиль, а общая сессия с входами команды закрывается).
+    pub async fn close_stale(&self, store: &Store) {
+        let stale: Vec<String> = self
+            .sessions
+            .lock()
+            .await
+            .keys()
+            .filter_map(|key| {
+                let (room, owner) = key.strip_prefix(TEAM_KEY)?.split_once('|')?;
+                let live = store.room(room).filter(|r| !r.archived).and_then(|r| store.team_browser_owner(&r));
+                (live.as_deref() != Some(owner)).then(|| key.clone())
+            })
+            .collect();
+        for key in stale {
+            self.close(&key).await;
+        }
     }
 
     fn owner_of(&self, bot_id: &str) -> String {
         self.owners.lock().unwrap().get(bot_id).cloned().unwrap_or_else(|| bot_id.to_string())
     }
 
+    /// Бот ждёт человека: его вызов отпускает общий браузер (см. `Session::suspend`). Вернуть — `Session::resume`.
+    pub async fn suspend(&self, bot_id: &str) -> Option<Arc<Session>> {
+        let key = self.owner_of(bot_id);
+        let session = self.sessions.lock().await.get(&key).cloned()?;
+        session.suspend(bot_id).then_some(session)
+    }
+
     pub async fn close(&self, bot_id: &str) {
-        let owner = self.owner_of(bot_id);
-        let session = self.sessions.lock().await.remove(&owner);
+        let key = self.owner_of(bot_id);
+        let session = self.sessions.lock().await.remove(&key);
         if let Some(session) = session {
             session.close().await;
         }
@@ -1453,7 +1550,7 @@ impl Browsers {
             .iter()
             .filter(|(bot, session)| {
                 // Браузер команды занят, пока работает любой из её ботов.
-                let busy = is_busy(bot) || self.owners.lock().unwrap().iter().any(|(member, owner)| owner == *bot && is_busy(member));
+                let busy = is_busy(bot) || self.owners.lock().unwrap().iter().any(|(member, key)| key == *bot && is_busy(member));
                 !session.alive()
                     || (!busy
                         && !session.shown.load(Ordering::Relaxed)
@@ -1524,6 +1621,24 @@ mod tests {
         assert!(!tabs.claim("a"));
         assert_eq!(tabs.current.as_deref(), Some("t1"));
         assert_eq!(tabs.mine(), vec!["t1".to_string()]);
+    }
+
+    #[test]
+    fn a_tab_opened_by_someone_else_does_not_take_the_current_tab_of_the_working_bot() {
+        let mut tabs = Tabs::default();
+        tabs.active_bot = "a".into();
+        tabs.page_opened("t1", None);
+        assert_eq!(tabs.current.as_deref(), Some("t1"), "свою вкладку бот видит текущей");
+        // Страница бота b (opener) открыла окно, пока работает a: оно принадлежит b и текущей у a не становится.
+        tabs.owner.insert("tb".into(), "b".into());
+        tabs.page_opened("t2", Some("tb"));
+        assert_eq!(tabs.owner["t2"], "b");
+        assert_eq!(tabs.current.as_deref(), Some("t1"));
+        // Вкладка без родителя (человек) достаётся тому, кто держит браузер.
+        tabs.page_opened("t3", None);
+        assert_eq!(tabs.owner["t3"], "a");
+        assert_eq!(tabs.current.as_deref(), Some("t3"));
+        assert_eq!(tabs.mine(), vec!["t1".to_string(), "t3".to_string()]);
     }
 
     fn bare_page(url: &str) -> Page {

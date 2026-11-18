@@ -2190,7 +2190,8 @@ async fn watch_sign_in(app: &Arc<App>, bot: &Bot, name: &str, output: &str) {
     if session.relay.is_some() || session.is_windowless() {
         return;
     }
-    let _lease = session.lease(&bot.id).await;
+    let cancel = app.turns.cancel_of(&bot.id).unwrap_or_default();
+    let Ok(_lease) = session.lease(&bot.id, &cancel).await else { return };
     let Ok((url, title)) = session.with_page(|page| (page.url.clone(), page.title.clone())) else { return };
     let messenger = crate::messengers::by_host(&host_of(&url));
     if !output.contains("[Содержимое страницы") {
@@ -2252,7 +2253,8 @@ async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Resul
     }
     let session = app.browsers.session(&app.store, &bot.id).await?;
     // Браузер команды общий, вкладки свои: на время вызова он принадлежит этому боту.
-    let _lease = session.lease(&bot.id).await;
+    let cancel = app.turns.cancel_of(&bot.id).unwrap_or_default();
+    let _lease = session.lease(&bot.id, &cancel).await?;
     // Каждый сайт в Chrome человека — с его согласия: карточка до перехода.
     if let Some(relay) = &session.relay {
         let url = text(args, "url");

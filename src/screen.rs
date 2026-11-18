@@ -454,7 +454,13 @@ async fn capture(app: Arc<App>, bot: String, stop: CancellationToken, generation
                     break;
                 }
                 // Браузер команды общий: человеку показываем вкладку этого бота, если им сейчас никто не работает.
-                session.view_as(&bot);
+                if !session.view_as(&bot) {
+                    // Браузер сейчас у другого бота команды: его вкладку этому человеку не показываем.
+                    if let Some(old) = current.take() {
+                        let _ = quick(&session, &old, "Page.stopScreencast", json!({})).await;
+                    }
+                    continue;
+                }
                 let now_sid = session.current_session();
                 if now_sid != current {
                     if let Some(old) = current.take() {

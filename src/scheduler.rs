@@ -223,6 +223,7 @@ async fn tick(app: &Arc<App>) {
     crate::runs::resume_due(app).await;
     crate::runs::notify_pauses(app).await;
     crate::workflow_run::tick(app);
+    app.browsers.close_stale(&app.store).await;
     app.browsers.close_idle(browser_idle_ms(), |bot| app.turns.is_busy(bot)).await;
 
     let routines = app.store.routines();

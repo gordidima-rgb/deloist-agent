@@ -714,7 +714,18 @@ async fn log_decision(app: &Arc<App>, bot_id: &str, scope: &crate::grants::Scope
     app.turns.emit(json!({ "type": "activity_logged", "botId": bot_id, "entry": entry }));
 }
 
-async fn ask_human(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>) -> ApprovalResult {
+/// Пока человек решает по карточке, бот не держит общий браузер команды: товарищи не ждут его ответа.
+async fn ask_human(app: &Arc<App>, bot_id: &str, question: Confirmation<'_>) -> ApprovalResult {
+    let held = app.browsers.suspend(bot_id).await;
+    let result = ask_human_inner(app, bot_id, question).await;
+    if let Some(session) = held {
+        let cancel = app.turns.cancel_of(bot_id).unwrap_or_default();
+        session.resume(bot_id, &cancel).await;
+    }
+    result
+}
+
+async fn ask_human_inner(app: &Arc<App>, bot_id: &str, mut question: Confirmation<'_>) -> ApprovalResult {
     let unattended = app.turns.is_unattended(bot_id);
     // Разговор есть только у хода, который человек начал сам в чате или группе.
     let conv = if unattended { None } else { app.turns.conv_of(bot_id) };
