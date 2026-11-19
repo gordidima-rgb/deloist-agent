@@ -527,6 +527,10 @@ pub struct Routine {
     /// Заметка с прошлого запуска (finish_turn note), обрезанная до 8000 знаков, хранится хвост.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub progress_note: String,
+    /// Дешёвая проверка перед ходом: команда оболочки. Непустая — запускается перед turn; код 0 будит бота,
+    /// код 1 значит «нового нет» (модель не вызывается). Задаёт только человек.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub check: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -589,6 +593,7 @@ impl Default for Routine {
             busy_since: 0,
             catch_up: "last".to_string(),
             progress_note: String::new(),
+            check: String::new(),
             extra: Map::new(),
         }
     }
@@ -2881,12 +2886,12 @@ impl Store {
         routine
     }
 
-    pub async fn add_routine(&self, input: &Value) -> std::io::Result<Routine> {
-        Ok(self.add_routine_capped(input, usize::MAX).await?.expect("без предела рутина добавляется всегда"))
+    pub async fn add_routine(&self, input: &Value, human: bool) -> std::io::Result<Routine> {
+        Ok(self.add_routine_capped(input, usize::MAX, human).await?.expect("без предела рутина добавляется всегда"))
     }
 
     /// То же с пределом: счёт и вставка под одним замком. `None` — предел достигнут.
-    pub async fn add_routine_capped(&self, input: &Value, cap: usize) -> std::io::Result<Option<Routine>> {
+    pub async fn add_routine_capped(&self, input: &Value, cap: usize, human: bool) -> std::io::Result<Option<Routine>> {
         // Напоминание не привязано к боту: его шлёт таймер, а название по умолчанию — текст напоминания.
         let reminder = reminders::wants(input);
         let mut routine = Routine {
@@ -2912,6 +2917,9 @@ impl Store {
         routine.hook = input.get("hook").is_some_and(truthy);
         routine.goal_id = text_or(input, "goalId", "");
         routine.approval_floor = text_or(input, "approvalFloor", "");
+        if human {
+            routine.check = text_or(input, "check", "");
+        }
         if let Some(v) = input.get("hookEvents").filter(|v| !v.is_null()) {
             routine.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         }
@@ -2933,7 +2941,7 @@ impl Store {
         Ok(Some(routine))
     }
 
-    pub async fn update_routine(&self, id: &str, patch: &Value) -> std::io::Result<Option<Routine>> {
+    pub async fn update_routine(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
         let updated = {
             let mut state = self.state.lock().unwrap();
             let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
@@ -2970,6 +2978,11 @@ impl Store {
             }
             if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
                 r.progress_note = as_string(v);
+            }
+            if human {
+                if let Some(v) = patch.get("check").filter(|v| !v.is_null()) {
+                    r.check = as_string(v);
+                }
             }
             if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
                 r.every_minutes = minutes(patch.get("everyMinutes"));
@@ -4025,7 +4038,7 @@ mod tests {
         use crate::runs::StopReason::{Check, Login, Network};
         let dir = temp_dir("routine-failures");
         let store = Store::open(dir.clone()).await.unwrap();
-        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "everyMinutes": 10 })).await.unwrap();
+        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "everyMinutes": 10 }), false).await.unwrap();
 
         store.mark_routine_run(&r.id, true).await.unwrap();
         assert_eq!(store.routine(&r.id).unwrap().last_status.as_deref(), Some("running"), "до конца хода — не «готово»");
@@ -4061,7 +4074,7 @@ mod tests {
         assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::Failed { failures: 4 });
         let saved = store.routine(&r.id).unwrap();
         assert!(saved.error_paused && saved.enabled, "рутина на паузе, но не выключена");
-        let resumed = store.update_routine(&r.id, &json!({ "errorPaused": false })).await.unwrap().unwrap();
+        let resumed = store.update_routine(&r.id, &json!({ "errorPaused": false }), false).await.unwrap().unwrap();
         assert_eq!((resumed.error_paused, resumed.failures), (false, 0));
         let _ = std::fs::remove_dir_all(dir);
     }

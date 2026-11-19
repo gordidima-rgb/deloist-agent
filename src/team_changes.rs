@@ -491,7 +491,7 @@ async fn apply_routine(app: &Arc<App>, r: &RoutinePlan) -> Result<String, String
     }
     let made = app
         .store
-        .add_routine_capped(&input, crate::routine_tools::MAX_ROUTINES)
+        .add_routine_capped(&input, crate::routine_tools::MAX_ROUTINES, false)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("уже {} рутин, новые не создаются", crate::routine_tools::MAX_ROUTINES))?;

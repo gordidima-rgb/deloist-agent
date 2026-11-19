@@ -679,6 +679,22 @@ async fn the_agent_key_cannot_sign_out_pay_or_sign_in_the_account() {
 }
 
 #[tokio::test]
+async fn the_agent_key_cannot_set_routine_check() {
+    let crew = Crew::start("routine-check-agent").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let response = crew
+        .client
+        .patch(format!("{}/api/routines/rt_x", crew.base))
+        .bearer_auth(&token)
+        .json(&json!({ "check": "cmd /c exit 0" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 403, "ключ программы задал проверку рутины");
+}
+
+#[tokio::test]
 async fn the_agent_key_cannot_send_a_test_reminder() {
     let crew = Crew::start("perm-test-reminder").await;
     let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();

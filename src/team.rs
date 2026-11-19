@@ -207,7 +207,7 @@ pub async fn import(app: &Arc<App>, team: &Value) -> Result<Value, String> {
         input["enabled"] = json!(false);
         // Вебхук включает только сам человек: адрес из чужого файла не должен появиться незаметно.
         input["hook"] = json!(false);
-        app.store.add_routine(&input).await.map_err(|e| e.to_string())?;
+        app.store.add_routine(&input, false).await.map_err(|e| e.to_string())?;
         made_routines += 1;
     }
 

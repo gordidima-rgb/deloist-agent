@@ -8211,6 +8211,7 @@ const STATUS_LABELS = {
   skipped: tr('пропущено: компьютер спал'),
   no_mail: tr('нет новых писем'),
   error: tr('не запустилась'),
+  no_change: tr('без изменений'),
   running: tr('идёт'),
   busy: tr('бот был занят'),
 };
@@ -9645,6 +9646,7 @@ function bindRoutineForm() {
       botId: f.botId.value,
       title: f.title.value.trim(),
       prompt: f.prompt.value.trim(),
+      check: f.check.value.trim(),
       everyMinutes: Number(f.everyMinutes.value) || 60,
       everyMaxMinutes: every ? Number(f.everyMaxMinutes.value) || 0 : 0,
       cron: every ? f.cron.value.trim() : '',

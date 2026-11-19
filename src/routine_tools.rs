@@ -349,7 +349,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 input.insert("approvalFloor".into(), json!(floor));
             }
             let made = store
-                .add_routine_capped(&Value::Object(input), MAX_ROUTINES)
+                .add_routine_capped(&Value::Object(input), MAX_ROUTINES, false)
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("уже {MAX_ROUTINES} рутин, новые не создаются"))?;
@@ -420,7 +420,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                     patch.insert("cron".into(), json!(routine.cron.clone()));
                 }
             }
-            let updated = store.update_routine(&routine.id, &Value::Object(patch)).await.map_err(|e| e.to_string())?
+            let updated = store.update_routine(&routine.id, &Value::Object(patch), false).await.map_err(|e| e.to_string())?
                 .ok_or("рутина уже удалена")?;
             app.turns.emit(json!({ "type": "state_changed" }));
             Ok(format!("Рутина изменена.\n{}", line(app, &updated)))
@@ -495,5 +495,12 @@ mod tests {
         let past_once = (Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d %H:%M").to_string();
         let past_once_error = schedule_patch(&json!({ "once_at": past_once })).unwrap_err();
         assert!(past_once_error.contains("будущем"), "{past_once_error}");
+    }
+
+    #[test]
+    fn bot_tool_does_not_carry_check_through() {
+        // check задаёт только человек; из аргументов бота он не попадает в патч.
+        let patch = schedule_patch(&json!({ "check": "rm -rf /", "at": "09:00" })).unwrap();
+        assert!(!patch.contains_key("check"));
     }
 }

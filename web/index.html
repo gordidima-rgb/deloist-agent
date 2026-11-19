@@ -1072,6 +1072,10 @@
                 <span>Что делать</span>
                 <textarea name="prompt" rows="3" placeholder="Собери три темы дня и запиши их в файл digest.md"></textarea>
               </label>
+              <label class="field">
+                <span>Проверка перед ходом (команда)</span>
+                <input name="check" class="k-input" placeholder="код 0 — будить бота, вывод уйдёт ему; код 1 — нового нет, модель не вызывается" />
+              </label>
               <label class="k-check"><input class="k-check__input" type="checkbox" name="quiet" checked /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Писать, только если есть что сказать</span></label>
               <label class="k-check"><input class="k-check__input" type="checkbox" name="hook" id="rt-hook" /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Запускать по вебхуку, а не по расписанию</span></label>
               <label class="field" id="rt-hook-box" hidden>

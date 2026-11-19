@@ -1366,16 +1366,16 @@ fn strip_html(html: &str) -> String {
     blank.replace_all(&text, "\n\n").trim().to_string()
 }
 
-struct ShellResult {
-    code: i32,
-    out: String,
-    err: String,
-    timed_out: bool,
+pub(crate) struct ShellResult {
+    pub(crate) code: i32,
+    pub(crate) out: String,
+    pub(crate) err: String,
+    pub(crate) timed_out: bool,
 }
 
 /// Команда бота. Песочница подставляет изоляцию и текстовый фильтр, но при любом отказе
 /// выполнение уходит на прежний путь: вывод и код остаются такими же, как раньше.
-async fn run_shell(command: &str, cwd: &Path, tmp: &Path, timeout: Duration, cancel: &CancellationToken, extra_env: &[(String, String)]) -> ShellResult {
+pub(crate) async fn run_shell(command: &str, cwd: &Path, tmp: &Path, timeout: Duration, cancel: &CancellationToken, extra_env: &[(String, String)]) -> ShellResult {
     // Второй замок политики облака: даже если проверку в `exec_tool` обойдут, процесс не стартует.
     if crate::cloud::active() {
         return ShellResult { code: 1, timed_out: false, out: String::new(), err: crate::cloud::NO_CONSOLE.to_string() };

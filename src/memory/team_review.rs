@@ -313,7 +313,7 @@ pub async fn ensure_routines(app: &Arc<App>) {
     // Рутины до 0.4.3 велели читать MAIN.md, которого больше нет: их задание обновляется до нынешнего.
     for routine in app.store.routines().into_iter().filter(|r| r.prompt.contains(MARK) && r.prompt.contains("MAIN.md")) {
         if let Some(room) = rooms.iter().find(|room| routine.prompt.contains(&mark_of(&room.id))) {
-            if let Err(e) = app.store.update_routine(&routine.id, &json!({ "prompt": prompt_for(room) })).await {
+            if let Err(e) = app.store.update_routine(&routine.id, &json!({ "prompt": prompt_for(room) }), false).await {
                 eprintln!("[memory] рутина разбора памяти «{}» не обновлена: {e}", room.name);
             }
         }
@@ -326,7 +326,7 @@ pub async fn ensure_routines(app: &Arc<App>) {
     created.extend(known);
     let todo = pending(&rooms, &bots, &app.store.routines(), &created);
     for (room, orch) in todo {
-        match app.store.add_routine_capped(&routine_input(&room, &orch), crate::routine_tools::MAX_ROUTINES).await {
+        match app.store.add_routine_capped(&routine_input(&room, &orch), crate::routine_tools::MAX_ROUTINES, false).await {
             Ok(Some(_)) => {
                 created.insert(room.id.clone());
             }

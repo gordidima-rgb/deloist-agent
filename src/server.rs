@@ -2812,7 +2812,7 @@ async fn add_routine(State(app): Shared, body: axum::body::Bytes) -> Response {
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    match app.store.add_routine(&body).await {
+    match app.store.add_routine(&body, true).await {
         Ok(routine) => created(json!({ "routine": routine })),
         Err(e) => io_fail(e),
     }
@@ -2831,7 +2831,7 @@ async fn patch_routine(State(app): Shared, Path(id): Path<String>, body: axum::b
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    match app.store.update_routine(&id, &body).await {
+    match app.store.update_routine(&id, &body, true).await {
         Ok(Some(routine)) => ok(json!({ "routine": routine })),
         Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
         Err(e) => io_fail(e),

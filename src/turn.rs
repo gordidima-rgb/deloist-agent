@@ -2950,7 +2950,7 @@ fn run_turn_body(
                     app.goals.edit(goal_id, |g| g.progress_note = note).await;
                 }
                 (_, Some(routine)) => {
-                    let _ = app.store.update_routine(&routine.id, &json!({ "progressNote": note })).await;
+                    let _ = app.store.update_routine(&routine.id, &json!({ "progressNote": note }), false).await;
                 }
                 _ => {}
             }

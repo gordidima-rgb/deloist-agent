@@ -412,7 +412,7 @@ pub async fn delete(app: &Arc<App>, id: &str) -> bool {
 
 pub async fn release_routines(app: &Arc<App>, goal_id: &str) {
     for routine in app.store.routines().into_iter().filter(|r| r.goal_id == goal_id && r.enabled) {
-        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;
+        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false }), false).await;
     }
 }
 
@@ -500,7 +500,7 @@ pub fn routine_run(app: &Arc<App>, routine: &Routine) -> Result<GoalRun, String>
 /// Рутина, чья цель завершена или удалена, больше не нужна: выключаем её, а не пропускаем срок за сроком.
 pub async fn release_if_dead(app: &Arc<App>, routine: &Routine) {
     if app.goals.get(&routine.goal_id).is_none_or(|g| g.status == "completed") {
-        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false })).await;
+        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false }), false).await;
     }
 }
 

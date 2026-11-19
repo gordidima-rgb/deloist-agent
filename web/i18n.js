@@ -3317,6 +3317,9 @@
     'Читает процесс': 'Reads workflow',
     'Читает прошлый разговор': 'Reads past conversation',
     'Читает справку': 'Reads help',
+    'без изменений': 'no change',
+    'Проверка перед ходом (команда)': 'Pre-run check (command)',
+    'код 0 — будить бота, вывод уйдёт ему; код 1 — нового нет, модель не вызывается': 'exit 0 wakes the bot and sends it the output; exit 1 means nothing new, the model is not called',
   };
 
   function savedLang() {
