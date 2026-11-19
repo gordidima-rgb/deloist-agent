@@ -40,6 +40,8 @@ pub fn defs() -> Vec<Value> {
             "every_max_minutes": { "type": "integer", "description": "Для every_minutes: случайный интервал — каждый раз срок выпадает между every_minutes и этим числом (40 и 80 — от 40 до 80 мин), чтобы запуски не шли ровной сеткой, как у человека. 0 — ровный интервал." },
             "window_from": { "type": "string", "description": "Для every_minutes: работать только с этого часа, ЧЧ:ММ. Окно может переходить через полночь (22:00–07:00). Нужны оба поля окна." },
             "window_to": { "type": "string", "description": "Конец окна ЧЧ:ММ." },
+            "cron": { "type": "string", "description": "Cron-выражение из 5 полей: минута час день-месяца месяц день-недели (например «0 9 * * 1-5»). Если задан, заменяет at/days/every_minutes. Несовместим с once_at и hook." },
+            "tz": { "type": "string", "description": "Часовой пояс IANA, например Europe/Moscow. Пусто — местное время ПК." },
         })
     };
     let with = |extra: Value| {
@@ -178,6 +180,29 @@ pub(crate) fn schedule_patch(args: &Value) -> Result<Map<String, Value>, String>
         }
         out.insert("everyMaxMinutes".into(), json!(max));
     }
+    if let Some(v) = args.get("cron").filter(|v| !v.is_null()) {
+        let s = v.as_str().ok_or("поле cron должно быть строкой")?.trim();
+        if !s.is_empty() {
+            crate::schedule::parse_cron(s).map_err(|e| format!("поле cron: {e}"))?;
+        }
+        out.insert("cron".into(), json!(s));
+    }
+    if let Some(v) = args.get("tz").filter(|v| !v.is_null()) {
+        let s = v.as_str().ok_or("поле tz должно быть строкой")?.trim();
+        if !s.is_empty() && !crate::schedule::tz_valid(s) {
+            return Err("поле tz: неизвестный часовой пояс".into());
+        }
+        out.insert("tz".into(), json!(s));
+    }
+    let has_cron = out.get("cron").and_then(Value::as_str).is_some_and(|s| !s.is_empty());
+    if has_cron {
+        if args.get("hook").is_some_and(crate::store::truthy) {
+            return Err("cron несовместим с hook".into());
+        }
+        if args.get("onceAt").is_some() {
+            return Err("cron несовместим с onceAt".into());
+        }
+    }
     for (key, field) in [("window_from", "windowFrom"), ("window_to", "windowTo")] {
         if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
             out.insert(field.into(), json!(v.as_str().ok_or_else(|| format!("поле {key} должно быть строкой ЧЧ:ММ"))?.trim()));
@@ -304,8 +329,9 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             let mut input = schedule_patch(args)?;
             let has_at = input.get("at").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
             let has_once = input.contains_key("onceAt");
-            if !has_at && !input.contains_key("everyMinutes") && !has_once {
-                return Err("не сказано когда: укажи at (время ЧЧ:ММ), every_minutes или once_at".into());
+            let has_cron = input.get("cron").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
+            if !has_at && !input.contains_key("everyMinutes") && !has_once && !has_cron {
+                return Err("не сказано когда: укажи at (время ЧЧ:ММ), every_minutes, once_at или cron".into());
             }
             check_window(input.get("windowFrom").and_then(Value::as_str).unwrap_or_default(), input.get("windowTo").and_then(Value::as_str).unwrap_or_default())?;
             input.insert("botId".into(), json!(target.id));
@@ -387,8 +413,12 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 }
             }
             // Включённая заново рутина должна получить свежий срок, а не старый, давно прошедший.
-            if patch.get("enabled") == Some(&json!(true)) && !["at", "everyMinutes", "days", "windowFrom", "windowTo"].iter().any(|k| patch.contains_key(*k)) {
-                patch.insert("at".into(), json!(routine.at));
+            if patch.get("enabled") == Some(&json!(true)) && !["at", "everyMinutes", "days", "windowFrom", "windowTo", "cron", "tz"].iter().any(|k| patch.contains_key(*k)) {
+                if routine.cron.is_empty() {
+                    patch.insert("at".into(), json!(routine.at));
+                } else {
+                    patch.insert("cron".into(), json!(routine.cron.clone()));
+                }
             }
             let updated = store.update_routine(&routine.id, &Value::Object(patch)).await.map_err(|e| e.to_string())?
                 .ok_or("рутина уже удалена")?;

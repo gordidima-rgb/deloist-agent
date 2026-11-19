@@ -8239,7 +8239,8 @@ const isTime = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
 
 function scheduleText(r) {
   if (r.hook) return tr('по внешнему вызову');
-  const timed = window.DeloistUI.routineSchedule.timedScheduleText(r, tr, window.LOCALE, (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'long' }));
+  if (r.cron) return r.tz ? `${r.cron} (${r.tz})` : r.cron;
+  const timed =window.DeloistUI.routineSchedule.timedScheduleText(r, tr, window.LOCALE, (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'long' }));
   if (timed) return timed;
   const low = Number(r.everyMinutes) || 60;
   const high = Number(r.everyMaxMinutes) || 0;
@@ -9646,6 +9647,8 @@ function bindRoutineForm() {
       prompt: f.prompt.value.trim(),
       everyMinutes: Number(f.everyMinutes.value) || 60,
       everyMaxMinutes: every ? Number(f.everyMaxMinutes.value) || 0 : 0,
+      cron: every ? f.cron.value.trim() : '',
+      tz: every ? f.tz.value.trim() : '',
       days: every ? selectedDays() : [],
       windowFrom: every ? f.windowFrom.value : '',
       windowTo: every ? f.windowTo.value : '',

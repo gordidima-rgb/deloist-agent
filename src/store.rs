@@ -472,6 +472,10 @@ pub struct Routine {
     pub every_max_minutes: i64,
     /// «09:00»: запускать в это время, а не каждые N минут.
     pub at: String,
+    /// Cron-выражение (5 полей). Если задано, заменяет every/at/days/window.
+    pub cron: String,
+    /// Часовой пояс IANA для cron. Пусто — местное время ПК.
+    pub tz: String,
     /// Дни недели, 1 — понедельник. Пусто — каждый день.
     pub days: Vec<i64>,
     /// Повтор по тому же правилу, что у задач (dates_ru::Recurrence). Пусто — нет правила.
@@ -560,6 +564,8 @@ impl Default for Routine {
             every_minutes: 60,
             every_max_minutes: 0,
             at: String::new(),
+            cron: String::new(),
+            tz: String::new(),
             days: Vec::new(),
             recurrence: None,
             start_on: String::new(),
@@ -1049,7 +1055,7 @@ fn calm_pets(state: &mut State) {
     }
 }
 
-fn truthy(v: &Value) -> bool {
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -1228,7 +1234,7 @@ pub(crate) fn string_map(v: Option<&Value>) -> BTreeMap<String, String> {
 }
 
 /// Поля расписания из запроса. Формат времени проверяет сервер, пустая строка снимает значение.
-fn apply_schedule(routine: &mut Routine, input: &Value) {
+fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(), String> {
     if let Some(max) = input.get("everyMaxMinutes") {
         routine.every_max_minutes = number(Some(max)).filter(|x| x.is_finite() && *x > 0.0).map_or(0, |x| x as i64);
     }
@@ -1260,6 +1266,30 @@ fn apply_schedule(routine: &mut Routine, input: &Value) {
     if let Some(v) = input.get("onceAt").or_else(|| input.get("once_at")) {
         routine.once_at = v.as_i64().unwrap_or(0);
     }
+    if let Some(v) = input.get("cron") {
+        let s = v.as_str().ok_or("поле cron должно быть строкой")?.trim().to_string();
+        if !s.is_empty() {
+            crate::schedule::parse_cron(&s).map_err(|e| format!("поле cron: {e}"))?;
+            if input.get("hook").is_some_and(truthy) {
+                return Err("cron несовместим с вебхуком".into());
+            }
+        }
+        routine.cron = s;
+    }
+    if let Some(v) = input.get("tz") {
+        let s = v.as_str().ok_or("поле tz должно быть строкой")?.trim().to_string();
+        if !s.is_empty() && !crate::schedule::tz_valid(&s) {
+            return Err("поле tz: неизвестный часовой пояс".into());
+        }
+        routine.tz = s;
+    }
+    if !routine.cron.is_empty() && routine.hook {
+        return Err("cron несовместим с вебхуком".into());
+    }
+    if !routine.cron.is_empty() && routine.once_at > 0 {
+        return Err("cron несовместим с разовым запуском (onceAt)".into());
+    }
+    Ok(())
 }
 
 fn minutes(v: Option<&Value>) -> i64 {
@@ -2846,7 +2876,7 @@ impl Store {
             quiet: input.get("quiet").map_or(true, truthy),
             ..Routine::default()
         };
-        apply_schedule(&mut routine, input);
+        apply_schedule(&mut routine, input).ok();
         routine.next_run = next_run_for(&routine, now());
         routine
     }
@@ -2878,7 +2908,7 @@ impl Store {
                 routine.title = take_chars(&routine.prompt, 80);
             }
         }
-        apply_schedule(&mut routine, input);
+        apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         routine.hook = input.get("hook").is_some_and(truthy);
         routine.goal_id = text_or(input, "goalId", "");
         routine.approval_floor = text_or(input, "approvalFloor", "");
@@ -2957,11 +2987,11 @@ impl Store {
             if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
                 r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             }
-            apply_schedule(r, patch);
+            apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             if reminders::is_reminder(r) {
                 reminders::apply(r, patch);
             }
-            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
+            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
             // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
             if rescheduled || !r.enabled || r.hook {
                 r.failures = 0;

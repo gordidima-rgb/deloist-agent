@@ -329,6 +329,8 @@ fn base_tool_defs() -> Value {
                     "every_max_minutes": { "type": "integer", "description": "Случайный интервал: срок между every_minutes и этим числом, без ровной сетки." },
                     "window_from": { "type": "string" },
                     "window_to": { "type": "string" },
+                    "cron": { "type": "string" },
+                    "tz": { "type": "string" },
                 } },
             }), &["title", "prompt", "schedule"],
         ),

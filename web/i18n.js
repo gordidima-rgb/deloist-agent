@@ -2003,6 +2003,7 @@
     'В определённое время': 'At a specific time',
     'Каждые, мин': 'Every (min)',
     'До, мин (случайно)': 'Up to (min, random)',
+    'Часовой пояс': 'Time zone',
     'Случайный срок между двумя числами, чтобы запуски не шли ровной сеткой': 'A random time between the two numbers, so runs do not follow an even grid',
     'Работать только с': 'Work only from',
     'до': 'to',

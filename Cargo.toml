@@ -16,6 +16,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 hkdf = "0.12"
 chacha20poly1305 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono-tz = "0.10"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 rand = "0.8"
 regex = "1"

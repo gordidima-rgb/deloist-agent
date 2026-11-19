@@ -304,8 +304,9 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
     // Расписание разбирает тот же код, что у create_routine.
     let mut input = crate::routine_tools::schedule_patch(schedule)?;
     let has_at = input.get("at").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
-    if !has_at && !input.contains_key("everyMinutes") {
-        return Err("schedule: не сказано когда: укажи at (время ЧЧ:ММ) или every_minutes".into());
+    let has_cron = input.get("cron").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
+    if !has_at && !input.contains_key("everyMinutes") && !has_cron {
+        return Err("schedule: не сказано когда: укажи at (время ЧЧ:ММ), every_minutes или cron".into());
     }
     crate::routine_tools::check_window(input.get("windowFrom").and_then(Value::as_str).unwrap_or_default(), input.get("windowTo").and_then(Value::as_str).unwrap_or_default())?;
     if app.store.routines().len() >= crate::routine_tools::MAX_ROUTINES {

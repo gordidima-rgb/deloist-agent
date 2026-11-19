@@ -1,10 +1,15 @@
 //! Когда рутине пора: «каждые N минут» с окном и днями недели или «в 09:00 по будням».
 //! Всё считается в местном времени компьютера: человек думает о ночи, а не о UTC.
 
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
+use chrono::{Datelike, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 
 use crate::dates_ru;
 use crate::store::{Bot, Routine};
+
+pub fn tz_valid(name: &str) -> bool {
+    let name = name.trim();
+    name.is_empty() || name.parse::<chrono_tz::Tz>().is_ok()
+}
 
 /// Последний пропущенный запуск догоняем, если компьютер проспал меньше этого: сводка в 10 ещё нужна, через день нет.
 pub const CATCH_UP_MS: i64 = 12 * 3_600_000;
@@ -146,6 +151,9 @@ pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
     if routine.once_at > 0 {
         return routine.once_at;
     }
+    if !routine.cron.trim().is_empty() {
+        return next_cron_run_ms(routine, now_ms);
+    }
     next_run_with(routine, now_ms, interval_minutes(routine, rand::random::<f64>()), local, to_ms)
 }
 
@@ -237,8 +245,55 @@ fn days_text(days: &[i64]) -> String {
     }
 }
 
+fn describe_cron(expr: &str) -> String {
+    let fields: Vec<&str> = expr.split_whitespace().collect();
+    if fields.len() != 5 {
+        return format!("по cron: {}", expr);
+    }
+    let (m, h, dom, _mon, dow) = (fields[0], fields[1], fields[2], fields[3], fields[4]);
+    let time = || -> Option<String> {
+        if m.chars().all(|c| c.is_ascii_digit()) && h.chars().all(|c| c.is_ascii_digit()) {
+            let mm: u8 = m.parse().ok()?;
+            let hh: u8 = h.parse().ok()?;
+            if mm <= 59 && hh <= 23 {
+                return Some(format!("{:02}:{:02}", hh, mm));
+            }
+        }
+        None
+    };
+    // каждые N минут
+    if let Some(n) = m.strip_prefix("*/") {
+        if h == "*" && dom == "*" && _mon == "*" && dow == "*" {
+            if let Ok(n) = n.parse::<u8>() {
+                return format!("каждые {} мин", n);
+            }
+        }
+    }
+    if let Some(t) = time() {
+        if dom == "*" && _mon == "*" && dow == "*" {
+            return format!("каждый день в {}", t);
+        }
+        if dom == "*" && _mon == "*" && (dow == "1-5" || dow == "1,2,3,4,5") {
+            return format!("по будням в {}", t);
+        }
+        if let Ok(d) = dom.parse::<u8>() {
+            if _mon == "*" && dow == "*" && (1..=31).contains(&d) {
+                return format!("{}-го числа в {}", d, t);
+            }
+        }
+    }
+    format!("по cron: {}", expr)
+}
+
 /// Расписание словами: «по будням в 09:00», «каждый час», «каждые 30 мин с 22:00 до 07:00».
 pub fn describe(routine: &Routine) -> String {
+    if !routine.cron.trim().is_empty() {
+        let mut text = describe_cron(&routine.cron);
+        if !routine.tz.trim().is_empty() {
+            text = format!("{} ({})", text, routine.tz.trim());
+        }
+        return text;
+    }
     if routine.hook {
         return "по вебхуку".to_string();
     }
@@ -349,7 +404,8 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
     ];
     let stamp = format!("DTSTAMP:{}", ics_stamp(now));
     let today = local(now).date();
-    for routine in routines.iter().filter(|r| r.enabled && !r.hook) {
+    for routine in routines.iter().filter(|r| r.enabled && !r.hook && r.cron.trim().is_empty()) {
+        // cron-рутины пропускаем: ICS не умеет произвольный cron.
         let bot = bots.iter().find(|b| b.id == routine.bot_id).map_or("", |b| b.name.as_str());
         let mut title = if bot.is_empty() {
             routine.title.clone()
@@ -394,6 +450,9 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
 /// Считаются только полностью прошедшие интервалы (чтобы обычный 30-секундный тик не считался пропуском).
 /// Считаются только последние семь дней: долго выключенный ПК не делает расчёт дорогим, а последний пропуск — настоящий.
 pub fn missed(routine: &Routine, now_ms: i64) -> Missed {
+    if !routine.cron.trim().is_empty() {
+        return Missed { count: 0, last_slot_ms: None };
+    }
     const WEEK_MS: i64 = 7 * 24 * 3_600_000;
     if routine.next_run <= 0 {
         return Missed { count: 0, last_slot_ms: None };
@@ -411,6 +470,158 @@ pub fn missed(routine: &Routine, now_ms: i64) -> Missed {
         slot = next;
     }
     Missed { count, last_slot_ms: last }
+}
+
+// ---------------------------------------------------------------------------
+// Cron (5 полей).
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct Cron {
+    pub minutes: Vec<bool>,
+    pub hours: Vec<bool>,
+    pub dom: Vec<bool>,
+    pub months: Vec<bool>,
+    pub dow: Vec<bool>,
+    pub dom_restricted: bool,
+    pub dow_restricted: bool,
+}
+
+fn parse_cron_field(s: &str, min: u8, max: u8, map7: bool) -> Result<(Vec<bool>, bool), String> {
+    let restricted = s.trim() != "*";
+    let mut allowed = vec![false; (max - min + 1) as usize];
+    for part in s.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return Err("пустой элемент списка".into());
+        }
+        let (range, step) = if let Some((r, st)) = part.split_once('/') {
+            let step: u8 = st.trim().parse().map_err(|_| "шаг должен быть положительным числом".to_string())?;
+            if step == 0 {
+                return Err("шаг должен быть больше 0".into());
+            }
+            (r.trim(), step)
+        } else {
+            (part, 1)
+        };
+        let (lo, hi) = if range == "*" {
+            (min, max)
+        } else if let Some((a, b)) = range.split_once('-') {
+            let a: u8 = a.trim().parse().map_err(|_| "неверное число".to_string())?;
+            let b: u8 = b.trim().parse().map_err(|_| "неверное число".to_string())?;
+            (a, b)
+        } else {
+            let v: u8 = range.parse().map_err(|_| "неверное число".to_string())?;
+            (v, v)
+        };
+        if lo < min || hi > max || lo > hi {
+            return Err(format!("значение вне диапазона {}-{}", min, max));
+        }
+        let mut v = lo;
+        while v <= hi {
+            let mut x = v;
+            if map7 && x == 7 {
+                x = 0;
+            }
+            if x >= min && x <= max {
+                allowed[(x - min) as usize] = true;
+            }
+            if step as u16 > (hi - v) as u16 {
+                break;
+            }
+            v += step;
+            if v == 0 && step > 0 {
+                // avoid infinite loop on wrap; not expected
+                break;
+            }
+        }
+    }
+    if !allowed.iter().any(|x| *x) {
+        return Err("ни одно значение не выбрано".into());
+    }
+    Ok((allowed, restricted))
+}
+
+pub fn parse_cron(expr: &str) -> Result<Cron, String> {
+    let fields: Vec<&str> = expr.split_whitespace().collect();
+    if fields.len() != 5 {
+        return Err("нужно 5 полей: минута час день-месяца месяц день-недели".into());
+    }
+    let (minutes, _) = parse_cron_field(fields[0], 0, 59, false)?;
+    let (hours, _) = parse_cron_field(fields[1], 0, 23, false)?;
+    let (dom, dom_restricted) = parse_cron_field(fields[2], 1, 31, false)?;
+    let (months, _) = parse_cron_field(fields[3], 1, 12, false)?;
+    // 0..=7 даёт 8 ячеек, 7 уже сложено в воскресенье (0): оставляем 7.
+    let (mut dow, dow_restricted) = parse_cron_field(fields[4], 0, 7, true)?;
+    dow.truncate(7);
+    let cron = Cron { minutes, hours, dom, months, dow, dom_restricted, dow_restricted };
+    // Выражение без единого дня в календаре («0 0 31 2 *») сохранить нельзя: оно не запустится никогда.
+    let today = Local::now().date_naive();
+    if !(0..CRON_HORIZON_DAYS).any(|d| cron_day_matches(&cron, today + Duration::days(d))) {
+        return Err("выражение не срабатывает ни в один день ближайших 8 лет".into());
+    }
+    Ok(cron)
+}
+
+/// Горизонт поиска запуска: 29 февраля бывает раз в 4 года, с запасом на пропуск високосного 2100-го.
+const CRON_HORIZON_DAYS: i64 = 8 * 366;
+
+fn cron_day_matches(cron: &Cron, date: NaiveDate) -> bool {
+    if !cron.months[date.month0() as usize] {
+        return false;
+    }
+    let dom_match = cron.dom[date.day0() as usize];
+    let dow_match = cron.dow[date.weekday().num_days_from_sunday() as usize];
+    // Как в классическом cron: если ограничены и день месяца, и день недели, достаточно любого из них.
+    if cron.dom_restricted && cron.dow_restricted {
+        dom_match || dow_match
+    } else {
+        dom_match && dow_match
+    }
+}
+
+/// Следующий запуск cron-рутины. Если его нет (после проверки при сохранении такого не бывает) — `i64::MAX`:
+/// тикер сравнивает `now() < next_run`, так что рутина просто не наступит.
+pub fn next_cron_run_ms(routine: &Routine, now_ms: i64) -> i64 {
+    let Ok(cron) = parse_cron(&routine.cron) else {
+        return i64::MAX;
+    };
+    let tz: Option<chrono_tz::Tz> = routine.tz.trim().parse().ok();
+    let to_local = |ms: i64| -> NaiveDateTime {
+        match (tz, chrono::DateTime::from_timestamp_millis(ms)) {
+            (Some(t), Some(d)) => d.with_timezone(&t).naive_local(),
+            _ => local(ms),
+        }
+    };
+    let to_utc_ms = |naive: NaiveDateTime| -> Option<i64> {
+        match tz {
+            Some(t) => match t.from_local_datetime(&naive) {
+                LocalResult::Single(dt) => Some(dt.timestamp_millis()),
+                LocalResult::Ambiguous(first, _) => Some(first.timestamp_millis()),
+                LocalResult::None => None,
+            },
+            None => Some(to_ms(naive)),
+        }
+    };
+    let start = to_local(now_ms).with_second(0).and_then(|t| t.with_nanosecond(0)).unwrap_or_else(|| to_local(now_ms));
+    let mut cur = start + Duration::minutes(1);
+    let end = start + Duration::days(CRON_HORIZON_DAYS);
+    while cur <= end {
+        if !cron_day_matches(&cron, cur.date()) {
+            cur = cur.date().succ_opt().map_or(end + Duration::minutes(1), |d| d.and_time(NaiveTime::MIN));
+        } else if !cron.hours[cur.hour() as usize] {
+            cur = cur.with_minute(0).unwrap_or(cur) + Duration::hours(1);
+        } else {
+            if cron.minutes[cur.minute() as usize] {
+                // Минуты, которой нет из-за перевода часов, пропускаем.
+                if let Some(ms) = to_utc_ms(cur).filter(|ms| *ms > now_ms) {
+                    return ms;
+                }
+            }
+            cur += Duration::minutes(1);
+        }
+    }
+    i64::MAX
 }
 
 #[cfg(test)]
@@ -710,6 +921,36 @@ mod tests {
         }
     }
 
+    fn cron_routine(cron: &str, tz: &str) -> Routine {
+        Routine { cron: cron.into(), tz: tz.into(), ..Routine::default() }
+    }
+
+    fn utc_ms(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
+        NaiveDate::from_ymd_opt(y, mo, d).unwrap().and_hms_opt(h, mi, 0).unwrap().and_utc().timestamp_millis()
+    }
+
+    fn naive(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, mo, d).unwrap().and_hms_opt(h, mi, 0).unwrap()
+    }
+
+    fn set(v: &[bool]) -> Vec<usize> {
+        v.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i).collect()
+    }
+
+    #[test]
+    fn cron_parser_reads_steps_lists_ranges_and_sunday() {
+        assert_eq!(set(&parse_cron("*/15 * * * *").unwrap().minutes), vec![0, 15, 30, 45]);
+        assert_eq!(set(&parse_cron("1-30/5 * * * *").unwrap().minutes), vec![1, 6, 11, 16, 21, 26]);
+        assert_eq!(set(&parse_cron("0,10,20 8-10 * * *").unwrap().minutes), vec![0, 10, 20]);
+        assert_eq!(set(&parse_cron("0 8-10 * * *").unwrap().hours), vec![8, 9, 10]);
+        assert_eq!(set(&parse_cron("0 0 * * 0").unwrap().dow), vec![0]);
+        assert_eq!(set(&parse_cron("0 0 * * 7").unwrap().dow), vec![0]);
+        assert_eq!(set(&parse_cron("0 0 * * 1-5").unwrap().dow), vec![1, 2, 3, 4, 5]);
+        for bad in ["61 * * * *", "* * *", "a b c d e", "* 24 * * *", "* * 0 * *", "* * * 13 *", "*/0 * * * *", "5-1 * * * *"] {
+            assert!(parse_cron(bad).is_err(), "{bad} должно отклоняться");
+        }
+    }
+
     #[test]
     fn start_on_holds_the_first_run_of_a_weekly_rule() {
         let r = Routine {
@@ -755,5 +996,58 @@ mod tests {
         finish(&mut repeated, to_ms(at(2, 9, 0)));
         assert!(repeated.enabled);
         assert_eq!(repeated.next_run, to_ms(at(3, 9, 0)));
+    }
+
+    #[test]
+    fn cron_day_of_month_or_day_of_week_when_both_are_set() {
+        let c = parse_cron("0 9 13 * 5").unwrap();
+        // 13 ноября 2026 — пятница; 20-е — тоже пятница; 13 декабря — воскресенье.
+        assert!(cron_day_matches(&c, naive(2026, 11, 20, 9, 0).date()), "пятница");
+        assert!(cron_day_matches(&c, naive(2026, 12, 13, 9, 0).date()), "13-е");
+        assert!(!cron_day_matches(&c, naive(2026, 11, 18, 9, 0).date()), "среда, не 13-е");
+        let next = next_cron_run_ms(&cron_routine("0 9 13 * 5", "UTC"), utc_ms(2026, 12, 8, 0, 0));
+        assert_eq!(next, utc_ms(2026, 12, 11, 9, 0), "ближайшая пятница раньше 13-го");
+    }
+
+    #[test]
+    fn cron_monthly_and_leap_day_do_not_fall_back_to_every_minute() {
+        let now = to_ms(naive(2026, 11, 18, 12, 0));
+        assert_eq!(next_cron_run_ms(&cron_routine("30 10 1 * *", ""), now), to_ms(naive(2026, 12, 1, 10, 30)));
+        assert_eq!(next_cron_run_ms(&cron_routine("0 0 29 2 *", ""), now), to_ms(naive(2028, 2, 29, 0, 0)));
+    }
+
+    #[test]
+    fn cron_without_a_day_in_eight_years_is_rejected() {
+        assert!(parse_cron("0 0 31 2 *").is_err());
+        assert!(parse_cron("0 0 29 2 *").is_ok());
+        assert_eq!(next_cron_run_ms(&cron_routine("not a cron", ""), 1), i64::MAX);
+    }
+
+    #[test]
+    fn cron_skips_the_hour_that_does_not_exist_and_runs_a_doubled_one_once() {
+        let berlin = cron_routine("30 2 * * *", "Europe/Berlin");
+        // 28.03.2027 02:30 в Берлине не бывает: переходим на следующий день, 02:30 CEST = 00:30 UTC.
+        assert_eq!(next_cron_run_ms(&berlin, utc_ms(2027, 3, 28, 0, 0)), utc_ms(2027, 3, 29, 0, 30));
+        // 25.10.2026 02:30 бывает дважды: берём раннее (CEST, 00:30 UTC), а после него — уже следующий день.
+        let first = next_cron_run_ms(&berlin, utc_ms(2026, 10, 24, 22, 0));
+        assert_eq!(first, utc_ms(2026, 10, 25, 0, 30));
+        assert_eq!(next_cron_run_ms(&berlin, first), utc_ms(2026, 10, 26, 1, 30));
+    }
+
+    #[test]
+    fn cron_uses_the_zone_of_the_routine() {
+        let ny = cron_routine("0 9 * * *", "America/New_York");
+        assert_eq!(next_cron_run_ms(&ny, utc_ms(2026, 11, 18, 12, 0)), utc_ms(2026, 11, 18, 14, 0));
+        assert!(tz_valid("Europe/Berlin") && tz_valid(""));
+        assert!(!tz_valid("Mars/Base"));
+    }
+
+    #[test]
+    fn cron_is_described_in_words_with_the_zone() {
+        assert_eq!(describe(&cron_routine("*/15 * * * *", "")), "каждые 15 мин");
+        assert_eq!(describe(&cron_routine("0 9 * * 1-5", "")), "по будням в 09:00");
+        assert_eq!(describe(&cron_routine("30 10 1 * *", "")), "1-го числа в 10:30");
+        assert_eq!(describe(&cron_routine("0 9 * * 1-5", "Europe/Berlin")), "по будням в 09:00 (Europe/Berlin)");
+        assert_eq!(describe(&cron_routine("0 9 13 * 5", "")), "по cron: 0 9 13 * 5");
     }
 }
