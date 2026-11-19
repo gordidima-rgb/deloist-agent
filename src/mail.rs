@@ -1458,6 +1458,9 @@ pub async fn put_trigger(app: &Arc<App>, routine_id: &str, body: &Value) -> Resu
     if routine.hook || crate::reminders::is_reminder(&routine) {
         return Err(ApiError::Bad("почтовый триггер — только у рутины по расписанию".into()));
     }
+    if app.watch.trigger(routine_id).is_some() {
+        return Err(ApiError::Bad("у рутины уже есть сторож страниц: у рутины один триггер".into()));
+    }
     let account_id = text_field(body, "accountId").unwrap_or_default();
     let account = app.mail.account(&account_id).ok_or_else(|| ApiError::Bad("нет такого ящика".into()))?;
     if !account.open_to(&routine.bot_id) {

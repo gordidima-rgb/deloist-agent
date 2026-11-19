@@ -91,7 +91,7 @@ pub fn key_shape_ok(value: &str) -> bool {
     value.chars().all(|c| c.is_ascii_graphic())
 }
 
-fn is_provider_console_origin(origin: &str) -> bool {
+pub(crate) fn is_provider_console_origin(origin: &str) -> bool {
     providers::BUILT_IN.iter().any(|b| b.console_origins.contains(&origin))
 }
 
@@ -730,7 +730,7 @@ fn settled(ready: bool, net_quiet: bool, quiet_samples: u32) -> bool {
 /// Страница успокоилась: документ загружен, сеть притихла и набор элементов перестал меняться.
 /// Загрузку ждём до `SETTLE_LOAD_MAX`, тишину после загрузки — до `SETTLE_MAX`:
 /// страница с вечной лентой или счётчиком не держит ход дольше трёх секунд.
-async fn settle(session: &Session) {
+pub(crate) async fn settle(session: &Session) {
     tokio::time::sleep(Duration::from_millis(150)).await;
     let started = now();
     let mut ready_at: Option<i64> = None;

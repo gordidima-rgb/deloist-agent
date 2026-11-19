@@ -360,6 +360,11 @@ async fn tick(app: &Arc<App>) {
             crate::mail::tick_routine(app, routine, trigger);
             continue;
         }
+        // Рутина со сторожем страниц: сначала страницы, ход — только если появились новые записи.
+        if let Some(trigger) = app.watch.trigger(&routine.id) {
+            crate::watch::tick_routine(app, routine, trigger);
+            continue;
+        }
         if let Err(e) = run_routine_as(app, &routine, true, "routine", late_ms).await {
             note(app, &routine, "failed", &e.message).await;
         }
@@ -442,6 +447,7 @@ mod tests {
             runs: crate::runs::Runs::open(&data),
             rest: crate::limit::Rest::open(&data),
             mail: crate::mail::Mail::open(&data),
+            watch: crate::watch::Watch::open(&data),
         })
     }
 

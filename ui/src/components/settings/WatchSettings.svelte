@@ -2,12 +2,7 @@
   // Экран «Сторож страниц» окна настроек: рутина по расписанию сама открывает страницы в браузере бота
   // и будит модель, только если на них появились новые записи. Без новых модель не вызывается.
   import { untrack } from 'svelte';
-  import Section from '../kit/Section.svelte';
-  import Field from '../kit/Field.svelte';
-  import TextInput from '../kit/TextInput.svelte';
-  import TextArea from '../kit/TextArea.svelte';
-  import Select from '../kit/Select.svelte';
-  import Button from '../kit/Button.svelte';
+  import { Section, Field, TextInput, TextArea, Select, Button } from '../kit';
   import { toast } from '../../lib/toast.js';
   import { tr } from '../../lib/i18n.js';
 

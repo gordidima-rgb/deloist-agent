@@ -4162,3 +4162,27 @@ async fn acp_foreign_mcp_send_tools_and_commands_follow_the_always_ask_list() {
     let (card, _) = acp_asks(&crew, &bot, disguised).await;
     assert!(card.is_some(), "[command] спрашивает команду под видом read");
 }
+
+#[tokio::test]
+async fn the_agent_key_cannot_touch_the_page_watcher() {
+    let crew = Crew::start("watch-agent").await;
+    let runtime: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let token = runtime["token"].as_str().unwrap().to_string();
+    let call = |method: reqwest::Method, path: &str, body: Option<Value>| {
+        let mut request = crew.client.request(method, format!("{}{path}", crew.base)).bearer_auth(&token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        request.send()
+    };
+    // Какие страницы бот открывает сам и без модели, решает только человек.
+    let refused = [
+        call(reqwest::Method::GET, "/api/watch", None).await.unwrap(),
+        call(reqwest::Method::PUT, "/api/watch/triggers/rt1", Some(json!({ "urls": ["https://x.com/someone"] }))).await.unwrap(),
+        call(reqwest::Method::DELETE, "/api/watch/triggers/rt1", None).await.unwrap(),
+    ];
+    for response in refused {
+        assert_eq!(response.status().as_u16(), 403, "ключ программы прошёл к сторожу страниц: {}", response.url());
+    }
+    assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"], json!([]));
+}

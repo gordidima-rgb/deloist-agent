@@ -2684,17 +2684,33 @@ async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum:
     };
     // Кнопку нажал человек, он и ответит на карточки. Без него запускает только расписание.
     let attended = body.get("attended").and_then(Value::as_bool).unwrap_or(true);
-    // Почтовый триггер: кнопка тоже смотрит ящик; писем нет — бот узнаёт об этом из задания.
-    if let (Some(trigger), Some(routine)) = (app.mail.trigger(&id), app.store.routine(&id)) {
-        let (extra, commit) = match crate::mail::check_trigger(&app, &routine, &trigger).await {
-            Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => (text, Some((senders, uid_validity, last_uid))),
-            Ok(crate::mail::Check::Nothing) => ("\n\nНовых подходящих писем нет.".to_string(), None),
+    // Триггер (почта или страница): кнопка тоже смотрит источник; нового нет — бот узнаёт об этом из задания.
+    type Commit = Box<dyn FnOnce(&App) + Send>;
+    let routine = app.store.routine(&id);
+    let triggered: Option<(String, Option<Commit>)> = match (&routine, app.mail.trigger(&id), app.watch.trigger(&id)) {
+        (Some(routine), Some(trigger), _) => match crate::mail::check_trigger(&app, routine, &trigger).await {
+            Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => {
+                let (bot, id) = (routine.bot_id.clone(), id.clone());
+                Some((text, Some(Box::new(move |app: &App| crate::mail::commit(app, &id, &bot, &senders, uid_validity, last_uid)))))
+            }
+            Ok(crate::mail::Check::Nothing) => Some(("\n\nНовых подходящих писем нет.".to_string(), None)),
             Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("почта: {e}")),
-        };
+        },
+        (Some(routine), None, Some(trigger)) => match crate::watch::check_trigger(&app, routine, &trigger).await {
+            Ok(crate::watch::Check::Items { text, keys }) => {
+                let id = id.clone();
+                Some((text, Some(Box::new(move |app: &App| crate::watch::commit(app, &id, keys)))))
+            }
+            Ok(crate::watch::Check::Nothing) => Some(("\n\nНовых подходящих записей на странице нет.".to_string(), None)),
+            Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("страницы: {e}")),
+        },
+        _ => None,
+    };
+    if let (Some(routine), Some((extra, commit))) = (routine, triggered) {
         return match crate::scheduler::run_routine_with(&app, &routine, !attended, "routine", 0, &extra).await {
             Ok(()) => {
-                if let Some((senders, validity, last)) = commit {
-                    crate::mail::commit(&app, &id, &routine.bot_id, &senders, validity, last);
+                if let Some(commit) = commit {
+                    commit(&app);
                 }
                 ok(json!({ "ok": true, "routine": app.store.routine(&id) }))
             }
@@ -2842,6 +2858,7 @@ async fn remove_routine(State(app): Shared, Path(id): Path<String>) -> Response 
     match app.store.remove_routine(&id).await {
         Ok(true) => {
             app.mail.remove_trigger(&id);
+            app.watch.remove_trigger(&id);
             ok(json!({ "ok": true }))
         }
         Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
@@ -2904,6 +2921,26 @@ async fn mail_remove_trigger(State(app): Shared, Path(id): Path<String>) -> Resp
 
 async fn mail_sent(State(app): Shared) -> Response {
     ok(json!({ "sent": app.mail.sent(200) }))
+}
+
+// ---------------------------------------------------------------------------
+// Сторож страниц (`/api/watch…` — только окно человека, `guard::human_only`)
+// ---------------------------------------------------------------------------
+
+async fn watch_overview(State(app): Shared) -> Response {
+    ok(crate::watch::overview(&app))
+}
+
+async fn watch_put_trigger(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    mail_reply(crate::watch::put_trigger(&app, &id, &body).await.map(|t| json!({ "trigger": t })))
+}
+
+async fn watch_remove_trigger(State(app): Shared, Path(id): Path<String>) -> Response {
+    ok(json!({ "ok": app.watch.remove_trigger(&id) }))
 }
 
 // ---------------------------------------------------------------------------
@@ -4438,6 +4475,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mail/accounts/{id}/check", post(mail_check))
         .route("/api/mail/triggers/{id}", axum::routing::put(mail_put_trigger).merge(delete(mail_remove_trigger)))
         .route("/api/mail/sent", get(mail_sent))
+        .route("/api/watch", get(watch_overview))
+        .route("/api/watch/triggers/{id}", axum::routing::put(watch_put_trigger).merge(delete(watch_remove_trigger)))
         .route("/api/routines/{id}/test-reminder", post(test_reminder))
         .route("/api/goals", post(add_goal))
         .route("/api/goals/{id}", axum::routing::patch(patch_goal).merge(delete(remove_goal)))
