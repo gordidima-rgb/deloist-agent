@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -53,47 +53,6 @@ impl Backend {
             Backend::Moli => "moli",
             Backend::UserChrome => "user_chrome",
         }
-    }
-
-    fn code(self) -> u8 {
-        match self {
-            Backend::WebView2 => 1,
-            Backend::Chrome => 2,
-            Backend::Edge => 3,
-            Backend::Obscura => 4,
-            Backend::UserChrome => 5,
-            Backend::Moli => 6,
-        }
-    }
-}
-
-/// Последний запущенный backend: UI и диагностика видят фактический путь, а не догадку.
-static LAST_BACKEND: AtomicU8 = AtomicU8::new(0);
-
-fn remember_backend(backend: Backend) {
-    LAST_BACKEND.store(backend.code(), Ordering::Relaxed);
-}
-
-/// Фактический путь последнего запущенного браузера: "webview2", "chrome" или "edge".
-/// Пока ни один бот не открывал браузер, отвечает предположением по настройкам машины.
-#[allow(dead_code)]
-pub fn backend() -> &'static str {
-    match LAST_BACKEND.load(Ordering::Relaxed) {
-        1 => "webview2",
-        2 => "chrome",
-        3 => "edge",
-        4 => "obscura",
-        5 => "user_chrome",
-        6 => "moli",
-        _ => predicted_backend(),
-    }
-}
-
-#[allow(dead_code)]
-fn predicted_backend() -> &'static str {
-    match find_browser("") {
-        Ok(found) => found.backend.as_str(),
-        Err(_) => "chrome",
     }
 }
 
@@ -721,7 +680,6 @@ impl Session {
             let session = Self::start_with(cdp, events, Backend::UserChrome, workspace, downloads, None, Some(relay)).await?;
             // Своя вкладка бота в его группе; вкладки человека бот не трогает.
             session.cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
-            remember_backend(Backend::UserChrome);
             return Ok(session);
         }
         // Облако: только Moli из образа. Настройка движка и путь к браузеру из настроек до запуска не доходят.
@@ -779,7 +737,6 @@ impl Session {
         let session = Self::start(&url, Backend::Obscura, workspace, downloads, Some(child)).await?;
         // У Chrome первая вкладка открывается при запуске. Obscura стартует пустым.
         session.cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
-        remember_backend(Backend::Obscura);
         Ok(session)
     }
 
@@ -815,7 +772,6 @@ impl Session {
         let session = Self::start(&url, Backend::Moli, workspace, downloads, Some(child)).await?;
         // У Chrome первая вкладка открывается при запуске. Moli стартует с пустой.
         session.cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
-        remember_backend(Backend::Moli);
         Ok(session)
     }
 
@@ -827,7 +783,6 @@ impl Session {
         // подключаемся к нему, а не запускаем второй на том же профиле.
         if let Some(url) = surviving_browser(&port_file).await {
             let session = Self::start(&url, found.backend, workspace, downloads, None).await?;
-            remember_backend(found.backend);
             return Ok(session);
         }
         let _ = tokio::fs::remove_file(&port_file).await;
@@ -849,7 +804,6 @@ impl Session {
             }
         })?;
         let session = Self::start(&url, found.backend, workspace, downloads, Some(child)).await?;
-        remember_backend(found.backend);
         Ok(session)
     }
 

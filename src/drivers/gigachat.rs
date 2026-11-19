@@ -97,6 +97,8 @@ pub async fn models(auth_key: &str) -> Result<Vec<Value>, String> {
     Ok(list)
 }
 
+const FILES_MAX: usize = 512;
+
 fn files() -> &'static Mutex<HashMap<String, String>> {
     static FILES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     FILES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -149,7 +151,14 @@ async fn upload_images(client: &reqwest::Client, base: &str, token: &str, cache_
         }
         let data: Value = response.json().await.unwrap_or(Value::Null);
         if let Some(id) = data["id"].as_str() {
-            files().lock().unwrap().insert(key, id.to_string());
+            let mut files = files().lock().unwrap();
+            // Таблица живёт до конца процесса: без предела она росла с каждой новой картинкой (аудит 19.11.2026).
+            // Сброшенный номер ничего не ломает: картинку просто загрузят ещё раз.
+            if files.len() >= FILES_MAX {
+                files.clear();
+            }
+            files.insert(key, id.to_string());
+            drop(files);
             ids.insert(hash, id.to_string());
         }
     }

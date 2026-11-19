@@ -1069,6 +1069,7 @@ pub async fn drop_bot(app: &Arc<App>, id: &str) -> std::io::Result<bool> {
     if !app.store.remove_bot(id).await? {
         return Ok(false);
     }
+    crate::screen::forget_bot(id);
     let _ = app.queues.clear_bot(id).await;
     crate::memory::forget_bot(app, id).await;
     app.turns.perms.forget_bot(id);

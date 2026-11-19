@@ -15,6 +15,20 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 
+/// Ждущий ответа запрос: его запись убирается вместе с ним.
+struct Waiting<'a> {
+    pending: &'a Pending,
+    id: u64,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(&self.id);
+        }
+    }
+}
+
 pub struct Cdp {
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
@@ -95,17 +109,33 @@ impl Cdp {
         }
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
+        // Запись уходит при любом выходе, и при отмене: трансляция экрана бросает зависшие запросы, и раньше
+        // они копились в таблице до закрытия соединения (аудит 19.11.2026: 256 отменённых — 256 записей).
+        let _waiting = Waiting { pending: &self.pending, id };
         if self.out.send(message.to_string()).is_err() {
-            self.pending.lock().unwrap().remove(&id);
             return Err("браузер закрыт".into());
         }
         match tokio::time::timeout(CALL_TIMEOUT, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err("браузер закрыт".into()),
-            Err(_) => {
-                self.pending.lock().unwrap().remove(&id);
-                Err(format!("браузер не ответил на {method} за {} с: страница могла зависнуть или стоять на точке останова", CALL_TIMEOUT.as_secs()))
-            }
+            Err(_) => Err(format!("браузер не ответил на {method} за {} с: страница могла зависнуть или стоять на точке останова", CALL_TIMEOUT.as_secs())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelled_calls_leave_no_pending_entries() {
+        let (out, _sent) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming) = mpsc::unbounded_channel();
+        let (cdp, _events) = Cdp::from_channels(out, incoming);
+        for _ in 0..256 {
+            // Ответа нет: запрос бросают раньше срока, как трансляция экрана при зависшей странице.
+            let _ = tokio::time::timeout(Duration::from_millis(1), cdp.call(None, "Page.captureScreenshot", json!({}))).await;
+        }
+        assert_eq!(cdp.pending.lock().unwrap().len(), 0);
     }
 }

@@ -2,7 +2,7 @@
 //! `run_command` и запись «Научи бота». Картинка идёт отдельным SSE-потоком только пока панель
 //! открыта: общий поток событий слушают док и питомцы, кадры им ни к чему.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path as FsPath, PathBuf};
@@ -147,10 +147,24 @@ impl Default for BotScreen {
 }
 
 static SCREENS: LazyLock<Mutex<HashMap<String, BotScreen>>> = LazyLock::new(Default::default);
+/// Удалённые боты: запоздалое завершение трансляции или зрителя не заводит их экран заново.
+static GONE: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
 
 fn with<R>(bot: &str, f: impl FnOnce(&mut BotScreen) -> R) -> R {
+    if GONE.lock().unwrap().contains(bot) {
+        return f(&mut BotScreen::default());
+    }
     let mut map = SCREENS.lock().unwrap();
     f(map.entry(bot.to_string()).or_default())
+}
+
+/// Бот удалён: трансляцию и команду остановить, последний кадр и состояние экрана отпустить
+/// (аудит 19.11.2026: экран удалённого бота с последним кадром жил до конца процесса).
+pub fn forget_bot(bot: &str) {
+    GONE.lock().unwrap().insert(bot.to_string());
+    if let Some(screen) = SCREENS.lock().unwrap().remove(bot) {
+        screen.capture.iter().chain(screen.shell.iter()).for_each(CancellationToken::cancel);
+    }
 }
 
 fn sse(value: &Value) -> Arc<String> {
@@ -1187,5 +1201,25 @@ mod tests {
         buffer.extend_from_slice(&word[3..]);
         assert_eq!(split_utf8(&mut buffer, false), "ук");
         assert!(buffer.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod forget_tests {
+    use super::*;
+
+    #[test]
+    fn a_deleted_bot_keeps_no_screen_and_late_events_do_not_bring_it_back() {
+        let bot = format!("bot_gone_{}", crate::guard::random_token());
+        let stop = CancellationToken::new();
+        with(&bot, |s| {
+            s.capture = Some(stop.clone());
+            s.last_frame = Some((Arc::new("кадр".into()), FrameMeta::default()));
+        });
+        forget_bot(&bot);
+        assert!(stop.is_cancelled(), "трансляция остановлена");
+        unavailable(&bot, "браузер закрыт");
+        with(&bot, |s| s.viewers = s.viewers.saturating_sub(1));
+        assert!(!SCREENS.lock().unwrap().contains_key(&bot), "экран не завёлся заново");
     }
 }
