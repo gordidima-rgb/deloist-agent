@@ -4,6 +4,32 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-11-19
+
+Routines wake the model only when there is work: page watcher, pre-run check, cron with a time zone.
+The Linux server builds again, and Claude bots no longer lose their tools after an update.
+
+### Routines
+
+- **Page watcher.** On its schedule a routine opens pages in the bot's browser itself (for example
+  `x.com/notifications` or a profile) and wakes the model only when new matching items appear. With nothing new
+  the model is not called and no tokens are spent. The first check only remembers the items; each is handled
+  once. Set it up in Settings → Page watcher: routine, addresses, item selector and a filter word.
+- **Pre-run check.** A routine can have a check command: exit 0 wakes the bot and passes it the output as data,
+  exit 1 means nothing new and the model is not called. Only the human sets it.
+- **Cron with a time zone.** A routine schedule can be a five-field cron expression with an IANA zone
+  (for example, `Europe/Moscow`); without a zone it uses the computer's time.
+
+### Fixes
+
+- **Claude bots keep their tools after an update.** The name of the Deloist tool set changed on every app start,
+  and a continued conversation called the tools by the old name, so the bot decided it had no browser or
+  routines. Now the name is one per install. Installing 0.4.7 changes it one last time.
+- **The Linux server builds again** (0.4.6 skipped the Linux package).
+- Cancelled browser requests no longer pile up in memory; a deleted bot's screen with its last frame is freed;
+  the GigaChat uploaded image table is capped.
+- A repeat build without changes no longer rebuilds the whole program.
+
 ## [0.4.6] — 2026-11-19
 
 Fixes from the Artist and Marketer X logs: tasks reach the other bot, and errors are visible.
