@@ -528,6 +528,27 @@ impl Runs {
         self.inner.lock().unwrap().items.iter().filter(|r| matches!(r.state, RunState::Paused { .. })).cloned().collect()
     }
 
+    /// Подошёл новый срок рутины: её прежние запуски, вставшие на паузу из-за лимита, сети или предела токенов,
+    /// устарели. Без этого каждый срок, пока модель на лимите, добавлял ещё одну паузу, а потом все они
+    /// просыпались по одной раз в 30 с (Маркетолог X, 19.11.2026: 12 пауз, пять — одной рутины).
+    /// Ожидание, которое бот поставил сам (`await_event`), не трогаем.
+    pub fn drop_stale_pauses(&self, routine_id: &str) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        let mut dropped = 0;
+        for run in inner.items.iter_mut().filter(|r| origin_routine(&r.origin) == Some(routine_id)) {
+            if matches!(run.state, RunState::Paused { reason: StopReason::Limit | StopReason::Network | StopReason::Budget, .. }) {
+                run.state = RunState::Done;
+                run.steps.clear();
+                run.updated_ms = now();
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            self.save(&inner.items);
+        }
+        dropped
+    }
+
     /// Запись, которая сразу на паузе (ход ещё не начинался).
     fn add(&self, run: Run) {
         let mut inner = self.inner.lock().unwrap();
@@ -967,5 +988,33 @@ mod tests {
         }
         assert_eq!(run.steps.len(), MAX_STEPS);
         assert_eq!(run.steps[0].call_id, "c10");
+    }
+}
+
+#[cfg(test)]
+mod stale_pause_tests {
+    use super::*;
+
+    fn paused(routine: &str, reason: StopReason) -> Run {
+        let origin = Origin::Routine { id: routine.into(), title: "Комментарии".into() };
+        let mut run = Run::new("bot", origin, &TurnOptions::default());
+        run.state = RunState::Paused { until_ms: now() + 3 * 24 * 3_600_000, reason, webhook: None, note: "claude-acp".into() };
+        run
+    }
+
+    #[test]
+    fn a_new_routine_term_replaces_its_stale_pauses_but_keeps_the_bots_own_wait() {
+        let dir = std::env::temp_dir().join(format!("runs-stale-{}", crate::guard::random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let runs = Runs::open(&dir);
+        for run in [paused("rt_a", StopReason::Limit), paused("rt_a", StopReason::Network), paused("rt_a", StopReason::Event), paused("rt_b", StopReason::Limit)] {
+            runs.add(run);
+        }
+        assert_eq!(runs.drop_stale_pauses("rt_a"), 2);
+        let left: Vec<_> = runs.paused().into_iter().map(|r| (origin_routine(&r.origin).unwrap().to_string(), r.state)).collect();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert!(left.iter().any(|(id, s)| id == "rt_a" && matches!(s, RunState::Paused { reason: StopReason::Event, .. })), "своё ожидание бота остаётся");
+        assert!(left.iter().any(|(id, _)| id == "rt_b"), "чужая рутина не трогается");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

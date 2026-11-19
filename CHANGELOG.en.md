@@ -4,6 +4,12 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+- **Routines do not pile up pauses on a limit.** While a model was on a limit, each routine term used to add one more
+  paused run, and when the pause ran out they woke one by one every 30 seconds with "The limit has reset". Now a new
+  routine term replaces its stuck run, so only one waits.
+- **Pause time with a date.** When the run continues on another day, the program says "I will continue at 22.11 16:00".
+- **Gemini with two accounts.** The "Gemini" entry offers only its own account's models; the second account's models are in
+  "Gemini · <account>". Before, a model of the second account could be picked for the first and fail with "Unknown model ID".
 - **The bot sets up the page watcher itself.** Tell a bot "watch for new posts" and it sets the page watcher on its routine
   (`create_routine`/`update_routine` with `watch_pages`), with no card and no addresses or selectors from you: the watcher
   only reads pages, like the bot's browser. Bots learn about it from their help and offer it to routines that check a page

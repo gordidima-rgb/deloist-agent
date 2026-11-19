@@ -247,20 +247,16 @@ impl Providers {
         });
     }
 
-    /// Итог по всем аккаунтам для общей карточки и общего выбора модели.
+    /// Итог по всем аккаунтам для общей карточки; выбор модели — первого аккаунта.
     fn ag_aggregate(&self, app: &App) {
         let accounts = self.ag_accounts(app);
         self.update_entry(app, ID, |e| {
             let connected = accounts.iter().any(|(_, a)| a["connected"] == true);
             e.insert("connected".into(), json!(connected));
-            let mut models: Vec<Value> = Vec::new();
-            for (_, account) in &accounts {
-                for model in account["models"].as_array().into_iter().flatten() {
-                    if !models.iter().any(|m| m["id"] == model["id"]) {
-                        models.push(model.clone());
-                    }
-                }
-            }
+            // Драйвер `acp:antigravity` идёт первым аккаунтом (`ag_resolve`): и выбор модели у него — только его модели.
+            // Прежде здесь было объединение всех аккаунтов, и бот получал модель второго аккаунта, которой первый не знает:
+            // «Unknown model ID: gemini-4-neon» (Маркетолог X, 19.11.2026). Модели других аккаунтов — в их пунктах «Gemini · …».
+            let models: Vec<Value> = accounts.first().and_then(|(_, a)| a["models"].as_array().cloned()).unwrap_or_default();
             if models.is_empty() {
                 e.remove("models");
             } else {

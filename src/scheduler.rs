@@ -205,9 +205,16 @@ pub async fn run_routine_with(app: &Arc<App>, routine: &Routine, unattended: boo
     started
 }
 
+/// Время срока для человека: «16:00», а не сегодня — с датой, «22.11 16:00». Без даты недельный лимит Claude
+/// читался как «сегодня в 16:00» (19.11.2026).
 pub fn clock(ms: i64) -> String {
     use chrono::TimeZone;
-    chrono::Local.timestamp_millis_opt(ms).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
+    let Some(at) = chrono::Local.timestamp_millis_opt(ms).single() else { return String::new() };
+    if at.date_naive() == chrono::Local::now().date_naive() {
+        at.format("%H:%M").to_string()
+    } else {
+        at.format("%d.%m %H:%M").to_string()
+    }
 }
 
 /// Ход рутины кончился: статус по итогу, ошибка растит серию. Реже — после 3 и 6 ошибок подряд, а три «вечные» ошибки
@@ -351,6 +358,8 @@ async fn tick(app: &Arc<App>) {
             }
             continue;
         }
+        // Новый срок заменяет прежний запуск этой рутины, застрявший на паузе: пауз не копится, будится одна.
+        app.runs.drop_stale_pauses(&routine.id);
         if over_limit(app) {
             pause_for_budget(app, &routine).await;
             continue;
@@ -555,4 +564,15 @@ pub fn start(app: Arc<App>) {
             tick(&app).await;
         }
     });
+}
+
+#[cfg(test)]
+mod clock_tests {
+    #[test]
+    fn a_time_that_is_not_today_carries_its_date() {
+        let now = chrono::Local::now().timestamp_millis();
+        assert_eq!(super::clock(now).len(), 5, "сегодня — только время");
+        let later = super::clock(now + 3 * 24 * 3_600_000);
+        assert!(later.len() == 11 && later.contains('.'), "{later}");
+    }
 }
