@@ -617,6 +617,7 @@ impl Drop for TurnKey<'_> {
 
 pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -> Result<(), String> {
     crate::cloud::deny(crate::cloud::NO_DRIVER)?;
+    load_bridge_name(req.app.store.data_dir());
     let bot_id = req.bot.id.clone();
     // Живёт до конца функции; без хода (его нет у вызова вне очереди) ключа нет и мост закрыт.
     let _turn_key = TurnKey::issue(req.app, &bot_id);
@@ -791,12 +792,37 @@ async fn fresh_session_summary(app: &Arc<App>, bot: &Bot, writer: &Bot, thread: 
     }
 }
 
-/// Имя нашего MCP-моста в сессии агента: со случайной частью на время работы программы. Агент называет сервер в запросе
-/// разрешения только строкой, и посторонний сервер с именем `deloist_browser` (из его собственных настроек) не должен
-/// получить поблажку: случайного имени он не знает. Сессия агента живёт дольше одного хода, поэтому имя одно на запуск.
+static BRIDGE_NAME: OnceLock<String> = OnceLock::new();
+
+/// Имя нашего MCP-моста в сессии агента: со случайной частью. Агент называет сервер в запросе разрешения только
+/// строкой, и посторонний сервер с именем `deloist_browser` (из его собственных настроек) не должен получить поблажку:
+/// случайного имени он не знает. Имя одно на установку и лежит в папке данных: сессии агента продолжаются после
+/// перезапуска программы, и в их истории инструменты названы прежним именем. С новым именем на каждый запуск бот
+/// после обновления до 0.4.6 звал `…_a113…__browser_nav`, получал «No such tool» и решал, что инструментов нет (19.11.2026).
 pub(crate) fn bridge_name() -> &'static str {
-    static NAME: OnceLock<String> = OnceLock::new();
-    NAME.get_or_init(|| format!("deloist_browser_{}", &crate::guard::random_token().chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect::<String>()))
+    BRIDGE_NAME.get_or_init(fresh_bridge_name)
+}
+
+fn fresh_bridge_name() -> String {
+    format!("deloist_browser_{}", crate::guard::random_token().chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect::<String>())
+}
+
+/// Взять имя моста из папки данных (или завести его там) до первого хода.
+fn load_bridge_name(data_dir: &Path) -> &'static str {
+    BRIDGE_NAME.get_or_init(|| stored_bridge_name(data_dir))
+}
+
+fn stored_bridge_name(data_dir: &Path) -> String {
+    let file = data_dir.join("bridge-name");
+    let ok = |n: &str| n.strip_prefix("deloist_browser_").is_some_and(|tail| tail.len() == 16 && tail.chars().all(|c| c.is_ascii_alphanumeric()));
+    match std::fs::read_to_string(&file) {
+        Ok(saved) if ok(saved.trim()) => saved.trim().to_string(),
+        _ => {
+            let name = fresh_bridge_name();
+            let _ = std::fs::write(&file, &name);
+            name
+        }
+    }
 }
 
 /// Новая сессия или продолжение прежней. `true` — сессия новая, агент ничего не знает о разговоре.
@@ -2472,6 +2498,18 @@ mod tests {
         let done = activity_of(&json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed" })).unwrap();
         assert_eq!(done["status"], "ok");
         assert!(done.get("name").is_none(), "обновление не стирает заголовок");
+    }
+
+    #[test]
+    fn the_bridge_name_survives_a_restart_and_a_broken_file_gets_a_new_one() {
+        let dir = std::env::temp_dir().join(format!("acp-bridge-{}", crate::guard::random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = stored_bridge_name(&dir);
+        assert!(first.starts_with("deloist_browser_") && first.len() == "deloist_browser_".len() + 16, "{first}");
+        assert_eq!(stored_bridge_name(&dir), first, "после перезапуска имя то же");
+        std::fs::write(dir.join("bridge-name"), "deloist_browser").unwrap();
+        assert_ne!(stored_bridge_name(&dir), "deloist_browser", "угадываемое имя не принимаем");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
