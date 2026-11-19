@@ -1571,15 +1571,24 @@ mod guard_list_tests {
     #[test]
     fn instruction_files_are_guarded_under_every_spelling_and_by_every_agent_name() {
         for path in [
-            r"sub\AGENTS.md.", "CLAUDE.md ", "AGENTS.md:stream", "AGENTS.md::$DATA", "GEMINI.md", "AGENTS.override.md", "CLAUDE.local.md", "QWEN.md",
-            r".github\copilot-instructions.md", r".github\instructions\ts.instructions.md", ".cursorrules", ".windsurfrules", ".clinerules", r".clinerules\rule.md",
+            "sub/AGENTS.md", "GEMINI.md", "AGENTS.override.md", "CLAUDE.local.md", "QWEN.md", ".github/copilot-instructions.md",
+            ".github/instructions/ts.instructions.md", ".cursorrules", ".windsurfrules", ".clinerules", ".clinerules/rule.md",
         ] {
             assert!(project_guard_reason(Path::new(path)).is_some(), "{path}");
         }
-        for path in ["notes.md", r"docs\agents-overview.md", "gemini.txt"] {
+        for path in ["notes.md", "docs/agents-overview.md", "gemini.txt"] {
             assert!(project_guard_reason(Path::new(path)).is_none(), "{path}");
         }
-        assert!(auto_exec_reason(Path::new(r".git.\config")).is_some(), "хвостовая точка не прячет .git");
+        // Написания, которые Windows сводит к тому же файлу: обратная косая, хвостовые точка и пробел, потоки NTFS.
+        // На Linux это другие имена файлов, и проверять их там незачем.
+        #[cfg(windows)]
+        {
+            for path in [r"sub\AGENTS.md.", "CLAUDE.md ", "AGENTS.md:stream", "AGENTS.md::$DATA", r".github\copilot-instructions.md", r".clinerules\rule.md"] {
+                assert!(project_guard_reason(Path::new(path)).is_some(), "{path}");
+            }
+            assert!(project_guard_reason(Path::new(r"docs\agents-overview.md")).is_none());
+            assert!(auto_exec_reason(Path::new(r".git.\config")).is_some(), "хвостовая точка не прячет .git");
+        }
         assert_eq!(defanged_name("AGENTS.md"), "AGENTS.md.txt");
         assert_eq!(defanged_name("report.pdf"), "report.pdf");
     }

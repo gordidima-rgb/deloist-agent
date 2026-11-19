@@ -451,19 +451,15 @@ mod tests {
         })
     }
 
-    fn check_cmd() -> &'static str {
-        #[cfg(windows)]
-        { "cmd /c exit 0" }
-        #[cfg(not(windows))]
-        { "sh -c 'exit 0'" }
-    }
-
+    // Вне Windows песочницы нет, и команда проверки не запускается без CREW_SANDBOX=off (sandbox_other::refusal):
+    // там проверка честно кончается ошибкой, это видит routine_check_exit_two_marks_error.
+    #[cfg(windows)]
     #[tokio::test]
     async fn routine_check_exit_zero_starts_turn() {
         let dir = temp_dir("zero");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
-        let cmd = if cfg!(windows) { "cmd /c echo new post" } else { "sh -c 'echo new post'" };
+        let cmd = "cmd /c echo new post";
         let routine = app.store.add_routine(&json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": cmd }), true).await.unwrap();
         let res = run_routine_as(&app, &routine, true, "routine", 0).await;
         assert!(res.is_ok(), "turn should start");
@@ -483,12 +479,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(windows)]
     #[tokio::test]
     async fn routine_check_exit_one_marks_no_change() {
         let dir = temp_dir("one");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
-        let cmd = if cfg!(windows) { "cmd /c exit 1" } else { "sh -c 'exit 1'" };
+        let cmd = "cmd /c exit 1";
         let routine = app.store.add_routine(&json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": cmd }), true).await.unwrap();
         let res = run_routine_as(&app, &routine, true, "routine", 0).await;
         assert!(res.is_ok());
