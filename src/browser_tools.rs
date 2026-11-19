@@ -168,7 +168,7 @@ pub fn tool_defs() -> Vec<Value> {
                 "action": s("type | press"),
                 "ref": n("Номер поля, для type."),
                 "text": s("Текст для type."),
-                "keys": s("Клавиша или сочетание для press."),
+                "keys": s("Одна клавиша или одно сочетание для press: «ArrowUp», «Control+A». Несколько нажатий — несколько вызовов."),
             }),
             &["action"],
         ),
@@ -1158,7 +1158,7 @@ fn key_for(name: &str) -> Result<Key, String> {
         _ => {
             let mut chars = name.chars();
             let (Some(first), None) = (chars.next(), chars.next()) else {
-                return Err(format!("неизвестная клавиша: {name}"));
+                return Err(format!("неизвестная клавиша: {name}. За один вызов press — одна клавиша или одно сочетание через +"));
             };
             let upper = first.to_ascii_uppercase();
             let code = if upper.is_ascii_alphabetic() {

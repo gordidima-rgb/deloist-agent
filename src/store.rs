@@ -2753,8 +2753,11 @@ impl Store {
     pub fn safe_path(&self, bot_id: &str, rel: &str) -> Result<PathBuf, String> {
         let base = self.workspace(bot_id);
         let outside = || format!("путь вне воркспейса: {rel}");
+        // Полный путь к своему же файлу бот берёт из ответов инструментов: внутри своей папки это тот же файл.
+        let given = Path::new(rel);
+        let inner = given.strip_prefix(&base).unwrap_or(given);
         let mut parts: Vec<std::ffi::OsString> = Vec::new();
-        for component in Path::new(rel).components() {
+        for component in inner.components() {
             match component {
                 Component::Normal(part) => {
                     if !plain_file_name(&part.to_string_lossy()) {
@@ -3956,6 +3959,19 @@ mod tests {
 
         // Второй якорь не появляется, пока окно снова не переполнится.
         assert!(!store.anchor_thread("bot", 8, 4).await);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_full_path_inside_the_own_workspace_is_the_same_file() {
+        let dir = temp_dir("safe-abs");
+        let store = Store::open(dir.clone()).await.unwrap();
+        let own = store.workspace("bot_a").join("pic.png");
+        assert_eq!(store.safe_path("bot_a", &own.display().to_string()).unwrap().file_name(), own.file_name());
+        let foreign = store.workspace("bot_b").join("pic.png").display().to_string();
+        assert!(store.safe_path("bot_a", &foreign).is_err(), "чужая папка остаётся снаружи");
+        let escape = store.workspace("bot_a").join("..").join("bot_b").join("pic.png").display().to_string();
+        assert!(store.safe_path("bot_a", &escape).is_err(), "выход через .. из своей папки");
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

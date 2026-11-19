@@ -362,6 +362,15 @@ fn native_search_env(command: &str, env: &[(String, String)], inherited: bool) -
     (is_codex && !own).then(|| ("CODEX_CONFIG".to_string(), json!({ "web_search": "live" }).to_string()))
 }
 
+/// Claude Code прячет схемы MCP-инструментов за поиском инструментов, а модель зовёт их вслепую: в журналах
+/// Маркетолога X (17–18.11.2026) — browser_mouse без ref, offer_specialist без бота, update_routine без номера,
+/// с ответом «input schema was not in your prompt». Инструменты моста бот должен видеть сразу. Свою настройку человека не трогаем.
+fn claude_tools_env(command: &str, env: &[(String, String)], inherited: bool) -> Option<(String, String)> {
+    let is_claude = command.to_lowercase().contains("claude-agent-acp");
+    let own = inherited || env.iter().any(|(name, _)| name.eq_ignore_ascii_case("ENABLE_TOOL_SEARCH"));
+    (is_claude && !own).then(|| ("ENABLE_TOOL_SEARCH".to_string(), "false".to_string()))
+}
+
 async fn spawn(spec: &Spec<'_>, signature: String, workspace: &Path) -> Result<Arc<Agent>, String> {
     // Политика облака: агенты запускаются командой, а консоли в облаке нет. Единственная точка запуска ACP.
     crate::cloud::deny(crate::cloud::NO_DRIVER)?;
@@ -387,6 +396,9 @@ async fn spawn(spec: &Spec<'_>, signature: String, workspace: &Path) -> Result<A
         cmd.env(name, value);
     }
     if let Some((name, value)) = native_search_env(command, spec.env, std::env::var_os("CODEX_CONFIG").is_some()) {
+        cmd.env(name, value);
+    }
+    if let Some((name, value)) = claude_tools_env(command, spec.env, std::env::var_os("ENABLE_TOOL_SEARCH").is_some()) {
         cmd.env(name, value);
     }
     let temp = spec.temp_root.and_then(make_temp);
@@ -1712,8 +1724,13 @@ fn activity_of(update: &Value) -> Option<Value> {
         args.insert("url".into(), json!(url));
     }
     // Короткие поля запроса: по ним чат показывает, что именно искали, нажимали, печатали (без вложенных данных).
-    for key in ["action", "pattern", "path", "file_path", "query", "q", "text", "keys", "ref", "selector", "label", "description", "subagent_type", "to"] {
-        match &update["rawInput"][key] {
+    // Codex кладёт аргументы MCP-инструмента в `rawInput.arguments`, рядом с `server` и `tool`.
+    let input = match &update["rawInput"]["arguments"] {
+        Value::Object(_) => &update["rawInput"]["arguments"],
+        _ => &update["rawInput"],
+    };
+    for key in ["action", "pattern", "path", "file_path", "query", "q", "text", "keys", "ref", "selector", "label", "description", "subagent_type", "to", "bot", "question"] {
+        match &input[key] {
             Value::String(s) if !s.is_empty() => {
                 args.insert(key.into(), json!(s.chars().take(200).collect::<String>()));
             }
@@ -1726,11 +1743,26 @@ fn activity_of(update: &Value) -> Option<Value> {
     if !args.is_empty() {
         out["args"] = Value::Object(args);
     }
-    let result = tool_content_text(&update["content"]);
+    let mut result = tool_content_text(&update["content"]);
+    if result.is_empty() {
+        result = mcp_output_text(&update["rawOutput"]);
+    }
     if !result.is_empty() {
         out["result"] = json!(result);
     }
     Some(out)
+}
+
+/// Ответ MCP-инструмента у Codex: `rawOutput` = `{ result: { content: [...] }, error: { message } }`, а `content` пустой.
+/// Без него в ходе работы оставалась пустая «ошибка», и причину отказа было не узнать.
+fn mcp_output_text(output: &Value) -> String {
+    let error = &output["error"];
+    let text = match error["message"].as_str().or(error.as_str()) {
+        Some(message) => message.to_string(),
+        None => output["result"]["content"].as_array().into_iter().flatten()
+            .filter_map(|item| item["text"].as_str()).collect::<Vec<_>>().join("\n"),
+    };
+    text.chars().take(4000).collect()
 }
 
 fn tool_content_text(content: &Value) -> String {
@@ -2321,6 +2353,11 @@ mod tests {
         assert!(native_search_env("codex-acp", &[("CODEX_CONFIG".into(), "{}".into())], false).is_none());
         assert!(native_search_env("codex-acp", &[], true).is_none());
         assert!(native_search_env("claude-agent-acp", &[], false).is_none());
+        let claude = "C:\\data\\agents\\claude-acp\\claude-agent-acp.exe";
+        assert_eq!(claude_tools_env(claude, &[], false), Some(("ENABLE_TOOL_SEARCH".into(), "false".into())));
+        assert!(claude_tools_env(claude, &[("ENABLE_TOOL_SEARCH".into(), "auto".into())], false).is_none());
+        assert!(claude_tools_env(claude, &[], true).is_none());
+        assert!(claude_tools_env("codex-acp", &[], false).is_none());
     }
 
     #[test]
@@ -2435,6 +2472,23 @@ mod tests {
         let done = activity_of(&json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed" })).unwrap();
         assert_eq!(done["status"], "ok");
         assert!(done.get("name").is_none(), "обновление не стирает заголовок");
+    }
+
+    #[test]
+    fn codex_mcp_calls_show_their_arguments_and_the_refusal() {
+        let failed = activity_of(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "m1", "status": "failed",
+            "rawInput": { "server": "deloist_browser_1", "tool": "share_file", "arguments": { "to": "Маркетолог Х", "path": "a.png" } },
+            "rawOutput": { "result": null, "error": { "message": "получатель не в команде" } },
+        })).unwrap();
+        assert_eq!(failed["args"]["to"], "Маркетолог Х");
+        assert_eq!(failed["args"]["path"], "a.png");
+        assert_eq!(failed["result"], "получатель не в команде");
+        let ok = activity_of(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "m2", "status": "completed",
+            "rawOutput": { "result": { "content": [{ "type": "text", "text": "передано" }] }, "error": null },
+        })).unwrap();
+        assert_eq!(ok["result"], "передано");
     }
 
     #[test]

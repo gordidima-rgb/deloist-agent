@@ -5,6 +5,7 @@
 //! Список намеренно короткий: посмотреть, прочитать тред, отправить задачу, дождаться ответа,
 //! вспомнить и запомнить. Подтверждений, удаления, настроек и ключей здесь нет и не будет.
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,7 +21,8 @@ const MAX_LINE: usize = 1024 * 1024;
 const MAX_TEXT: usize = 20_000;
 const FINISH_ON_CLOSE: Duration = Duration::from_secs(5);
 const BROWSER_WAIT: Duration = Duration::from_secs(40);
-type BrowserPending = Arc<Mutex<Option<(String, Receiver<Result<String, String>>)>> >;
+/// Действия моста, которые ещё идут: job → (инструмент, ответ; `None`, пока его ждёт вызов).
+type BrowserPending = Arc<Mutex<HashMap<String, (String, Option<Receiver<Result<String, String>>>)>>>;
 
 /// Строка протокола целиком: ответы идут из разных потоков и не должны перемешаться.
 fn send(out: &Mutex<std::io::Stdout>, reply: &Value) {
@@ -37,7 +39,7 @@ pub fn run(root: &Path, browser_bot: Option<String>) -> i32 {
     let stdin = std::io::stdin();
     let out = Arc::new(Mutex::new(std::io::stdout()));
     let in_flight = Arc::new(AtomicUsize::new(0));
-    let browser_pending: BrowserPending = Arc::new(Mutex::new(None));
+    let browser_pending: BrowserPending = Arc::default();
     let mut locked = stdin.lock();
 
     loop {
@@ -135,36 +137,46 @@ fn browser_tools() -> Value {
 }
 
 fn browser_request(root: &Path, bot: &str, name: &str, args: &Value, pending: &BrowserPending) -> Result<String, String> {
-    // Память не должна ждать браузер: пока действие висит, `remember` и `recall` раньше получали отказ
-    // «действие ещё выполняется», и бот решал, что не может записывать в память.
-    if matches!(name, "remember" | "recall" | "search_history" | "read_history") {
-        return call_browser(root, bot, name, args);
-    }
-    let mut slot = pending.lock().map_err(|_| "ожидание браузера прервано")?;
-    if name == "browser_wait" {
-        if !slot.as_ref().is_some_and(|(id, _)| Some(id.as_str()) == args["job"].as_str()) {
-            return Err("ожидаемое действие браузера не найдено".into());
-        }
+    let job = if name == "browser_wait" {
+        args["job"].as_str().unwrap_or_default().to_string()
     } else {
-        if slot.is_some() { return Err("Действие браузера ещё выполняется: продолжай ожидать его через browser_wait".into()); }
         if !crate::tools::is_bridge_tool(name) {
             return Err("неизвестный инструмент".into());
         }
+        let mut jobs = pending.lock().map_err(|_| "ожидание прервано")?;
+        // Вкладка у бота одна: два действия `browser_*` разом мешали бы друг другу. Остальное (карточки,
+        // передача задачи, память) браузер не трогает и ждать его не должно: висящая карточка человеку
+        // раньше блокировала delegate и share_file, и задача до другого бота не доходила.
+        if name.starts_with("browser_") {
+            if let Some((job, (tool, _))) = jobs.iter().find(|(_, (tool, _))| tool.starts_with("browser_")) {
+                return Err(format!("Действие {tool} ещё выполняется: дождись его через browser_wait с job: {job}"));
+            }
+        }
         let (tx, rx) = mpsc::channel();
-        let (root, bot, name, args) = (root.to_path_buf(), bot.to_string(), name.to_string(), args.clone());
         let job = crate::guard::random_token();
-        std::thread::spawn(move || { let _ = tx.send(call_browser(&root, &bot, &name, &args)); });
-        *slot = Some((job, rx));
-    }
-    wait_browser(&mut slot, BROWSER_WAIT)
+        let (root, bot, tool, args) = (root.to_path_buf(), bot.to_string(), name.to_string(), args.clone());
+        std::thread::spawn(move || { let _ = tx.send(call_browser(&root, &bot, &tool, &args)); });
+        jobs.insert(job.clone(), (name.to_string(), Some(rx)));
+        job
+    };
+    wait_job(pending, &job, BROWSER_WAIT)
 }
 
-fn wait_browser(slot: &mut Option<(String, Receiver<Result<String, String>>)>, timeout: Duration) -> Result<String, String> {
-    let (job, rx) = slot.as_ref().unwrap();
-    match rx.recv_timeout(timeout) {
-        Ok(result) => { *slot = None; result }
-        Err(RecvTimeoutError::Timeout) => Ok(format!("Действие ещё выполняется, возможно ждёт человека. Вызови browser_wait с job: {job}. Не запускай действие повторно.")),
-        Err(RecvTimeoutError::Disconnected) => { *slot = None; Err("соединение с браузером прервано".into()) }
+/// Ждёт действие, не держа общий замок: пока одно ждёт человека, другие вызовы идут своим ходом.
+fn wait_job(pending: &BrowserPending, job: &str, timeout: Duration) -> Result<String, String> {
+    let rx = match pending.lock().map_err(|_| "ожидание прервано")?.get_mut(job) {
+        None => return Err("ожидаемое действие не найдено".into()),
+        Some((_, rx)) => rx.take().ok_or("это действие уже ждёт другой вызов browser_wait")?,
+    };
+    let outcome = rx.recv_timeout(timeout);
+    let mut jobs = pending.lock().map_err(|_| "ожидание прервано")?;
+    match outcome {
+        Ok(result) => { jobs.remove(job); result }
+        Err(RecvTimeoutError::Timeout) => {
+            if let Some((_, slot)) = jobs.get_mut(job) { *slot = Some(rx); }
+            Ok(format!("Действие ещё выполняется, возможно ждёт человека. Вызови browser_wait с job: {job}. Не запускай действие повторно."))
+        }
+        Err(RecvTimeoutError::Disconnected) => { jobs.remove(job); Err("соединение с приложением прервано".into()) }
     }
 }
 
@@ -212,13 +224,35 @@ mod browser_wait_tests {
     #[test]
     fn waiting_preserves_the_same_action_until_it_finishes() {
         let (tx, rx) = mpsc::channel();
-        let mut pending = Some(("job-1".to_string(), rx));
-        let first = wait_browser(&mut pending, Duration::ZERO).unwrap();
+        let pending: BrowserPending = Arc::default();
+        pending.lock().unwrap().insert("job-1".into(), ("browser_nav".into(), Some(rx)));
+        let first = wait_job(&pending, "job-1", Duration::ZERO).unwrap();
         assert!(first.contains("job-1"));
-        assert!(pending.is_some());
+        assert!(pending.lock().unwrap()["job-1"].1.is_some());
         tx.send(Ok("готово".into())).unwrap();
-        assert_eq!(wait_browser(&mut pending, Duration::ZERO).unwrap(), "готово");
-        assert!(pending.is_none());
+        assert_eq!(wait_job(&pending, "job-1", Duration::ZERO).unwrap(), "готово");
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_card_waiting_for_the_human_does_not_block_other_tools() {
+        let root = std::env::temp_dir().join(format!("deloist-bridge-{}", crate::guard::random_token()));
+        let pending: BrowserPending = Arc::default();
+        let (_card, rx) = mpsc::channel();
+        pending.lock().unwrap().insert("card".into(), ("propose_rule".into(), Some(rx)));
+        for tool in ["delegate", "share_file", "browser_nav"] {
+            let result = browser_request(&root, "bot_x", tool, &json!({}), &pending);
+            assert!(!result.as_ref().is_err_and(|e| e.contains("ещё выполняется")), "{tool}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn only_one_browser_action_runs_at_a_time() {
+        let pending: BrowserPending = Arc::default();
+        let (_page, rx) = mpsc::channel();
+        pending.lock().unwrap().insert("page".into(), ("browser_page".into(), Some(rx)));
+        let err = browser_request(Path::new("."), "bot_x", "browser_nav", &json!({}), &pending).unwrap_err();
+        assert!(err.contains("browser_page") && err.contains("job: page"), "{err}");
     }
 }
 
