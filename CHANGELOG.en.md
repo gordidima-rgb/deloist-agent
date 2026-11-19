@@ -4,6 +4,12 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+- **The bot sets up the page watcher itself.** Tell a bot "watch for new posts" and it sets the page watcher on its routine
+  (`create_routine`/`update_routine` with `watch_pages`), with no card and no addresses or selectors from you: the watcher
+  only reads pages, like the bot's browser. Bots learn about it from their help and offer it to routines that check a page
+  for something new. `list_routines` shows which routine has a watcher and its last error.
+- The page watcher trims tails such as ";" at the end of an address or selector left by copying.
+
 ## [0.4.7] — 2026-11-19
 
 Routines wake the model only when there is work: page watcher, pre-run check, cron with a time zone.

@@ -763,3 +763,43 @@ async fn deleting_a_goal_always_asks_and_an_unknown_goal_is_refused() {
     let (status, result) = tool_result(&crew);
     assert_ne!(status, "ok", "{result}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bot_sets_up_the_page_watcher_itself_and_removes_it() {
+    let (crew, fake, bot) = setup("rt-watch", "auto", &[]).await;
+    let id = seed(&crew, &bot, json!({})).await;
+    // Хвост «;» из скопированного текста не ломает ни адрес, ни селектор.
+    let page = "https://93.184.216.34/feed";
+    *fake.script.lock().unwrap() = vec![
+        tool("update_routine", json!({ "routine_id": id, "watch_pages": [format!("{page};")], "watch_item": "article[data-testid=\"tweet\"];" })),
+        say("Готово"),
+    ];
+    ask(&crew, &bot).await;
+    let (status, result) = tool_result(&crew);
+    assert_eq!(status, "ok", "{result}");
+    assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "сторож только читает страницы: карточки нет");
+    let watch = crew.ok("GET", "/api/watch", None).await;
+    assert_eq!(watch["triggers"][0]["urls"], json!([page]), "{watch}");
+    assert_eq!(watch["triggers"][0]["selector"], "article[data-testid=\"tweet\"]");
+    assert!(result.contains("Сторож страниц") && result.contains(page), "бот видит сторожа: {result}");
+
+    // Внутренняя сеть — тот же отказ, что у browser_nav; сторож остаётся прежним.
+    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "watch_pages": ["http://127.0.0.1/admin"] })), say("Готово")];
+    ask(&crew, &bot).await;
+    assert_eq!(tool_result(&crew).0, "error");
+    assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"][0]["urls"], json!([page]));
+
+    // Пустой список снимает сторожа.
+    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "watch_pages": [] })), say("Готово")];
+    ask(&crew, &bot).await;
+    assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"], json!([]));
+
+    // Сразу при создании: рутина и её сторож.
+    *fake.script.lock().unwrap() = vec![
+        tool("create_routine", json!({ "title": "Лента", "prompt": "ответь на новые посты", "every_minutes": 15, "watch_pages": [page] })),
+        say("Готово"),
+    ];
+    ask(&crew, &bot).await;
+    let made = routines(&crew).await.into_iter().find(|r| r["title"] == "Лента").expect("рутина создана");
+    assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"][0]["routineId"], made["id"]);
+}

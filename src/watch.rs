@@ -303,6 +303,11 @@ pub fn overview(app: &App) -> Value {
     json!({ "triggers": app.watch.triggers() })
 }
 
+/// Хвосты, которые приносит копирование из текста: «https://x.com/i/timeline;», «article,» — их не было в адресе.
+fn tidy(value: &str) -> &str {
+    value.trim().trim_end_matches([';', ',']).trim_end()
+}
+
 /// Поля из тела запроса; `other_trigger` — у рутины уже есть почтовый триггер.
 fn build(routine_id: &str, body: &Value, other_trigger: bool) -> Result<PageTrigger, String> {
     if other_trigger {
@@ -310,7 +315,7 @@ fn build(routine_id: &str, body: &Value, other_trigger: bool) -> Result<PageTrig
     }
     let text = |key: &str| body.get(key).and_then(Value::as_str).unwrap_or_default().chars().filter(|c| !c.is_control()).collect::<String>();
     let mut urls: Vec<String> = Vec::new();
-    for url in body.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|u| !u.is_empty()) {
+    for url in body.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(tidy).filter(|u| !u.is_empty()) {
         if crate::browser::url_origin(url).is_none() {
             return Err(format!("не адрес сайта (нужен http или https): {url}"));
         }
@@ -321,7 +326,7 @@ fn build(routine_id: &str, body: &Value, other_trigger: bool) -> Result<PageTrig
     if urls.is_empty() || urls.len() > MAX_URLS {
         return Err(format!("нужно от 1 до {MAX_URLS} адресов страниц"));
     }
-    let selector = Some(text("selector").trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "article".into());
+    let selector = Some(tidy(&text("selector")).to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "article".into());
     if selector.chars().count() > SELECTOR_CHARS {
         return Err(format!("селектор длиннее {SELECTOR_CHARS} символов"));
     }

@@ -42,6 +42,9 @@ pub fn defs() -> Vec<Value> {
             "window_to": { "type": "string", "description": "Конец окна ЧЧ:ММ." },
             "cron": { "type": "string", "description": "Cron-выражение из 5 полей: минута час день-месяца месяц день-недели (например «0 9 * * 1-5»). Если задан, заменяет at/days/every_minutes. Несовместим с once_at и hook." },
             "tz": { "type": "string", "description": "Часовой пояс IANA, например Europe/Moscow. Пусто — местное время ПК." },
+            "watch_pages": { "type": "array", "items": { "type": "string" }, "description": "Сторож страниц: до 10 адресов, которые программа сама открывает в браузере бота по расписанию рутины и будит модель, только если там появились новые записи (без новых ход не идёт и токены не тратятся). Первая проверка только запоминает. Пример: [\"https://x.com/i/timeline\"]. Пустой список снимает сторожа. Ставь сам, когда человек просит следить за страницей: ему настраивать это не нужно." },
+            "watch_item": { "type": "string", "description": "CSS-селектор одной записи на этих страницах. Для X — article[data-testid=\"tweet\"]. По умолчанию article." },
+            "watch_contains": { "type": "string", "description": "Будить только на записи, где есть этот текст (без учёта регистра). Пусто — любая новая запись." },
         })
     };
     let with = |extra: Value| {
@@ -62,6 +65,7 @@ pub fn defs() -> Vec<Value> {
             "create_routine",
             "Создать рутину: в нужное время ты сам проснёшься и выполнишь prompt. \
              Примеры: каждый вторник; 3-я суббота сентября; один раз 2 декабря 10:00. \
+             Если рутина проверяет страницу на новое (лента, уведомления, профиль), поставь watch_pages: ты будешь просыпаться только на новые записи, пустые проверки не тратят токенов. \
              Называй человеку расписание и время следующего запуска из ответа. Без bot_id рутина твоя. \
              Обещаешь сделать что-то позже или регулярно — сначала поставь рутину (или шаг в свою через update_routine), иначе не обещай.",
             with(json!({
@@ -279,7 +283,15 @@ pub(crate) fn target_bot(app: &App, me: &Bot, args: &Value) -> Result<Bot, Strin
 
 fn line(app: &App, routine: &Routine) -> String {
     let who = app.store.bot(&routine.bot_id).map_or_else(|| "бот удалён".to_string(), |b| b.name);
-    format!("{} · «{}» — {}: {}. {}", routine.id, routine.title, who, schedule::describe(routine), schedule::describe_next(routine))
+    let mut text = format!("{} · «{}» — {}: {}. {}", routine.id, routine.title, who, schedule::describe(routine), schedule::describe_next(routine));
+    if let Some(w) = app.watch.trigger(&routine.id) {
+        text.push_str(&format!(" Сторож страниц: {} (запись: {}{})", w.urls.join(", "), w.selector, if w.contains.is_empty() { String::new() } else { format!(", содержит «{}»", w.contains) }));
+        if !w.last_error.is_empty() {
+            text.push_str(&format!(", ошибка: {}", w.last_error));
+        }
+        text.push('.');
+    }
+    text
 }
 
 /// Цель для рутины: должна быть и принадлежать тому же боту, что и рутина.
@@ -289,6 +301,20 @@ fn goal_of(app: &App, id: &str, bot_id: &str) -> Result<crate::goals::Goal, Stri
         return Err("цель другого бота: рутина запускает цель своего бота".into());
     }
     Ok(goal)
+}
+
+/// Сторож страниц из полей `watch_*`. Он только читает страницы, как `browser_nav`: адреса проходят ту же
+/// проверку (`check_address` в `put_trigger`), поэтому бот ставит его сам, без карточки. Пустой список снимает сторожа.
+async fn set_watch(app: &Arc<App>, routine_id: &str, args: &Value) -> Result<(), String> {
+    let pages = args.get("watch_pages").cloned().unwrap_or(Value::Null);
+    if pages.as_array().is_some_and(Vec::is_empty) {
+        app.watch.remove_trigger(routine_id);
+        return Ok(());
+    }
+    let body = json!({ "urls": pages, "selector": text(args, "watch_item"), "contains": text(args, "watch_contains") });
+    crate::watch::put_trigger(app, routine_id, &body).await.map(|_| ()).map_err(|e| match e {
+        crate::mail::ApiError::Bad(m) | crate::mail::ApiError::NotFound(m) | crate::mail::ApiError::Upstream(m) => m,
+    })
 }
 
 fn find(app: &App, args: &Value) -> Result<Routine, String> {
@@ -353,6 +379,13 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("уже {MAX_ROUTINES} рутин, новые не создаются"))?;
+            if args.get("watch_pages").is_some_and(|v| !v.is_null()) {
+                // Сторож не встал (адрес не прошёл проверку) — рутина без него будила бы модель впустую: убираем.
+                if let Err(e) = set_watch(app, &made.id, args).await {
+                    let _ = store.remove_routine(&made.id).await;
+                    return Err(e);
+                }
+            }
             app.turns.emit(json!({ "type": "state_changed" }));
             Ok(format!("Рутина создана.\n{}", line(app, &made)))
         }
@@ -403,7 +436,8 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                     }
                 }
             }
-            if patch.is_empty() {
+            let watch = args.get("watch_pages").filter(|v| !v.is_null());
+            if patch.is_empty() && watch.is_none() {
                 return Err("не указано, что менять".into());
             }
             // Правка чужой рутины добавляет осторожность правящего: прежний пол остаётся, строже можно, мягче нельзя.
@@ -420,8 +454,14 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                     patch.insert("cron".into(), json!(routine.cron.clone()));
                 }
             }
-            let updated = store.update_routine(&routine.id, &Value::Object(patch), false).await.map_err(|e| e.to_string())?
-                .ok_or("рутина уже удалена")?;
+            if watch.is_some() {
+                set_watch(app, &routine.id, args).await?;
+            }
+            let updated = if patch.is_empty() {
+                routine
+            } else {
+                store.update_routine(&routine.id, &Value::Object(patch), false).await.map_err(|e| e.to_string())?.ok_or("рутина уже удалена")?
+            };
             app.turns.emit(json!({ "type": "state_changed" }));
             Ok(format!("Рутина изменена.\n{}", line(app, &updated)))
         }
