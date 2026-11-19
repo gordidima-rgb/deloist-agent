@@ -10,7 +10,10 @@ fn main() {
     println!("cargo:rerun-if-changed=web/icons");
     println!("cargo:rerun-if-changed=web/ui");
     println!("cargo:rerun-if-changed=catalog");
-    println!("cargo:rerun-if-changed=docs/images/whats-new");
+    // Несуществующий путь Cargo считает изменённым на каждой сборке: без папки следим за её родителем
+    // (аудит 19.11.2026: лишние ~5,5 мин на повторной сборке без правок).
+    let whats_new = if Path::new("docs/images/whats-new").is_dir() { "docs/images/whats-new" } else { "docs/images" };
+    println!("cargo:rerun-if-changed={whats_new}");
     println!("cargo:rerun-if-changed=private");
     println!("cargo:rustc-check-cfg=cfg(deloist_private)");
     if Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("private").is_dir() {
@@ -181,7 +184,9 @@ fn build_import_libs(defs: &Path, out_dir: &Path) {
 fn build_icon_obj(manifest: &Path, out_dir: &Path) {
     // Официальная сборка берёт значок из private/assets (рисунок владельца), публичная — общий.
     let private_ico = manifest.join("private").join("assets").join("deloist.ico");
-    println!("cargo:rerun-if-changed={}", private_ico.display());
+    if private_ico.is_file() {
+        println!("cargo:rerun-if-changed={}", private_ico.display());
+    }
     let ico_path = if private_ico.is_file() { private_ico } else { manifest.join("assets").join("deloist.ico") };
     println!("cargo:rerun-if-changed={}", ico_path.display());
     let ico = std::fs::read(&ico_path).expect("deloist.ico");
