@@ -4,6 +4,21 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-11-19
+
+Fixes from the Artist and Marketer X logs: tasks reach the other bot, and errors are visible.
+
+- **A card for the human no longer holds the bot.** While a card waited (a new rule, a question), handing a task,
+  sharing a file and the browser got "browser action still running" for bots on Codex and Claude, so the Artist's
+  pictures and the Marketer's tasks did not arrive. Now only the card itself waits; only browser actions go one at a time.
+- **Tool errors of Codex bots are visible.** In the flow of work, Deloist tool steps of Codex showed empty: no
+  arguments and no reason for the error. Now you see whom a task went to and why it was refused.
+- **Own file by full path.** Browser upload and file tools accept a full path to a file in the bot's own folder
+  instead of answering "path outside the workspace".
+- **Claude bots see all tools at once.** Claude used to hide Deloist tool descriptions and call them blind, without
+  required fields (a click without a number, a routine without a number, a specialist without a name).
+- Browser keyboard: one key or one chord per press; the description and the error say so.
+
 ## [0.4.5] — 2026-11-19
 
 Teams and a readable flow of work: you see what a bot is doing and whom it handed what; a bot belongs to one team
