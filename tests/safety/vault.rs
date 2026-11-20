@@ -100,8 +100,8 @@ fn start_env(dir: &Path) -> (String, String, String, String) {
     )
 }
 
-/// Есть ли в папке файл с этой строкой. Читает всё, включая вложенные папки.
-fn dir_contains(dir: &Path, needle: &str) -> bool {
+/// Файл в папке, где есть эта строка (первый найденный). Читает всё, включая вложенные папки.
+fn dir_contains(dir: &Path, needle: &str) -> Option<std::path::PathBuf> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(path) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&path) else {
@@ -113,12 +113,12 @@ fn dir_contains(dir: &Path, needle: &str) -> bool {
                 stack.push(child);
             } else if let Ok(bytes) = std::fs::read(&child) {
                 if bytes.windows(needle.len()).any(|window| window == needle.as_bytes()) {
-                    return true;
+                    return Some(child);
                 }
             }
         }
     }
-    false
+    None
 }
 
 fn has_login(logins: &Value, id: &str) -> Option<Value> {
@@ -167,7 +167,7 @@ async fn bitwarden_unlock_lists_and_locks_without_leaking_secrets() {
 
     // На диске данных их тоже нет, и аргументы программ их не несли.
     for secret in [MASTER, SESSION, BW_SECRET] {
-        assert!(!dir_contains(&crew.data_dir, secret), "секрет {secret} оказался в папке данных");
+        assert!(dir_contains(&crew.data_dir, secret).is_none(), "секрет {secret} оказался в папке данных");
     }
     let argv = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(argv.contains("unlock"), "заглушка bw не вызвана: {argv}");
@@ -225,8 +225,8 @@ async fn onepassword_token_is_checked_kept_encrypted_and_removable() {
         }
     }
     // Ни один файл папки данных не содержит токен или пароль открытым текстом: токен в зашифрованном хранилище.
-    assert!(!dir_contains(&crew.data_dir, OP_TOKEN), "токен 1Password открыто лежит в папке данных");
-    assert!(!dir_contains(&crew.data_dir, OP_SECRET), "пароль 1Password попал в папку данных");
+    assert!(dir_contains(&crew.data_dir, OP_TOKEN).is_none(), "токен 1Password открыто лежит в папке данных");
+    assert!(dir_contains(&crew.data_dir, OP_SECRET).is_none(), "пароль 1Password попал в папку данных");
     // Заглушка op получает токен только из окружения, в аргументах его быть не должно.
     let argv = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(argv.contains("whoami"), "заглушка op не вызвана: {argv}");
@@ -235,7 +235,7 @@ async fn onepassword_token_is_checked_kept_encrypted_and_removable() {
     let (status, _) = crew.send("DELETE", "/api/vault/onepassword", None).await;
     assert_eq!(status, 200);
     assert_eq!(crew.ok("GET", "/api/vault", None).await["onepassword"]["connected"], false);
-    assert!(!dir_contains(&crew.data_dir, OP_TOKEN), "токен остался в папке данных после удаления");
+    assert!(dir_contains(&crew.data_dir, OP_TOKEN).is_none(), "токен остался в папке данных после удаления");
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +529,9 @@ impl Vault {
         for secret in secrets {
             assert!(!events.contains(secret), "секрет {secret} в потоке событий");
             assert!(!model.contains(secret), "секрет {secret} в запросах к модели");
-            assert!(!dir_contains(&self.crew.data_dir, secret), "секрет {secret} в папке данных (в том числе threads)");
+            if let Some(file) = dir_contains(&self.crew.data_dir, secret) {
+                panic!("секрет {secret} в папке данных: {}", file.display());
+            }
         }
     }
 }
