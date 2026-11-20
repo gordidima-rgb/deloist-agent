@@ -22,6 +22,7 @@ mod browser;
 mod browser_tools;
 mod catalog;
 mod changelog;
+#[cfg(feature = "desktop")]
 mod capture;
 mod cloud;
 mod instabox;
@@ -54,7 +55,9 @@ mod graph;
 mod guard;
 mod headless;
 mod hermes_import;
+#[cfg(feature = "desktop")]
 mod hotkeys;
+#[cfg(feature = "desktop")]
 mod icon_art;
 mod image;
 mod intro;
@@ -116,6 +119,7 @@ mod search;
 mod secrets;
 mod sensitive;
 mod shellplan;
+#[cfg(feature = "desktop")]
 mod selection;
 mod server;
 mod service;
@@ -552,6 +556,7 @@ fn main() {
         return;
     }
     // Подсказка «правка выделенного» — тоже отдельный процесс, маленькое окно у курсора.
+    #[cfg(feature = "desktop")]
     if let Some(at) = first_arg("--prompt") {
         if let Err(message) = selection::run_prompt(&at, first_arg("--target"), first_arg("--mode")) {
             eprintln!("{message}");

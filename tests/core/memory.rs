@@ -83,7 +83,7 @@ async fn completions(State(fake): State<Fake>, body: Bytes) -> Response {
         if delay > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
         }
-        if fake.extract_failures.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
+        if fake.extract_failures.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
             return Response::builder().status(500).body(Body::from("{\"error\": {\"message\": \"boom\"}}")).unwrap();
         }
         let reply = fake.extractor.lock().unwrap().clone();

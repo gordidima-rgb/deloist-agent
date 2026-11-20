@@ -45,12 +45,6 @@ fn sanitized(item: &Value, allowed: &[&str]) -> Value {
     input
 }
 
-/// Всё, что можно перенести на другую машину. Имена вместо идентификаторов:
-/// на новой машине они всё равно будут другими.
-pub fn export(app: &App) -> Value {
-    export_with(app, true)
-}
-
 /// `workflows: false` — для ключа программы (скрипт бота): графы процессов содержат постановки и адреса, их отдаёт только окно.
 pub fn export_with(app: &App, workflows: bool) -> Value {
     let bots = app.store.bots();

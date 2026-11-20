@@ -10,11 +10,9 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::post;
 use axum::Router;
-use std::sync::Arc;
-use std::sync::Mutex;
 
 #[derive(Clone)]
-struct Fake { calls: Arc<Mutex<u32>> }
+struct Fake;
 async fn completions(State(_fake): State<Fake>, _body: Bytes) -> Response {
     let text = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"facts\\\":[\\\"Любит Rust\\\"],\\\"agents\\\":[{\\\"name\\\":\\\"Скаут\\\",\\\"role\\\":\\\"ищет источники\\\"}]}\"}}]}\n\ndata: [DONE]\n\n";
     Response::builder().header("content-type", "text/event-stream").body(Body::from(text)).unwrap()
@@ -32,7 +30,7 @@ async fn know_me_read_propose_save() {
     writeln!(f, r#"{{"type":"assistant","message":{{"content":"ok"}}}}"#).unwrap();
 
     // Fake model server.
-    let fake = Fake { calls: Arc::new(Mutex::new(0)) };
+    let fake = Fake;
     let app = Router::new().route("/v1/chat/completions", post(completions)).with_state(fake);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();

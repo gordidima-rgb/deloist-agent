@@ -109,6 +109,7 @@ static PENDING: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 const PENDING_LIFE: Duration = Duration::from_secs(60);
 
 /// Где показать: в доке, если он включён, иначе в главном окне (его надо открыть).
+#[cfg(feature = "desktop")]
 pub fn announce(app: &App, mut event: Value) {
     let dock = app.store.settings().dock_enabled;
     event["target"] = json!(if dock { "dock" } else { "main" });
@@ -128,6 +129,7 @@ pub fn announce(app: &App, mut event: Value) {
 
 /// Кому уходит голос: бот из настройки «Голос уходит», а если там `last` или бота уже нет —
 /// последний, с кем говорили.
+#[cfg(feature = "desktop")]
 pub async fn voice_bot(app: &App) -> Option<String> {
     let target = crate::hotkeys::voice_target(app);
     if target != crate::hotkeys::LAST_BOT && app.store.bot(&target).is_some() {
@@ -136,6 +138,7 @@ pub async fn voice_bot(app: &App) -> Option<String> {
     last_bot(app).await
 }
 
+#[cfg(feature = "desktop")]
 pub async fn on_hotkey(app: &Arc<App>) {
     let Some(bot) = voice_bot(app).await else { return };
     announce(app, json!({ "type": "voice_hotkey", "botId": bot }));
@@ -267,8 +270,17 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/voice/pending", post(take_pending))
         .route("/api/voice/target", post(target_route))
         .route("/api/voice/state", post(state_route))
-        .merge(crate::hotkeys::routes())
-        .merge(crate::selection::routes())
+        .merge(desktop_routes())
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_routes() -> Router<Arc<App>> {
+    Router::new().merge(crate::hotkeys::routes()).merge(crate::selection::routes())
+}
+
+#[cfg(not(feature = "desktop"))]
+fn desktop_routes() -> Router<Arc<App>> {
+    Router::new()
 }
 
 #[cfg(test)]

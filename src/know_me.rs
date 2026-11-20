@@ -221,7 +221,6 @@ pub async fn http_propose(State(app): State<Arc<App>>, Json(body): Json<ProposeB
 #[derive(Deserialize)]
 pub struct SaveBody {
     facts: Option<Vec<String>>,
-    agents: Option<Vec<Value>>,
 }
 
 pub async fn http_save(State(app): State<Arc<App>>, Json(body): Json<SaveBody>) -> Result<Json<Value>, (StatusCode, String)> {

@@ -151,14 +151,6 @@ fn handoff_error(handed_off: bool) -> String {
     }
 }
 
-impl DevToolsEndpoint {
-    fn ws_url(&self, from_version: Option<&str>) -> Option<String> {
-        if let Some(url) = from_version {
-            return Some(url.to_string());
-        }
-        self.path.as_ref().map(|path| format!("ws://127.0.0.1:{}{path}", self.port))
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct VersionInfo {
@@ -1930,7 +1922,6 @@ mod tests {
         let endpoint = parse_devtools_active_port("9222\n/devtools/browser/6f7e-1\n").unwrap();
         assert_eq!(endpoint.port, 9222);
         assert_eq!(endpoint.path.as_deref(), Some("/devtools/browser/6f7e-1"));
-        assert_eq!(endpoint.ws_url(None).as_deref(), Some("ws://127.0.0.1:9222/devtools/browser/6f7e-1"));
     }
 
     #[test]
@@ -1938,8 +1929,6 @@ mod tests {
         let endpoint = parse_devtools_active_port("51000\n").unwrap();
         assert_eq!(endpoint.port, 51000);
         assert_eq!(endpoint.path, None);
-        assert_eq!(endpoint.ws_url(None), None);
-        assert_eq!(endpoint.ws_url(Some("ws://127.0.0.1:51000/devtools/browser/x")).as_deref(), Some("ws://127.0.0.1:51000/devtools/browser/x"));
     }
 
     #[test]

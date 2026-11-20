@@ -151,10 +151,6 @@ pub fn url_label(raw: &str) -> String {
     format!("{host}{path}{}", if hidden { " (параметры адреса скрыты)" } else { "" })
 }
 
-pub fn host_only(raw: &str) -> String {
-    let rest = raw.trim().split_once("://").map(|(_, r)| r).unwrap_or(raw.trim());
-    rest.split(['/', '?', '#']).next().unwrap_or_default().rsplit('@').next().unwrap_or_default().to_lowercase()
-}
 
 // ---------------------------------------------------------------------------
 // Где лежит путь
@@ -1055,7 +1051,6 @@ mod tests {
         assert_eq!(url_label("https://x.com/home?token=abc#frag"), "x.com/home (параметры адреса скрыты)");
         assert_eq!(url_label("https://x.com@evil.test/a"), "evil.test/a");
         assert_eq!(url_label("https://X.COM.evil.test/"), "x.com.evil.test/");
-        assert_eq!(host_only("https://user:pw@xn--e1afmkfd.xn--p1ai:8080/p?q=1"), "xn--e1afmkfd.xn--p1ai:8080");
         assert!(!url_label("https://a.b/c?token=secret").contains("secret"));
     }
 

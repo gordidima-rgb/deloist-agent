@@ -52,8 +52,6 @@ pub struct Pack {
 pub enum Kind {
     /// NeMo-трансдьюсер: Parakeet, GigaAM. Язык модель выбирает сама или знает один.
     Transducer,
-    /// Whisper: язык можно задать.
-    Whisper,
 }
 
 /// Какие языки модель понимает и можно ли его задать.
@@ -63,8 +61,6 @@ pub enum Langs {
     Russian,
     /// Сама определяет язык, задать нельзя.
     Auto,
-    /// Сама определяет, но можно и задать.
-    Choice,
 }
 
 #[derive(Clone, Debug)]
@@ -453,7 +449,7 @@ pub fn cancel() -> bool {
 }
 
 /// Скачать недостающее и загрузить модель. Возвращает сразу; ход работы — в `job()` и событиях.
-pub fn start_prepare(data_dir: PathBuf, model: Model, language: String, emit: Emit) -> Job {
+pub fn start_prepare(data_dir: PathBuf, model: Model, emit: Emit) -> Job {
     let token = CancellationToken::new();
     {
         let mut jobs = JOB.lock().unwrap();
@@ -469,7 +465,7 @@ pub fn start_prepare(data_dir: PathBuf, model: Model, language: String, emit: Em
     update(&emit, |job| *job = Job { state: first, model: model.id.to_string(), received: 0, total, error: String::new() });
     let snapshot = job();
     tokio::spawn(async move {
-        let result = prepare(&data_dir, &model, &language, &missing, &token, &emit).await;
+        let result = prepare(&data_dir, &model, &missing, &token, &emit).await;
         update(&emit, |job| match result {
             Ok(()) => job.state = "ready",
             Err(e) if e == CANCELLED => *job = Job::idle(),
@@ -484,7 +480,7 @@ pub fn start_prepare(data_dir: PathBuf, model: Model, language: String, emit: Em
     snapshot
 }
 
-async fn prepare(data_dir: &Path, model: &Model, language: &str, missing: &[Pack], cancel: &CancellationToken, emit: &Emit) -> Result<(), String> {
+async fn prepare(data_dir: &Path, model: &Model, missing: &[Pack], cancel: &CancellationToken, emit: &Emit) -> Result<(), String> {
     let mut done = 0u64;
     for pack in missing {
         let base = done;
@@ -507,7 +503,7 @@ async fn prepare(data_dir: &Path, model: &Model, language: &str, missing: &[Pack
     });
     tokio::select! {
         _ = cancel.cancelled() => Err(CANCELLED.into()),
-        loaded = engine().load(data_dir, model, language) => loaded,
+        loaded = engine().load(data_dir, model) => loaded,
     }
 }
 
@@ -592,24 +588,19 @@ fn threads() -> i32 {
     (cores / 2).clamp(1, 4) as i32
 }
 
-pub fn spec(data_dir: &Path, model: &Model, language: &str) -> Spec {
+pub fn spec(data_dir: &Path, model: &Model) -> Spec {
     let dir = pack_dir(data_dir, &with_test_pins(model.pack.clone()));
     let file = |i: usize| model.pack.files.get(i).map(|f| dir.join(f)).unwrap_or_default();
-    let language = match model.langs {
-        Langs::Choice if language != "auto" => language.to_string(),
-        _ => String::new(),
-    };
     Spec {
         runtime: pack_dir(data_dir, &runtime_pack()),
         kind: match model.kind {
             Kind::Transducer => "nemo_transducer".into(),
-            Kind::Whisper => "whisper".into(),
         },
         encoder: file(0),
         decoder: file(1),
         joiner: if model.kind == Kind::Transducer { file(2) } else { PathBuf::new() },
         tokens: dir.join("tokens.txt"),
-        language,
+        language: String::new(),
         threads: threads(),
         fake: cfg!(debug_assertions) && std::env::var("CREW_TEST_STT_FAKE").is_ok_and(|v| v == "1"),
     }
@@ -617,8 +608,8 @@ pub fn spec(data_dir: &Path, model: &Model, language: &str) -> Spec {
 
 impl Engine {
     /// Запустить процесс модели и дождаться готовности. Та же модель уже работает — ничего не делает.
-    pub async fn load(&self, data_dir: &Path, model: &Model, language: &str) -> Result<(), String> {
-        let spec = spec(data_dir, model, language);
+    pub async fn load(&self, data_dir: &Path, model: &Model) -> Result<(), String> {
+        let spec = spec(data_dir, model);
         let key = format!("{}|{}", model.id, spec.language);
         let mut slot = self.worker.lock().await;
         if let Some(worker) = slot.as_mut() {
@@ -632,8 +623,8 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn transcribe(&self, data_dir: &Path, model: &Model, language: &str, pcm: &[u8]) -> Result<String, String> {
-        self.load(data_dir, model, language).await?;
+    pub async fn transcribe(&self, data_dir: &Path, model: &Model, pcm: &[u8]) -> Result<String, String> {
+        self.load(data_dir, model).await?;
         let mut slot = self.worker.lock().await;
         let worker = slot.as_mut().ok_or("модель не загрузилась")?;
         let result = tokio::time::timeout(DECODE_TIMEOUT, ask(worker, pcm)).await.unwrap_or_else(|_| Err("модель не ответила за минуту".into()));
@@ -886,20 +877,12 @@ mod sherpa {
                 config.sample_rate = 16000;
                 config.tokens = cstr(&spec.tokens, &mut keep)?;
                 config.num_threads = spec.threads.max(1);
-                if spec.kind == "whisper" {
-                    config.wh_encoder = cstr(&spec.encoder, &mut keep)?;
-                    config.wh_decoder = cstr(&spec.decoder, &mut keep)?;
-                    let language = CString::new(spec.language.as_str()).unwrap_or_default();
-                    config.wh_language = language.as_ptr();
-                    keep.push(language);
-                } else {
-                    config.tr_encoder = cstr(&spec.encoder, &mut keep)?;
-                    config.tr_decoder = cstr(&spec.decoder, &mut keep)?;
-                    config.tr_joiner = cstr(&spec.joiner, &mut keep)?;
-                    let kind = CString::new(spec.kind.as_str()).unwrap_or_default();
-                    config.model_type = kind.as_ptr();
-                    keep.push(kind);
-                }
+                config.tr_encoder = cstr(&spec.encoder, &mut keep)?;
+                config.tr_decoder = cstr(&spec.decoder, &mut keep)?;
+                config.tr_joiner = cstr(&spec.joiner, &mut keep)?;
+                let kind = CString::new(spec.kind.as_str()).unwrap_or_default();
+                config.model_type = kind.as_ptr();
+                keep.push(kind);
                 let create: Create = std::mem::transmute::<usize, Create>(get("SherpaOnnxCreateOfflineRecognizer")?);
                 let recognizer = create(&*config);
                 drop(keep);
@@ -1044,7 +1027,7 @@ fn status_json(app: &App, voice: &VoiceSettings) -> Value {
                 "id": m.id, "title": m.title, "note": m.note,
                 "sizeMb": (m.pack.size as f64 / 1_048_576.0).round(),
                 "installed": installed(data, &with_test_pins(m.pack.clone())),
-                "languages": match m.langs { Langs::Russian => "ru", Langs::Auto => "auto", Langs::Choice => "choice" },
+                "languages": match m.langs { Langs::Russian => "ru", Langs::Auto => "auto" },
                 "license": m.license, "source": m.source,
             })
         })
@@ -1099,7 +1082,7 @@ async fn transcribe_local(app: &App, voice: &VoiceSettings, clip: &Clip) -> Resu
         return Err((409, "Модель речи ещё не скачана. Нажми на микрофон ещё раз, она скачается".into()));
     }
     let pcm = to_16k(&clip.pcm, clip.rate);
-    engine().transcribe(data, &model, &voice.language, &pcm).await.map_err(|e| (502, format!("Не получилось распознать речь на компьютере: {e}")))
+    engine().transcribe(data, &model, &pcm).await.map_err(|e| (502, format!("Не получилось распознать речь на компьютере: {e}")))
 }
 
 /// WAV-заголовок для 16-битного моно: свой сервер ждёт файл, а не сырой PCM.
@@ -1203,7 +1186,7 @@ async fn prepare_route(State(app): State<Arc<App>>, Json(body): Json<Value>) -> 
     }
     let model = model(&voice.model).unwrap_or_else(|| models().remove(0));
     let data = app.store.data_dir().to_path_buf();
-    let wanted = format!("{}|{}", model.id, spec(&data, &model, &voice.language).language);
+    let wanted = format!("{}|{}", model.id, spec(&data, &model).language);
     // Модель уже в памяти: слушаем сразу.
     if engine().worker.lock().await.as_ref().is_some_and(|w| w.key == wanted) {
         return ok(json!({ "ready": true, "engine": "local" }));
@@ -1212,7 +1195,7 @@ async fn prepare_route(State(app): State<Arc<App>>, Json(body): Json<Value>) -> 
     if body["dryRun"] == json!(true) {
         return ok(json!({ "ready": false, "engine": "local", "job": job() }));
     }
-    let job = start_prepare(data, model, voice.language.clone(), emitter(&app));
+    let job = start_prepare(data, model, emitter(&app));
     ok(json!({ "ready": false, "engine": "local", "job": job, "progress": job.percent() }))
 }
 
@@ -1235,8 +1218,7 @@ async fn remove_route(State(app): State<Arc<App>>, UrlPath(id): UrlPath<String>)
 /// Скачать модель из настроек, не дожидаясь нажатия на микрофон.
 async fn download_route(State(app): State<Arc<App>>, UrlPath(id): UrlPath<String>) -> Response {
     let Some(model) = model(&id) else { return fail(404, "Такой модели нет") };
-    let voice = settings(&app);
-    let job = start_prepare(app.store.data_dir().to_path_buf(), model, voice.language, emitter(&app));
+    let job = start_prepare(app.store.data_dir().to_path_buf(), model, emitter(&app));
     ok(json!({ "job": job, "progress": job.percent() }))
 }
 
@@ -1472,19 +1454,6 @@ mod tests {
     }
 
     #[test]
-    fn language_goes_only_to_models_that_take_it() {
-        let data = Path::new("C:/data");
-        let giga = model("gigaam-v3").unwrap();
-        assert_eq!(spec(data, &giga, "en").language, "", "GigaAM знает только русский");
-        let mut whisper = giga.clone();
-        whisper.langs = Langs::Choice;
-        whisper.kind = Kind::Whisper;
-        assert_eq!(spec(data, &whisper, "en").language, "en");
-        assert_eq!(spec(data, &whisper, "auto").language, "");
-        assert_eq!(spec(data, &giga, "ru").kind, "nemo_transducer");
-    }
-
-    #[test]
     fn audio_for_the_model_is_16k() {
         let pcm: Vec<u8> = (0..4800i16).flat_map(|s| s.to_le_bytes()).collect();
         assert_eq!(to_16k(&pcm, 48000).len(), 1600 * 2);
@@ -1513,7 +1482,7 @@ mod tests {
         let wav = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/privet-bot.wav")).unwrap();
         let samples: Vec<f32> = wav[44..].chunks_exact(2).map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0).collect();
         for model in models().into_iter().filter(|m| installed(&data, &m.pack)) {
-            let spec = spec(&data, &model, "auto");
+            let spec = spec(&data, &model);
             let rec = sherpa::Recognizer::load(&spec).unwrap();
             let text = rec.transcribe(&samples).unwrap().to_lowercase();
             assert!(text.contains("привет") && text.contains("бот"), "{}: {text}", model.id);

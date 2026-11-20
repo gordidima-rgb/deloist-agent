@@ -384,7 +384,7 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
         .map(|v| v.trim().chars().take(200).collect::<String>())
         .filter(|v| !v.is_empty());
     {
-        let mut guard = app.workflows.lock();
+        let guard = app.workflows.lock();
         let found = guard.get(&id).is_some_and(|s| {
             let digest = wf::hook_digest(&secret);
             s.wf.enabled

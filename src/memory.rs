@@ -143,7 +143,7 @@ impl Fact {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-struct Book {
+pub(crate) struct Book {
     /// Номера короткие и не повторяются: модели легко на них ссылаться.
     next: u64,
     facts: Vec<Fact>,

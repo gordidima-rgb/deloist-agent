@@ -132,10 +132,6 @@ impl Conn {
         Self::new(k, local_salt, DIR_EXT_TO_APP, DIR_APP_TO_EXT)
     }
 
-    pub fn is_paired(&self) -> bool {
-        self.k.is_some()
-    }
-
     /// Пир прислал верный `ready`: подключением можно пользоваться.
     pub fn is_ready(&self) -> bool {
         self.s.is_some() && self.peer_ready

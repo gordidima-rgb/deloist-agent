@@ -57,8 +57,6 @@ pub enum Memory {
 }
 
 impl Memory {
-    pub const ALL: [Memory; 3] = [Memory::Normal, Memory::Large, Memory::Max];
-
     pub fn parse(text: &str) -> Self {
         match text {
             "large" => Memory::Large,
@@ -432,7 +430,7 @@ mod tests {
         assert_eq!(known_tokens("my-local-model:7b"), None);
         assert_eq!(known_tokens("claude-something-new"), None);
         assert_eq!(known_tokens(""), None);
-        for mode in Memory::ALL {
+        for mode in [Memory::Normal, Memory::Large, Memory::Max] {
             assert_eq!(budget_chars(None, mode), 120_000, "без известного окна расти не от чего: {mode:?}");
         }
         assert_eq!(approx_tokens(BASE_CHARS), DEFAULT_TOKENS);

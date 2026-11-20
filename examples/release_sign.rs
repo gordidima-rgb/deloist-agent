@@ -46,7 +46,7 @@ fn main() {
                 None => notes.clone(),
             };
             assert!(notes.len() <= 16 * 1024, "заметки длиннее 16 КБ: клиент читает описание до 64 КБ, но заметки должны быть короткими");
-            let mut manifest = serde_json::json!({
+            let manifest = serde_json::json!({
                 "version": version,
                 "notes": notes,
                 "url": url,

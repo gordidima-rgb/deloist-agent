@@ -455,11 +455,6 @@ pub fn level_model_for_driver(driver: &str, level: ModelLevel) -> Option<&'stati
     level_model(level_provider(driver), level)
 }
 
-/// Все три модели провайдера разом (strong, standard, fast).
-pub fn level_models(provider: &str) -> Option<[&'static str; 3]> {
-    MODEL_LEVELS.iter().find(|(p, _)| *p == provider).map(|(_, models)| *models)
-}
-
 /// Таблица для интерфейса: провайдер → `{ strong, standard, fast }`.
 pub fn levels_json() -> Value {
     let mut out = Map::new();
@@ -1847,10 +1842,10 @@ mod tests {
     #[test]
     fn every_builtin_provider_has_a_level_row() {
         for built in BUILT_IN {
-            assert!(level_models(built.id).is_some(), "нет уровней для провайдера {}", built.id);
+            assert!(level_model(built.id, ModelLevel::Strong).is_some(), "нет уровней для провайдера {}", built.id);
         }
         for driver in ["anthropic", "gemini", "api", "deloist"] {
-            assert!(level_models(driver).is_some(), "нет уровней для драйвера {driver}");
+            assert!(level_model(driver, ModelLevel::Strong).is_some(), "нет уровней для драйвера {driver}");
         }
     }
 
@@ -1866,8 +1861,12 @@ mod tests {
         assert_eq!(level_model("openrouter", ModelLevel::Standard), Some("openrouter/free"));
         assert_eq!(level_model("zai", ModelLevel::Fast), Some("glm-4.7-flash"));
         // Локальный сервер: все три уровня — выбранная модель, пустая строка значит «по умолчанию».
-        assert_eq!(level_models("ollama"), Some(["", "", ""]));
-        assert_eq!(level_models("lmstudio"), Some(["", "", ""]));
+        assert_eq!(level_model("ollama", ModelLevel::Strong), Some(""));
+        assert_eq!(level_model("ollama", ModelLevel::Standard), Some(""));
+        assert_eq!(level_model("ollama", ModelLevel::Fast), Some(""));
+        assert_eq!(level_model("lmstudio", ModelLevel::Strong), Some(""));
+        assert_eq!(level_model("lmstudio", ModelLevel::Standard), Some(""));
+        assert_eq!(level_model("lmstudio", ModelLevel::Fast), Some(""));
     }
 
     #[test]

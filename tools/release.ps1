@@ -54,8 +54,14 @@ $env:CARGO_TARGET_DIR = $Target
 # Флаги передаём через --config: переменная RUSTFLAGS отменила бы настройки из .cargo/config.toml.
 $registry = Join-Path $env:USERPROFILE '.cargo\registry\src'
 $remap = "target.x86_64-pc-windows-gnullvm.rustflags=['--remap-path-prefix=$registry=crates','--remap-path-prefix=$root=src']"
-cargo build --release --bin deloist --bin deloist-setup --example release_sign --config $remap
+$buildOutput = cargo build --release --bin deloist --bin deloist-setup --example release_sign --config $remap 2>&1
+$buildOutput | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Сборка не прошла.' }
+$warnings = @($buildOutput | Select-String "warning:")
+if ($warnings.Count -gt 0) {
+    $warnings | ForEach-Object { Write-Host $_.Line }
+    throw "Выпуск остановлен: сборка с предупреждениями ($($warnings.Count)). Убери их."
+}
 
 foreach ($name in 'deloist.exe', 'deloist-setup.exe') {
   $built = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("$Target\release\$name"))
