@@ -82,7 +82,7 @@
         items.push({ id: 'deloist', name: 'Deloist', rows: [{ label: tr('Баланс'), left: start > 0 ? (Math.max(w.nowKop, 0) / start) * 100 : 0, resetsAt: null }] });
       }
       for (const p of list.providers || []) {
-        if (p.enabled === false) continue;
+        if (p.enabled === false || p.pickerOnly) continue;
         if (p.kind === 'acp') {
           for (const a of agents) {
             if (a.id === p.id || a.id.startsWith(`${p.id}@`)) items.push({ id: a.id, name: a.name || p.name, rows: windows(a.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resetsAt: l.resetsAt, spent: l.spent, cap: l.cap, currency: l.currency })) });

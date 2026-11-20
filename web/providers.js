@@ -644,11 +644,10 @@ window.DeloistProviders = (() => {
     } catch {
       return;
     }
-    const agents = new Map((limits.providers || []).map((p) => [p.id, p]));
     const items = [];
     if (limits.deloist) items.push({ id: 'deloist', name: 'Deloist', wallet: limits.deloist });
     for (const p of list.providers || []) {
-      if (p.enabled === false) continue;
+      if (p.enabled === false || p.pickerOnly) continue;
       if (p.kind === 'acp') {
         // У Gemini может быть до трёх аккаунтов Google: у каждого свой кружок (antigravity, antigravity@<id>).
         for (const a of limits.providers || []) {

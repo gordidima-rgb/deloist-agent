@@ -44,3 +44,27 @@ describe('provider quota explanation', () => {
     expect(fresh).not.toContain('токен недействителен');
   });
 });
+
+it('renders one sidebar ring for each Gemini account', async () => {
+  const box = document.createElement('div');
+  const providers = [
+    { id: 'antigravity', kind: 'acp', name: 'Gemini' },
+    { id: 'antigravity@a2', kind: 'acp', name: 'Gemini · Second', pickerOnly: true },
+  ];
+  const quotas = { providers: [provider, { id: 'antigravity@a2', name: 'Gemini · Second', limits: [] }] };
+  const renderSource = source.slice(source.indexOf('  function arc('), source.indexOf('  function startUsage('));
+  const renderUsage = new Function('el', 'api', 'esc', 'tr', 'iconColor', `
+    ${renderSource}
+    return renderUsage;
+  `)(
+    () => box,
+    async (path) => path.endsWith('/limits') ? quotas : { providers },
+    String, (text, { name }) => text.replace('{name}', name), () => 'ffffff',
+  );
+
+  await renderUsage();
+
+  const rings = [...box.querySelectorAll('.usage-item')];
+  expect(rings.map((ring) => ring.dataset.provider)).toEqual(['antigravity', 'antigravity@a2']);
+  expect(rings[1].querySelector('img').getAttribute('src')).toContain('/api/providers/antigravity/icon');
+});

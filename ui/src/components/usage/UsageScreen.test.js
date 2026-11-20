@@ -97,6 +97,25 @@ describe('UsageScreen', () => {
     expect(host.textContent).toContain('сброс через 3 ч');
     expect(host.textContent).not.toContain('DeepSeek API');
   });
+
+  it('lists each Gemini account once even when the model picker has additional entries', async () => {
+    await render(async (path) => {
+      if (path.startsWith('/api/usage')) return usageFixture('2026-11');
+      if (path === '/api/providers/limits') {
+        return { providers: [
+          { id: 'antigravity', name: 'Gemini · First', limits: [] },
+          { id: 'antigravity@a2', name: 'Gemini · Second', limits: [] },
+        ] };
+      }
+      return { providers: [
+        { id: 'antigravity', kind: 'acp', name: 'Gemini' },
+        { id: 'antigravity@a2', kind: 'acp', name: 'Gemini · Second', pickerOnly: true },
+      ] };
+    });
+
+    const names = [...host.querySelectorAll('.us-sub-card .us-name')].map((card) => card.textContent);
+    expect(names).toEqual(['Gemini · First', 'Gemini · Second']);
+  });
 });
 
 describe('usage helpers', () => {
