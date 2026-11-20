@@ -166,6 +166,21 @@ fn validate_checks(id: &str, checks: &Value) -> Result<(), String> {
                 return Err(format!("{id}: agent.checks[{i}].criteria.{lang} — непустой список строк"));
             }
         }
+        let behavior = obj.get("behavior").ok_or_else(|| format!("{id}: agent.checks[{i}].behavior обязателен"))?;
+        let Some(behavior) = behavior.as_object() else {
+            return Err(format!("{id}: agent.checks[{i}].behavior должен быть объектом"));
+        };
+        for key in ["require", "forbid"] {
+            let Some(patterns) = behavior.get(key).and_then(Value::as_array) else {
+                return Err(format!("{id}: agent.checks[{i}].behavior.{key} — список регулярных выражений"));
+            };
+            if patterns.len() > 4 || (key == "require" && patterns.is_empty()) || !patterns.iter().all(|p| p.as_str().is_some_and(|p| !p.trim().is_empty())) {
+                return Err(format!("{id}: agent.checks[{i}].behavior.{key} — непустых строк не больше 4"));
+            }
+            for pattern in patterns.iter().filter_map(Value::as_str) {
+                regex::Regex::new(pattern).map_err(|e| format!("{id}: agent.checks[{i}].behavior.{key}: {pattern}: {e}"))?;
+            }
+        }
     }
     Ok(())
 }
@@ -303,10 +318,10 @@ pub fn validate(m: &Value) -> Result<(), String> {
                 // triggers required
                 let triggers = agent.get("triggers").ok_or_else(|| format!("{id}: specialist требует agent.triggers"))?;
                 validate_triggers(id, triggers)?;
-                // checks required
-                let checks = agent.get("checks").ok_or_else(|| format!("{id}: specialist требует agent.checks"))?;
-                validate_checks(id, checks)?;
             }
+            // Проверочные задачи нужны и ведущим: релизный прогон гоняет всех ботам каталога.
+            let checks = agent.get("checks").ok_or_else(|| format!("{id}: agent требует agent.checks"))?;
+            validate_checks(id, checks)?;
         }
         _ => validate_app(id, m.get("app").ok_or_else(|| format!("{id}: нет раздела app"))?)?,
     }
@@ -1406,8 +1421,8 @@ mod tests {
                     "keywords": { "ru": ["rust"], "en": ["rust"] }
                 },
                 "checks": [
-                    { "task": { "ru": "Собрать", "en": "Build" }, "criteria": { "ru": ["зелено"], "en": ["green"] } },
-                    { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["ок"], "en": ["ok"] } }
+                    { "task": { "ru": "Собрать", "en": "Build" }, "criteria": { "ru": ["зелено"], "en": ["green"] }, "behavior": { "require": ["сборк|build"], "forbid": [] } },
+                    { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["ок"], "en": ["ok"] }, "behavior": { "require": ["провер|check"], "forbid": [] } }
                 ]
             }
         })
@@ -1440,12 +1455,36 @@ mod tests {
         let agent = json!({
             "schema": 1, "id": "agent.x", "kind": "agent", "version": "1", "category": "research", "tier": "public",
             "title": { "ru": "Агент" }, "summary": { "ru": "Коротко" }, "source": { "name": "Мы", "license": "MIT" },
-            "agent": { "persona": { "ru": "Ты агент" }, "skills": ["skill.a", "skill.missing"], "model_hint": "standard" }
+            "agent": {
+                "persona": { "ru": "Ты агент" }, "skills": ["skill.a", "skill.missing"], "model_hint": "standard",
+                "checks": [
+                    { "task": { "ru": "Ответить", "en": "Answer" }, "criteria": { "ru": ["ок"], "en": ["ok"] }, "behavior": { "require": ["ок|ok"], "forbid": [] } },
+                    { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["ок"], "en": ["ok"] }, "behavior": { "require": ["ок|ok"], "forbid": [] } }
+                ]
+            }
         });
         let catalog = build(&files(&[skill("skill.a"), skill("skill.a"), agent]), "test");
         assert_eq!(catalog.items.len(), 1, "{:?}", catalog.errors);
         assert!(catalog.errors.iter().any(|e| e.contains("уже занят")));
         assert!(catalog.errors.iter().any(|e| e.contains("skill.missing")));
+    }
+
+    #[test]
+    fn a_lead_without_checks_is_rejected_too() {
+        let mut lead = json!({
+            "schema": 1, "id": "agent.lead", "kind": "agent", "version": "1.0.0", "category": "dev", "tier": "public",
+            "title": { "ru": "Лидер" }, "summary": { "ru": "Коротко" }, "source": { "name": "Мы", "license": "MIT" },
+            "agent": {
+                "persona": { "ru": "Ты лидер", "en": "Lead" }, "skills": [], "model_hint": "standard", "effort": "medium",
+                "checks": [
+                    { "task": { "ru": "Ответить", "en": "Answer" }, "criteria": { "ru": ["по делу"], "en": ["to the point"] }, "behavior": { "require": ["ответ|answer"], "forbid": [] } },
+                    { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["точно"], "en": ["accurate"] }, "behavior": { "require": ["провер|check"], "forbid": [] } }
+                ]
+            }
+        });
+        assert!(validate(&lead).is_ok(), "{:?}", validate(&lead));
+        lead["agent"].as_object_mut().unwrap().remove("checks");
+        assert!(validate(&lead).unwrap_err().contains("checks"));
     }
 
     #[test]
@@ -1519,6 +1558,14 @@ mod tests {
         let mut no_checks = good.clone();
         no_checks["agent"].as_object_mut().unwrap().remove("checks");
         assert!(validate(&no_checks).unwrap_err().contains("checks"));
+
+        let mut no_behavior = good.clone();
+        no_behavior["agent"]["checks"][0].as_object_mut().unwrap().remove("behavior");
+        assert!(validate(&no_behavior).unwrap_err().contains("behavior"));
+
+        let mut bad_pattern = good.clone();
+        bad_pattern["agent"]["checks"][0]["behavior"]["require"] = json!(["["]);
+        assert!(validate(&bad_pattern).unwrap_err().contains("behavior.require"));
 
         let mut too_long = good.clone();
         too_long["agent"]["persona"]["en"] = json!("x".repeat(PERSONA_MAX + 1));

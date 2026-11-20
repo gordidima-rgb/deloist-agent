@@ -12,7 +12,7 @@
       "tier": "verified",
       "version": "1.0.0",
       "path": "agents/agent.research-desk.json",
-      "hash": "5495c632e760e18247068bfb85586f30905c38a467209304e883b3c4274c8136"
+      "hash": "e2c85dfafeaaf86bba22871a65f52d4966bc5aaff0a59a07a33dfacf63c168ed"
     },
     {
       "id": "agent.rust-developer",
@@ -25,7 +25,7 @@
       "tier": "verified",
       "version": "1.0.0",
       "path": "agents/agent.rust-developer.json",
-      "hash": "9d9e31012d1216d6174eff4b088054b065024cfde9f9a01d5192431b36a8614d"
+      "hash": "1d6ee4efcf40a5b96cf981421bd52cf7bb7d82bc343761c2bbe154c6390228d4"
     },
     {
       "id": "app.gosuslugi",

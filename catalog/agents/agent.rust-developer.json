@@ -51,6 +51,10 @@
         "criteria": {
           "ru": ["cargo check -q без ошибок", "затронутые тесты зелёные"],
           "en": ["cargo check -q passes", "affected tests are green"]
+        },
+        "behavior": {
+          "require": ["(?:ошибок|cargo)", "(?:затронутые|зелёные)", "(?:passes|cargo)"],
+      "forbid": []
         }
       },
       {
@@ -61,6 +65,10 @@
         "criteria": {
           "ru": ["нет unwrap в серверном коде", "секреты не попадают в логи", "async не блокируется"],
           "en": ["no unwrap in server code", "secrets do not reach logs", "async is not blocked"]
+        },
+        "behavior": {
+          "require": ["(?:серверном|unwrap)", "(?:попадают|секреты)", "(?:блокируется|async)"],
+      "forbid": []
         }
       }
     ],

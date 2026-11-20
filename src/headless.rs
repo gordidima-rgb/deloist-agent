@@ -19,7 +19,7 @@ pub const NOT_RUNNING: i32 = 3;
 pub const TIMEOUT: i32 = 4;
 
 /// Флаги, после которых идёт значение, а не текст задачи.
-const VALUE_FLAGS: &[&str] = &["--bot", "--room", "--export", "--timeout", "--out", "--wait"];
+const VALUE_FLAGS: &[&str] = &["--bot", "--bot-id", "--room", "--export", "--timeout", "--out", "--wait"];
 const NUMBER_FLAGS: &[&str] = &["--timeout", "--wait"];
 const PLAIN_FLAGS: &[&str] = &["--json", "--no-wait"];
 const MAX_EXPORT_DEPTH: u32 = 16;

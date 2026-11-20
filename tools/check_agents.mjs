@@ -91,6 +91,20 @@ function checkTriggers(where, triggers) {
   }
 }
 
+function checkPatterns(where, patterns, name, allowEmpty = false) {
+  if (!Array.isArray(patterns) || patterns.length > 4 || (!allowEmpty && patterns.length === 0) || !patterns.every(isText)) {
+    report(where, `${name} must be an array of ${allowEmpty ? '0-4' : '1-4'} non-empty strings`);
+    return;
+  }
+  for (const pattern of patterns) {
+    try {
+      new RegExp(pattern, 'iu');
+    } catch (error) {
+      report(where, `${name} has an invalid regular expression ${JSON.stringify(pattern)}: ${error.message}`);
+    }
+  }
+}
+
 function checkChecks(where, checks) {
   if (!Array.isArray(checks) || checks.length < 2 || checks.length > 3) {
     report(where, 'agent.checks must have 2-3 items');
@@ -114,6 +128,13 @@ function checkChecks(where, checks) {
         report(where, `agent.checks[${i}].criteria.${lang} must be a non-empty array of strings`);
       }
     }
+    // Исполняемая проверка ответа: без неё релизный прогон не решит «прошёл/не прошёл».
+    if (!isObject(check.behavior)) {
+      report(where, `agent.checks[${i}].behavior must be an object`);
+      return;
+    }
+    checkPatterns(where, check.behavior.require, `agent.checks[${i}].behavior.require`);
+    checkPatterns(where, check.behavior.forbid, `agent.checks[${i}].behavior.forbid`, true);
   });
 }
 
@@ -128,6 +149,7 @@ for (const { dir, prefix } of catalogRoots) {
   }
 }
 
+const agents = [];
 const specialists = [];
 const entries = catalogRoots.flatMap(({ dir, prefix }) => {
   const agentsDir = join(dir, 'agents');
@@ -144,11 +166,13 @@ for (const { name, agentsDir, prefix } of entries) {
     report(rel, `invalid JSON: ${error.message}`);
     continue;
   }
-  if (data?.agent?.rank !== 'specialist') continue;
-  specialists.push({ rel, data });
+  const rank = data?.agent?.rank || 'lead'; // старые манифесты без rank — ведущие (как при загрузке каталога).
+  if (!['lead', 'specialist'].includes(rank)) continue;
+  agents.push({ rel, data });
+  if (rank === 'specialist') specialists.push({ rel, data });
 }
 
-for (const { rel, data } of specialists) {
+for (const { rel, data } of agents) {
   if (!hasBothLanguages(data.title)) report(rel, 'title must have both ru and en');
   if (!hasBothLanguages(data.summary)) report(rel, 'summary must have both ru and en');
 
@@ -158,7 +182,7 @@ for (const { rel, data } of specialists) {
   const persona = isObject(agent.persona) ? agent.persona : null;
   if (!persona || !isText(persona.ru) || !isText(persona.en)) {
     report(rel, 'agent.persona must have both ru and en');
-  } else {
+  } else if (data.agent.rank === 'specialist') {
     if (!headingsInOrder(persona.ru, RU_HEADINGS)) {
       report(rel, 'agent.persona.ru is missing the 8 specialist headings in order');
     }
@@ -173,9 +197,12 @@ for (const { rel, data } of specialists) {
     }
   }
 
-  checkTriggers(rel, agent.triggers);
+  if (data.agent.rank === 'specialist') checkTriggers(rel, agent.triggers);
   if (!MODEL_HINTS.includes(agent.model_hint)) {
     report(rel, `agent.model_hint must be one of ${MODEL_HINTS.join(', ')}`);
+  }
+  if (!['low', 'medium', 'high'].includes(agent.effort)) {
+    report(rel, 'agent.effort must be one of low, medium, high');
   }
   checkChecks(rel, agent.checks);
 
@@ -192,8 +219,8 @@ for (const { rel, data } of specialists) {
     if (pattern.test(text)) report(rel, `mentions forbidden text (${pattern})`);
   }
 
-  if (!indexIds.has(data.id)) {
-    report('catalog/index.json', `specialist "${data.id}" is missing from the index`);
+  if (rel.startsWith('catalog/') && !indexIds.has(data.id)) {
+    report('catalog/index.json', `agent "${data.id}" is missing from the index`);
   }
 }
 
@@ -201,4 +228,4 @@ if (problems.length > 0) {
   for (const problem of problems) console.log(problem);
   process.exit(1);
 }
-console.log(`ok ${specialists.length} specialists`);
+console.log(`ok ${agents.length} agents (${specialists.length} specialists)`);

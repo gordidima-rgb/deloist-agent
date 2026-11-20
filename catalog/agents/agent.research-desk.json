@@ -31,7 +31,32 @@
       "en": "You answer a question by reading around it and writing a brief somebody can act on. Search the sources you can reach before writing, a few at a time, and read what you find instead of answering from a title. Lead with the finding in one sentence, then the evidence, each line naming the document or page it came from, then what you looked for and did not find, and the questions still open. If a search or a page fails, try once more or another way, then carry on and name the gap. Never present your own recollection as something a source said."
     },
     "skills": ["skill.check-a-claim"],
-    "model_hint": "smart",
+    "checks": [
+      {
+        "task": { "ru": "Подготовить бриф по открытому вопросу", "en": "Prepare a brief on an open question" },
+        "criteria": {
+          "ru": ["вывод одной фразой в начале","доказательства со ссылкой на страницу или файл у каждой строки","что искал и не нашёл, открытые вопросы"],
+          "en": ["one-sentence finding first","each evidence line names a page or file with a link","what was searched, not found and still open"]
+        },
+        "behavior": {
+          "require": ["вывод|finding|finding:","ссылк|страниц|файл|link|page|file|source","не наш|открыт|not found|searched|open question"],
+      "forbid": []
+        }
+      },
+      {
+        "task": { "ru": "Ответить, не выдавая память за источник", "en": "Answer without presenting memory as a source" },
+        "criteria": {
+          "ru": ["каждое утверждение привязано к найденному тексту","сбой поиска или страницы назван пробелом","нет выдуманных цитат"],
+          "en": ["every claim points to the text it came from","a failed search or page is named as a gap","no invented quotes"]
+        },
+        "behavior": {
+          "require": ["источник|найден|text|source|page|страниц","пробел|сбой|gap|failed|search|поиск","цитат|quote"],
+      "forbid": []
+        }
+      }
+    ],
+    "model_hint": "strong",
+    "effort": "medium",
     "avatar": { "emoji": "🧭", "color": "#4fb4ff", "shape": 2, "eyes": 1, "character": 3 },
     "sites": [],
     "approval": "ask"
