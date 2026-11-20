@@ -1684,6 +1684,7 @@
     'Лимиты подписок': 'Subscription limits',
     'Подключённых подписок с лимитами нет.': 'No connected subscriptions with limits.',
     'осталось {p}': '{p} left',
+    '{spent} из {cap}': '{spent} of {cap}',
     // Окно «Рутины»: вкладки «Напоминания» и «Привычки» (ui/src/components/routines)
     'Разделы': 'Sections',
     'Напоминания': 'Reminders',

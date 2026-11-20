@@ -587,13 +587,21 @@ window.DeloistProviders = (() => {
   }
 
   const money = (kop) => ((Number(kop) || 0) / 100).toLocaleString(window.LOCALE, { style: 'currency', currency: 'RUB', minimumFractionDigits: 2 });
+  function limitAmountText(l) {
+    if (l && Number.isFinite(l.spent) && Number.isFinite(l.cap) && l.cap > 0 && l.currency) {
+      const fmt = (v) => v.toLocaleString(window.LOCALE, { style: 'currency', currency: l.currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return tr('{spent} из {cap}', { spent: fmt(l.spent), cap: fmt(l.cap) });
+    }
+    return '';
+  }
   const DELOIST_MARK = '<span class="k-logo k-logo--xs usage-mark" aria-hidden="true"></span>';
 
   let usageItems = [];
   let walletAt = 0;
 
-  function usageRow(label, left, note) {
-    return `<div class="usage-row"><span>${esc(label)}</span><span class="usage-bar"><span class="${left <= 20 ? 'low' : left <= 50 ? 'mid' : ''}" style="width:${Math.max(0, Math.min(100, left))}%"></span></span><b>${esc(tr('осталось {n} %', { n: Math.round(left) }))}</b><i>${note ? esc(note) : ''}</i></div>`;
+  function usageRow(label, left, note, headline) {
+    const primary = headline || tr('осталось {n} %', { n: Math.round(left) });
+    return `<div class="usage-row"><span>${esc(label)}</span><span class="usage-bar"><span class="${left <= 20 ? 'low' : left <= 50 ? 'mid' : ''}" style="width:${Math.max(0, Math.min(100, left))}%"></span></span><b>${esc(primary)}</b><i>${note ? esc(note) : ''}</i></div>`;
   }
 
   function details(item) {
@@ -616,7 +624,7 @@ window.DeloistProviders = (() => {
     const status = reason ? `<p class="usage-none">${esc(tr(reason) + lastRead)}</p>` : '';
     if (!hours && !week && !rest.length) return `${head}${name}${status || `<p class="usage-none">${esc(tr('Этот провайдер не сообщает лимиты'))}</p>`}`;
     const reset = (l) => DeloistUI.resetLine(l.resetsAt);
-    const rows = [hours, week, ...rest].filter(Boolean).map((l) => usageRow(limitLabel(l.label), l.left, reset(l))).join('');
+    const rows = [hours, week, ...rest].filter(Boolean).map((l) => usageRow(limitLabel(l.label), l.left, reset(l), limitAmountText(l))).join('');
     const age = DeloistUI.ageLine(item.at);
     return `${head}${name}${rows}${status}${age ? `<p class="usage-none">${esc(age)}</p>` : ''}`;
   }

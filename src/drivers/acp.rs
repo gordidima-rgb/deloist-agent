@@ -1163,7 +1163,30 @@ fn usage_line(line: &str, now: chrono::DateTime<chrono::Local>) -> Option<Value>
     };
     let resets = tail.trim().trim_start_matches('·').trim();
     let resets = resets.strip_prefix("resets").map(str::trim).unwrap_or(resets);
-    Some(json!({ "label": label, "left": (100 - used).clamp(0, 100), "resetsAt": crate::limit::parse_reset(resets, now) }))
+    let mut row = json!({ "label": label, "left": (100 - used).clamp(0, 100), "resetsAt": crate::limit::parse_reset(resets, now) });
+    if let Some((spent, cap, currency)) = parse_money_cap(line) {
+        row["spent"] = json!(spent);
+        row["cap"] = json!(cap);
+        row["currency"] = json!(currency);
+    }
+    Some(row)
+}
+
+/// Разбор денежного потолка в строке `/usage` (например `$2.19 / $3.00` или `$2.19 of $3.00`).
+fn parse_money_cap(line: &str) -> Option<(f64, f64, &'static str)> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"([\$€£₽])\s*(\d+(?:[.,]\d+)?)\s*(?:/|of|из)\s*[\$€£₽]?\s*(\d+(?:[.,]\d+)?)").unwrap());
+    let caps = re.captures(line)?;
+    let currency = match caps.get(1)?.as_str() {
+        "$" => "USD",
+        "€" => "EUR",
+        "£" => "GBP",
+        "₽" => "RUB",
+        _ => return None,
+    };
+    let spent: f64 = caps.get(2)?.as_str().replace(',', ".").parse().ok()?;
+    let cap: f64 = caps.get(3)?.as_str().replace(',', ".").parse().ok()?;
+    (cap > 0.0 && spent >= 0.0).then_some((spent, cap, currency))
 }
 
 /// Лимиты через `/status`: агент отвечает сам, без модели и без расхода подписки.

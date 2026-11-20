@@ -16,8 +16,62 @@
     ['ask', 'Спросить'],
     ['allow', 'Можно'],
   ];
-  // Свои простые значки для трёх первых (имена в lib/icons.js); у остальных круглая плашка с буквами.
+  // Свои значки: сначала SVG-глифы кита (три первых), затем локальные логотипы из web/icons/apps/,
+  // а для остальных каналов без логотипа — смысловой значок кита (чат/сообщество/работа), без инициалов.
   const GLYPHS = { telegram: 'msg-telegram', whatsapp: 'msg-whatsapp', max: 'msg-max' };
+  const APP_ICONS = {
+    messenger: 'messenger',
+    wechat: 'wechat',
+    discord: 'discord',
+    instagram: 'instagram',
+    x: 'x',
+    tiktok: 'tiktok',
+    reddit: 'reddit',
+    twitch: 'twitch',
+    vk: 'vk',
+    ok: 'odnoklassniki',
+    slack: 'slack',
+    zoom: 'zoom',
+    rocketchat: 'rocketdotchat',
+    zulip: 'zulip',
+    element: 'element',
+    steam: 'steam',
+  };
+  const FALLBACK_GLYPH = {
+    teams: 'users',
+    gchat: 'users',
+    webex: 'users',
+    chanty: 'users',
+    flock: 'users',
+    twist: 'users',
+    pumble: 'users',
+    basecamp: 'users',
+    bitrix24: 'users',
+    pachca: 'users',
+    vkteams: 'users',
+    dingtalk: 'users',
+    feishu: 'users',
+    lark: 'users',
+    zohocliq: 'users',
+    guilded: 'users',
+    linkedin: 'globe',
+    yandex: 'message-circle',
+    gmessages: 'message-circle',
+    snapchat: 'message-circle',
+    zalo: 'message-circle',
+    imo: 'message-circle',
+    tamtam: 'message-circle',
+    bip: 'message-circle',
+    eitaa: 'message-circle',
+    rubika: 'message-circle',
+    bale: 'message-circle',
+    soroush: 'message-circle',
+    igap: 'message-circle',
+    gap: 'message-circle',
+    wire: 'lock',
+    threema: 'lock',
+    keybase: 'lock',
+  };
 
   let botId = null;
   let list = [];
@@ -72,11 +126,16 @@
   function badge(m) {
     const meta = registry.find((r) => r.id === m.id) || m;
     const glyph = GLYPHS[m.id];
-    const inner = glyph
-      ? DeloistUI.icon(glyph, { stroke: 1.9 })
-      : `<span class="msg-abbr">${esc(meta.abbr || m.name.charAt(0))}</span>`;
-    const style = glyph ? '' : ` style="background:${esc(meta.color || '#667')};color:#fff;border-color:transparent"`;
-    return `<span class="msg-badge${glyph ? ' msg-glyph' : ''}"${style}>${inner}</span>`;
+    if (glyph) {
+      return `<span class="msg-badge msg-glyph">${DeloistUI.icon(glyph, { stroke: 1.9 })}</span>`;
+    }
+    const appIcon = APP_ICONS[m.id];
+    if (appIcon) {
+      return `<span class="msg-badge msg-app-icon"><img src="/icons/apps/${esc(appIcon)}.svg" alt="" width="15" height="15"></span>`;
+    }
+    const iconName = FALLBACK_GLYPH[m.id] || 'message-circle';
+    const style = meta.color ? ` style="color:${esc(meta.color)}"` : '';
+    return `<span class="msg-badge msg-glyph"${style}>${DeloistUI.icon(iconName, { stroke: 1.9 })}</span>`;
   }
 
   function statusText(m) {

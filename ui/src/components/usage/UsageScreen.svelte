@@ -85,7 +85,7 @@
         if (p.enabled === false) continue;
         if (p.kind === 'acp') {
           for (const a of agents) {
-            if (a.id === p.id || a.id.startsWith(`${p.id}@`)) items.push({ id: a.id, name: a.name || p.name, rows: windows(a.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resetsAt: l.resetsAt })) });
+            if (a.id === p.id || a.id.startsWith(`${p.id}@`)) items.push({ id: a.id, name: a.name || p.name, rows: windows(a.limits).map((l) => ({ label: limitLabel(l.label), left: l.left, resetsAt: l.resetsAt, spent: l.spent, cap: l.cap, currency: l.currency })) });
           }
         }
       }
@@ -138,6 +138,11 @@
     return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(d);
   }
 
+  function fmtAmount(l) {
+    if (!Number.isFinite(l?.spent) || !Number.isFinite(l?.cap) || l.cap <= 0 || !l.currency) return '';
+    const fmt = (v) => v.toLocaleString(locale, { style: 'currency', currency: l.currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return tr('{spent} из {cap}', { spent: fmt(l.spent), cap: fmt(l.cap) });
+  }
   const canNext = $derived(month < thisMonth);
 </script>
 
@@ -307,7 +312,7 @@
             <b class="us-name">{s.name}</b>
             {#each s.rows as l (l.label)}
               <div class="us-subrow">
-                <div class="us-rowhead"><span>{l.label}</span><span class="us-val" class:us-warn={l.left < 15}>{tr('осталось {p}', { p: fmtPct(l.left) })}</span></div>
+                <div class="us-rowhead"><span>{l.label}</span><span class="us-val" class:us-warn={l.left < 15}>{fmtAmount(l) || tr('осталось {p}', { p: fmtPct(l.left) })}</span></div>
                 <div class="us-bar" aria-hidden="true"><i style:width={`${Math.max(0, Math.min(100, l.left))}%`} style:background={l.left < 15 ? 'var(--k-attention)' : 'var(--k-brand)'}></i></div>
                 {#if resetLine(l.resetsAt)}<p class="us-sub">{resetLine(l.resetsAt)}</p>{/if}
               </div>
