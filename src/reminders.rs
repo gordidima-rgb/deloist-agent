@@ -23,10 +23,6 @@ const MAX_TEXT_CHARS: usize = 500;
 const MINUTE_MS: i64 = 60_000;
 /// Если компьютер был выключен дольше этого, напоминание не шлём: «в 9» в одиннадцать вечера уже не напоминание.
 pub const OVERDUE_MS: i64 = 12 * 3_600_000;
-/// Запасной идентификатор для уведомления Windows: PowerShell, у которого Windows разрешает показывать тосты без регистрации.
-/// Берём его, пока ярлыка «Пуск» с идентификатором программы нет (отладочная сборка, портативная копия).
-#[cfg(windows)]
-const POWERSHELL_AUMID: &str = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
 
 pub fn is_reminder(routine: &Routine) -> bool {
     routine.extra.get("kind").and_then(Value::as_str) == Some(KIND)
@@ -269,21 +265,6 @@ pub async fn fire(app: &Arc<App>, routine: &Routine) {
 // Уведомление Windows
 // ---------------------------------------------------------------------------
 
-/// Какой идентификатор ставить тостам: наш, если ярлык «Пуск» несёт идентификатор программы, иначе PowerShell.
-#[cfg(windows)]
-fn toast_app_id(shortcut_app_id: Option<&str>) -> &'static str {
-    match shortcut_app_id {
-        Some(id) if id == crate::aumid::AUMID => crate::aumid::AUMID,
-        _ => POWERSHELL_AUMID,
-    }
-}
-
-/// То же решение, что у окна (`aumid::in_use`, одно на процесс): иначе тост и окно подписаны по-разному.
-#[cfg(windows)]
-fn toast_app_id_once() -> &'static str {
-    toast_app_id(crate::aumid::in_use().then_some(crate::aumid::AUMID))
-}
-
 #[cfg(windows)]
 fn show_toast(title: &str, body: &str) -> Result<(), String> {
     use windows::core::HSTRING;
@@ -304,7 +285,8 @@ fn show_toast(title: &str, body: &str) -> Result<(), String> {
     );
     xml.LoadXml(&HSTRING::from(markup)).map_err(err)?;
     let toast = ToastNotification::CreateToastNotification(&xml).map_err(err)?;
-    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(toast_app_id_once())).map_err(err)?;
+    let app_id = HSTRING::from(crate::aumid::notification_app_id()?);
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&app_id).map_err(err)?;
     notifier.Show(&toast).map_err(err)
 }
 
@@ -398,74 +380,5 @@ mod tests {
         assert_eq!(status_of(&[ok.clone()]), "ok");
         assert_eq!(status_of(&[bad.clone()]), "error");
         assert_eq!(status_of(&[ok, bad]), "partial");
-    }
-
-    #[cfg(windows)]
-    mod app_id {
-        use super::*;
-
-        /// Временная папка на один тест; ярлыки создаём только в ней, настоящий «Пуск» не трогаем.
-        fn temp_dir() -> std::path::PathBuf {
-            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let dir = std::env::temp_dir().join(format!("deloist-aumid-{stamp}"));
-            std::fs::create_dir_all(&dir).unwrap();
-            dir
-        }
-
-        fn shortcut(dir: &std::path::Path, app_id: Option<&str>) -> std::path::PathBuf {
-            let link = dir.join("Deloist.lnk");
-            let target = std::env::current_exe().unwrap();
-            crate::aumid::write_shortcut(&link, &target, dir, app_id).unwrap();
-            link
-        }
-
-        #[test]
-        fn shortcut_with_our_id_gives_our_id() {
-            let dir = temp_dir();
-            let link = shortcut(&dir, Some(crate::aumid::AUMID));
-            let read = crate::aumid::shortcut_app_id(&link);
-            assert_eq!(read.as_deref(), Some(crate::aumid::AUMID));
-            assert_eq!(toast_app_id(read.as_deref()), crate::aumid::AUMID);
-        }
-
-        #[test]
-        fn no_shortcut_gives_powershell() {
-            let dir = temp_dir();
-            let link = dir.join("Deloist.lnk");
-            assert_eq!(crate::aumid::shortcut_app_id(&link), None);
-            assert_eq!(toast_app_id(None), POWERSHELL_AUMID);
-        }
-
-        #[test]
-        fn shortcut_with_other_or_no_id_gives_powershell() {
-            let dir = temp_dir();
-            let other = shortcut(&dir, Some("Other.App"));
-            let read = crate::aumid::shortcut_app_id(&other);
-            assert_eq!(toast_app_id(read.as_deref()), POWERSHELL_AUMID);
-            let bare_dir = temp_dir();
-            let bare = shortcut(&bare_dir, None);
-            assert_eq!(toast_app_id(crate::aumid::shortcut_app_id(&bare).as_deref()), POWERSHELL_AUMID);
-        }
-
-        /// Установка до 0.3.5: ярлык на этот exe без идентификатора — дописываем его; ярлык на чужой exe не трогаем.
-        #[test]
-        fn old_shortcut_to_this_exe_is_adopted_other_is_left_alone() {
-            let exe = std::env::current_exe().unwrap();
-            let dir = temp_dir();
-            let own = shortcut(&dir, None);
-            assert!(crate::aumid::adopt(&own, &exe));
-            assert_eq!(crate::aumid::shortcut_app_id(&own).as_deref(), Some(crate::aumid::AUMID));
-
-            let other_dir = temp_dir();
-            let other_exe = other_dir.join("other.exe");
-            std::fs::write(&other_exe, b"x").unwrap();
-            let foreign = other_dir.join("Deloist.lnk");
-            crate::aumid::write_shortcut(&foreign, &other_exe, &other_dir, None).unwrap();
-            assert!(!crate::aumid::adopt(&foreign, &exe));
-            assert_ne!(crate::aumid::shortcut_app_id(&foreign).as_deref(), Some(crate::aumid::AUMID), "чужой ярлык не тронут");
-            assert!(!crate::aumid::adopt(&other_dir.join("missing.lnk"), &exe));
-            let _ = std::fs::remove_dir_all(&dir);
-            let _ = std::fs::remove_dir_all(&other_dir);
-        }
     }
 }

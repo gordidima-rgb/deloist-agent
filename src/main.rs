@@ -535,7 +535,7 @@ fn main() {
         eprintln!("{message}");
         std::process::exit(1);
     }
-    // Окно и уведомления подписываются «Deloist», если ярлык «Пуск» несёт тот же идентификатор (aumid.rs).
+    // Окно группируется с ярлыком «Пуск», если тот ведёт на эту копию Deloist (aumid.rs).
     #[cfg(windows)]
     if aumid::in_use() {
         aumid::set_process_app_id();
