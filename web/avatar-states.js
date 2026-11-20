@@ -180,6 +180,7 @@
       case 'room_retry':
         return { mood: 'grumpy', seconds: 1.5 };
       case 'model_switched':
+      case 'level_escalated':
         return { mood: 'surprise', seconds: 1.2 };
       case 'compacting':
         return { mood: 'dizzy', seconds: 3 };
@@ -187,6 +188,16 @@
         return { mood: 'love', seconds: 1.8 };
       case 'skill_learned':
         return { mood: 'star', seconds: 1.8 };
+      case 'task_done':
+        return { mood: 'star', seconds: 1.8 };
+      case 'task_update':
+        return event.state === 'paused' ? { mood: 'grumpy', seconds: 1.5 }
+          : (event.state === 'error' || event.state === 'interrupted') ? { mood: 'sad', seconds: 2 }
+          : null;
+      case 'error':
+        return errorMood(event.message);
+      case 'delegate_end':
+        return event.ok === false ? { mood: 'grumpy', seconds: 1.5 } : { mood: 'joy', seconds: 1 };
       default:
         return null;
     }
@@ -211,7 +222,8 @@
   }
 
   /** События, после которых бот снова работает сам: просьбы без события закрытия (браузер, предложение) снимаются. */
-  const clears = (event) => ['tool_start', 'tool_update', 'delegate_start', 'turn_start', 'turn_end'].includes(event?.type)
+  const clears = (event) => ['tool_start', 'tool_update', 'delegate_start', 'delegate_end', 'turn_start', 'turn_end', 'task_done'].includes(event?.type)
+    || (event?.type === 'task_update' && ['running', 'done', 'error', 'interrupted'].includes(event?.state))
     || (event?.type === 'activity' && event.call?.status === 'running');
 
   // -------------------------------------------------------------- Трекер
@@ -308,7 +320,7 @@
         return errorMood(text);
       },
       feed(event) {
-        const id = event?.botId;
+        const id = event?.botId || event?.bot || event?.from || event?.target || event?.to;
         if (!id) return;
         switch (event.type) {
           case 'turn_start':
@@ -350,8 +362,12 @@
             reason.set(id, event.message);
             break;
           case 'delegate_end': {
-            // Ушёл ли получатель с неудачей, видно по концу его хода.
-            feel(id, failed.get(event.to) ? { mood: 'grumpy', seconds: 1.5 } : { mood: 'joy', seconds: 1 });
+            // Успех только при явном ok; неудача получателя или отмена — недовольство, а не радость.
+            const ok = event?.ok;
+            const targetFailed = failed.get(event?.to);
+            feel(id, (ok === false || (ok === undefined && targetFailed === true))
+              ? { mood: 'grumpy', seconds: 1.5 }
+              : { mood: 'joy', seconds: 1 });
             break;
           }
           default:

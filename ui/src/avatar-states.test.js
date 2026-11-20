@@ -277,9 +277,15 @@ describe('createTracker', () => {
 
   it('разовые эмоции по событиям без истории', () => {
     const { tracker, log } = make();
-    for (const type of ['model_retry', 'model_switched', 'compacting', 'memory_learned', 'skill_learned']) tracker.feed({ type, botId: 'b' });
+    for (const type of ['model_retry', 'model_switched', 'level_escalated', 'compacting', 'memory_learned', 'skill_learned', 'task_done']) tracker.feed({ type, botId: 'b' });
+    tracker.feed({ type: 'task_update', botId: 'b', state: 'paused' });
+    tracker.feed({ type: 'task_update', botId: 'b', state: 'error' });
+    tracker.feed({ type: 'delegate_end', from: 'lead', to: 'worker', ok: false });
     tracker.feed({ type: 'approval_closed', botId: 'b', id: 'a', status: 'denied' });
-    expect(log.filter(([k]) => k === 'feel').map((e) => e[1])).toEqual(['grumpy', 'surprise', 'dizzy', 'love', 'star', 'sad']);
+    expect(log.filter(([k]) => k === 'feel').map((e) => e[1])).toEqual(['grumpy', 'surprise', 'surprise', 'dizzy', 'love', 'star', 'star', 'grumpy', 'sad', 'grumpy', 'sad']);
+    expect(S.clears({ type: 'task_done' })).toBe(true);
+    expect(S.clears({ type: 'task_update', state: 'running' })).toBe(true);
+    expect(S.clears({ type: 'task_update', state: 'paused' })).toBe(false);
   });
 });
 
