@@ -129,8 +129,8 @@ async fn the_checkout_opens_only_in_the_mode() {
     turn(&crew, &fake, &bot, tool("read_file", json!({ "path": crew.data_dir.join("state.json").display().to_string() })), "deny").await;
     assert!(tool_result(&fake).contains("служебные файлы программы (ключи и токены), сюда боту нельзя"), "{}", tool_result(&fake));
 
-    // До режима: исходники можно читать, но запись и сборка в checkout — с карточки.
-    assert!(turn(&crew, &fake, &bot, tool("read_file", json!({ "path": dir.join("src").join("main.rs").display().to_string() })), "deny").await.is_none());
+    // До режима: исходники вне папок бота читаются после карточки «Этот компьютер», запись и сборка — тоже с карточки.
+    assert!(turn(&crew, &fake, &bot, tool("read_file", json!({ "path": dir.join("src").join("main.rs").display().to_string() })), "once").await.is_some(), "вне папки чтение спрашивает карточку");
     assert!(tool_result(&fake).contains("fn main"), "{}", tool_result(&fake));
     assert!(turn(&crew, &fake, &bot, write(&dir.join("src").join("a.rs")), "deny").await.is_some(), "без режима запись спрашивает");
     assert!(!dir.join("src").join("a.rs").exists());
@@ -231,9 +231,9 @@ async fn the_running_install_is_refused() {
         turn(&crew, &fake, &bot, run(&elsewhere), "deny").await;
         assert!(tool_result(&fake).contains("сборка только в target самого checkout"), "{approval}: {}", tool_result(&fake));
     }
-    // Читать папку программы можно.
+    // Папку программы можно посмотреть после карточки «Этот компьютер».
     crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "ask" }))).await;
-    assert!(turn(&crew, &fake, &bot, tool("list_files", json!({ "path": install.display().to_string() })), "deny").await.is_none());
+    assert!(turn(&crew, &fake, &bot, tool("list_files", json!({ "path": install.display().to_string() })), "once").await.is_some(), "вне папки список спрашивает карточку");
     assert!(tool_result(&fake).contains("deloist"), "{}", tool_result(&fake));
     let _ = std::fs::remove_dir_all(&dir);
 }

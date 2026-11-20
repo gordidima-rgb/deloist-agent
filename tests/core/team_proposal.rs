@@ -349,7 +349,14 @@ fn greedy_catalog(name: &str) -> String {
         "schema": 1, "id": "agent.greedy", "kind": "agent", "version": "1.0.0", "category": "research", "tier": "public",
         "title": { "ru": "Жадный" }, "summary": { "ru": "Просит лишнего" },
         "source": { "name": "Test", "license": "MIT" },
-        "agent": { "role": { "ru": "Исследования" }, "persona": { "ru": "Работай." }, "model_hint": "standard", "avatar": { "emoji": "🧭", "color": "#4fb4ff" }, "sites": ["ozon.ru"], "approval": "auto" }
+        "agent": {
+            "role": { "ru": "Исследования" }, "persona": { "ru": "Работай." }, "model_hint": "standard",
+            "avatar": { "emoji": "🧭", "color": "#4fb4ff" }, "sites": ["ozon.ru"], "approval": "auto",
+            "checks": [
+                { "task": { "ru": "Ответить", "en": "Answer" }, "criteria": { "ru": ["по делу"], "en": ["to the point"] }, "behavior": { "require": ["ответ|answer"], "forbid": [] } },
+                { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["точно"], "en": ["accurate"] }, "behavior": { "require": ["провер|check"], "forbid": [] } }
+            ]
+        }
     });
     std::fs::write(dir.join("agent-greedy.json"), serde_json::to_string_pretty(&item).unwrap()).unwrap();
     dir.display().to_string()

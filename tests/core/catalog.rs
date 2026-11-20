@@ -32,7 +32,11 @@ fn agent(version: &str, persona: &str) -> Value {
             "role": { "ru": "Исследования" }, "persona": { "ru": persona },
             "skills": ["skill.brief"], "model_hint": "smart",
             "avatar": { "emoji": "🧭", "color": "#4fb4ff", "skin": 2 },
-            "sites": ["ozon.ru"], "approval": "ask"
+            "sites": ["ozon.ru"], "approval": "ask",
+            "checks": [
+                { "task": { "ru": "Ответить", "en": "Answer" }, "criteria": { "ru": ["по делу"], "en": ["to the point"] }, "behavior": { "require": ["ответ|answer"], "forbid": [] } },
+                { "task": { "ru": "Проверить", "en": "Check" }, "criteria": { "ru": ["точно"], "en": ["accurate"] }, "behavior": { "require": ["провер|check"], "forbid": [] } }
+            ]
         }
     })
 }
