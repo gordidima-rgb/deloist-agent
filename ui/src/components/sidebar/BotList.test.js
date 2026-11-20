@@ -219,4 +219,32 @@ describe('BotList', () => {
       expect(document.activeElement).toBe(mainOf('t1'));
     });
   });
+
+  it('reorders bots via drag-and-drop and Alt+Arrow and shows avatar status dot', () => {
+    const onreorder = vi.fn();
+    render({ bots: [bot('a', { busy: true }), bot('b', { error: true })], onreorder });
+    const rows = [...host.querySelectorAll('.sb-row[data-id]')];
+    expect(rows[0].querySelector('.sb-state-dot')?.dataset.state).toBe('busy');
+    expect(rows[1].querySelector('.sb-state-dot')?.dataset.state).toBe('error');
+
+    const start = new Event('dragstart', { bubbles: true, cancelable: true });
+    start.dataTransfer = { setData: vi.fn(), effectAllowed: '' };
+    rows[0].dispatchEvent(start);
+    const over = new Event('dragover', { bubbles: true, cancelable: true });
+    over.dataTransfer = { dropEffect: '' };
+    rows[1].dispatchEvent(over);
+    flushSync();
+    expect(rows[1].classList.contains('is-drag-over')).toBe(true);
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    drop.dataTransfer = { dropEffect: '' };
+    rows[1].dispatchEvent(drop);
+    flushSync();
+    expect(onreorder).toHaveBeenCalledWith('main', ['b', 'a']);
+
+    const mainBtn = rows[0].querySelector('.k-list-item__main');
+    mainBtn.focus();
+    mainBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }));
+    flushSync();
+    expect(onreorder).toHaveBeenLastCalledWith('main', ['b', 'a']);
+  });
 });

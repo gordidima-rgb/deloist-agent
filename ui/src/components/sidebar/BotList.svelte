@@ -18,9 +18,80 @@ import { ListItem, Icon, Badge } from '../kit';
     onselect,
     onselectroom,
     onpin,
+    onreorder,
     // Меню бота: кнопка «Настройки» в строке и правый щелчок. (id, { x, y, trigger }) — точка, где открыть.
     onmenu,
   } = $props();
+
+  // Перетаскивание строк внутри группы (порядок сохраняется на сервере через onreorder).
+  let dragId = $state('');
+  let dragGroup = $state('');
+  let dragOverId = $state('');
+
+  function groupList(group) {
+    if (group === 'pinned') return pinned;
+    if (group === 'reserve') return reserve;
+    if (group === 'main') return main;
+    if (group.startsWith('team:')) {
+      const teamId = group.slice(5);
+      return teams.find((t) => t.room.id === teamId)?.members ?? [];
+    }
+    return [];
+  }
+
+  function dragStart(event, id, group) {
+    if (!onreorder || searching) return;
+    dragId = id;
+    dragGroup = group;
+    dragOverId = '';
+    try { event.dataTransfer?.setData('text/plain', id); } catch {}
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }
+  function dragEnd() {
+    dragId = '';
+    dragGroup = '';
+    dragOverId = '';
+  }
+  function dragOverRow(event, id, group) {
+    if (!dragId || group !== dragGroup || id === dragId) return;
+    event.preventDefault();
+    dragOverId = id;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }
+  function dropRow(event, id, group) {
+    if (!dragId || group !== dragGroup || dragId === id) { dragEnd(); return; }
+    event.preventDefault();
+    const ids = groupList(group).map((b) => b.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(id);
+    if (from < 0 || to < 0) { dragEnd(); return; }
+    const next = [...ids];
+    next.splice(from, 1);
+    next.splice(to, 0, dragId);
+    onreorder?.(group, next);
+    dragEnd();
+  }
+  function keyboardMove(event, id, group) {
+    if (!onreorder || searching || !(event.altKey || event.metaKey || event.ctrlKey)) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    const ids = groupList(group).map((b) => b.id);
+    const i = ids.indexOf(id);
+    const j = event.key === 'ArrowUp' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    next.splice(i, 1);
+    next.splice(j, 0, id);
+    onreorder?.(group, next);
+  }
+
+  function botStatusTone(bot) {
+    if (bot.error) return 'error';
+    if (bot.needs) return 'needs';
+    if (bot.busy) return 'busy';
+    if (bot.unread) return 'unread';
+    return '';
+  }
 
   // from — команда, в ветке которой стоит строка: «Перенести» уводит бота именно из неё.
   function openMenu(event, id, from = '') {
@@ -162,10 +233,14 @@ import { ListItem, Icon, Badge } from '../kit';
 
 {#snippet botRow(bot, opts = {})}
   {@const slot = opts.slot ?? `side:${bot.id}`}
+  {@const group = opts.group ?? ''}
+  {@const status = botStatusTone(bot)}
   <ListItem
-    class="sb-row"
+    class={dragOverId === bot.id ? 'sb-row is-drag-over' : 'sb-row'}
     data-id={bot.id}
+    data-group={group || undefined}
     data-parent={opts.parent}
+    draggable={Boolean(onreorder && group && !searching)}
     role={opts.level ? 'treeitem' : undefined}
     aria-level={opts.level}
     title={bot.name}
@@ -178,11 +253,19 @@ import { ListItem, Icon, Badge } from '../kit';
     unread={bot.unread}
     onclick={() => onselect?.(bot.id)}
     oncontextmenu={onmenu ? (event) => openMenu(event, bot.id, opts.parent) : undefined}
+    ondragstart={group ? (event) => dragStart(event, bot.id, group) : undefined}
+    ondragend={group ? dragEnd : undefined}
+    ondragover={group ? (event) => dragOverRow(event, bot.id, group) : undefined}
+    ondrop={group ? (event) => dropRow(event, bot.id, group) : undefined}
+    onkeydown={group ? (event) => keyboardMove(event, bot.id, group) : undefined}
   >
     {#snippet avatar()}
       <span class="sb-face">
         <span class="avatar sb-avatar" data-slot={slot} {@attach avatarOf(bot.id, slot)}></span>
         {#if opts.lead}<span class="sb-crown" title={tr('Ведущий команды')}><Icon name="crown" size={10} /></span>{/if}
+        {#if status}
+          <span class="sb-state-dot is-{status}" data-state={status} aria-hidden="true"></span>
+        {/if}
       </span>
     {/snippet}
     {#snippet context()}
@@ -290,7 +373,7 @@ import { ListItem, Icon, Badge } from '../kit';
   {#if pinned.length}
     <h3 class="sb-head">{tr('Закреплённые')}</h3>
     <ul class="k-list sb-list">
-      {#each pinned as bot (bot.id)}{@render botRow(bot)}{/each}
+      {#each pinned as bot (bot.id)}{@render botRow(bot, { group: 'pinned' })}{/each}
     </ul>
   {/if}
 
@@ -304,7 +387,7 @@ import { ListItem, Icon, Badge } from '../kit';
           <li class="sb-branch" class:is-open={open} role="none" {...(open ? {} : { inert: true })}>
             <ul class="sb-group" role="group">
               {#each team.members as member (member.id)}
-                {@render botRow(member, { level: 2, parent: team.room.id, slot: `side:${member.id}:${team.room.id}`, lead: member.id === team.leadId })}
+                {@render botRow(member, { level: 2, parent: team.room.id, group: `team:${team.room.id}`, slot: `side:${member.id}:${team.room.id}`, lead: member.id === team.leadId })}
               {/each}
             </ul>
           </li>
@@ -320,7 +403,7 @@ import { ListItem, Icon, Badge } from '../kit';
       <h3 class="sb-head">{tr('Боты')}</h3>
     {/if}
     <ul class="k-list sb-list" data-drop={teams.length ? 'loose' : undefined}>
-      {#each main as bot (bot.id)}{@render botRow(bot)}{/each}
+      {#each main as bot (bot.id)}{@render botRow(bot, { group: 'main' })}{/each}
     </ul>
   {/if}
 
@@ -332,7 +415,7 @@ import { ListItem, Icon, Badge } from '../kit';
     </button>
     {#if reserveOpen}
       <ul class="k-list sb-list">
-        {#each reserve as bot (bot.id)}{@render botRow(bot)}{/each}
+        {#each reserve as bot (bot.id)}{@render botRow(bot, { group: 'reserve' })}{/each}
       </ul>
     {/if}
   {/if}
@@ -430,6 +513,24 @@ import { ListItem, Icon, Badge } from '../kit';
   .sb-crown {
     position: absolute; top: -4px; left: -4px; display: inline-flex; padding: 2px;
     border-radius: var(--k-radius-pill); background: var(--k-surface); color: var(--k-brand); box-shadow: 0 0 0 1px var(--k-brand-tint);
+  }
+  .sb-state-dot {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 10px;
+    height: 10px;
+    border-radius: var(--k-radius-pill);
+    border: 2px solid var(--k-surface);
+    background: var(--k-brand);
+    pointer-events: none;
+  }
+  .sb-state-dot.is-busy { background: var(--k-ok); }
+  .sb-state-dot.is-needs { background: var(--k-warn); }
+  .sb-state-dot.is-error { background: var(--k-err); }
+  .sb-state-dot.is-unread { background: var(--k-brand); }
+  :global(.sb-row.is-drag-over) {
+    box-shadow: inset 0 2px 0 0 var(--k-brand);
   }
   :global(.sb-members), :global(.sb-roll) { margin-left: 4px; }
 

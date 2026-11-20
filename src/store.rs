@@ -298,6 +298,9 @@ pub struct Settings {
     /// Последняя версия программы, которую человек уже видел в диалоге «Что нового».
     #[serde(default)]
     pub last_seen_version: String,
+    /// Порядок ботов и специалистов в списке слева (перетаскиванием), общий для рабочей области.
+    #[serde(default)]
+    pub bot_order: Vec<String>,
     /// Мост в Telegram: без токена из `secrets.json` ничего не делает.
     pub telegram: TelegramSettings,
     /// Мост в Discord: без токена из `secrets.json` ничего не делает.
@@ -357,6 +360,7 @@ impl Default for Settings {
             journal_seen_at: 0,
             skill_learning: "auto".into(),
             last_seen_version: String::new(),
+            bot_order: Vec::new(),
             telegram: TelegramSettings::default(),
             discord: DiscordSettings::default(),
             slack: SlackSettings::default(),
@@ -2069,6 +2073,18 @@ impl Store {
                 if matches!(mode, "auto" | "ask" | "off") {
                     s.skill_learning = mode.into();
                 }
+            }
+            if let Some(arr) = patch.get("botOrder").and_then(Value::as_array) {
+                let mut seen = std::collections::HashSet::new();
+                let mut next = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let Some(id) = item.as_str().map(str::trim).filter(|id| !id.is_empty()) else { continue };
+                    let id = take_chars(id, 64);
+                    if seen.insert(id.clone()) {
+                        next.push(id);
+                    }
+                }
+                s.bot_order = next;
             }
             // Включили питомцев, а выбранных нет: показываем первого, иначе включение выглядело бы поломкой.
             if state.settings.pets_mode != "off" && !state.bots.iter().any(|bot| bot.pet) {

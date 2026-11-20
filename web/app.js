@@ -760,6 +760,43 @@ function queuedCount(id) {
   return Number(botById(id)?.queued) || 0;
 }
 
+// Порядок ботов в списке слева хранится на сервере (`settings.botOrder`), общий для всей рабочей области.
+function botOrderList() {
+  return Array.isArray(S.settings?.botOrder) ? S.settings.botOrder.map(String) : [];
+}
+
+async function reorderSidebar(group, ids) {
+  if (!Array.isArray(ids) || !ids.length) return;
+  const known = new Set(S.bots.map((b) => b.id));
+  const moved = ids.filter((id) => known.has(id));
+  if (!moved.length) return;
+  const movedSet = new Set(moved);
+  // Базовый список всех ботов в текущем порядке (сохранённый порядок + новые боты в конце).
+  const saved = botOrderList().filter((id) => known.has(id));
+  const currentIds = [...saved, ...S.bots.map((b) => b.id).filter((id) => !saved.includes(id))];
+  const merged = [];
+  let inserted = false;
+  for (const id of currentIds) {
+    if (movedSet.has(id)) {
+      if (!inserted) {
+        merged.push(...moved);
+        inserted = true;
+      }
+    } else {
+      merged.push(id);
+    }
+  }
+  if (!inserted) merged.push(...moved);
+  S.settings = { ...(S.settings || {}), botOrder: merged };
+  renderSidebar();
+  try {
+    const res = await api('/api/settings', { method: 'PUT', body: { botOrder: merged } });
+    if (res?.settings) S.settings = res.settings;
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
 function renderSidebar() {
   renderNeeds();
   const current = botById(S.currentId);
@@ -770,9 +807,18 @@ function renderSidebar() {
 
   const list = $('#bot-list');
   const q = S.filter.trim().toLowerCase();
+  const order = botOrderList();
+  const rank = new Map(order.map((id, i) => [id, i]));
   const bots = S.bots
     .filter((b) => !q || `${b.name} ${b.role}`.toLowerCase().includes(q))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.preview?.at || b.createdAt) - (a.preview?.at || a.createdAt));
+    .sort((a, b) => {
+      const pinDiff = Number(b.pinned) - Number(a.pinned);
+      if (pinDiff !== 0) return pinDiff;
+      const ai = rank.has(a.id) ? rank.get(a.id) : Number.MAX_SAFE_INTEGER;
+      const bi = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return (b.preview?.at || b.createdAt) - (a.preview?.at || a.createdAt);
+    });
   const shown = new Set(bots.map((b) => b.id));
   const rooms = S.rooms
     .filter((r) => !q || `${r.name} ${r.instructions || ''}`.toLowerCase().includes(q) || (r.botIds || []).some((id) => shown.has(id)))
@@ -819,7 +865,7 @@ function renderSidebar() {
   };
   if (inRoom()) renderRoomScreen();
   if (botListView) botListView.update(props);
-  else botListView = window.DeloistUI.mountBotList(list, { ...props, paint: paintSideAvatar, onselect: pickBot, onselectroom: pickRoom, onpin: pinBot, onmenu: openBotMenu });
+  else botListView = window.DeloistUI.mountBotList(list, { ...props, paint: paintSideAvatar, onselect: pickBot, onselectroom: pickRoom, onpin: pinBot, onmenu: openBotMenu, onreorder: reorderSidebar });
   // Вид бота мог поменяться: строки Svelte живут дольше одной отрисовки, перерисовываем аватары на месте.
   setTimeout(() => {
     for (const el of $$('#bot-list .sb-row[data-id] .sb-avatar:not(.room-icon)')) {
@@ -6110,18 +6156,12 @@ function openDrawer(tab = 'profile') {
   setDrawerRail(false);
 }
 
-// Открыли чат бота: панель уже на месте — перерисовать для него, нет — поставить так, как её оставили.
-// На узком окне панель ложится поверх чата, поэтому сама там не появляется.
+// Открыли чат бота: если карточка уже открыта человеком — перерисовать для него;
+// сама карточка остаётся скрытой, пока её не откроют явно (кнопкой/меню).
 function showDrawerForBot() {
   if (!$('#drawer').hidden) {
     renderDrawer();
-    return;
   }
-  if (narrowWindow()) return;
-  $('#drawer').hidden = false;
-  document.body.classList.add('drawer-open');
-  mountDrawerHead().update({ value: S.tab });
-  setDrawerRail(savedDrawerRail(), false);
 }
 
 function collapseDrawer() {
