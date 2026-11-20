@@ -1368,6 +1368,25 @@ async fn the_program_key_gets_403_for_tasks_list() {
 }
 
 #[tokio::test]
+async fn the_program_key_cannot_transfer_bots() {
+    let crew = Crew::start("transfer-key").await;
+    let passport: Value = serde_json::from_str(&std::fs::read_to_string(crew.data_dir.join("runtime.json")).unwrap()).unwrap();
+    let key = passport["token"].as_str().unwrap();
+    // Перенос меняет состав и память команды и трогает облако: только человек в окне.
+    for (method, path) in [
+        ("GET", "/api/transfer/export"),
+        ("GET", "/api/transfer/status"),
+        ("POST", "/api/transfer/import"),
+        ("POST", "/api/transfer/to-cloud"),
+        ("POST", "/api/transfer/from-cloud"),
+        ("POST", "/api/transfer/to-pc"),
+    ] {
+        let status = crew.client.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), format!("{}{path}", crew.base)).bearer_auth(key).body("{}").send().await.unwrap().status().as_u16();
+        assert_eq!(status, 403, "{method} {path} → {status}: перенос ботов открыт ключу программы");
+    }
+}
+
+#[tokio::test]
 async fn browser_bridge_works_only_with_the_key_of_the_running_turn() {
     let (crew, bot, log) = acp_crew("bridge-key").await;
     let other = crew.ok("POST", "/api/bots", Some(json!({ "name": "Второй", "role": "р" }))).await["bot"]["id"].as_str().unwrap().to_string();
