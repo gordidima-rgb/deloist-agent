@@ -416,6 +416,9 @@ pub struct Bot {
     pub monthly_token_limit: i64,
     /// Бот-оркестратор: расспрашивает человека и собирает команду (`propose_team`). Его нельзя убрать, пока жива команда.
     pub orchestrator: bool,
+    /// Бот работает только на доверенной облачной машине: на ПК его ход не запускается.
+    /// Проверяется в настоящем исполнении хода, а не только в интерфейсе; хранится в state.json.
+    pub cloud_only: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -450,6 +453,7 @@ impl Default for Bot {
             read_aloud: false,
             monthly_token_limit: 0,
             orchestrator: false,
+            cloud_only: false,
             extra: Map::new(),
         }
     }
@@ -1133,6 +1137,11 @@ pub fn check_bot_patch(patch: &Value) -> Result<(), String> {
     if let Some(v) = patch.get("removeGuest").filter(|v| !v.is_null()) {
         if !v.as_str().is_some_and(|id| !id.trim().is_empty()) {
             return Err("removeGuest: нужен id бота".into());
+        }
+    }
+    if let Some(v) = patch.get("cloudOnly").filter(|v| !v.is_null()) {
+        if !v.is_boolean() {
+            return Err("cloudOnly: нужно true или false".into());
         }
     }
     Ok(())
@@ -2276,6 +2285,7 @@ impl Store {
             read_aloud: false,
             monthly_token_limit: 0,
             orchestrator: false,
+            cloud_only: false,
             extra,
         };
         let bot = {
@@ -2350,6 +2360,10 @@ impl Store {
             }
             if let Some(v) = patch.get("readAloud").filter(|v| !v.is_null()) {
                 bot.read_aloud = truthy(v);
+            }
+            // Только облачная машина: на ПК такой бот не должен начинать ход даже после перезапуска.
+            if let Some(v) = patch.get("cloudOnly").filter(|v| !v.is_null()) {
+                bot.cloud_only = truthy(v);
             }
             let pet = patch.get("pet").filter(|v| !v.is_null()).map(truthy);
             if let Some(pet) = pet {

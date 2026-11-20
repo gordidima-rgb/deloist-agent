@@ -869,6 +869,19 @@
                       <input type="file" id="team-file" accept="application/json,.json" hidden />
                     </div>
                     <p class="note" id="team-note"></p>
+                    <div class="row" id="transfer-row">
+                      <label class="field small">
+                        <span>Бот для переноса</span>
+                        <select id="transfer-bot" class="k-input"></select>
+                      </label>
+                    </div>
+                    <div class="row">
+                      <button type="button" class="k-btn k-btn--primary" id="transfer-to-cloud">Перенести в облако</button>
+                      <button type="button" class="k-btn k-btn--ghost" id="transfer-from-cloud">Вернуть из облака</button>
+                      <button type="button" class="k-btn k-btn--ghost" id="transfer-export">Скачать пакет переноса</button>
+                    </div>
+                    <p class="note" id="transfer-note">Команда, инструкции, память и рутины едут вместе. Секреты и ключи в пакет не попадают; слишком крупные части остаются на источнике и перечисляются в отчёте.</p>
+                    <pre class="note" id="transfer-report" hidden></pre>
                   </div>
                 </section>
               </section>

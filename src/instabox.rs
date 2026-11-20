@@ -906,6 +906,43 @@ pub fn gateway_url(gw_hex: &str, uid: &str, origin: &str) -> Result<String, Fail
     Ok(format!("{origin}/auth/gateway?t={}.{}", b64.encode(&payload), b64.encode(key.sign(&signed).to_bytes())))
 }
 
+/// Один вход в облако для переноса ботов: подписанный пропуск шлюза → сессионная cookie.
+/// Возвращает origin и cookie; ключи и пропуск наружу не уходят. Машину будит, если она спит.
+/// Это тот же аутентифицированный канал, что и кнопка «Открыть облако», только без браузера.
+pub async fn transfer_session(app: &Arc<crate::App>) -> Result<(String, String), Fail> {
+    let ctx = Ctx::new(Arc::new(SecretsStore(app.clone())));
+    let (id, origin, gateway) = deployed(&ctx)?;
+    ensure_running(&ctx, &id).await?;
+    let uid = ctx.store.get(K_UID).filter(|v| !v.is_empty()).ok_or_else(|| Fail::local(409, "не хватает данных облака: создайте его заново"))?;
+    let url = gateway_url(&gateway, &uid, &origin)?;
+    let host = origin.strip_prefix("https://").unwrap_or(&origin).trim_end_matches('/').to_string();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| Fail::local(502, scrub(&e.to_string())))?;
+    let response = client
+        .get(url)
+        .header(reqwest::header::HOST, host)
+        .header(reqwest::header::ORIGIN, origin.as_str())
+        .header("sec-fetch-site", "same-origin")
+        .send()
+        .await
+        .map_err(|e| Fail::local(502, scrub(&e.to_string())))?;
+    if !response.status().is_success() && !response.status().is_redirection() {
+        return Err(Fail::local(502, "облако не пустило: откройте его в окне и попробуйте снова"));
+    }
+    let cookie = response
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| Fail::local(502, "облако не выдало сессию"))?
+        .to_string();
+    Ok((origin, cookie))
+}
+
 /// Машина должна работать: спящую будим (`POST /wake`, ждёт до 45 с), остановленную запускаем.
 async fn ensure_running(ctx: &Ctx, id: &str) -> Result<(), Fail> {
     for _ in 0..3 {

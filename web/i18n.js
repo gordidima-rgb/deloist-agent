@@ -3340,6 +3340,22 @@
     'без изменений': 'no change',
     'Проверка перед ходом (команда)': 'Pre-run check (command)',
     'код 0 — будить бота, вывод уйдёт ему; код 1 — нового нет, модель не вызывается': 'exit 0 wakes the bot and sends it the output; exit 1 means nothing new, the model is not called',
+    // Перенос ботов между ПК и доверенной облачной машиной.
+    'Перенести в облако': 'Move to cloud',
+    'Вернуть из облака': 'Move back to PC',
+    'Разрешить и на ПК': 'Allow on PC too',
+    'Только в облаке': 'Cloud only',
+    'Бот для переноса': 'Bot to move',
+    'Скачать пакет переноса': 'Download transfer bundle',
+    'Команда, инструкции, память и рутины едут вместе. Секреты и ключи в пакет не попадают; слишком крупные части остаются на источнике и перечисляются в отчёте.': 'The team, instructions, memory and routines move together. Secrets and keys are never bundled; oversized parts stay on the source and are listed in the report.',
+    'Перенесено: ботов {bots}, навыков {skills}, команд {rooms}, рутин {routines}.': 'Moved: {bots} bots, {skills} skills, {rooms} teams, {routines} routines.',
+    'Пропущено — осталось на источнике:': 'Skipped — left on the source:',
+    'Не применилось:': 'Failed to apply:',
+    'Бот перенесён в облако': 'Bot moved to the cloud',
+    'Бот возвращён на ПК': 'Bot moved back to the PC',
+    'Не смог перенести: {error}': 'Could not move: {error}',
+    'Бот работает только в облаке': 'The bot now runs only in the cloud',
+    'Боту снова можно работать на ПК': 'The bot can run on this PC again',
   };
 
   function savedLang() {

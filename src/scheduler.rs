@@ -452,6 +452,7 @@ mod tests {
             vault: crate::password_vault::Vault::default(),
             tasks: crate::team_tasks::Tasks::open(&data),
             import_requests: crate::team_import_requests::ImportRequests::default(),
+            transfer: crate::transfer::Transfer::open(&data),
             workflows: crate::workflows::Workflows::open(&data),
             runs: crate::runs::Runs::open(&data),
             rest: crate::limit::Rest::open(&data),

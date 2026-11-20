@@ -989,6 +989,10 @@ function botMenuItems(bot) {
     { id: 'unread', label: S.unread.has(bot.id) ? tr('Отметить прочитанным') : tr('Отметить непрочитанным'), icon: 'eye' },
     { id: 'dock', label: bot.dock !== false ? tr('Убрать из дока') : tr('Показать в доке'), icon: 'dock-hide' },
     { id: 'compact', label: tr('Сжать историю'), icon: 'compact' },
+    { kind: 'sep' },
+    { id: 'to-cloud', label: tr('Перенести в облако'), icon: 'cloud' },
+    { id: 'from-cloud', label: tr('Вернуть из облака'), icon: 'cloud' },
+    { id: 'cloud-only', label: bot.cloudOnly ? tr('Разрешить и на ПК') : tr('Только в облаке'), icon: 'cloud' },
     ...(S.debug ? [{ id: 'debug', label: tr('Скопировать отладку'), icon: 'copy' }] : []),
     { kind: 'sep' },
     { id: 'delete', label: tr('Удалить бота'), icon: 'trash', danger: true },
@@ -1060,6 +1064,9 @@ async function botMenuPick(bot, pick, from = '') {
   }
   if (pick === 'dock') return setDockBot(id, bot.dock === false);
   if (pick === 'compact') return compactBot(id);
+  if (pick === 'to-cloud') return transferBot(bot, 'to-cloud');
+  if (pick === 'from-cloud') return transferBot(bot, 'from-cloud');
+  if (pick === 'cloud-only') return setCloudOnly(bot, !bot.cloudOnly);
   if (pick === 'debug') return copyDebug(id);
   if (pick === 'delete') {
     if (!confirm(tr('Удалить «{name}» вместе с чатом и памятью?', { name: bot.name }))) return;
@@ -7273,6 +7280,83 @@ async function addMcp() {
   }
 }
 
+// Перенос ботов между ПК и доверенной облачной машиной. Отчёт о пропущенных частях показываем
+// рядом с кнопками: источник при этом не меняется, человек видит, что именно осталось на месте.
+function fillTransferBots() {
+  const select = $('#transfer-bot');
+  if (!select) return;
+  const prev = select.value;
+  const options = (S.bots || []).map((bot) => {
+    const option = document.createElement('option');
+    option.value = bot.name;
+    option.textContent = bot.name;
+    return option;
+  });
+  select.replaceChildren(...options);
+  if (options.some((option) => option.value === prev)) select.value = prev;
+}
+
+function showTransferReport(data) {
+  const box = $('#transfer-report');
+  if (!box) return;
+  const report = data?.report || {};
+  const applied = report.applied || {};
+  const skipped = data?.skipped || report.skipped || [];
+  const failed = data?.failed || report.failed || [];
+  const lines = [tr('Перенесено: ботов {bots}, навыков {skills}, команд {rooms}, рутин {routines}.', {
+    bots: applied.bots || 0, skills: applied.skills || 0, rooms: applied.rooms || 0, routines: applied.routines || 0,
+  })];
+  if (skipped.length) {
+    lines.push(tr('Пропущено — осталось на источнике:'));
+    skipped.forEach((part) => lines.push(`${part.part || part.kind}: ${part.reason || ''} (${part.bytes || 0} / ${part.limit || 0})`));
+  }
+  if (failed.length) {
+    lines.push(tr('Не применилось:'));
+    failed.forEach((item) => lines.push(typeof item === 'string' ? item : JSON.stringify(item)));
+  }
+  box.hidden = false;
+  box.textContent = lines.join('\n');
+}
+
+async function transferBot(bot, kind) {
+  try {
+    const data = await api(`/api/transfer/${kind}`, { method: 'POST', body: { bots: [bot.name] } });
+    showTransferReport(data);
+    toast(kind === 'to-cloud' ? tr('Бот перенесён в облако') : tr('Бот возвращён на ПК'));
+    await refreshState();
+  } catch (err) {
+    toast(tr('Не смог перенести: {error}', { error: trServer(err.message) }), 7000);
+  }
+}
+
+async function setCloudOnly(bot, on) {
+  try {
+    await api(`/api/bots/${encodeURIComponent(bot.id)}`, { method: 'PATCH', body: { cloudOnly: on } });
+    await refreshState();
+    toast(on ? tr('Бот работает только в облаке') : tr('Боту снова можно работать на ПК'));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function exportTransfer() {
+  const name = $('#transfer-bot')?.value;
+  if (!name) return;
+  try {
+    const { bundle, skipped } = await api(`/api/transfer/export?bots=${encodeURIComponent(name)}`);
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deloist-transfer-${name}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showTransferReport({ report: {}, skipped });
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
 async function exportTeam() {
   try {
     const { team } = await api('/api/team/export');
@@ -7412,6 +7496,7 @@ function closeSettingsSub() {
 function loadSubscreen(subId) {
   if (subId === 'rules') loadRules();
   if (subId === 'skills') renderSkills();
+  if (subId === 'team') fillTransferBots();
   if (subId === 'scripts') renderScripts();
   if (subId === 'mcp') renderMcp();
   if (subId === 'dock') loadDockDisplays();
@@ -9334,6 +9419,17 @@ function bindUi() {
   $('#mcp-transport').addEventListener('change', syncMcpTransport);
   $('#team-export').addEventListener('click', exportTeam);
   $('#team-import').addEventListener('click', () => $('#team-file').click());
+  $('#transfer-to-cloud').addEventListener('click', () => {
+    const name = $('#transfer-bot')?.value;
+    const bot = (S.bots || []).find((b) => b.name === name);
+    if (bot) transferBot(bot, 'to-cloud');
+  });
+  $('#transfer-from-cloud').addEventListener('click', () => {
+    const name = $('#transfer-bot')?.value;
+    const bot = (S.bots || []).find((b) => b.name === name);
+    if (bot) transferBot(bot, 'from-cloud');
+  });
+  $('#transfer-export').addEventListener('click', exportTransfer);
   $('#team-file').addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (file) importTeam(file);

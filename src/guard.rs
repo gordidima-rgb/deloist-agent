@@ -620,6 +620,8 @@ fn human_only(path: &str) -> bool {
         // по номеру и отзывает (`cancel`), а принять, отклонить и увидеть список ждущих может только окно.
         || path.starts_with("/api/team/import-requests")
         || (path.starts_with("/api/team/import-request/") && (path.trim_end_matches('/').ends_with("/approve") || path.trim_end_matches('/').ends_with("/deny")))
+        // Перенос ботов между машинами меняет состав и память команды и трогает облако: только окно.
+        || path.starts_with("/api/transfer")
         // Бот-оптимизатор читает журналы и спрашивает человека: ответ, выключатель и список
         // его решений видит и меняет только окно. Ключ программы из `runtime.json` сюда не ходит.
         || path.starts_with("/api/optimizer")

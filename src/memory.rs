@@ -1825,6 +1825,31 @@ pub async fn facts(app: &App, scope: &str) -> Vec<Fact> {
     load(app).await.facts.into_iter().filter(|f| f.scope == scope).collect()
 }
 
+/// Факты, приехавшие с доверенной машины при переносе бота. Общий путь записи (`write`) сам
+/// отсекает секреты, вырезает управляющие знаки, не дублирует заголовки и пишет журнал.
+/// Возвращает число записанных фактов и ошибки по тем, что не прошли проверки.
+pub async fn import_transfer_facts(app: &Arc<App>, facts: &[Fact]) -> (usize, Vec<String>) {
+    let writer = Writer::Program { who: json!({ "source": "transfer" }), author: "transfer", name: "перенос" };
+    let (mut made, mut errors) = (0usize, Vec::new());
+    for fact in facts {
+        let draft = Draft {
+            id: fact.id.clone(),
+            scope: fact.scope.clone(),
+            kind: fact.kind.clone(),
+            title: fact.title.clone(),
+            body: Some(fact.body.clone()),
+            entities: Some(fact.entities.clone()),
+            links: Some(fact.links.clone()),
+            pinned: Some(fact.pinned),
+        };
+        match write(app, &writer, draft).await {
+            Ok(_) => made += 1,
+            Err(e) => errors.push(e),
+        }
+    }
+    (made, errors)
+}
+
 /// Факты в общей памяти, которые записал этот бот: на его экране памяти они иначе не видны.
 pub async fn shared_by(app: &App, bot_id: &str) -> Vec<Fact> {
     load(app).await.facts.into_iter().filter(|f| f.scope == SHARED && f.author == bot_id).collect()

@@ -9,3 +9,4 @@ mod voice;
 mod voice_chat;
 mod stt_local;
 mod smoke;
+mod transfer_gui;

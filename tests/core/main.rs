@@ -37,6 +37,7 @@ mod team_async;
 mod team_proposal;
 mod team_rooms;
 mod telegram;
+mod transfer;
 mod todos;
 mod toast_reply;
 mod workflows;

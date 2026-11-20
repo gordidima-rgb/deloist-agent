@@ -815,6 +815,11 @@ async fn patch_bot(
     if (body.get("approval").is_some() || body.get("browserSites").is_some() || body.get("alwaysAsk").is_some()) && window.is_none() {
         return fail(StatusCode::FORBIDDEN, "режим вопросов, список сайтов и «Всегда спрашивать» меняет только человек в окне");
     }
+    // Куда бот выполняется, решает только человек: ключ программы не должен сам «уехать» в облако
+    // или вернуться оттуда, обойдя перенос.
+    if body.get("cloudOnly").is_some() && window.is_none() {
+        return fail(StatusCode::FORBIDDEN, "облачный режим бота меняет только человек в окне");
+    }
     // Роль, инструкции и ранг определяют, чем бот занимается и как себя ведёт: скрипт с ключом программы правит их только
     // карточкой propose_bot_change, которую принимает человек.
     if (body.get("role").is_some() || body.get("persona").is_some() || body.get("rank").is_some()) && window.is_none() {
@@ -3726,6 +3731,184 @@ async fn import_team(State(app): Shared, body: axum::body::Bytes) -> Response {
     }
 }
 
+// --- Перенос ботов между ПК и доверенной облачной машиной -------------------------------------
+// Всё human-only (guard.rs): решает человек в окне. Сборка пакета и применение — чистые функции
+// из transfer.rs; сеть идёт только через подписанный пропуск Instabox или аутентифицированный relay.
+
+fn transfer_names(body: &Value) -> Vec<String> {
+    let from_body = body
+        .get("bots")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if from_body.is_empty() {
+        body.get("bot").and_then(Value::as_str).map(|v| vec![v.to_string()]).unwrap_or_default()
+    } else {
+        from_body
+    }
+}
+
+async fn transfer_export(State(app): Shared, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let names: Vec<String> = q
+        .get("bots")
+        .map(|text| text.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+        .unwrap_or_else(|| app.store.bots().into_iter().map(|b| b.name).collect());
+    if names.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "не выбраны боты");
+    }
+    let direction = if crate::cloud::active() { "to-pc" } else { "to-cloud" };
+    match crate::transfer::build_for_bots(&app, &names, &crate::transfer::origin(), direction).await {
+        Ok((bundle, skipped)) => ok(json!({ "bundle": bundle, "skipped": skipped })),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+async fn transfer_import(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(bundle) = body.get("bundle") else {
+        return fail(StatusCode::BAD_REQUEST, "нужен bundle");
+    };
+    match crate::transfer::apply(&app, bundle).await {
+        Ok(report) => ok(json!({ "report": report })),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+async fn transfer_status(State(app): Shared) -> Response {
+    ok(crate::transfer::report_from_last(&app))
+}
+
+/// Один вызов облачного API через подписанный пропуск шлюза. Ключи в ответ не попадают.
+async fn cloud_transfer_call(app: &Arc<App>, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<(u16, Value), Response> {
+    let (origin, cookie) = crate::instabox::transfer_session(app).await.map_err(|f| {
+        let status = StatusCode::from_u16(f.status).unwrap_or(StatusCode::BAD_GATEWAY);
+        fail(status, f.text())
+    })?;
+    let host = origin.strip_prefix("https://").unwrap_or(&origin).trim_end_matches('/').to_string();
+    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| fail(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let mut req = client
+        .request(method, format!("{origin}{path}"))
+        .header(reqwest::header::HOST, host)
+        .header(reqwest::header::ORIGIN, origin.as_str())
+        .header(reqwest::header::COOKIE, cookie)
+        .header("sec-fetch-site", "same-origin");
+    if let Some(body) = body {
+        req = req.json(&body);
+    }
+    let response = req.send().await.map_err(|e| fail(StatusCode::BAD_GATEWAY, crate::instabox::scrub(&e.to_string())))?;
+    let status = response.status().as_u16();
+    let data = response.json::<Value>().await.unwrap_or_else(|_| json!({}));
+    Ok((status, data))
+}
+
+/// Пометить исходных ботов как облачных только после подтверждённой отправки.
+async fn mark_cloud_only(app: &Arc<App>, names: &[String], on: bool) -> Vec<String> {
+    let mut failed = Vec::new();
+    let bots = app.store.bots();
+    for name in names {
+        if let Some(bot) = bots.iter().find(|b| &b.name == name) {
+            if let Err(e) = app.store.update_bot(&bot.id, &json!({ "cloudOnly": on })).await {
+                failed.push(format!("{name}: {e}"));
+            }
+        }
+    }
+    failed
+}
+
+async fn transfer_to_cloud(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let names = transfer_names(&body);
+    if names.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "не выбраны боты");
+    }
+    let (bundle, skipped) = match crate::transfer::build_for_bots(&app, &names, &crate::transfer::origin(), "to-cloud").await {
+        Ok(v) => v,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e),
+    };
+    // Пакет собран до обращения к сети; при ошибке источник остаётся нетронутым.
+    let (status, data) = match cloud_transfer_call(&app, reqwest::Method::POST, "/api/transfer/import", Some(json!({ "bundle": bundle }))).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    if !(200..300).contains(&status) {
+        let message = data.get("error").and_then(Value::as_str).unwrap_or("облако отклонило перенос");
+        return fail(StatusCode::BAD_GATEWAY, message.to_string());
+    }
+    let mut failed = mark_cloud_only(&app, &names, true).await;
+    if let Some(report) = data.get("report") {
+        if let Some(parts) = report.get("failed").and_then(Value::as_array) {
+            failed.extend(parts.iter().filter_map(Value::as_str).map(str::to_string));
+        }
+    }
+    ok(json!({ "report": data.get("report").cloned().unwrap_or(data), "skipped": skipped, "failed": failed, "where": "cloud" }))
+}
+
+async fn transfer_from_cloud(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let names = transfer_names(&body);
+    if names.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "не выбраны боты");
+    }
+    let query = names.join(",");
+    let (status, data) = match cloud_transfer_call(&app, reqwest::Method::GET, &format!("/api/transfer/export?bots={query}"), None).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    if !(200..300).contains(&status) {
+        let message = data.get("error").and_then(Value::as_str).unwrap_or("облако не отдало ботов");
+        return fail(StatusCode::BAD_GATEWAY, message.to_string());
+    }
+    let Some(bundle) = data.get("bundle") else {
+        return fail(StatusCode::BAD_GATEWAY, "облако вернуло пустой пакет");
+    };
+    let bundle = match crate::transfer::retarget(bundle.clone(), "to-pc") {
+        Ok(v) => v,
+        Err(e) => return fail(StatusCode::BAD_GATEWAY, e),
+    };
+    match crate::transfer::apply(&app, &bundle).await {
+        Ok(report) => {
+            let _ = mark_cloud_only(&app, &names, false).await;
+            ok(json!({ "report": report, "skipped": data.get("skipped").cloned().unwrap_or(json!([])), "where": "pc" }))
+        }
+        Err(e) => fail(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
+/// Отправить пакет на доверенный ПК через аутентифицированный ретранслятор (устройства/релей).
+async fn transfer_to_pc(State(app): Shared, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(pc) = body.get("pc").and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+        return fail(StatusCode::BAD_REQUEST, "нужен pc: id доверенного ПК");
+    };
+    let names = transfer_names(&body);
+    if names.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "не выбраны боты");
+    }
+    let (bundle, skipped) = match crate::transfer::build_for_bots(&app, &names, &crate::transfer::origin(), "to-pc").await {
+        Ok(v) => v,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e),
+    };
+    match app.relay.remote_call(&app, pc, "transfer", json!({ "bundle": bundle })).await {
+        Ok(report) => ok(json!({ "report": report, "skipped": skipped, "where": "pc" })),
+        Err((status, code, message)) => fail(StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY), format!("{code}: {message}")),
+    }
+}
+
 // --- Заявка командной строки на добавление команды (`deloist team apply`) ---------------------
 // Ключ программы заявку подаёт, читает её статус по номеру и отзывает; принять или отклонить может
 // только окно (см. guard::human_only). Файл команды лежит в памяти и ничего не создаёт до «Добавить».
@@ -4532,6 +4715,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/connectors/{id}/check", post(connector_check))
         .route("/api/team/export", get(export_team))
         .route("/api/team/import", post(import_team))
+        .route("/api/transfer/export", get(transfer_export))
+        .route("/api/transfer/import", post(transfer_import))
+        .route("/api/transfer/status", get(transfer_status))
+        .route("/api/transfer/to-cloud", post(transfer_to_cloud))
+        .route("/api/transfer/from-cloud", post(transfer_from_cloud))
+        .route("/api/transfer/to-pc", post(transfer_to_pc))
         .route("/api/team/import-request", post(import_request_create))
         .route("/api/team/import-requests", get(import_requests_pending))
         .route("/api/team/import-requests/reject-all", post(import_requests_reject_all))

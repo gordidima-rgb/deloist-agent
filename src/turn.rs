@@ -1502,6 +1502,10 @@ pub fn start_turn_with(app: &Arc<App>, bot_id: &str, text: &str, attachments: Ve
     let Some(bot) = app.store.bot(bot_id) else {
         return Err(StartError { status: 500, message: "бот не найден".into() });
     };
+    // Ранний отказ: флаг «только в облаке» проверяется до занятия бота и до записи в очередь.
+    if let Some(message) = crate::cloud::dispatch_error(&bot) {
+        return Err(StartError { status: 409, message });
+    }
     let task = text.trim().to_string();
     if task.is_empty() && attachments.is_empty() {
         return Err(StartError { status: 400, message: "пустое сообщение".into() });
@@ -2209,6 +2213,12 @@ fn run_turn_body(
         let delegated = source.starts_with("delegation:");
         let settings = app.store.settings();
         let bot_id = bot.id.clone();
+        // Настоящая проверка в исполнителе: делегирование и шаги процессов приходят сюда,
+        // минуя start_turn_with. Читаем сохранённый флаг заново — после перезапуска он тоже действует.
+        if let Some(message) = crate::cloud::dispatch_error_by_id(&app, &bot_id) {
+            app.turns.emit(json!({ "type": "error", "botId": bot_id, "turnId": turn_id, "message": message }));
+            return (message, 0);
+        }
 
         let mut saved: Vec<Value> = Vec::new();
         // Сколько из `saved` уже в треде: шаги пишутся по мере хода, чтобы после обрыва там было видно сделанное.
