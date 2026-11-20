@@ -4186,3 +4186,25 @@ async fn the_agent_key_cannot_touch_the_page_watcher() {
     }
     assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"], json!([]));
 }
+
+#[tokio::test]
+async fn acp_calls_without_a_command_ask_only_when_they_look_dangerous() {
+    let (crew, bot, log) = acp_crew("acp-opaque").await;
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "ask" }))).await;
+    let _ = acp_asks(&crew, &bot, json!({})).await;
+    let bridge = bridge_name_in(&log);
+    let call = |title: String| json!({ "toolCallId": "o1", "title": title, "kind": "other", "rawInput": {} });
+    // Свой мост в формате Antigravity и безобидный инструмент агента — без карточки.
+    for title in [format!("Run mcp_{bridge}_browser_nav"), "Run mcp_notes_lookup".to_string()] {
+        let (card, answer) = acp_asks(&crew, &bot, call(title.clone())).await;
+        assert!(card.is_none(), "{title}: лишняя карточка {card:?}");
+        assert!(answer.contains("разрешение: yes"), "{title}: {answer}");
+    }
+    // Похожее на оплату, отправку или удаление — спрашивается.
+    for title in ["Run mcp_gmail_send_email", "Run mcp_files_delete_file", "Run mcp_shop_pay_invoice"] {
+        assert!(acp_asks(&crew, &bot, call(title.into())).await.0.is_some(), "{title} прошёл без карточки");
+    }
+    // Строгий режим спрашивает и безобидное.
+    crew.ok("PATCH", &format!("/api/bots/{bot}"), Some(json!({ "approval": "strict" }))).await;
+    assert!(acp_asks(&crew, &bot, call("Run mcp_notes_lookup".into())).await.0.is_some(), "строгий режим не спросил");
+}

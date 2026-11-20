@@ -879,6 +879,13 @@ fn describe_plan(app: &App, bot: &Bot, plan: &shellplan::Plan, d: &mut Described
 // Запросы агента ACP
 // ---------------------------------------------------------------------------
 
+/// Инструмент нашего моста в названии вызова: слово сразу после имени моста, за любыми разделителями.
+fn bridge_tool_in(title: &str) -> Option<String> {
+    let (_, after) = title.split_once(crate::drivers::acp::bridge_name())?;
+    let tool: String = after.trim_start_matches(|c: char| !c.is_ascii_alphanumeric()).chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    (!tool.is_empty()).then_some(tool)
+}
+
 /// Какой MCP-инструмент вызывает агент: `(сервер, инструмент)`. Из `rawInput` (`server`/`tool`) или из названия
 /// вида `mcp.сервер.инструмент` / `Tool: сервер/инструмент`.
 pub fn acp_mcp_tool(call: &Value) -> Option<(String, String)> {
@@ -888,6 +895,13 @@ pub fn acp_mcp_tool(call: &Value) -> Option<(String, String)> {
         return Some((server, tool));
     }
     let title = call["title"].as_str().unwrap_or_default().trim();
+    // Наш мост узнаём по его секретному имени, где бы оно ни стояло и чем бы ни было отделено: Codex пишет
+    // «mcp.<мост>.<инструмент>», Claude «mcp__<мост>__<инструмент>», Antigravity «Run mcp_<мост>_<инструмент>», а новый
+    // агент напишет по-своему. Раньше каждый формат дописывали руками, и Gemini на каждом шаге ждал карточку
+    // (Маркетолог X, 19.11.2026). Имени моста посторонний сервер не знает, так что подделать его нельзя.
+    if let Some(tool) = bridge_tool_in(title) {
+        return Some((crate::drivers::acp::bridge_name().to_string(), tool));
+    }
     let (title, had_tool) = match title.strip_prefix("Tool:") {
         Some(t) => (t.trim(), true),
         None => (title, false),
@@ -1075,5 +1089,17 @@ mod tests {
         assert_eq!(acp_mcp_tool(&json!({ "title": "Run shell command" })), None);
         // Название без разделителя сервера — не наш инструмент.
         assert_eq!(acp_mcp_tool(&json!({ "title": "mcp.browser_nav" })), None);
+    }
+
+    #[test]
+    fn our_bridge_is_recognised_in_any_agents_naming_and_a_lookalike_is_not() {
+        let bridge = crate::drivers::acp::bridge_name();
+        // Codex, Claude, Antigravity и выдуманный новый формат.
+        for title in [format!("mcp.{bridge}.browser_nav"), format!("mcp__{bridge}__browser_nav"), format!("Run mcp_{bridge}_browser_nav"), format!("Call {bridge} -> browser_nav(url)")] {
+            assert_eq!(acp_mcp_tool(&json!({ "title": title })), Some((bridge.to_string(), "browser_nav".into())), "{title}");
+        }
+        // Сервер с похожим, но не нашим именем, и пустой инструмент — не мост.
+        assert_eq!(acp_mcp_tool(&json!({ "title": "Run mcp_deloist_browser_0000000000000000_browser_nav" })), None);
+        assert_eq!(acp_mcp_tool(&json!({ "title": format!("Run mcp_{bridge}_") })), None);
     }
 }

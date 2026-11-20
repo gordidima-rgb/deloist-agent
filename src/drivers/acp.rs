@@ -1942,7 +1942,19 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
             None => check(our_tool_for(kind), ""),
         }
     };
-    let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || always || (!ours && crate::tools::needs_approval(req.app, bot, our_tool_for(kind)));
+    // Всё, что не запрещено, — разрешено. Вызов без команды, без файлов и не удаление (инструмент самого агента или
+    // его MCP-сервера) — не команда: раньше он считался «самым опасным» run_command и в рутинах спрашивался на каждом
+    // шаге. Теперь он спрашивается, только если по названию похож на опасное (оплата, отправка, удаление, публикация)
+    // или бот в строгом режиме. Команды, файлы, ключи, выпуск и «Всегда спрашивать» проверяются как прежде.
+    // Без имени проверять нечего: пустой запрос спрашивается, как раньше.
+    let name = mcp.as_ref().map_or_else(|| call["title"].as_str().unwrap_or_default().trim().to_string(), |(_, tool)| tool.replace('_', " "));
+    let opaque = kind == "other" && !name.is_empty() && paths.is_empty() && command.trim().is_empty() && shell_command.trim().is_empty() && title_command.is_empty();
+    let policy_ask = if opaque {
+        bot.approval == "strict" || crate::grants::risky_kind(&name).is_some()
+    } else {
+        crate::tools::needs_approval(req.app, bot, our_tool_for(kind))
+    };
+    let mut ask = releases || touch.is_some() || guarded_edit || conflicting_known || always || (!ours && policy_ask);
     // Команда только названием (Antigravity), которая по строгому разбору лишь читает: карточка не нужна, как у своего `run_command`.
     if ask && !always && !releases && touch.is_none() && !conflicting_known && !title_command.is_empty()
         && crate::tools::acp_title_command_is_read_only(req.app, bot, title_command)
