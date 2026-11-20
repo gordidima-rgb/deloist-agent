@@ -4,6 +4,34 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.9] — 2026-11-20
+
+- **Move bots between a PC and the cloud.** The bot menu and the Team screen can move selected bots to the cloud
+  and back, or mark a bot "cloud only" so it never starts on this PC — including through delegations and workflows.
+  The whole set travels: skills, routines, instructions, memory and access settings. Secrets are stripped, integrity
+  is checked with a checksum, and repeating a transfer never duplicates bots. Oversized parts are skipped with a
+  report and left on the source. Device-to-device transfers use the same authenticated channel as cloud commands.
+
+- **Headless server build for Linux.** The `--no-default-features` build no longer pulls desktop dependencies;
+  the server passes the voice tests and compiles without warnings.
+
+- **Folder isolation in the Linux container.** Personal bot folders are created with 0700 and team folders with 2770;
+  `tools/cloud/verify-isolation.sh` checks the permissions after deployment.
+
+- **Avatar emotions for every event.** The event map now covers tasks, a successful delegation and an escalating
+  level, so the avatar reacts to all described situations rather than only some of them.
+
+- **Bot order and avatar state.** Bots can be reordered by dragging in Settings; a bot card no longer opens on its
+  own until you click it; the avatar has a status dot.
+
+- **Ember kit: messengers and limits.** Local icons for all 52 messengers, and usage amounts shown against the cap
+  (`{spent} of {cap}`).
+
+- **Catalog: agent behaviour checks.** All 41 catalog agents now fill in `behavior.require` and `behavior.forbid`;
+  `tools/check_agents.mjs` validates 32 specialists.
+
+- **Windows reminders.** Reminders are shown under the Deloist identity instead of the built-in agent.
+
 - **File mode ("This computer").** A file on this computer outside the bot's folders (its workspace and project folders)
   is read and written by a bot only inside a folder the person allowed — via the "This computer" button on a one-line
   card. One click allows that one file; the card also offers "in this conversation" and "always allow here", remembered
