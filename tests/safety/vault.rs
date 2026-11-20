@@ -30,7 +30,7 @@ fn fixture() -> Value {
                 {
                     "id": "bw-good", "type": 1, "name": "Example",
                     "login": {
-                        "username": "anna@example.com", "password": BW_SECRET, "totp": "654321",
+                        "username": "anna@example.com", "password": BW_SECRET, "totp": LOCAL_TOTP,
                         "uris": [{ "uri": "example.com" }]
                     }
                 },
@@ -160,7 +160,7 @@ async fn bitwarden_unlock_lists_and_locks_without_leaking_secrets() {
     // Ни один ответ не содержит пароля, кода или ключа сессии.
     for answer in [&state, &unlocked, &logins] {
         let text = answer.to_string();
-        for secret in [BW_SECRET, SESSION, MASTER, "654321"] {
+        for secret in [BW_SECRET, SESSION, MASTER, LOCAL_TOTP] {
             assert!(!text.contains(secret), "секрет {secret} в ответе: {text}");
         }
     }
@@ -244,7 +244,10 @@ async fn onepassword_token_is_checked_kept_encrypted_and_removable() {
 
 /// Секреты фикстуры. В ответах инструментов, событиях, журнале и данных программы их быть не должно.
 const LOCAL_SECRET: &str = "pw-local-6604";
-const LOCAL_TOTP: &str = "654321";
+/// Код длинный и без узора: папку данных проверяем целиком, вместе с профилем Chrome, а Chrome сам скачивает от Google
+/// сжатый файл экспериментов (`VariationsSeedV2`), где «654321» встречалось просто так — тест падал «под нагрузкой»
+/// в зависимости от того, какой файл пришёл в этот запуск (20.11.2026).
+const LOCAL_TOTP: &str = "40719362";
 const LOCAL_LOGIN: &str = "bw:bw-local";
 
 /// Страница входа: логин, пароль, код. Страница сама присылает значение поля пароля в `/report`,
