@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 
 use crate::voice::{fail, ok};
 use crate::App;
+pub use crate::voice::LAST_BOT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Action {
@@ -83,9 +84,6 @@ pub struct Config {
     /// «Голос уходит»: id бота или `last` — последнему, с кем говорили.
     pub voice_target: String,
 }
-
-/// «Голос уходит» последнему боту, с кем говорили.
-pub const LAST_BOT: &str = "last";
 
 /// Ключ в настройках (`state.json`).
 const SETTINGS_KEY: &str = "hotkeys";
@@ -381,11 +379,6 @@ fn state(app: &App) -> &'static Hotkeys {
         let status = Action::ALL.into_iter().map(|a| (a, Status::Unavailable)).collect();
         Hotkeys { config: Mutex::new(config), status: Mutex::new((0, status)), applied: Condvar::new(), hwnd: AtomicIsize::new(0) }
     })
-}
-
-/// Кому уходит голос: id бота или `last`.
-pub fn voice_target(app: &App) -> String {
-    state(app).config.lock().unwrap().voice_target.clone()
 }
 
 /// Одно действие за раз: второе нажатие, пока открыт экран выбора или подсказка, ничего не делает.

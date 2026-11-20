@@ -216,7 +216,7 @@ pub fn hold_off_sleep() {
 pub fn hold_off_sleep() {}
 
 /// Окно закрыто и большая часть памяти больше не нужна: возвращаем её системе, а не ждём, пока та попросит.
-#[cfg(windows)]
+#[cfg(all(windows, feature = "desktop"))]
 pub fn release_idle_memory() {
     use windows_sys::Win32::System::Memory::SetProcessWorkingSetSizeEx;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
@@ -226,7 +226,7 @@ pub fn release_idle_memory() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), feature = "desktop"))]
 pub fn release_idle_memory() {}
 
 /// Что на этой системе и в этой сборке работает, а что нет. Интерфейс прячет кнопки того, чего нет.

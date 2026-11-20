@@ -330,6 +330,7 @@ fn save_session(data_dir: &Path, key: &(String, String), value: Option<(String, 
 }
 
 /// Погасить агентов всех ботов: при выходе программы.
+#[cfg(feature = "desktop")]
 pub fn shutdown() {
     let agents: Vec<Arc<Agent>> = pool().lock().unwrap().drain().map(|(_, agent)| agent).collect();
     for agent in agents {

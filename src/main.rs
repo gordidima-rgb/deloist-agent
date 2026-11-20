@@ -396,6 +396,7 @@ fn run_server(root: &Path) -> Result<(), String> {
     })
 }
 
+#[cfg(feature = "desktop")]
 const DEFAULT_PORT: u16 = 18899;
 
 #[cfg(not(feature = "desktop"))]

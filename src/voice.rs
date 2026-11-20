@@ -19,6 +19,9 @@ use crate::App;
 // Облачное распознавание (deloist.ru) живёт в private/src/voice_cloud.rs; в публичной сборке там заглушка.
 pub use crate::voice_cloud::transcribe;
 
+/// Маркер «последнему, с кем говорили» в настройке голоса.
+pub const LAST_BOT: &str = "last";
+
 /// Те же пределы, что у распознавания на сайте (SpeechKit, синхронный режим).
 pub const RATES: [u32; 3] = [8000, 16000, 48000];
 pub const MAX_BYTES: usize = 1024 * 1024;
@@ -127,15 +130,38 @@ pub fn announce(app: &App, mut event: Value) {
     app.turns.emit(event);
 }
 
-/// Кому уходит голос: бот из настройки «Голос уходит», а если там `last` или бота уже нет —
-/// последний, с кем говорили.
-#[cfg(feature = "desktop")]
+/// Кому уходит голос: бот из сохранённой настройки «Голос уходит», а если там `last` или бота уже нет —
+/// последний, с кем говорили. Чтение идёт из хранилища, чтобы работать и в сборке без окна.
 pub async fn voice_bot(app: &App) -> Option<String> {
-    let target = crate::hotkeys::voice_target(app);
-    if target != crate::hotkeys::LAST_BOT && app.store.bot(&target).is_some() {
+    let target = persisted_voice_target(app);
+    if target != LAST_BOT && app.store.bot(&target).is_some() {
         return Some(target);
     }
     last_bot(app).await
+}
+
+/// Сохранённая настройка голоса из `state.json`: `hotkeys.voiceTarget` или `settings.voiceTarget`.
+fn persisted_voice_target(app: &App) -> String {
+    let settings = app.store.settings();
+    voice_target_from(&settings)
+}
+
+fn voice_target_from(settings: &crate::store::Settings) -> String {
+    let from_hotkeys = settings
+        .extra
+        .get("hotkeys")
+        .and_then(|v| v.get("voiceTarget"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if !from_hotkeys.is_empty() {
+        return from_hotkeys.to_string();
+    }
+    let from_settings = settings.voice_target.trim();
+    if !from_settings.is_empty() {
+        return from_settings.to_string();
+    }
+    LAST_BOT.to_string()
 }
 
 #[cfg(feature = "desktop")]
@@ -212,6 +238,7 @@ async fn take_pending() -> Response {
 
 /// Микрофон разрешён только своей странице: окно и так не уходит со своего адреса,
 /// но проверка адреса остаётся на случай чужого кадра.
+#[cfg(any(test, all(windows, feature = "desktop")))]
 pub fn mic_allowed(uri: &str, origin: &str) -> bool {
     uri == origin || uri.starts_with(&format!("{origin}/"))
 }
@@ -338,5 +365,17 @@ mod tests {
         assert!(mic_allowed("http://127.0.0.1:18899", origin));
         assert!(!mic_allowed("http://127.0.0.1:18899.evil.com/", origin));
         assert!(!mic_allowed("https://example.com/", origin));
+    }
+
+    #[test]
+    fn persisted_voice_target_reads_hotkeys_and_settings() {
+        let mut settings = crate::store::Settings::default();
+        assert_eq!(voice_target_from(&settings), LAST_BOT);
+        settings.voice_target = "bot_dock".into();
+        assert_eq!(voice_target_from(&settings), "bot_dock");
+        settings.extra.insert("hotkeys".into(), json!({ "voiceTarget": "bot_hotkey" }));
+        assert_eq!(voice_target_from(&settings), "bot_hotkey");
+        settings.extra.insert("hotkeys".into(), json!({ "voiceTarget": "  " }));
+        assert_eq!(voice_target_from(&settings), "bot_dock");
     }
 }
