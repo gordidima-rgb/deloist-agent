@@ -141,14 +141,27 @@ async fn always_here_covers_the_same_bot_tool_and_folder_only() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn auto_mode_still_allows_ordinary_external_writes() {
-    let (crew, fake, bot) = setup("ap-auto-outside", &[]).await;
+async fn auto_mode_asks_for_files_of_this_computer_but_not_for_its_own_folder() {
+    let (crew, fake, bot) = setup("ap-auto-files", &[]).await;
     set_mode(&crew, &bot, "auto").await;
-    let dir = outside("auto-outside");
-    let file = dir.join("a").join("ordinary.txt");
-    let cards = turn_calls(&crew, &fake, &bot, vec![write(&file)]).await;
-    assert!(cards.is_empty());
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "x");
+    let dir = outside("auto-files");
+
+    // Файл этого компьютера вне папок бота — карточка «Этот компьютер» и в «Свободе действий».
+    let cards = turn_calls(&crew, &fake, &bot, vec![write(&dir.join("a").join("out.txt"))]).await;
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    assert_eq!(cards[0]["allowLabel"], "Этот компьютер", "{cards:?}");
+    assert_eq!(cards[0]["tool"], "write_file");
+    assert!(!dir.join("a").join("out.txt").exists(), "записано без разрешения");
+    // Разрешили папку «всегда» — дальше пишется без карточки.
+    turn(&crew, &fake, &bot, write(&dir.join("a").join("out.txt")), Some("always")).await.expect("карточка на запись");
+    let cards = turn_calls(&crew, &fake, &bot, vec![write(&dir.join("a").join("out.txt"))]).await;
+    assert!(cards.is_empty(), "{cards:?}");
+    assert_eq!(std::fs::read_to_string(&dir.join("a").join("out.txt")).unwrap(), "x");
+
+    // Соседняя папка — снова карточка.
+    let cards = turn_calls(&crew, &fake, &bot, vec![write(&dir.join("a-evil").join("out.txt"))]).await;
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    assert!(!dir.join("a-evil").join("out.txt").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

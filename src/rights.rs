@@ -45,8 +45,8 @@ pub fn summary(app: &App, bot: &Bot) -> Value {
     for (label, name, args) in probes() {
         if tools::mode_needs_approval_for(app, &probe_bot, name, &args) { asks.push(label.to_string()) } else { allowed.push(label.to_string()) }
     }
-    // Что спрашивается в любом режиме, даже в «Свободе действий».
-    asks.push("в любом режиме: выпуск наружу (push, релиз, зеркало), файлы с ключами и ключи SSH, автозапуск, .git и программы".into());
+    // Что спрашивается в любом режиме, даже в «Свободе действий»: файлы этого компьютера — файловый режим 0.4.9.
+    asks.push("в любом режиме: выпуск наружу (push, релиз, зеркало), файлы с ключами и ключи SSH, автозапуск, .git, программы и файлы этого компьютера вне папок бота".into());
     let never = vec!["служебные файлы и секреты программы: команды, которые к ним тянутся, отклоняются".to_string()];
     let messengers: Vec<Value> = app.turns.messengers.entries(&bot.id).into_iter().map(|m| {
         let rules = crate::messengers::RULES.iter().map(|r| format!("{} — {}", r.label().to_lowercase(), level_text(m["rules"][r.key()].as_str().unwrap_or("ask")))).collect::<Vec<_>>();

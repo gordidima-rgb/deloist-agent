@@ -707,8 +707,8 @@ pub async fn request_confirmation(app: &Arc<App>, bot_id: &str, question: Confir
     matches!(ask_human(app, bot_id, question).await, ApprovalResult::Allowed)
 }
 
-async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote, exact: String) -> ApprovalResult {
-    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label: None, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human, exact: Some(exact) }).await
+async fn request_approval(app: &Arc<App>, bot_id: &str, tool: &str, title: &str, detail: &str, allow_label: Option<&str>, scope: Option<crate::grants::Scope>, human: Option<crate::describe::Described>, sensitive: bool, remote: crate::grants::Remote, exact: String) -> ApprovalResult {
+    ask_human(app, bot_id, Confirmation { tool, title, detail, allow_label, deny_label: None, timeout: APPROVAL_TIMEOUT, scope, room: None, danger: false, sensitive, remote, human, exact: Some(exact) }).await
 }
 
 /// Действие разрешено правилом, которое живёт вне `Perms` (старые разрешения сайта у бота).
@@ -3058,7 +3058,9 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
         };
         let scope = crate::grants::scope_for(app, bot, &call.name, &call.args);
         let remote = crate::grants::remote_ok(&call.name, &call.args, scope.as_ref(), touch.is_some(), false, &app.store.workspace(&bot.id));
-        match request_approval(app, &bot.id, &call.name, title, &detail, scope, human, touch.is_some(), remote, call_key(&call.name, &call.args)).await {
+        // Файловый режим: кнопка разрешения — «Этот компьютер», а не «Разрешить один раз».
+        let file_switch = crate::tools::file_mode_place(app, &bot.id, &call.name, &call.args).is_some();
+        match request_approval(app, &bot.id, &call.name, title, &detail, file_switch.then_some("Этот компьютер"), scope, human, touch.is_some(), remote, call_key(&call.name, &call.args)).await {
             ApprovalResult::Allowed => {}
             ApprovalResult::Denied => return ("denied".into(), "Человек не разрешил выполнение.".into()),
             ApprovalResult::Waiting(text) => return ("timeout".into(), text),

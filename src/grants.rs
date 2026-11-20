@@ -884,6 +884,20 @@ pub fn scope_for(app: &crate::App, bot: &crate::store::Bot, name: &str, args: &V
                 Err(_) => Scope::new(name, "", "", "write", raw).once_only(),
             }
         }
+        // Файловый режим: файл этого компьютера вне папок бота разрешается на его папку; список
+        // папки открывает саму папку. Путь, который выполнение отобьёт (секреты, ссылки, ssh-config)
+        // или который лежит в папках бота, карточкой не спрашивается: это запасной вид без памяти.
+        "read_file" | "list_files" => match crate::tools::file_mode_place(app, &bot.id, name, args) {
+            Some((folder, label)) => {
+                let scope = Scope::new(name, &folder, "", "read", &label);
+                if protected_folder(Path::new(&folder)) {
+                    scope.once_only()
+                } else {
+                    scope
+                }
+            }
+            None => Scope::new(name, "", "", "read", arg(args, "path")).once_only(),
+        },
         "generate_image" => Scope::new(name, ANYWHERE, "pay", "call", ""),
         // Письмо от имени человека: вид `send`, каждое — отдельное решение (`mail::scope`).
         _ if crate::mail::is_tool(name) => crate::mail::scope(app, bot, name, args),

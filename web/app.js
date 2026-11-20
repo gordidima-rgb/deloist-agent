@@ -3476,15 +3476,17 @@ function approvalScope(ev) {
 }
 
 // Кнопки решения по порядку: действие, затем «в разговоре» и «всегда», затем отказ.
+// Свою подпись главной кнопки ставит файловый режим: «Этот компьютер» вместо «Разрешить один раз».
 function approvalActions(ev) {
+  const primary = ev.allowLabel ? tr(ev.allowLabel) : tr('Разрешить один раз');
   if (!ev.grantable) {
     return [
-      { answer: 'once', label: ev.allowLabel ? tr(ev.allowLabel) : tr('Разрешить') },
+      { answer: 'once', label: primary },
       { answer: 'deny', label: ev.denyLabel ? tr(ev.denyLabel) : tr('Отклонить') },
     ];
   }
   return [
-    { answer: 'once', label: tr('Разрешить один раз') },
+    { answer: 'once', label: primary },
     ...(ev.conversation ? [{ answer: 'conversation', label: tr('Разрешить в этом разговоре') }] : []),
     ...(ev.always !== false ? [{ answer: 'always', label: tr('Всегда разрешать здесь') }] : []),
     { answer: 'deny', label: tr('Запретить') },

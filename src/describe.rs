@@ -430,6 +430,27 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
             with_note(&mut text, &mut d.risk, guard_note(app, &bot.id, raw));
             d.text = text;
         }
+        "read_file" | "list_files" => {
+            // Файловый режим: файл этого компьютера вне папок бота. Карточка — одна строка
+            // о файле и его папке; запасной текст — для пути, который карточка не открывала.
+            let raw = arg(args, "path");
+            let (folder, label) = crate::tools::file_mode_place(app, &bot.id, name, args)
+                .unwrap_or_else(|| (String::new(), file_name(raw)));
+            d.class = "read";
+            d.place = "outside";
+            d.risk = "medium";
+            d.text = if name == "list_files" {
+                ph!(
+                    format!("{me} хочет посмотреть список файлов папки «{folder}» на этом компьютере"),
+                    format!("{me} wants to list the files of the folder “{folder}” on this computer")
+                )
+            } else {
+                ph!(
+                    format!("{me} хочет прочитать файл с этого компьютера: «{label}» (папка «{folder}»)"),
+                    format!("{me} wants to read the file “{label}” on this computer (folder “{folder}”)")
+                )
+            };
+        }
         "run_command" => describe_command(app, bot, arg(args, "command"), &mut d),
         "web_fetch" => {
             let label = url_label(arg(args, "url"));

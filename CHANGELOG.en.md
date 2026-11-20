@@ -4,6 +4,14 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+- **File mode ("This computer").** A file on this computer outside the bot's folders (its workspace and project folders)
+  is read and written by a bot only inside a folder the person allowed — via the "This computer" button on a one-line
+  card. One click allows that one file; the card also offers "in this conversation" and "always allow here", remembered
+  per folder and for this bot only. The allowed task resumes on its own, and an answer after a pause continues it exactly
+  once. It asks in every mode, including "free rein"; nothing changes inside the bot's own folders. Secrets, keys and
+  ssh-config are not opened by the card, as before; real paths are compared against the allowed folder, so a junction or
+  symlink pointing outward gains nothing.
+
 - **Linux archives in every release.** The GitHub release gets `Deloist-linux-x86_64.tar.gz` (the app with a window),
   `deloist-server-linux-x86_64.tar.gz` (server without a window) and `SHA256SUMS-linux.txt`; the README links "Linux (beta)".
   The server image of a release is published with its version number and `latest`.

@@ -110,19 +110,19 @@ fn base_tool_defs() -> Value {
     json!([
         function(
             "list_files",
-            "Показать файлы и папки. Без подтверждения: своя папка и любая папка на компьютере, кроме секретов.",
+            "Показать файлы и папки. Своя папка — без подтверждения; папка этого компьютера вне твоих папок — человек подтверждает карточкой «Этот компьютер» и может запомнить папку.",
             json!({ "path": { "type": "string", "description": "Относительный путь — в своей папке (по умолчанию её корень), абсолютный (C:\\…) — где угодно." } }),
             &[],
         ),
         function(
             "read_file",
-            "Прочитать текстовый файл. Без подтверждения: своя папка и любой файл на компьютере, кроме секретов.",
+            "Прочитать текстовый файл. Своя папка и папки этого компьютера, которые человек уже разрешил, — без подтверждения; новый файл с компьютера — карточка «Этот компьютер», человек может запомнить папку. Секреты и файлы с ключами так не открываются: ключам нужна своя карточка.",
             json!({ "path": { "type": "string", "description": "Относительный путь — в своей папке, абсолютный (C:\\…) — где угодно." } }),
             &["path"],
         ),
         function(
             "write_file",
-            "Создать или перезаписать текстовый файл. Родительские папки создаются сами. В своей папке — без подтверждения, вне её — человек может спросить разрешение.",
+            "Создать или перезаписать текстовый файл. Родительские папки создаются сами. В своей папке — без подтверждения, вне её — карточка «Этот компьютер» (человек может запомнить папку), в любом режиме.",
             json!({
                 "path": { "type": "string", "description": "Относительный путь — в своей папке, абсолютный (C:\\…) — вне её." },
                 "content": { "type": "string", "description": "Полное содержимое файла." },
@@ -559,6 +559,13 @@ pub(crate) fn mode_needs_approval_for(app: &App, bot: &Bot, name: &str, args: &V
         }
         return true;
     }
+    // Файловый режим (0.4.9): файл этого компьютера вне папок бота читается и пишется только
+    // с разрешения человека на ту папку — кнопка «Этот компьютер» на карточке, «в этом разговоре»
+    // или «всегда» (разрешения помнит `grants`). В любом режиме: доступ к файлам этого компьютера
+    // «Свобода действий» не снимает, как выпуск наружу и ключи.
+    if file_mode_place(app, &bot.id, name, args).is_some() {
+        return true;
+    }
     if crate::routine_tools::is_routine_tool(name) {
         return crate::routine_tools::needs_approval(app, bot, name, args);
     }
@@ -957,6 +964,72 @@ pub(crate) fn homes(app: &App, bot_id: &str) -> Vec<std::path::PathBuf> {
     let mut out = crate::rooms::projects_for_turn(app, bot_id);
     out.extend(crate::rooms::room_homes(app, bot_id));
     out
+}
+
+/// Путь лежит в папках бота: его воркспейс (у бота в команде — общая папка команды) и папки проектов.
+/// Обе стороны сравниваются настоящими (каноническими): ссылка (junction, symlink) изнутри наружу не проходит.
+fn in_runtime(app: &App, bot_id: &str, real: &Path) -> bool {
+    let real = crate::reach::real_path(real).unwrap_or_else(|| real.to_path_buf());
+    let mut roots = vec![app.store.workspace(bot_id)];
+    roots.extend(homes(app, bot_id));
+    roots.iter().any(|root| {
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        real.starts_with(&root)
+    })
+}
+
+/// Настоящий путь файлового вызова, если он ведёт к файлу этого компьютера вне папок бота.
+/// `None` — вызов не файловый режим: путь в папках бота, относительный, это секрет, ключи,
+/// ssh-config или путь, который выполнение всё равно отобьёт.
+fn outside_runtime_real(app: &App, bot_id: &str, name: &str, args: &Value) -> Option<std::path::PathBuf> {
+    let raw = args.get("path").and_then(Value::as_str).unwrap_or_default();
+    if raw.trim().is_empty() || !matches!(name, "read_file" | "list_files" | "write_file") {
+        return None;
+    }
+    let real = if name == "write_file" {
+        // Полный путь записи со всеми её отказами (секреты, потоки файлов, memory.md): то, что
+        // запись отобьёт сама, карточкой не спрашивают. Относительный путь всегда в своей папке.
+        if !crate::reach::is_absolute_like(raw) {
+            return None;
+        }
+        write_target(app, bot_id, raw).ok()?.0
+    } else {
+        // Файл с ключами — своя карточка `secret`; ssh-config читается без карточки; относительный
+        // путь — в своей папке.
+        if crate::keys::call_touch(name, args).is_some() || crate::keys::is_ssh_config(raw) || !crate::reach::is_absolute_like(raw) {
+            return None;
+        }
+        let real = crate::reach::real_path(Path::new(raw))?;
+        // Файл, который нельзя проверить (ссылки, секреты): выполнение откажет, карточка не нужна.
+        if !crate::reach::safe_read_links(&real)
+            || crate::reach::secret_reason(&real, &app.store.data_dir(), &app.store.workspace(bot_id)).is_some()
+        {
+            return None;
+        }
+        real
+    };
+    if in_runtime(app, bot_id, &real) {
+        return None;
+    }
+    Some(real)
+}
+
+/// Файловый режим (0.4.9): файл с этого компьютера вне папок бота. Возвращает папку, которую
+/// просит бот, и имя файла или папки: читать и писать такие файлы бот может только в папке,
+/// которую человек явно разрешил (кнопка «Этот компьютер» на карточке, «в этом разговоре»
+/// или «всегда»), и в любом режиме. Папка — настоящая: ссылку наружу она не покрывает.
+pub(crate) fn file_mode_place(app: &App, bot_id: &str, name: &str, args: &Value) -> Option<(String, String)> {
+    let real = outside_runtime_real(app, bot_id, name, args)?;
+    let folder = match name {
+        // Список папки открывает саму папку, а не её родителя.
+        "list_files" => real.clone(),
+        _ => real.parent()?.to_path_buf(),
+    };
+    let label = real
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::reach::display(&real));
+    Some((crate::reach::display(&folder), label))
 }
 
 /// Файл автозапуска, внутренность `.git` или запускаемый файл (`.exe`, `.bat`, `.js`, `.lnk`…): запись туда нужна только
