@@ -226,6 +226,7 @@ async fn collect(who: &str, child: &mut Child) -> Result<(ExitStatus, Vec<u8>), 
 
 /// Разбор адреса для тестов. Принимает только `http://127.0.0.1:<порт>`, `http://localhost:<порт>`
 /// или `http://[::1]:<порт>` без пути, и только если стоит второй маркер `CREW_TEST_MODE=1`.
+#[cfg(debug_assertions)]
 fn parse_test_origin(raw: Option<&str>, marker: Option<&str>) -> Option<String> {
     if marker.map(str::trim) != Some("1") {
         return None;
