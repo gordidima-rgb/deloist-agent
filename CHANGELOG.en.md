@@ -4,6 +4,16 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.8] — 2026-11-20
+
+Bots on any model work without needless prompts, set up the page watcher themselves, and routines no longer pile up
+pauses on a limit.
+
+- **No needless permission prompts on Gemini or any other agent.** The program recognises its own tools by their secret
+  name whatever format the agent uses: each format (GPT, Claude, Gemini) used to be added by hand, and on Gemini every bot
+  action waited for a card, so unattended routines stalled. Plus one general rule, "what is not forbidden is allowed": an
+  agent action with no command and no files asks only if it looks like paying, sending, deleting or publishing, or if the
+  bot is in strict mode. Commands, files, keys, releases and the "Always ask" list are checked as before.
 - **Routines do not pile up pauses on a limit.** While a model was on a limit, each routine term used to add one more
   paused run, and when the pause ran out they woke one by one every 30 seconds with "The limit has reset". Now a new
   routine term replaces its stuck run, so only one waits.
@@ -15,6 +25,7 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
   only reads pages, like the bot's browser. Bots learn about it from their help and offer it to routines that check a page
   for something new. `list_routines` shows which routine has a watcher and its last error.
 - The page watcher trims tails such as ";" at the end of an address or selector left by copying.
+- Linux build: tests that check only Windows rules no longer run on Linux.
 
 ## [0.4.7] — 2026-11-19
 
