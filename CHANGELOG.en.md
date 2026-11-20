@@ -4,6 +4,10 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+- **Linux archives in every release.** The GitHub release gets `Deloist-linux-x86_64.tar.gz` (the app with a window),
+  `deloist-server-linux-x86_64.tar.gz` (server without a window) and `SHA256SUMS-linux.txt`; the README links "Linux (beta)".
+  The server image of a release is published with its version number and `latest`.
+
 ## [0.4.8] — 2026-11-20
 
 Bots on any model work without needless prompts, set up the page watcher themselves, and routines no longer pile up

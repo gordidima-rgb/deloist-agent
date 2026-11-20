@@ -17,6 +17,7 @@
 [![Telegram](https://img.shields.io/badge/Telegram-deloist__app-26a5e4?logo=telegram&logoColor=white)](https://t.me/deloist_app)
 
 **[⬇ Скачать для Windows](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-Setup.exe)** ·
+[Linux (бета)](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-linux-x86_64.tar.gz) ·
 [Сайт](https://deloist.ru) ·
 [Что нового](https://github.com/gordidima-rgb/deloist-agent/releases) ·
 [Сообщить об ошибке](../../issues/new?template=bug.yml) ·
@@ -270,7 +271,7 @@ flowchart LR
 <details>
 <summary><b>А на Mac или Linux?</b></summary>
 
-Пока только Windows.
+Основная платформа — Windows. Linux в бете: в каждом выпуске есть [Deloist-linux-x86_64.tar.gz](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-linux-x86_64.tar.gz) (программа с окном, нужен WebKitGTK 4.1) и [deloist-server-linux-x86_64.tar.gz](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/deloist-server-linux-x86_64.tar.gz) (без окна, `deloist --server`), контрольные суммы — в `SHA256SUMS-linux.txt`. Mac пока нет.
 </details>
 
 ## Сборка из исходников

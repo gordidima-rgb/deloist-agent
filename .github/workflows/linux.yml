@@ -72,6 +72,9 @@ jobs:
     needs: [server, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Архивы прикладываются к выпуску этого тега (его создаёт release.ps1 до того, как тег приходит сюда).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -102,6 +105,14 @@ jobs:
           path: |
             dist/Deloist-linux-x86_64.tar.gz
             dist/deloist-server-linux-x86_64.tar.gz
+      # Раньше архивы жили только артефактом прогона (90 дней) и в выпуск не попадали.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd dist
+          sha256sum Deloist-linux-x86_64.tar.gz deloist-server-linux-x86_64.tar.gz > SHA256SUMS-linux.txt
+          gh release upload "$GITHUB_REF_NAME" Deloist-linux-x86_64.tar.gz deloist-server-linux-x86_64.tar.gz SHA256SUMS-linux.txt --clobber --repo "$GITHUB_REPOSITORY"
 
   docker:
     name: docker image (not pushed)
@@ -118,7 +129,7 @@ jobs:
   image:
     name: publish server image
     # feat/stand — до того, как этот файл попадёт в main (ручной запуск GitHub видит только из main).
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/stand'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/stand' || startsWith(github.ref, 'refs/tags/v')))
     needs: [server]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -136,9 +147,14 @@ jobs:
       - name: Image tag
         id: tag
         run: |
+          # Выпуск v0.4.9 -> образ :0.4.9 и :latest; main -> :main.
+          extra=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then t="${{ inputs.tag }}";
-          elif [ "${{ github.ref }}" = "refs/heads/feat/stand" ]; then t="stand"; else t="main"; fi
+          elif [ "${{ github.ref }}" = "refs/heads/feat/stand" ]; then t="stand";
+          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then t="${GITHUB_REF_NAME#v}"; extra="ghcr.io/gordidima-rgb/deloist-server:latest";
+          else t="main"; fi
           echo "tag=$t" >> "$GITHUB_OUTPUT"
+          echo "extra=$extra" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -146,6 +162,7 @@ jobs:
           tags: |
             ghcr.io/gordidima-rgb/deloist-server:${{ steps.tag.outputs.tag }}
             ghcr.io/gordidima-rgb/deloist-server:sha-${{ github.sha }}
+            ${{ steps.tag.outputs.extra }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha

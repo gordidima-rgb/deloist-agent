@@ -17,6 +17,7 @@ They sort your email, check stock and answer customers, and ask you before any i
 [![Telegram](https://img.shields.io/badge/Telegram-deloist__app-26a5e4?logo=telegram&logoColor=white)](https://t.me/deloist_app)
 
 **[⬇ Download for Windows](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-Setup.exe)** ·
+[Linux (beta)](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-linux-x86_64.tar.gz) ·
 [Website](https://deloist.com) ·
 [What's new](https://github.com/gordidima-rgb/deloist-agent/releases) ·
 [Report a bug](../../issues/new?template=bug.yml) ·
@@ -268,7 +269,7 @@ No. Ready-made bots and skills install from the catalog in one click, and you gi
 <details>
 <summary><b>What about Mac or Linux?</b></summary>
 
-Windows only for now.
+Windows is the main platform. Linux is in beta: every release has [Deloist-linux-x86_64.tar.gz](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/Deloist-linux-x86_64.tar.gz) (the app with a window, needs WebKitGTK 4.1) and [deloist-server-linux-x86_64.tar.gz](https://github.com/gordidima-rgb/deloist-agent/releases/latest/download/deloist-server-linux-x86_64.tar.gz) (no window, `deloist --server`), with checksums in `SHA256SUMS-linux.txt`. Mac is not supported yet.
 </details>
 
 ## Build from source
