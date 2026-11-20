@@ -1591,6 +1591,14 @@ impl Store {
         for sub in ["threads", "memory", "workspaces", "tmp", "rooms"] {
             tokio::fs::create_dir_all(data_dir.join(sub)).await?;
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = tokio::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700)).await;
+            for sub in ["threads", "memory", "workspaces", "tmp", "rooms"] {
+                let _ = tokio::fs::set_permissions(data_dir.join(sub), std::fs::Permissions::from_mode(0o700)).await;
+            }
+        }
         let state_file = data_dir.join("state.json");
         let mut must_write = false;
         let mut state = match tokio::fs::read_to_string(&state_file).await {
@@ -1635,6 +1643,11 @@ impl Store {
 
         for bot in &state.bots {
             tokio::fs::create_dir_all(data_dir.join("workspaces").join(&bot.id)).await?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = tokio::fs::set_permissions(data_dir.join("workspaces").join(&bot.id), std::fs::Permissions::from_mode(0o700)).await;
+            }
         }
 
         let store = Self {
@@ -2276,6 +2289,11 @@ impl Store {
             bot
         };
         tokio::fs::create_dir_all(self.workspace(&bot.id)).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = tokio::fs::set_permissions(self.workspace(&bot.id), std::fs::Permissions::from_mode(0o700)).await;
+        }
         self.persist().await?;
         Ok(bot)
     }
@@ -4792,6 +4810,11 @@ fn build_team_folder(root: &Path, room: &Room, names: &[(String, String)]) {
     let mut done = std::fs::read_to_string(&marker).unwrap_or_default();
     if std::fs::create_dir_all(&dir).is_err() {
         return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o2770));
     }
     let Ok(team_root) = std::fs::canonicalize(&dir) else { return };
     let fresh: Vec<&(String, String)> = names.iter().filter(|(id, _)| !done.lines().any(|l| l == id)).collect();
