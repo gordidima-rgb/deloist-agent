@@ -168,7 +168,7 @@ impl Ledger {
         line.push('\n');
         let _gate = self.write_gate.lock().await;
         if let Ok(mut file) = tokio::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("receipts.jsonl")).await {
-            if let Err(e) = file.write_all(line.as_bytes()).await {
+            if let Err(e) = write_line(&mut file, &line).await {
                 eprintln!("[ledger] не записал квитанцию: {e}");
             }
         }
@@ -347,7 +347,7 @@ impl Ledger {
         let file = tokio::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("journal.jsonl")).await;
         match file {
             Ok(mut file) => {
-                if let Err(e) = file.write_all(line.as_bytes()).await {
+                if let Err(e) = write_line(&mut file, &line).await {
                     eprintln!("[ledger] не записал журнал: {e}");
                 }
             }
@@ -369,7 +369,7 @@ impl Ledger {
         let _gate = self.write_gate.lock().await;
         let file = tokio::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("activity.jsonl")).await;
         if let Ok(mut file) = file {
-            if let Err(e) = file.write_all(line.as_bytes()).await {
+            if let Err(e) = write_line(&mut file, &line).await {
                 eprintln!("[ledger] не записал журнал решений: {e}");
             }
         }
@@ -436,4 +436,11 @@ mod tests {
         assert_eq!(ledger.today_json()["tokens"], 5_620, "в отчёте служебная память видна");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Строка журнала целиком на диске до того, как снят замок записи: tokio пишет файл в фоне, и без flush следующая
+/// запись или чтение могли разминуться с ней.
+async fn write_line(file: &mut tokio::fs::File, line: &str) -> std::io::Result<()> {
+    file.write_all(line.as_bytes()).await?;
+    file.flush().await
 }

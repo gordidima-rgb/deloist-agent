@@ -172,7 +172,13 @@ pub async fn save(store: &Store, bot_ids: &[String], raw_name: &str, bytes: &[u8
             match opened {
                 Ok(mut handle) => {
                     use tokio::io::AsyncWriteExt;
-                    if let Err(e) = handle.write_all(bytes).await {
+                    // Tokio пишет файл в фоне: без flush ответ «сохранено» уходил раньше данных, и под нагрузкой
+                    // читался пустой файл (полный прогон 20.11.2026: один из шести параллельных — пустой).
+                    let written = match handle.write_all(bytes).await {
+                        Ok(()) => handle.flush().await,
+                        Err(e) => Err(e),
+                    };
+                    if let Err(e) = written {
                         for path in made.iter().chain(std::iter::once(&abs)) {
                             let _ = tokio::fs::remove_file(path).await;
                         }

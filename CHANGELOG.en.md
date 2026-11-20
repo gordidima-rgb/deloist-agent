@@ -26,6 +26,8 @@ pauses on a limit.
   for something new. `list_routines` shows which routine has a watcher and its last error.
 - The page watcher trims tails such as ";" at the end of an address or selector left by copying.
 - Linux build: tests that check only Windows rules no longer run on Linux.
+- A chat attachment is on disk before the program answers "saved": under load a bot could read an empty file. The run,
+  decision and usage journals are written the same way.
 
 ## [0.4.7] — 2026-11-19
 
