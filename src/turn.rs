@@ -3034,8 +3034,9 @@ pub(crate) async fn execute_call_in(app: &Arc<App>, bot: &Bot, call: &ToolCall, 
             "type": "tool_start", "botId": bot.id, "callId": call.id, "name": call.name, "args": call.args,
         }));
     }
-    // Человек взял управление браузером в экране бота: следующий шаг ждёт, пока он вернёт его.
+    // Человек взял управление браузером в экране бота или перехватил экран ПК с телефона: ждём возврата.
     crate::screen::wait_released(app, &bot.id, cancel).await;
+    crate::remote_screen::wait_released(cancel).await;
     // Пока ждали, человек нажал «Стоп»: инструмент не запускаем, ни клик, ни команду.
     if cancel.is_cancelled() {
         return stopped(app, &bot.id);

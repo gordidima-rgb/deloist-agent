@@ -34,6 +34,14 @@ impl Relay {
         Err((503, UNAVAILABLE.to_string()))
     }
 
+    pub fn set_screen(&self, _app: &App, _id: &str, _enabled: bool, _confirm: Option<&str>) -> Result<(), Failure> {
+        Err((503, UNAVAILABLE.to_string()))
+    }
+
+    pub fn stop_screen(&self, _app: &App) -> Value {
+        crate::remote_screen::controller().stop(None).view()
+    }
+
     pub fn decide(&self, _app: &App, _req: &str, _allow: bool, _code: Option<&str>) -> Result<Value, Failure> {
         Err((503, UNAVAILABLE.to_string()))
     }

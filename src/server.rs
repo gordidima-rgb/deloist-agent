@@ -2117,6 +2117,24 @@ async fn devices_actions(State(app): Shared, Path(id): Path<String>, body: axum:
     }
 }
 
+async fn devices_screen(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
+        return fail(StatusCode::BAD_REQUEST, "нужно enabled: true или false");
+    };
+    match app.relay.set_screen(&app, &id, enabled, body.get("confirm").and_then(Value::as_str)) {
+        Ok(()) => ok(json!({ "ok": true, "enabled": enabled })),
+        Err((status, message)) => fail(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message),
+    }
+}
+
+async fn devices_screen_stop(State(app): Shared) -> Response {
+    ok(json!({ "remoteScreen": app.relay.stop_screen(&app) }))
+}
+
 async fn devices_pair(State(app): Shared, Path(req): Path<String>, body: axum::body::Bytes) -> Response {
     let body = match parse_body(&body) {
         Ok(v) => v,
@@ -4602,6 +4620,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/devices/{id}", delete(devices_revoke))
         .route("/api/devices/pair/{req}", post(devices_pair))
         .route("/api/devices/{id}/actions", post(devices_actions))
+        .route("/api/devices/{id}/screen", post(devices_screen))
+        .route("/api/devices/screen/stop", post(devices_screen_stop))
         .route("/api/remote/pcs", get(remote_pcs))
         .route("/api/remote/pair/start", post(remote_pair_start))
         .route("/api/remote/pair/{req}/ack", post(remote_pair_ack))

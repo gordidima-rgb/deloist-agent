@@ -99,6 +99,7 @@ mod providers;
 mod openrouter_login;
 mod queue;
 mod reach;
+mod remote_screen;
 mod rights;
 mod routine_tools;
 mod rooms;

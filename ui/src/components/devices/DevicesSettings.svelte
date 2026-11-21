@@ -14,11 +14,15 @@ import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
   let loadError = $state('');
   let notice = $state('');
 
-  // Что сейчас спрашивается: отзыв, включение действий, отключение ПК.
+  // Что сейчас спрашивается: отзыв, включение действий, включение экрана, отключение ПК.
   let revoking = $state('');
   let actionsAsk = $state('');
   let actionsName = $state('');
   let actionsError = $state('');
+  let screenAsk = $state('');
+  let screenName = $state('');
+  let screenError = $state('');
+  let screenSwitchKey = $state({});
   let switchKey = $state({});
   let forgetting = $state('');
   let busy = $state('');
@@ -136,6 +140,48 @@ import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
     }
   }
 
+  function askScreen(device) {
+    screenAsk = device.id;
+    screenName = '';
+    screenError = '';
+  }
+
+  function cancelScreen(device) {
+    screenAsk = '';
+    screenSwitchKey = { ...screenSwitchKey, [device.id]: (screenSwitchKey[device.id] ?? 0) + 1 };
+  }
+
+  async function setScreen(device, enabled) {
+    busy = device.id;
+    screenError = '';
+    try {
+      await api(`/api/devices/${enc(device.id)}/screen`, {
+        method: 'POST',
+        body: enabled ? { enabled: true, confirm: screenName } : { enabled: false },
+      });
+      screenAsk = '';
+      await loadDevices();
+    } catch (err) {
+      screenError = trServer(errorText(err));
+      if (!enabled) screenSwitchKey = { ...screenSwitchKey, [device.id]: (screenSwitchKey[device.id] ?? 0) + 1 };
+    } finally {
+      busy = '';
+    }
+  }
+
+  async function stopRemoteScreen() {
+    busy = 'screen';
+    try {
+      await api('/api/devices/screen/stop', { method: 'POST' });
+      notice = tr('Трансляция экрана остановлена');
+      await loadDevices();
+    } catch (err) {
+      notice = trServer(errorText(err));
+    } finally {
+      busy = '';
+    }
+  }
+
   async function startPair(candidate) {
     pairBusy = true;
     pairError = '';
@@ -198,6 +244,18 @@ import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
     <Row label={info?.pcName ? tr('Этот ПК: {name}', { name: info.pcName }) : tr('Этот ПК')} sublabel={linkText(info)}>
       <span class="dot" class:is-on={info?.connected} role="img" aria-label={info?.connected ? tr('в сети') : tr('не в сети')}></span>
     </Row>
+    {#if info?.remoteScreen?.active}
+      <Row
+        label={info.remoteScreen.mode === 'takeover'
+          ? tr('Экран перехвачен: {name}', { name: info.remoteScreen.deviceName || tr('Устройство') })
+          : info.remoteScreen.mode === 'paused'
+            ? tr('Экран на паузе: {name}', { name: info.remoteScreen.deviceName || tr('Устройство') })
+            : tr('Экран смотрит: {name}', { name: info.remoteScreen.deviceName || tr('Устройство') })}
+        sublabel={info.remoteScreen.mode === 'takeover' ? tr('Боты на паузе, пока экран перехвачен.') : tr('Через 5 минут без касаний трансляция паузится сама.')}
+      >
+        <Button size="sm" variant="attention" loading={busy === 'screen'} onclick={stopRemoteScreen}>{tr('Остановить экран')}</Button>
+      </Row>
+    {/if}
   </Section>
 
   {#if server.supported}
@@ -258,6 +316,32 @@ import { Section, Row, Field, TextInput, Button, Switch } from '../kit';
             <span class="inline">
               <Button size="sm" variant="primary" disabled={actionsName !== device.name} loading={busy === device.id} onclick={() => setActions(device, true)}>{tr('Включить')}</Button>
               <Button size="sm" variant="ghost" onclick={() => cancelActions(device)}>{tr('Отмена')}</Button>
+            </span>
+          </div>
+        {/if}
+        {#key screenSwitchKey[device.id] ?? 0}
+          <Row label={tr('Разрешать экран ПК на телефоне')} sublabel={tr('Просмотр экрана, перехват управления и возврат ботам. Через 5 минут без касаний трансляция паузится ради трафика.')}>
+            <Switch
+              checked={Boolean(device.screen)}
+              aria-label={tr('Разрешать экран ПК на телефоне')}
+              disabled={busy === device.id}
+              onchange={(on) => (on ? askScreen(device) : setScreen(device, false))}
+            />
+          </Row>
+        {/key}
+        {#if screenAsk === device.id}
+          <div class="ask">
+            <p class="hint">
+              {tr('Устройство сможет смотреть экран этого ПК и перехватывать управление мышью и клавиатурой. Остановить трансляцию можно в любой момент здесь на ПК.')}
+            </p>
+            <Field label={tr('Введите имя устройства точно: {name}', { name: nameOf(device) })} error={screenError}>
+              {#snippet children({ id, describedby, invalid })}
+                <TextInput {id} {describedby} {invalid} bind:value={screenName} autocomplete="off" />
+              {/snippet}
+            </Field>
+            <span class="inline">
+              <Button size="sm" variant="primary" disabled={screenName !== device.name} loading={busy === device.id} onclick={() => setScreen(device, true)}>{tr('Включить')}</Button>
+              <Button size="sm" variant="ghost" onclick={() => cancelScreen(device)}>{tr('Отмена')}</Button>
             </span>
           </div>
         {/if}

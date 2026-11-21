@@ -293,6 +293,14 @@ pub mod win {
         pub fn crop(&self, rect: Rect) -> Option<Shot> {
             crop_pixels(self.canvas.bytes(), self.canvas.width as usize, self.canvas.height as usize, self.left, self.top, rect)
         }
+
+        pub fn bounds(&self) -> Rect {
+            Rect { left: self.left, top: self.top, right: self.left + self.canvas.width, bottom: self.top + self.canvas.height }
+        }
+
+        pub fn pixels(&self) -> &[u8] {
+            self.canvas.bytes()
+        }
     }
 
     impl Drop for Canvas {
