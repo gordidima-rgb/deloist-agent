@@ -4,6 +4,11 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+- **PC screen on the phone (PC side).** Settings → Devices has a "PC screen on the phone" switch per trusted device,
+  turned on by typing the device name. The phone can watch the screen, "Take over" control (bots wait) and "Return
+  to bots"; after 5 minutes without touches the stream pauses. Revoking a device stops its stream at once. The phone
+  page on `my.deloist.ru` ships separately.
+
 ## [0.4.9] — 2026-11-20
 
 - **Move bots between a PC and the cloud.** The bot menu and the Team screen can move selected bots to the cloud

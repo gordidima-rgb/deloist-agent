@@ -3778,6 +3778,8 @@ async fn device_routes_are_closed_to_the_program_key() {
         (call(reqwest::Method::POST, "/api/devices/pair/req1", Some(json!({ "allow": true }))).await, "пропуск"),
         (call(reqwest::Method::POST, "/api/devices/pair/req1", Some(json!({ "allow": false }))).await, "отказ"),
         (call(reqwest::Method::POST, "/api/devices/0123456789abcdef0123456789abcdef/actions", Some(json!({ "enabled": true, "confirm": "x" }))).await, "переключатель действий"),
+        (call(reqwest::Method::POST, "/api/devices/0123456789abcdef0123456789abcdef/screen", Some(json!({ "enabled": true, "confirm": "x" }))).await, "экран ПК на телефоне"),
+        (call(reqwest::Method::POST, "/api/devices/screen/stop", None).await, "остановка экрана"),
     ] {
         assert_eq!(status, 403, "ключ программы дошёл до адреса устройств: {what}");
     }
