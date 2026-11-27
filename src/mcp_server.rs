@@ -171,6 +171,8 @@ fn wait_job(pending: &BrowserPending, job: &str, timeout: Duration) -> Result<St
     let outcome = rx.recv_timeout(timeout);
     let mut jobs = pending.lock().map_err(|_| "ожидание прервано")?;
     match outcome {
+        // Ход кончился, пока человек не ответил: это не сбой инструмента, а конец ожидания — бот говорит, что ждёт человека.
+        Ok(Err(e)) if e == "ход остановлен" => { jobs.remove(job); Ok("Ход остановлен, пока действие ждало человека: он не ответил. Если страница всё ещё закрыта, скажи ему «Нужен ты» одной строкой и не повторяй действие.".into()) }
         Ok(result) => { jobs.remove(job); result }
         Err(RecvTimeoutError::Timeout) => {
             if let Some((_, slot)) = jobs.get_mut(job) { *slot = Some(rx); }
@@ -231,6 +233,17 @@ mod browser_wait_tests {
         assert!(pending.lock().unwrap()["job-1"].1.is_some());
         tx.send(Ok("готово".into())).unwrap();
         assert_eq!(wait_job(&pending, "job-1", Duration::ZERO).unwrap(), "готово");
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_turn_stopped_while_the_human_was_awaited_is_not_a_tool_error() {
+        let (tx, rx) = mpsc::channel();
+        let pending: BrowserPending = Arc::default();
+        pending.lock().unwrap().insert("job-1".into(), ("browser_human".into(), Some(rx)));
+        tx.send(Err("ход остановлен".into())).unwrap();
+        let told = wait_job(&pending, "job-1", Duration::ZERO).expect("конец ожидания человека — не ошибка инструмента");
+        assert!(told.contains("Нужен ты"), "{told}");
         assert!(pending.lock().unwrap().is_empty());
     }
 
