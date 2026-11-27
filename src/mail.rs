@@ -1531,19 +1531,40 @@ pub async fn check(app: &Arc<App>, id: &str) -> Result<Value, ApiError> {
     Ok(json!({ "ok": true }))
 }
 
-/// `POST /api/mail/oauth/yandex/{flow}/finish`: токены из браузерного входа — в секреты, ящик — в список. Вход проверяется до сохранения.
-pub async fn finish_oauth(app: &Arc<App>, flow: &str, body: &Value) -> Result<Value, ApiError> {
-    let (address, tokens) = crate::mail_oauth::take(app, flow).ok_or_else(|| ApiError::NotFound("вход не найден: начните заново".into()))?.map_err(ApiError::Bad)?;
-    let p = detect("x@yandex.ru").ok_or_else(|| ApiError::Bad("нет службы Яндекс".into()))?;
-    let mut account = Account { id: uid("mbx"), created_at: now(), auth: AUTH_YANDEX.into(), address, preset: p.id.into(), imap_host: crate::mail_oauth::IMAP_HOST.into(), imap_port: p.imap.1, imap_tls: "tls".into(), smtp_host: crate::mail_oauth::SMTP_HOST.into(), smtp_port: p.smtp.1, smtp_tls: "tls".into(), authserv: p.authserv.iter().map(|s| s.to_string()).collect(), ..Account::default() };
+/// Ящик для входа через Яндекс: повторный вход с тем же адресом обновляет прежний ящик (id и настройки остаются), иначе новый.
+fn sign_in_account(app: &App, address: String, body: &Value) -> Result<Account, ApiError> {
+    let mut account = match app.mail.state.lock().unwrap().accounts.iter().find(|a| a.auth == AUTH_YANDEX && a.address == address) {
+        Some(existing) => existing.clone(),
+        None => {
+            let p = detect("x@yandex.ru").ok_or_else(|| ApiError::Bad("нет службы Яндекс".into()))?;
+            Account { id: uid("mbx"), created_at: now(), auth: AUTH_YANDEX.into(), address, preset: p.id.into(), imap_host: crate::mail_oauth::IMAP_HOST.into(), imap_port: p.imap.1, imap_tls: "tls".into(), smtp_host: crate::mail_oauth::SMTP_HOST.into(), smtp_port: p.smtp.1, smtp_tls: "tls".into(), authserv: p.authserv.iter().map(|s| s.to_string()).collect(), ..Account::default() }
+        }
+    };
     if let Some(name) = text_field(body, "displayName") {
         account.display_name = name.chars().filter(|c| !c.is_control()).take(120).collect();
     }
+    Ok(account)
+}
+
+/// Токены нового входа — в секреты, ящик — в список (на месте прежнего с тем же id).
+fn keep_sign_in(app: &App, account: &Account, tokens: &crate::oauth::Tokens) -> Result<(), String> {
+    crate::oauth::save_tokens(&app.connectors.secrets, &account.secret_scope(), tokens, None)?;
+    app.mail.change(|s| match s.accounts.iter_mut().find(|a| a.id == account.id) {
+        Some(a) => *a = account.clone(),
+        None => s.accounts.push(account.clone()),
+    });
+    Ok(())
+}
+
+/// `POST /api/mail/oauth/yandex/{flow}/finish`: токены из браузерного входа — в секреты, ящик — в список. Вход проверяется до сохранения.
+pub async fn finish_oauth(app: &Arc<App>, flow: &str, body: &Value) -> Result<Value, ApiError> {
+    let (address, tokens) = crate::mail_oauth::take(app, flow).ok_or_else(|| ApiError::NotFound("вход не найден: начните заново".into()))?.map_err(ApiError::Bad)?;
+    let mut account = sign_in_account(app, address, body)?;
     let login = Login { user: account.address.clone(), password: tokens.access.clone(), oauth: true };
     check_account(&account, &login).await.map_err(|e| ApiError::Upstream(friendly(e, true)))?;
     account.checked_at = now();
-    crate::oauth::save_tokens(&app.connectors.secrets, &account.secret_scope(), &tokens, None).map_err(ApiError::Upstream)?;
-    app.mail.change(|s| s.accounts.push(account.clone()));
+    account.last_error.clear();
+    keep_sign_in(app, &account, &tokens).map_err(ApiError::Upstream)?;
     Ok(public(app, &account))
 }
 
@@ -2016,6 +2037,25 @@ mod batch_tests {
         }
         assert_eq!(app.mail.account("m1").unwrap().imap_host, crate::mail_oauth::IMAP_HOST, "ничего не сохранилось");
         assert!(patch(&app, "m1", &json!({ "label": "Работа" })).await.is_ok(), "подпись менять можно");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn signing_in_again_with_the_same_address_updates_the_account() {
+        let (app, dir) = app_in("resign").await;
+        let tokens = |a: &str| crate::oauth::Tokens { access: a.into(), refresh: Some("r".into()), expires_in: Some(3600) };
+        let mut first = sign_in_account(&app, "me@yandex.ru".into(), &json!({})).ok().unwrap();
+        first.label = "Работа".into();
+        keep_sign_in(&app, &first, &tokens("a1")).unwrap();
+        let again = sign_in_account(&app, "me@yandex.ru".into(), &json!({ "displayName": "Иван" })).ok().unwrap();
+        assert_eq!((again.id.as_str(), again.label.as_str()), (first.id.as_str(), "Работа"), "id и настройки прежние");
+        keep_sign_in(&app, &again, &tokens("a2")).unwrap();
+        let accounts = app.mail.state.lock().unwrap().accounts.clone();
+        assert_eq!(accounts.len(), 1, "второго ящика нет");
+        assert_eq!(accounts[0].display_name, "Иван");
+        assert_eq!(app.connectors.secrets.get(&again.secret_scope(), crate::oauth::ACCESS).as_deref(), Some("a2"));
+        let other = sign_in_account(&app, "other@yandex.ru".into(), &json!({})).ok().unwrap();
+        assert_ne!(other.id, first.id, "другой адрес — другой ящик");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
