@@ -170,18 +170,12 @@ pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
 
 /// Интервал до следующего запуска: ровный `every_minutes` или случайный до `every_max_minutes`
 /// (`roll` — число из [0, 1)), чтобы запуски не повторялись минута в минуту.
-pub fn interval_minutes<T: AsSchedule>(x: &T, roll: f64) -> i64 {
-    let s = x.as_schedule();
-    if let Some(low) = s.every_minutes {
-        let low = low.max(1);
-        let high = s.every_max_minutes.unwrap_or(0);
-        if high <= low {
-            return low;
-        }
-        low + ((high - low + 1) as f64 * roll.clamp(0.0, 0.999_999)) as i64
-    } else {
-        s.interval_minutes().unwrap_or(60.0) as i64
+fn roll_minutes(low: i64, high: i64, roll: f64) -> i64 {
+    let low = low.max(1);
+    if high <= low {
+        return low;
     }
+    low + ((high - low + 1) as f64 * roll.clamp(0.0, 0.999_999)) as i64
 }
 
 /// Час для ожиданий рутин (занятый бот, пауза после ошибок). В отладочной сборке `CREW_TEST_HOUR_MS` ужимает его для проверок.
@@ -201,25 +195,6 @@ pub fn failure_gap_ms(failures: u32) -> i64 {
         3..=5 => hour_ms(),
         _ => 4 * hour_ms(),
     }
-}
-
-/// Расчёт срока с подставляемыми часами пояса: так его можно проверить на переводе часов в любой стране.
-/// Интервал считается в настоящем времени (мс), а в местные часы переводится только для окна и дней:
-/// иначе после перевода часов назад срок «через 5 минут» мог оказаться в прошлом и тикер крутился бы час.
-fn next_run_with(
-    routine: &Routine,
-    now_ms: i64,
-    every: i64,
-    local_of: impl Fn(i64) -> NaiveDateTime,
-    ms_of: impl Fn(NaiveDateTime) -> i64,
-) -> i64 {
-    let mut s = routine.schedule();
-    if s.kind == "interval" {
-        s.every_minutes = Some(every);
-        s.every_max_minutes = None;
-    }
-    let next = schedule_next_with(&s, now_ms, &local_of, &ms_of).unwrap_or(now_ms + every * 60_000);
-    if next > now_ms { next } else { now_ms + routine.every_minutes.clamp(1, 60) * 60_000 }
 }
 
 const WEEKDAYS_SHORT: [&str; 7] = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
@@ -564,13 +539,6 @@ fn cron_day_matches(cron: &Cron, date: NaiveDate) -> bool {
     }
 }
 
-/// Следующий запуск cron-рутины. Если его нет (после проверки при сохранении такого не бывает) — `i64::MAX`:
-/// тикер сравнивает `now() < next_run`, так что рутина просто не наступит.
-pub fn next_cron_run_ms(routine: &Routine, now_ms: i64) -> i64 {
-    let s = routine.schedule();
-    cron_next_ms(&s, now_ms).unwrap_or(i64::MAX)
-}
-
 // ---------------------------------------------------------------------------
 // Расписание запускающего узла процесса (бывшее workflows::Schedule).
 // ---------------------------------------------------------------------------
@@ -891,14 +859,7 @@ pub fn schedule_next_with(
     // interval
     if s.kind == "interval" {
         if let Some(low) = s.every_minutes {
-            let low = low.max(1);
-            let high = s.every_max_minutes.unwrap_or(0);
-            let roll = rand::random::<f64>();
-            let every = if high > low {
-                low + ((high - low + 1) as f64 * roll.clamp(0.0, 0.999_999)) as i64
-            } else {
-                low
-            };
+            let every = roll_minutes(low, s.every_max_minutes.unwrap_or(0), rand::random::<f64>());
             let target = now_ms + every * 60_000;
             let at = local_of(target);
             if s.allowed(at) {
@@ -1012,18 +973,22 @@ mod tests {
         Routine { every_minutes: every, ..Routine::default() }
     }
 
+    fn cron_at(routine: &Routine, now_ms: i64) -> i64 {
+        cron_next_ms(&routine.schedule(), now_ms).unwrap_or(i64::MAX)
+    }
+
     #[test]
     fn a_random_interval_stays_inside_its_range_and_reaches_both_ends() {
         let r = Routine { every_minutes: 40, every_max_minutes: 80, ..Routine::default() };
-        assert_eq!(interval_minutes(&r, 0.0), 40);
-        assert_eq!(interval_minutes(&r, 0.999_999_9), 80);
-        assert_eq!(interval_minutes(&r, 0.5), 60);
+        assert_eq!(roll_minutes(40, 80, 0.0), 40);
+        assert_eq!(roll_minutes(40, 80, 0.999_999_9), 80);
+        assert_eq!(roll_minutes(40, 80, 0.5), 60);
         for _ in 0..200 {
-            assert!((40..=80).contains(&interval_minutes(&r, rand::random::<f64>())));
+            assert!((40..=80).contains(&roll_minutes(40, 80, rand::random::<f64>())));
         }
         // Верх не больше низа — интервал ровный.
-        assert_eq!(interval_minutes(&Routine { every_minutes: 50, every_max_minutes: 30, ..Routine::default() }, 0.9), 50);
-        assert_eq!(interval_minutes(&routine(50), 0.9), 50);
+        assert_eq!(roll_minutes(50, 30, 0.9), 50);
+        assert_eq!(roll_minutes(50, 0, 0.9), 50);
         assert_eq!(describe(&r), "каждые 40–80 мин, случайно");
     }
 
@@ -1153,10 +1118,10 @@ mod tests {
         // Старый расчёт: местные 02:15 понимаются как первый проход, то есть час назад.
         let naive = ms_of(local_of(now_ms) + Duration::minutes(5));
         assert!(naive < now_ms, "демонстрация: наивный расчёт даёт прошлое");
-        assert_eq!(next_run_with(&r, now_ms, r.every_minutes, &local_of, &ms_of), now_ms + 5 * 60_000);
+        assert_eq!(schedule_next_with(&r.schedule(), now_ms, &local_of, &ms_of).unwrap(), now_ms + 5 * 60_000);
         // И в самом конце «первого» часа тоже.
         let before = switch - 2 * 60_000;
-        assert_eq!(next_run_with(&r, before, r.every_minutes, &local_of, &ms_of), before + 5 * 60_000);
+        assert_eq!(schedule_next_with(&r.schedule(), before, &local_of, &ms_of).unwrap(), before + 5 * 60_000);
     }
 
     #[test]
@@ -1380,39 +1345,39 @@ mod tests {
         assert!(cron_day_matches(&c, naive(2026, 11, 20, 9, 0).date()), "пятница");
         assert!(cron_day_matches(&c, naive(2026, 12, 13, 9, 0).date()), "13-е");
         assert!(!cron_day_matches(&c, naive(2026, 11, 18, 9, 0).date()), "среда, не 13-е");
-        let next = next_cron_run_ms(&cron_routine("0 9 13 * 5", "UTC"), utc_ms(2026, 12, 8, 0, 0));
+        let next = cron_at(&cron_routine("0 9 13 * 5", "UTC"), utc_ms(2026, 12, 8, 0, 0));
         assert_eq!(next, utc_ms(2026, 12, 11, 9, 0), "ближайшая пятница раньше 13-го");
     }
 
     #[test]
     fn cron_monthly_and_leap_day_do_not_fall_back_to_every_minute() {
         let now = to_ms(naive(2026, 11, 18, 12, 0));
-        assert_eq!(next_cron_run_ms(&cron_routine("30 10 1 * *", ""), now), to_ms(naive(2026, 12, 1, 10, 30)));
-        assert_eq!(next_cron_run_ms(&cron_routine("0 0 29 2 *", ""), now), to_ms(naive(2028, 2, 29, 0, 0)));
+        assert_eq!(cron_at(&cron_routine("30 10 1 * *", ""), now), to_ms(naive(2026, 12, 1, 10, 30)));
+        assert_eq!(cron_at(&cron_routine("0 0 29 2 *", ""), now), to_ms(naive(2028, 2, 29, 0, 0)));
     }
 
     #[test]
     fn cron_without_a_day_in_eight_years_is_rejected() {
         assert!(parse_cron("0 0 31 2 *").is_err());
         assert!(parse_cron("0 0 29 2 *").is_ok());
-        assert_eq!(next_cron_run_ms(&cron_routine("not a cron", ""), 1), i64::MAX);
+        assert_eq!(cron_at(&cron_routine("not a cron", ""), 1), i64::MAX);
     }
 
     #[test]
     fn cron_skips_the_hour_that_does_not_exist_and_runs_a_doubled_one_once() {
         let berlin = cron_routine("30 2 * * *", "Europe/Berlin");
         // 28.03.2027 02:30 в Берлине не бывает: переходим на следующий день, 02:30 CEST = 00:30 UTC.
-        assert_eq!(next_cron_run_ms(&berlin, utc_ms(2027, 3, 28, 0, 0)), utc_ms(2027, 3, 29, 0, 30));
+        assert_eq!(cron_at(&berlin, utc_ms(2027, 3, 28, 0, 0)), utc_ms(2027, 3, 29, 0, 30));
         // 25.10.2026 02:30 бывает дважды: берём раннее (CEST, 00:30 UTC), а после него — уже следующий день.
-        let first = next_cron_run_ms(&berlin, utc_ms(2026, 10, 24, 22, 0));
+        let first = cron_at(&berlin, utc_ms(2026, 10, 24, 22, 0));
         assert_eq!(first, utc_ms(2026, 10, 25, 0, 30));
-        assert_eq!(next_cron_run_ms(&berlin, first), utc_ms(2026, 10, 26, 1, 30));
+        assert_eq!(cron_at(&berlin, first), utc_ms(2026, 10, 26, 1, 30));
     }
 
     #[test]
     fn cron_uses_the_zone_of_the_routine() {
         let ny = cron_routine("0 9 * * *", "America/New_York");
-        assert_eq!(next_cron_run_ms(&ny, utc_ms(2026, 11, 18, 12, 0)), utc_ms(2026, 11, 18, 14, 0));
+        assert_eq!(cron_at(&ny, utc_ms(2026, 11, 18, 12, 0)), utc_ms(2026, 11, 18, 14, 0));
         assert!(tz_valid("Europe/Berlin") && tz_valid(""));
         assert!(!tz_valid("Mars/Base"));
     }
@@ -1482,7 +1447,7 @@ mod tests {
         assert_eq!(next_run_ms(&r, now_ms), schedule_next(&r.schedule(), now_ms).unwrap());
         // random interval bounds
         let r = Routine { every_minutes: 40, every_max_minutes: 80, ..Routine::default() };
-        let v = interval_minutes(&r, 0.5);
+        let v = roll_minutes(r.every_minutes, r.every_max_minutes, 0.5);
         assert!((40..=80).contains(&v));
         assert_eq!(describe(&r), describe(&r.schedule()));
         // cron
