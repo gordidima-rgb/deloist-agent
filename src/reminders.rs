@@ -1,9 +1,6 @@
-//! Напоминания без модели. Рутина-напоминание (`extra.kind == "reminder"`) стреляет таймером:
-//! ход бота не начинается и модель не вызывается. Бот подключается только к обычным рутинам с заданием.
-//!
-//! Поля в `extra` рутины: `leadMinutes` (0, 5, 15 или 60: за сколько до события слать),
-//! `channels` (["windows"] по умолчанию, или "telegram"), `onceAt` (разовое напоминание, мс; нет — повтор
-//! по `at`/`days`). Текст напоминания — поле `prompt`, название — `title`.
+//! Напоминания без модели: срок стреляет таймером, ход бота не начинается и модель не вызывается.
+//! Свои поля: `leadMinutes` (0, 5, 15 или 60: за сколько до события слать), `channels` (["windows"] по умолчанию,
+//! или "telegram"), `onceAt` (разовое напоминание, мс; нет — повтор по `at`/`days`). Текст — поле `prompt`, название — `title`.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -11,11 +8,13 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use crate::schedule;
-use crate::store::{now, Routine};
+use serde::{Deserialize, Serialize};
+
+use crate::schedule::{self, Timing};
+use crate::store::now;
 use crate::App;
 
-/// Значение `extra.kind` у рутины-напоминания. У обычных рутин этого поля нет.
+/// Значение `kind` в запросе и в записи: так интерфейс отличает напоминание.
 pub const KIND: &str = "reminder";
 pub const LEADS: [i64; 4] = [0, 5, 15, 60];
 pub const CHANNELS: [&str; 2] = ["windows", "telegram"];
@@ -24,32 +23,57 @@ const MINUTE_MS: i64 = 60_000;
 /// Если компьютер был выключен дольше этого, напоминание не шлём: «в 9» в одиннадцать вечера уже не напоминание.
 pub const OVERDUE_MS: i64 = 12 * 3_600_000;
 
-pub fn is_reminder(routine: &Routine) -> bool {
-    routine.extra.get("kind").and_then(Value::as_str) == Some(KIND)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Reminder {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    /// Текст напоминания.
+    pub prompt: String,
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub when: Timing,
+    /// За сколько минут до события слать: 0, 5, 15 или 60.
+    pub lead_minutes: i64,
+    /// Каналы доставки; пусто — уведомление Windows.
+    pub channels: Vec<String>,
+    pub last_run: i64,
+    pub next_run: i64,
+    pub created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<String>,
+    /// Подробности последней отправки по каналам.
+    #[serde(skip_serializing_if = "Value::is_null")]
+    pub last_delivery: Value,
 }
 
-/// Запрос создаёт напоминание, если у него `kind: "reminder"`.
-pub fn wants(input: &Value) -> bool {
-    input.get("kind").and_then(Value::as_str) == Some(KIND)
+impl Default for Reminder {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            kind: KIND.into(),
+            title: String::new(),
+            prompt: String::new(),
+            enabled: true,
+            when: Timing::default(),
+            lead_minutes: 0,
+            channels: Vec::new(),
+            last_run: 0,
+            next_run: 0,
+            created_at: 0,
+            last_status: None,
+            last_delivery: Value::Null,
+        }
+    }
 }
 
-fn lead_ms(routine: &Routine) -> i64 {
-    routine.extra.get("leadMinutes").and_then(Value::as_i64).unwrap_or(0).max(0) * MINUTE_MS
+fn lead_ms(reminder: &Reminder) -> i64 {
+    reminder.lead_minutes.max(0) * MINUTE_MS
 }
 
-/// Момент разового напоминания в мс; 0 — разового нет.
-fn once_at(routine: &Routine) -> i64 {
-    routine.once_at
-}
-
-pub fn channels_of(routine: &Routine) -> Vec<String> {
-    let list: Vec<String> = routine
-        .extra
-        .get("channels")
-        .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
-        .unwrap_or_default();
-    or_windows(list)
+pub fn channels_of(reminder: &Reminder) -> Vec<String> {
+    or_windows(reminder.channels.clone())
 }
 
 /// Пустой список каналов означает уведомление Windows: так решено для рутин и для привычек.
@@ -59,8 +83,8 @@ pub fn or_windows(list: Vec<String>) -> Vec<String> {
 
 /// Срок отправки, если считать от `now_ms`: момент события минус опережение.
 /// Разовое и повторяющееся считаются через schedule::next_run_ms (одна дата).
-pub fn schedule_from(routine: &Routine, now_ms: i64) -> i64 {
-    schedule::next_run_ms(routine, now_ms) - lead_ms(routine)
+pub fn schedule_from(reminder: &Reminder, now_ms: i64) -> i64 {
+    schedule::next_run_ms(&reminder.when, now_ms) - lead_ms(reminder)
 }
 
 /// Срок пропущен больше чем на 12 часов: компьютер был выключен, напоминание уже не к месту.
@@ -69,9 +93,9 @@ pub fn overdue(fire_at: i64, now_ms: i64) -> bool {
 }
 
 /// Поля напоминания из запроса: только переданные. При создании сюда приходят все поля запроса.
-pub fn apply(routine: &mut Routine, input: &Value) {
+pub fn apply(reminder: &mut Reminder, input: &Value) {
     if let Some(lead) = input.get("leadMinutes").and_then(Value::as_i64) {
-        routine.extra.insert("leadMinutes".into(), json!(lead));
+        reminder.lead_minutes = lead;
     }
     if let Some(list) = input.get("channels").and_then(Value::as_array) {
         let mut wanted: Vec<String> = Vec::new();
@@ -83,15 +107,15 @@ pub fn apply(routine: &mut Routine, input: &Value) {
         if wanted.is_empty() {
             wanted.push("windows".to_string());
         }
-        routine.extra.insert("channels".into(), json!(wanted));
+        reminder.channels = wanted;
     }
     if let Some(value) = input.get("onceAt") {
-        routine.once_at = value.as_i64().filter(|ms| *ms > 0).unwrap_or(0);
+        reminder.when.once_at = value.as_i64().filter(|ms| *ms > 0).unwrap_or(0);
     }
 }
 
 /// Проверка напоминания. `existing` — сохранённое напоминание при правке: недостающие поля берутся из него.
-pub fn validate(input: &Value, existing: Option<&Routine>) -> Result<(), String> {
+pub fn validate(input: &Value, existing: Option<&Reminder>) -> Result<(), String> {
     match input.get("prompt").filter(|v| !v.is_null()) {
         Some(text) => {
             let text = text.as_str().unwrap_or_default().trim();
@@ -127,12 +151,12 @@ pub fn validate(input: &Value, existing: Option<&Routine>) -> Result<(), String>
         }
         // Пустая дата снимает разовость: остаётся повтор по времени.
         Some(_) => false,
-        None => existing.is_some_and(|r| once_at(r) > 0),
+        None => existing.is_some_and(|r| r.when.once_at > 0),
     };
     if !once {
         let at = match input.get("at") {
             Some(value) => value.as_str().unwrap_or_default().trim().to_string(),
-            None => existing.map(|r| r.at.clone()).unwrap_or_default(),
+            None => existing.map(|r| r.when.at.clone()).unwrap_or_default(),
         };
         if schedule::parse_time(&at).is_none() {
             return Err("нужны дата или время напоминания ЧЧ:ММ".into());
@@ -203,13 +227,13 @@ pub struct Delivery {
 }
 
 /// Отправить напоминание по всем его каналам. Открытое окно получает событие `reminder` в любом случае.
-pub async fn deliver(app: &Arc<App>, routine: &Routine) -> Vec<Delivery> {
-    app.turns.emit(json!({ "type": "reminder", "routineId": routine.id, "title": routine.title, "text": routine.prompt }));
-    send_text(app, "Напоминание", &routine.prompt, &channels_of(routine)).await
+pub async fn deliver(app: &Arc<App>, reminder: &Reminder) -> Vec<Delivery> {
+    app.turns.emit(json!({ "type": "reminder", "routineId": reminder.id, "title": reminder.title, "text": reminder.prompt }));
+    send_text(app, "Напоминание", &reminder.prompt, &channels_of(reminder)).await
 }
 
 /// Отправить текст по списку каналов. Ошибка одного канала не мешает остальным.
-/// Рутины-напоминания и привычки шлют через неё: каналы одни и те же.
+/// Напоминания и привычки шлют через неё: каналы одни и те же.
 pub async fn send_text(app: &Arc<App>, title: &str, body: &str, channels: &[String]) -> Vec<Delivery> {
     let mut out = Vec::new();
     for id in channels {
@@ -240,24 +264,24 @@ fn status_of(list: &[Delivery]) -> &'static str {
 }
 
 /// Срок напоминания подошёл: шлём (или отмечаем пропуск) и ставим следующий срок. Модель не вызывается.
-pub async fn fire(app: &Arc<App>, routine: &Routine) {
+pub async fn fire(app: &Arc<App>, reminder: &Reminder) {
     let at = now();
-    let (status, detail) = if overdue(routine.next_run, at) {
+    let (status, detail) = if overdue(reminder.next_run, at) {
         ("missed", json!([{ "channel": null, "ok": false, "error": "пропущено: компьютер был выключен больше 12 часов" }]))
     } else {
-        let list = deliver(app, routine).await;
+        let list = deliver(app, reminder).await;
         (status_of(&list), deliveries_json(&list))
     };
-    let once = once_at(routine) > 0;
+    let once = reminder.when.once_at > 0;
     // Следующий срок — первый, что ещё не прошёл: после долгого простоя пропущенные не копятся.
-    let mut next = if once { routine.next_run } else { schedule_from(routine, routine.next_run + lead_ms(routine)) };
+    let mut next = if once { reminder.next_run } else { schedule_from(reminder, reminder.next_run + lead_ms(reminder)) };
     let mut guard = 0;
     while !once && next <= at && guard < 400 {
-        next = schedule_from(routine, next + lead_ms(routine));
+        next = schedule_from(reminder, next + lead_ms(reminder));
         guard += 1;
     }
-    if let Err(e) = app.reminders.finish(&routine.id, status, detail, next, once) {
-        eprintln!("[reminder] {}: {e}", routine.title);
+    if let Err(e) = app.reminders.finish(&reminder.id, status, detail, next, once) {
+        eprintln!("[reminder] {}: {e}", reminder.title);
     }
 }
 
@@ -313,7 +337,7 @@ pub struct Reminders {
 
 struct RemindersInner {
     path: std::path::PathBuf,
-    items: Mutex<Vec<Routine>>,
+    items: Mutex<Vec<Reminder>>,
     broken: AtomicBool,
 }
 
@@ -321,7 +345,7 @@ impl Reminders {
     pub fn open(data_dir: std::path::PathBuf) -> Self {
         let path = data_dir.join("reminders.json");
         let mut broken = false;
-        let saved: Vec<Routine> = match std::fs::read_to_string(&path) {
+        let saved: Vec<Reminder> = match std::fs::read_to_string(&path) {
             Ok(text) => {
                 // Формат: { "reminders": [...] } или голый массив (на всякий случай).
                 let parsed: Result<serde_json::Value, _> = serde_json::from_str(&text);
@@ -371,63 +395,39 @@ impl Reminders {
         }
     }
 
-    pub fn list(&self) -> Vec<Routine> {
+    pub fn list(&self) -> Vec<Reminder> {
         self.inner.items.lock().unwrap().clone()
     }
 
-    pub fn get(&self, id: &str) -> Option<Routine> {
+    pub fn get(&self, id: &str) -> Option<Reminder> {
         self.inner.items.lock().unwrap().iter().find(|r| r.id == id).cloned()
     }
 
-    pub fn add_reminder(&self, input: &Value, human: bool) -> std::io::Result<Routine> {
+    pub fn add_reminder(&self, input: &Value) -> std::io::Result<Reminder> {
         if !self.writable() {
             return Err(std::io::Error::other("reminders store broken"));
         }
-        let reminder = wants(input);
-        let mut routine = Routine {
+        let mut reminder = Reminder {
             id: crate::store::uid("rt"),
-            bot_id: if reminder { String::new() } else { crate::store::text_or(input, "botId", "") },
-            title: crate::store::take_chars(&crate::store::text_or(input, "title", if reminder { "" } else { "Рутина" }), 80),
+            title: crate::store::take_chars(&crate::store::text_or(input, "title", ""), 80),
             prompt: crate::store::text_or(input, "prompt", ""),
-            every_minutes: crate::store::minutes(input.get("everyMinutes")),
-            enabled: input.get("enabled").map_or(true, |v| v != &serde_json::Value::Bool(false)),
-            quiet: input.get("quiet").map_or(true, crate::store::truthy),
-            catch_up: crate::store::text_or(input, "catchUp", "last"),
+            enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
             created_at: crate::store::now(),
-            ..Routine::default()
+            ..Reminder::default()
         };
-        if reminder {
-            routine.extra.insert("kind".into(), serde_json::json!(KIND));
-            apply(&mut routine, input);
-            if routine.title.is_empty() {
-                routine.title = crate::store::take_chars(&routine.prompt, 80);
-            }
+        apply(&mut reminder, input);
+        if reminder.title.is_empty() {
+            reminder.title = crate::store::take_chars(&reminder.prompt, 80);
         }
-        crate::store::apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        routine.hook = input.get("hook").is_some_and(crate::store::truthy);
-        routine.goal_id = crate::store::text_or(input, "goalId", "");
-        routine.approval_floor = crate::store::text_or(input, "approvalFloor", "");
-        if human {
-            routine.check = crate::store::text_or(input, "check", "");
-        }
-        if let Some(v) = input.get("hookEvents").filter(|v| !v.is_null()) {
-            routine.hook_events = crate::store::validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        }
-        if routine.hook {
-            routine.hook_token = crate::guard::random_token();
-            routine.next_run = 0;
-        } else {
-            routine.next_run = schedule_from(&routine, crate::store::now());
-        }
-        {
-            let mut items = self.inner.items.lock().unwrap();
-            items.push(routine.clone());
-        }
+        reminder.when.every_minutes = crate::store::minutes(input.get("everyMinutes"));
+        reminder.when.apply(input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        reminder.next_run = schedule_from(&reminder, crate::store::now());
+        self.inner.items.lock().unwrap().push(reminder.clone());
         self.save();
-        Ok(routine)
+        Ok(reminder)
     }
 
-    pub fn update_reminder(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
+    pub fn update_reminder(&self, id: &str, patch: &Value) -> std::io::Result<Option<Reminder>> {
         if !self.writable() {
             return Err(std::io::Error::other("reminders store broken"));
         }
@@ -435,35 +435,16 @@ impl Reminders {
             let mut items = self.inner.items.lock().unwrap();
             let Some(r) = items.iter_mut().find(|r| r.id == id) else { return Ok(None); };
             if let Some(v) = patch.get("enabled").filter(|v| !v.is_null()) { r.enabled = crate::store::truthy(v); }
-            if let Some(v) = patch.get("quiet").filter(|v| !v.is_null()) { r.quiet = crate::store::truthy(v); }
             if let Some(v) = patch.get("prompt").filter(|v| !v.is_null()) { r.prompt = crate::store::as_string(v); }
             if let Some(v) = patch.get("title").filter(|v| !v.is_null()) { r.title = crate::store::as_string(v); }
-            if let Some(v) = patch.get("goalId").filter(|v| !v.is_null()) { r.goal_id = crate::store::as_string(v); }
-            if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) { r.approval_floor = crate::store::as_string(v); }
-            if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
-                r.error_paused = crate::store::truthy(v);
-                if !r.error_paused { r.failures = 0; r.stop_reason = None; }
+            if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) { r.when.every_minutes = crate::store::minutes(patch.get("everyMinutes")); }
+            r.when.apply(patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            apply(r, patch);
+            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
+            if rescheduled {
+                r.next_run = schedule_from(r, crate::store::now());
             }
-            if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) { r.catch_up = crate::store::as_string(v); }
-            if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) { r.progress_note = crate::store::as_string(v); }
-            if human {
-                if let Some(v) = patch.get("check").filter(|v| !v.is_null()) { r.check = crate::store::as_string(v); }
-            }
-            if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) { r.every_minutes = crate::store::minutes(patch.get("everyMinutes")); }
-            if let Some(v) = patch.get("hook").filter(|v| !v.is_null()) {
-                let want = crate::store::truthy(v);
-                if want && !r.hook { r.hook_token = crate::guard::random_token(); }
-                if !want { r.hook_token.clear(); }
-                r.hook = want;
-            }
-            if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
-                r.hook_events = crate::store::validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            }
-            crate::store::apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-            if is_reminder(r) { apply(r, patch); }
-            let rescheduled = ["everyMinutes","everyMaxMinutes","at","days","windowFrom","windowTo","hook","leadMinutes","recurrence","startOn","onceAt","cron","tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
-            if rescheduled || !r.enabled || r.hook { r.failures = 0; r.stop_reason = None; }
-            if r.hook { r.next_run = 0; } else if rescheduled { r.next_run = schedule_from(r, crate::store::now()); }
+            // Только для проверок: приблизить срок, не дожидаясь его.
             if cfg!(debug_assertions) {
                 if let Some(at) = crate::store::number(patch.get("nextRun")) { r.next_run = at as i64; }
             }
@@ -487,7 +468,7 @@ impl Reminders {
         if let Some(r) = items.iter_mut().find(|r| r.id == id) {
             r.last_run = crate::store::now();
             r.last_status = Some(status.to_string());
-            r.extra.insert("lastDelivery".into(), detail);
+            r.last_delivery = detail;
             r.next_run = next_run;
             if disable { r.enabled = false; }
         }
@@ -511,11 +492,8 @@ mod tests {
         Local.with_ymd_and_hms(2026, 11, day, hour, minute, 0).unwrap().timestamp_millis()
     }
 
-    fn reminder(at: &str, lead: i64) -> Routine {
-        let mut r = Routine { at: at.into(), prompt: "позвонить маме".into(), ..Routine::default() };
-        r.extra.insert("kind".into(), json!(KIND));
-        r.extra.insert("leadMinutes".into(), json!(lead));
-        r
+    fn reminder(at: &str, lead: i64) -> Reminder {
+        Reminder { when: Timing { at: at.into(), ..Timing::default() }, prompt: "позвонить маме".into(), lead_minutes: lead, ..Reminder::default() }
     }
 
     #[test]
@@ -536,7 +514,7 @@ mod tests {
     #[test]
     fn one_off_uses_its_date_minus_lead() {
         let mut r = reminder("", 60);
-        r.once_at = ms(5, 12, 0);
+        r.when.once_at = ms(5, 12, 0);
         assert_eq!(schedule_from(&r, ms(2, 8, 0)), ms(5, 11, 0));
     }
 

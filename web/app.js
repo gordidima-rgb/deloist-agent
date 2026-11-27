@@ -150,6 +150,7 @@ const S = {
   skills: [],
   mcp: [],
   routines: [],
+  reminders: [],
   settings: {},
   levels: {}, // провайдер → { strong, standard, fast } из /api/state
   dataDir: '',
@@ -5171,7 +5172,8 @@ async function refreshState() {
     S.rooms = data.rooms || [];
     S.skills = data.skills || [];
     S.mcp = data.mcp || [];
-    S.routines = data.routines;
+    S.routines = data.processes;
+    S.reminders = data.reminders;
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
@@ -8357,9 +8359,9 @@ const errorPauseText = (r) => {
 };
 async function resumeRoutineErrors(id) {
   try {
-    const res = await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'PATCH', body: { errorPaused: false } });
+    const res = await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: { errorPaused: false } });
     const r = S.routines.find((x) => x.id === id);
-    if (r) Object.assign(r, { errorPaused: false, failures: 0, stopReason: undefined }, res?.routine || {});
+    if (r) Object.assign(r, { errorPaused: false, failures: 0, stopReason: undefined }, res?.process || {});
   } catch (err) {
     toast(err.message);
   }
@@ -8390,12 +8392,6 @@ function scheduleText(r) {
 
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 
-/** Адрес вебхука: порт тот же, что у страницы. */
-function hookUrl(r) {
-  const port = location.port || '80';
-  return `${location.protocol}//127.0.0.1:${port}/hooks/${r.id}/${r.hookToken || ''}`;
-}
-
 function nextText(ts) {
   const n = Number(ts);
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -8416,7 +8412,7 @@ function whenText(ts) {
 
 async function runRoutine(id) {
   try {
-    await api(`/api/routines/${encodeURIComponent(id)}/run`, { method: 'POST' });
+    await api(`/api/workflows/${encodeURIComponent(id)}/run`, { method: 'POST' });
     toast(tr('Запустил, смотри в чате бота'));
   } catch (err) {
     toast(err.message);
@@ -8425,9 +8421,8 @@ async function runRoutine(id) {
 
 const routinesOpen = () => $('#modal-routines').open;
 
-// Напоминания живут на своей вкладке: во вкладке «Рутины» их нет (у них нет бота и задания).
-const isReminder = (r) => r.kind === 'reminder';
-const ordinaryRoutines = () => S.routines.filter((r) => !isReminder(r));
+// Напоминания живут на своей вкладке и в своём списке (`S.reminders`): у них нет бота и задания.
+const ordinaryRoutines = () => S.routines;
 
 // Название-суть и чипы рутины (бот, расписание, следующий и прошлый запуск): один вид и в списке рутин, и карточкой в чате.
 function routineParts(r) {
@@ -8436,7 +8431,7 @@ function routineParts(r) {
   const last = STATUS_LABELS[r.lastStatus];
   const icon = (name) => ic(name);
   const gist = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-  const nextTitle = r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next });
+  const nextTitle = r.hook ? tr('по вебхуку') : tr('Следующий запуск: {time}', { time: next });
   const why = REASON_LABELS[r.stopReason];
   const lastTitle = r.lastRun
     ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${why ? ` (${why})` : ''}`
@@ -8470,7 +8465,7 @@ function routineCardModel(r) {
     schedule: scheduleText(r),
     next,
     nextIcon: r.hook ? 'link' : 'clock',
-    nextTitle: r.hook ? tr('Адрес: {url}', { url: hookUrl(r) }) : tr('Следующий запуск: {time}', { time: next }),
+    nextTitle: r.hook ? tr('по вебхуку') : tr('Следующий запуск: {time}', { time: next }),
     last: r.lastRun ? whenText(r.lastRun) : '',
     lastTitle: r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${REASON_LABELS[r.stopReason] ? ` (${REASON_LABELS[r.stopReason]})` : ''}` : '',
     lastBad: BAD_STATUSES.includes(r.lastStatus),
@@ -8490,8 +8485,8 @@ function routinePaneProps(list) {
     const r = S.routines.find((x) => x.id === id);
     if (!r) return;
     try {
-      const res = await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'PATCH', body });
-      apply(r, res?.routine);
+      const res = await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+      apply(r, res?.process);
     } catch (err) {
       toast(err.message);
     }
@@ -8512,7 +8507,7 @@ function routinePaneProps(list) {
     ontoggle: (id, value) => patch(id, { enabled: value }, (r) => { r.enabled = value; }),
     ondelete: async (id) => {
       try {
-        await api(`/api/routines/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
         S.routines = S.routines.filter((x) => x.id !== id);
       } catch (err) {
         toast(err.message);
@@ -8683,7 +8678,7 @@ function openTelegramFromRoutines() {
 function reminderProps() {
   return {
     api,
-    routines: S.routines.filter(isReminder),
+    routines: S.reminders,
     onchanged: async () => {
       await refreshState();
       syncRoutineTabs();
@@ -8694,7 +8689,7 @@ function reminderProps() {
 
 // Список напоминаний приходит из общего состояния: после его обновления передаём свежий.
 function syncRoutineTabs() {
-  if (routineTab === 'reminders' && remindersView) remindersView.update({ routines: S.routines.filter(isReminder) });
+  if (routineTab === 'reminders' && remindersView) remindersView.update({ routines: S.reminders });
 }
 
 function dropRoutineTabViews() {
@@ -9683,21 +9678,13 @@ function mountRoutineSchedule() {
 }
 
 function syncRoutineMode() {
-  const hook = $('#rt-hook')?.checked;
   const every = routineSchedule.kind === 'every';
-  $('#rt-schedule').hidden = Boolean(hook);
-  $('#rt-every-box').hidden = hook || !every;
-  $('#rt-days-box').hidden = hook || !every;
-  $('#rt-hook-events-box').hidden = !hook;
+  $('#rt-every-box').hidden = !every;
+  $('#rt-days-box').hidden = !every;
 }
 
 function bindRoutineForm() {
   mountRoutineSchedule();
-  $('#rt-hook').addEventListener('change', () => {
-    // Расписание и вебхук взаимоисключающие: одно и то же не настраиваем дважды.
-    $('#rt-hook-box').hidden = !$('#rt-hook').checked || !$('#rt-hook-url').value;
-    syncRoutineMode();
-  });
   $$('#rt-days .day-btn').forEach((b) =>
     b.addEventListener('click', () => b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'))),
   );
@@ -9710,8 +9697,7 @@ function bindRoutineForm() {
   $('#form-routine').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
-    const hook = $('#rt-hook').checked;
-    const problem = hook ? '' : window.DeloistUI.routineSchedule.scheduleProblem(routineSchedule);
+    const problem = window.DeloistUI.routineSchedule.scheduleProblem(routineSchedule);
     if (problem) {
       toast(problem === 'past' ? tr('Выбери момент в будущем') : tr('Выбери время запуска'));
       return;
@@ -9729,19 +9715,12 @@ function bindRoutineForm() {
       days: every ? selectedDays() : [],
       windowFrom: every ? f.windowFrom.value : '',
       windowTo: every ? f.windowTo.value : '',
-      ...(hook ? {} : window.DeloistUI.routineSchedule.scheduleFields(routineSchedule)),
+      ...window.DeloistUI.routineSchedule.scheduleFields(routineSchedule),
       catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
       quiet: f.quiet.checked,
-      hook,
-      hookEvents: hook
-        ? String($('#rt-hook-events')?.value || '')
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
     };
     try {
-      const { routine } = await api('/api/routines', { method: 'POST', body });
+      const { process: routine } = await api('/api/workflows', { method: 'POST', body });
       S.routines.push(routine);
       if (drawerShown() && S.tab === 'routines') renderDrawer();
       renderRoutines();
@@ -9749,21 +9728,9 @@ function bindRoutineForm() {
       $$('#rt-days .day-btn').forEach((b) => b.setAttribute('aria-pressed', 'false'));
       // Форма вернулась в обычный вид: расписание снова доступно.
       mountRoutineSchedule();
-      $('#rt-hook-box').hidden = true;
-      $('#rt-hook-url').value = '';
       syncRoutineMode();
       fillRoutineBots();
-      if (routine.hook) {
-        // Адрес показываем сразу: именно его нужно вставить во внешний сервис.
-        $('#rt-hook-box').hidden = false;
-        $('#rt-hook-url').value = hookUrl(routine);
-        if ($('#rt-hook-token')) $('#rt-hook-token').textContent = routine.hookToken || '';
-        if ($('#rt-hook-events')) $('#rt-hook-events').value = (routine.hookEvents || []).join(', ');
-        $('#rt-hook-url').select?.();
-        toast(tr('Адрес для вызова на экране'));
-      } else {
-        toast(tr('Рутина добавлена'));
-      }
+      toast(tr('Рутина добавлена'));
     } catch (err) {
       toast(err.message);
     }
@@ -10318,7 +10285,8 @@ async function boot() {
     S.rooms = data.rooms || [];
     S.skills = data.skills || [];
     S.mcp = data.mcp || [];
-    S.routines = data.routines;
+    S.routines = data.processes;
+    S.reminders = data.reminders;
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;

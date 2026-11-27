@@ -930,6 +930,8 @@ pub fn delete_workflow(app: &Arc<App>, wf_id: &str) -> bool {
         guard.remove_files(wf_id);
     }
     let _ = app.connectors.secrets.delete_scope(&crate::workflows::hook_scope(wf_id));
+    app.mail.remove_trigger(wf_id);
+    app.watch.remove_trigger(wf_id);
     change_event(app, wf_id, None);
     true
 }
@@ -1194,7 +1196,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wfr-series-{}", crate::store::uid("t")));
         let app = crate::scheduler::tests::make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
-        let r = app.store.add_routine(&serde_json::json!({ "botId": bot.id, "title": "Срез", "prompt": "собери", "everyMinutes": 10 }), false).await.unwrap();
+        let r = crate::simple_process::create(&app.workflows, &serde_json::json!({ "botId": bot.id, "title": "Срез", "prompt": "собери", "everyMinutes": 10 }), usize::MAX, false).unwrap().unwrap().wf;
         let slot_next = || app.workflows.lock().get(&r.id).unwrap().slots["t1"].next.unwrap();
         let fail = |reason| count_series(&app, &r.id, "failed", Some(reason), None);
         let soon = crate::store::now() + 20 * 60_000;
@@ -1219,7 +1221,7 @@ mod tests {
         assert!(matches!(count_series(&app, &r.id, "needs", Some(Login), None), Series::Failed(1)));
         assert!(matches!(fail(Check), Series::Failed(2)));
         assert!(matches!(fail(Check), Series::Paused(3)));
-        assert!(app.store.routine(&r.id).unwrap().error_paused && app.store.routine(&r.id).unwrap().enabled, "процесс на паузе, но не выключен");
+        assert!(super::error_paused(&app, &r.id) && app.workflows.lock().get(&r.id).unwrap().wf.enabled, "процесс на паузе, но не выключен");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

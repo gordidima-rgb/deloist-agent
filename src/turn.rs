@@ -2997,7 +2997,7 @@ fn run_turn_body(
                     };
                     crate::workflow_run::step_ended(&app, ended).await;
                 }
-                _ => crate::scheduler::routine_finished(&app, routine, status).await,
+                _ => {}
             }
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
@@ -3012,10 +3012,6 @@ fn run_turn_body(
                     app.goals.edit(goal_id, |g| g.progress_note = note).await;
                 }
                 // Заметку шага процесса хранит процесс: её кладёт `workflow_run::step_ended`.
-                (_, Some(_)) if process_step => {}
-                (_, Some(routine)) => {
-                    let _ = app.store.update_routine(&routine.id, &json!({ "progressNote": note }), false).await;
-                }
                 _ => {}
             }
         }

@@ -74,7 +74,7 @@ pub struct RoutinePlan {
     pub target_name: String,
     pub title: String,
     pub prompt: String,
-    /// Ввод для `Store::add_routine_capped`: ровно он будет записан.
+    /// Ввод для `simple_process::create`: ровно он будет записан.
     pub input: Value,
     /// «по будням в 09:00».
     pub schedule: String,
@@ -309,7 +309,7 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
         return Err("schedule: не сказано когда: укажи at (время ЧЧ:ММ), every_minutes или cron".into());
     }
     crate::workflow_tools::check_window(input.get("windowFrom").and_then(Value::as_str).unwrap_or_default(), input.get("windowTo").and_then(Value::as_str).unwrap_or_default())?;
-    if app.store.routines().len() >= crate::workflow_tools::MAX_ROUTINES {
+    if app.workflows.lock().items.iter().filter(|s| s.is_simple()).count() >= crate::workflow_tools::MAX_ROUTINES {
         return Err(format!("уже {} рутин, новые не создаются", crate::workflow_tools::MAX_ROUTINES));
     }
     input.insert("botId".into(), json!(target.id));
@@ -320,7 +320,7 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
     input.insert("quiet".into(), json!(true));
     let quiet = input.get("quiet").and_then(Value::as_bool).unwrap_or(false);
     let input = Value::Object(input);
-    let preview = crate::store::Store::preview_routine(&input);
+    let (when, next) = crate::simple_process::preview(&input);
     let free_mode = effective_mode(app, &target) == "auto";
     Ok(RoutinePlan {
         host_id: bot.id.clone(),
@@ -330,8 +330,8 @@ pub fn plan_routine(app: &App, bot: &Bot, args: &Value) -> Result<RoutinePlan, S
         title,
         prompt,
         input,
-        schedule: crate::schedule::describe(&preview),
-        next: crate::schedule::describe_next(&preview),
+        schedule: when,
+        next,
         free_mode,
         quiet,
     })
@@ -489,13 +489,10 @@ async fn apply_routine(app: &Arc<App>, r: &RoutinePlan) -> Result<String, String
     if mode != "auto" {
         input["approvalFloor"] = json!(mode);
     }
-    let made = app
-        .store
-        .add_routine_capped(&input, crate::workflow_tools::MAX_ROUTINES, false)
-        .await
+    let made = crate::simple_process::create(&app.workflows, &input, crate::workflow_tools::MAX_ROUTINES, false)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("уже {} рутин, новые не создаются", crate::workflow_tools::MAX_ROUTINES))?;
-    Ok(format!("Человек согласился. Рутина создана и включена: «{}» у «{}», {}. {} Номер: {}.", made.title, target.name, crate::schedule::describe(&made), crate::schedule::describe_next(&made), made.id))
+    Ok(format!("Человек согласился. Рутина создана и включена: «{}» у «{}», {}. {} Номер: {}.", made.wf.title, target.name, crate::schedule::describe(&made.timing()), crate::schedule::describe_next(false, true, made.next_run()), made.wf.id))
 }
 
 #[cfg(test)]

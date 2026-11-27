@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::{bare_id, commit, dir, forget_prompts_for, load, normalize_entities, resolve_team, room_scope, who_bot, Book, Change, Fact, BODY_LIMIT, GATE, SHARED, TITLE_LIMIT};
 use crate::sensitive::secret_in;
 use crate::service;
-use crate::store::{now, Bot, Room, Routine};
+use crate::store::{now, Bot, Room};
 use crate::App;
 
 /// Метка в начале постановки рутины: по ней находим рутину команды и не заводим вторую.
@@ -269,7 +269,7 @@ fn prompt_for(room: &Room) -> String {
     )
 }
 
-/// Ввод для `Store::add_routine_capped`: тихая, каждый день, от имени оркестратора.
+/// Ввод для `simple_process::create`: тихая, каждый день, от имени оркестратора.
 pub(crate) fn routine_input(room: &Room, orchestrator: &Bot) -> Value {
     json!({
         "botId": orchestrator.id, "title": "Разбор памяти команды", "prompt": prompt_for(room),
@@ -282,14 +282,15 @@ fn mark_of(room_id: &str) -> String {
 }
 
 /// Команды с оркестратором, которым рутину ещё не заводили.
-pub(crate) fn pending(rooms: &[Room], bots: &[Bot], routines: &[Routine], created: &HashSet<String>) -> Vec<(Room, Bot)> {
+/// `prompts` — постановки простых процессов.
+pub(crate) fn pending(rooms: &[Room], bots: &[Bot], prompts: &[String], created: &HashSet<String>) -> Vec<(Room, Bot)> {
     rooms
         .iter()
         .filter(|r| !r.archived && !created.contains(&r.id))
         .filter_map(|r| {
             let orch = r.bot_ids.iter().find_map(|id| bots.iter().find(|b| &b.id == id && b.orchestrator))?;
             let mark = mark_of(&r.id);
-            (!routines.iter().any(|x| x.prompt.contains(&mark))).then(|| (r.clone(), orch.clone()))
+            (!prompts.iter().any(|x| x.contains(&mark))).then(|| (r.clone(), orch.clone()))
         })
         .collect()
 }
@@ -305,28 +306,38 @@ async fn load_created(app: &App) -> HashSet<String> {
     serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default().into_iter().collect()
 }
 
+/// Номера и постановки простых процессов.
+fn prompts_of(app: &App) -> Vec<(String, String)> {
+    app.workflows.lock().items.iter().filter(|s| s.is_simple()).map(|s| (s.wf.id.clone(), s.prompt())).collect()
+}
+
+fn texts_of(app: &App) -> Vec<String> {
+    prompts_of(app).into_iter().map(|(_, p)| p).collect()
+}
+
 /// Тик планировщика: у каждой команды с оркестратором есть своя рутина разбора. Заводим один раз на команду:
 /// если человек её удалил, второй раз не возвращаем.
 pub async fn ensure_routines(app: &Arc<App>) {
     let rooms = app.store.rooms();
     let bots = app.store.bots();
     // Рутины до 0.4.3 велели читать MAIN.md, которого больше нет: их задание обновляется до нынешнего.
-    for routine in app.store.routines().into_iter().filter(|r| r.prompt.contains(MARK) && r.prompt.contains("MAIN.md")) {
-        if let Some(room) = rooms.iter().find(|room| routine.prompt.contains(&mark_of(&room.id))) {
-            if let Err(e) = app.store.update_routine(&routine.id, &json!({ "prompt": prompt_for(room) }), false).await {
+    let old: Vec<(String, String)> = prompts_of(app).into_iter().filter(|(_, p)| p.contains(MARK) && p.contains("MAIN.md")).collect();
+    for (id, prompt) in old {
+        if let Some(room) = rooms.iter().find(|room| prompt.contains(&mark_of(&room.id))) {
+            if let Err(e) = crate::simple_process::patch(&app.workflows, &id, &json!({ "prompt": prompt_for(room) }), false) {
                 eprintln!("[memory] рутина разбора памяти «{}» не обновлена: {e}", room.name);
             }
         }
     }
     let known = SEEN.lock().unwrap().clone().unwrap_or_default();
-    if pending(&rooms, &bots, &app.store.routines(), &known).is_empty() {
+    if pending(&rooms, &bots, &texts_of(app), &known).is_empty() {
         return;
     }
     let mut created = load_created(app).await;
     created.extend(known);
-    let todo = pending(&rooms, &bots, &app.store.routines(), &created);
+    let todo = pending(&rooms, &bots, &texts_of(app), &created);
     for (room, orch) in todo {
-        match app.store.add_routine_capped(&routine_input(&room, &orch), crate::workflow_tools::MAX_ROUTINES, false).await {
+        match crate::simple_process::create(&app.workflows, &routine_input(&room, &orch), crate::workflow_tools::MAX_ROUTINES, false) {
             Ok(Some(_)) => {
                 created.insert(room.id.clone());
             }
@@ -335,9 +346,9 @@ pub async fn ensure_routines(app: &Arc<App>) {
         }
     }
     // Рутина, найденная по метке, тоже считается заведённой: человек мог её переименовать или выключить.
-    let routines = app.store.routines();
+    let texts = texts_of(app);
     for room in rooms.iter().filter(|r| !r.archived) {
-        if routines.iter().any(|x| x.prompt.contains(&mark_of(&room.id))) {
+        if texts.iter().any(|x| x.contains(&mark_of(&room.id))) {
             created.insert(room.id.clone());
         }
     }
@@ -441,7 +452,7 @@ mod tests {
         assert_eq!(input["quiet"], true);
         assert_eq!(input["at"], AT);
         // Рутина уже есть (или помечена созданной) — вторая не нужна, даже если человек её удалил.
-        let existing = Routine { prompt: input["prompt"].as_str().unwrap().into(), ..Routine::default() };
+        let existing = input["prompt"].as_str().unwrap().to_string();
         assert!(pending(&rooms, &bots, &[existing], &HashSet::new()).is_empty());
         assert!(pending(&rooms, &bots, &[], &HashSet::from(["r1".to_string()])).is_empty());
     }

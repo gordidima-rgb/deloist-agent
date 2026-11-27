@@ -103,6 +103,7 @@ mod reach;
 mod remote_screen;
 mod rights;
 mod routine_migrate;
+mod simple_process;
 mod rooms;
 mod runs;
 mod runtime;

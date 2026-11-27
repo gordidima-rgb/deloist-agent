@@ -633,8 +633,6 @@ async fn state(State(app): Shared) -> Response {
         item["activeBot"] = json!(app.rooms.active_bot(&room.id));
         rooms.push(item);
     }
-    let mut routines = app.store.routines();
-    routines.extend(app.reminders.list());
     ok(json!({
         "bots": bots,
         "rooms": rooms,
@@ -642,7 +640,8 @@ async fn state(State(app): Shared) -> Response {
         // Адрес сервера отдаём без ключа: интерфейсу он нужен только чтобы показать, куда подключено.
         // Адрес без ключа, шаблоны без вписанных руками значений: секреты живут не здесь.
         "mcp": app.store.mcp_servers().into_iter().map(|s| shown_mcp(&app, s)).collect::<Vec<_>>(),
-        "routines": routines,
+        "processes": crate::simple_process::cards(&app.workflows, None),
+        "reminders": app.reminders.list(),
         "goals": app.goals.list(),
         "checkins": app.goals.checkins(),
         "settings": settings_json(&app),
@@ -2378,7 +2377,7 @@ async fn put_settings(State(app): Shared, body: axum::body::Bytes) -> Response {
     }
 }
 
-fn check_schedule(body: &Value) -> Result<(), Response> {
+pub(crate) fn check_schedule(body: &Value) -> Result<(), Response> {
     if !crate::schedule::times_valid(body) {
         return Err(fail(StatusCode::BAD_REQUEST, "время нужно в формате ЧЧ:ММ"));
     }
@@ -2698,66 +2697,17 @@ async fn slack_forget(State(app): Shared) -> Response {
     ok(json!({ "ok": true }))
 }
 
-async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
-    let body = if body.is_empty() {
-        json!({})
-    } else {
-        match parse_body(&body) {
-            Ok(v) => v,
-            Err(r) => return r,
-        }
-    };
-    // Кнопку нажал человек, он и ответит на карточки. Без него запускает только расписание.
-    let attended = body.get("attended").and_then(Value::as_bool).unwrap_or(true);
-    // Триггер (почта или страница): кнопка тоже смотрит источник; нового нет — бот узнаёт об этом из задания.
-    type Commit = Box<dyn FnOnce(&App) + Send>;
-    let routine = app.store.routine(&id);
-    let triggered: Option<(String, Option<Commit>)> = match (&routine, app.mail.trigger(&id), app.watch.trigger(&id)) {
-        (Some(routine), Some(trigger), _) => match crate::mail::check_trigger(&app, routine, &trigger).await {
-            Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => {
-                let (bot, id) = (routine.bot_id.clone(), id.clone());
-                Some((text, Some(Box::new(move |app: &App| crate::mail::commit(app, &id, &bot, &senders, uid_validity, last_uid)))))
-            }
-            Ok(crate::mail::Check::Nothing) => Some(("\n\nНовых подходящих писем нет.".to_string(), None)),
-            Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("почта: {e}")),
-        },
-        (Some(routine), None, Some(trigger)) => match crate::watch::check_trigger(&app, routine, &trigger).await {
-            Ok(crate::watch::Check::Items { text, keys }) => {
-                let id = id.clone();
-                Some((text, Some(Box::new(move |app: &App| crate::watch::commit(app, &id, keys)))))
-            }
-            Ok(crate::watch::Check::Nothing) => Some(("\n\nНовых подходящих записей на странице нет.".to_string(), None)),
-            Err(e) => return fail(StatusCode::BAD_GATEWAY, format!("страницы: {e}")),
-        },
-        _ => None,
-    };
-    if let Some((extra, commit)) = triggered {
-        let source = if attended { "manual" } else { "request" };
-        return match crate::workflow_run::start_run_with(&app, &id, source, None, None, None, false, Some(extra)) {
-            Ok(_) => {
-                if let Some(commit) = commit {
-                    commit(&app);
-                }
-                ok(json!({ "ok": true, "routine": app.store.routine(&id) }))
-            }
-            Err(e) => fail(StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), &e.message),
-        };
-    }
-    match crate::scheduler::run_now(&app, &id, !attended).await {
-        Ok(routine) => ok(json!({ "ok": true, "routine": routine })),
-        Err(e) => fail(StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), &e.message),
-    }
+/// Простые процессы «триггер → бот» карточками: только чтение, без секретов. Правка и запуск — адреса `/api/workflows` (окно человека).
+async fn processes_list(State(app): Shared) -> Response {
+    ok(json!({ "processes": crate::simple_process::cards(&app.workflows, None) }))
 }
 
 /// Проверка напоминания: отправить его сейчас по его каналам, расписание не трогаем.
 async fn test_reminder(State(app): Shared, Path(id): Path<String>) -> Response {
-    let Some(routine) = app.reminders.get(&id).or_else(|| app.store.routine(&id)) else {
-        return fail(StatusCode::NOT_FOUND, "рутина не найдена");
+    let Some(reminder) = app.reminders.get(&id) else {
+        return fail(StatusCode::NOT_FOUND, "напоминание не найдено");
     };
-    if !crate::reminders::is_reminder(&routine) {
-        return fail(StatusCode::BAD_REQUEST, "это не напоминание");
-    }
-    let deliveries = crate::reminders::deliver(&app, &routine).await;
+    let deliveries = crate::reminders::deliver(&app, &reminder).await;
     ok(json!({ "ok": deliveries.iter().all(|d| d.error.is_none()), "deliveries": crate::reminders::deliveries_json(&deliveries) }))
 }
 
@@ -2820,107 +2770,77 @@ async fn report_week(State(app): Shared, Query(query): Query<ReportQuery>) -> Re
     ok(app.ledger.report_week(day, &names).await)
 }
 
-/// Рутины файлом календаря: только чтение, без секретов вебхуков и с тем же входом, что у остальных GET.
-async fn routines_calendar(State(app): Shared) -> Response {
-    let mut all_routines = app.store.routines();
-    all_routines.extend(app.reminders.list());
-    let body = crate::schedule::routines_ics(&all_routines, &app.store.bots(), crate::store::now());
+/// Процессы и напоминания файлом календаря: только чтение, без секретов вебхуков и с тем же входом, что у остальных GET.
+async fn tasks_calendar(State(app): Shared) -> Response {
+    let bots = app.store.bots();
+    let mut items: Vec<crate::schedule::IcsItem> = app
+        .workflows
+        .lock()
+        .items
+        .iter()
+        .filter(|s| s.is_simple() && s.wf.enabled && !s.is_hook())
+        .map(|s| crate::schedule::IcsItem {
+            id: s.wf.id.clone(),
+            title: s.wf.title.clone(),
+            bot: bots.iter().find(|b| b.id == s.bot_id()).map(|b| b.name.clone()).unwrap_or_default(),
+            prompt: s.prompt(),
+            timing: s.timing(),
+        })
+        .collect();
+    items.extend(app.reminders.list().into_iter().filter(|r| r.enabled).map(|r| crate::schedule::IcsItem { id: r.id, title: r.title, bot: String::new(), prompt: r.prompt, timing: r.when }));
+    let body = crate::schedule::tasks_ics(&items, crate::store::now());
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
-        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"deloist-routines.ics\"")
+        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"deloist-tasks.ics\"")
         .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(body))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-async fn add_routine(State(app): Shared, body: axum::body::Bytes) -> Response {
+async fn add_reminder(State(app): Shared, body: axum::body::Bytes) -> Response {
     let body = match parse_body(&body) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    // Напоминание без бота: проверяет текст, опережение, каналы и время, а не бота и промпт рутины.
-    if crate::reminders::wants(&body) {
-        if let Err(message) = crate::reminders::validate(&body, None) {
-            return fail(StatusCode::BAD_REQUEST, message);
-        }
-    } else {
-        let bot_id = body.get("botId").and_then(Value::as_str).unwrap_or_default();
-        if bot_id.is_empty() || app.store.bot(bot_id).is_none() {
-            return fail(StatusCode::BAD_REQUEST, "нужен существующий бот");
-        }
-        if body.get("prompt").and_then(Value::as_str).unwrap_or_default().trim().is_empty() {
-            return fail(StatusCode::BAD_REQUEST, "нужен промпт рутины");
-        }
+    if let Err(message) = crate::reminders::validate(&body, None) {
+        return fail(StatusCode::BAD_REQUEST, message);
     }
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    if crate::reminders::wants(&body) {
-        match app.reminders.add_reminder(&body, true) {
-            Ok(routine) => created(json!({ "routine": routine })),
-            Err(e) => io_fail(e),
-        }
-    } else {
-        match app.store.add_routine(&body, true).await {
-            Ok(routine) => created(json!({ "routine": routine })),
-            Err(e) => io_fail(e),
-        }
+    match app.reminders.add_reminder(&body) {
+        Ok(reminder) => created(json!({ "reminder": reminder })),
+        Err(e) => io_fail(e),
     }
 }
 
-async fn patch_routine(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+async fn patch_reminder(State(app): Shared, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
     let body = match parse_body(&body) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    let is_reminder = app.reminders.get(&id).is_some();
-    if is_reminder {
-        if let Some(existing) = app.reminders.get(&id) {
-            if let Err(message) = crate::reminders::validate(&body, Some(&existing)) {
-                return fail(StatusCode::BAD_REQUEST, message);
-            }
-        }
-    } else if let Some(existing) = app.store.routine(&id).filter(crate::reminders::is_reminder) {
-        if let Err(message) = crate::reminders::validate(&body, Some(&existing)) {
-            return fail(StatusCode::BAD_REQUEST, message);
-        }
+    let Some(existing) = app.reminders.get(&id) else {
+        return fail(StatusCode::NOT_FOUND, "напоминание не найдено");
+    };
+    if let Err(message) = crate::reminders::validate(&body, Some(&existing)) {
+        return fail(StatusCode::BAD_REQUEST, message);
     }
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    if is_reminder {
-        match app.reminders.update_reminder(&id, &body, true) {
-            Ok(Some(routine)) => ok(json!({ "routine": routine })),
-            Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-            Err(e) => io_fail(e),
-        }
-    } else {
-        match app.store.update_routine(&id, &body, true).await {
-            Ok(Some(routine)) => ok(json!({ "routine": routine })),
-            Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-            Err(e) => io_fail(e),
-        }
+    match app.reminders.update_reminder(&id, &body) {
+        Ok(Some(reminder)) => ok(json!({ "reminder": reminder })),
+        Ok(None) => fail(StatusCode::NOT_FOUND, "напоминание не найдено"),
+        Err(e) => io_fail(e),
     }
 }
 
-async fn remove_routine(State(app): Shared, Path(id): Path<String>) -> Response {
-    if app.reminders.get(&id).is_some() {
-        match app.reminders.remove_reminder(&id) {
-            Ok(true) => ok(json!({ "ok": true })),
-            Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-            Err(e) => io_fail(e),
-        }
-    } else {
-        match app.store.remove_routine(&id).await {
-            Ok(true) => {
-                app.mail.remove_trigger(&id);
-                app.watch.remove_trigger(&id);
-                ok(json!({ "ok": true }))
-            }
-            Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-            Err(e) => io_fail(e),
-        }
+async fn remove_reminder(State(app): Shared, Path(id): Path<String>) -> Response {
+    match app.reminders.remove_reminder(&id) {
+        Ok(true) => ok(json!({ "ok": true })),
+        Ok(false) => fail(StatusCode::NOT_FOUND, "напоминание не найдено"),
+        Err(e) => io_fail(e),
     }
 }
 
@@ -4491,10 +4411,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/selfdev/bots/{id}", post(selfdev_bot))
         .route("/api/selfdev/preset", post(selfdev_preset))
         .route("/api/selfdev/clone", post(selfdev_clone))
-        .route("/api/routines.ics", get(routines_calendar))
-        .route("/api/routines", post(add_routine))
-        .route("/api/routines/{id}", axum::routing::patch(patch_routine).merge(delete(remove_routine)))
-        .route("/api/routines/{id}/run", post(run_routine_now))
+        .route("/api/tasks.ics", get(tasks_calendar))
+        .route("/api/processes", get(processes_list))
+        .route("/api/reminders", post(add_reminder))
+        .route("/api/reminders/{id}", axum::routing::patch(patch_reminder).merge(delete(remove_reminder)))
+        .route("/api/reminders/{id}/test", post(test_reminder))
         .route("/api/mail", get(mail_overview))
         .route("/api/mail/accounts", post(mail_create))
         .route("/api/mail/accounts/{id}", axum::routing::patch(mail_patch).merge(delete(mail_remove)))
@@ -4506,7 +4427,6 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mail/oauth/yandex/{flow}/finish", post(mail_oauth_finish))
         .route("/api/watch", get(watch_overview))
         .route("/api/watch/triggers/{id}", axum::routing::put(watch_put_trigger).merge(delete(watch_remove_trigger)))
-        .route("/api/routines/{id}/test-reminder", post(test_reminder))
         .route("/api/goals", post(add_goal))
         .route("/api/goals/{id}", axum::routing::patch(patch_goal).merge(delete(remove_goal)))
         .route("/api/goals/{id}/run", post(run_goal_now))

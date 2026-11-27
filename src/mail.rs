@@ -1189,9 +1189,9 @@ async fn trigger_pass(account: &Account, login: &Login, folder: &str, trigger: &
 }
 
 /// Проверить ящик для рутины. Без новых подходящих писем — `Nothing`; просмотренные неподходящие запоминаются сразу.
-pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trigger: &Trigger) -> Result<Check, String> {
+pub async fn check_trigger(app: &Arc<App>, routine: &crate::workflows::Stored, trigger: &Trigger) -> Result<Check, String> {
     let account = app.mail.account(&trigger.account_id).ok_or("ящик триггера удалён")?;
-    if !account.open_to(&routine.bot_id) {
+    if !account.open_to(&routine.bot_id()) {
         return Err(format!("бот рутины не допущен к ящику {}", account.address));
     }
     let login = login_of(app, &account, false).await?;
@@ -1204,7 +1204,7 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
         Err(e) => {
             // Токен Яндекса не помог и после обновления: человеку нужно войти заново.
             let e = if account.auth == AUTH_YANDEX && auth_failed(&e) { friendly(e, true) } else { e };
-            app.mail.update_trigger(&routine.id, |t| {
+            app.mail.update_trigger(&routine.wf.id, |t| {
                 t.last_check = now();
                 t.last_error = e.clone();
             });
@@ -1212,7 +1212,7 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
         }
     };
     let (fail_uid, fail_count) = retry.unwrap_or_default();
-    app.mail.update_trigger(&routine.id, |t| {
+    app.mail.update_trigger(&routine.wf.id, |t| {
         t.fail_uid = fail_uid;
         t.fail_count = fail_count;
         if !error.is_empty() {
@@ -1226,7 +1226,7 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
     let mut letters: Vec<(u32, net::Parsed)> = fetched.into_iter().map(|f| (f.uid, net::parse(&f.data, TRIGGER_BODY_CHARS, &account.authserv))).filter(|(_, l)| matches(l, &trigger.from, &trigger.subject)).collect();
     letters.sort_by_key(|(uid, _)| *uid);
     if letters.is_empty() || validity != trigger.uid_validity {
-        app.mail.update_trigger(&routine.id, |t| {
+        app.mail.update_trigger(&routine.wf.id, |t| {
             t.uid_validity = validity;
             t.last_uid = last;
             t.last_check = now();
@@ -1266,21 +1266,21 @@ pub fn commit(app: &App, routine_id: &str, bot_id: &str, senders: &[String], uid
 /// Срок процесса с почтовым триггером. Проверка идёт в фоне: медленный почтовый сервер не держит другие процессы.
 /// Есть новые письма — запуск с ними во входе; нет — срок просто пройден. `late` — пометка, что срок опоздал.
 pub fn tick_process(app: &Arc<App>, id: &str, node: &str, trigger: Trigger, late: Option<String>) {
-    let Some(routine) = app.store.routine(id) else { return };
+    let Some(routine) = app.workflows.find(id) else { return };
     if !app.mail.checking.lock().unwrap().insert(id.to_string()) {
         return;
     }
     let (app, node) = (app.clone(), node.to_string());
     tokio::spawn(async move {
         // Метка «проверяется» снимается при любом выходе, и при панике тоже: иначе процесс не проверялся бы больше.
-        let _guard = Checking { app: app.clone(), id: routine.id.clone() };
+        let _guard = Checking { app: app.clone(), id: routine.wf.id.clone() };
         match check_trigger(&app, &routine, &trigger).await {
-            Ok(Check::Nothing) => crate::workflow_run::note_status(&app, &routine.id, "no_mail"),
+            Ok(Check::Nothing) => crate::workflow_run::note_status(&app, &routine.wf.id, "no_mail"),
             Ok(Check::Letters { text, senders, uid_validity, last_uid, .. }) => {
                 let data = format!("{}{text}", late.map(|l| format!("{l}
 ")).unwrap_or_default());
-                match crate::workflow_run::start_run_with(&app, &routine.id, "schedule", None, None, Some(node), false, Some(data)) {
-                    Ok(_) => commit(&app, &routine.id, &routine.bot_id, &senders, uid_validity, last_uid),
+                match crate::workflow_run::start_run_with(&app, &routine.wf.id, "schedule", None, None, Some(node), false, Some(data)) {
+                    Ok(_) => commit(&app, &routine.wf.id, &routine.bot_id(), &senders, uid_validity, last_uid),
                     // У процесса уже идёт запуск: письма никуда не денутся, их заберёт следующий срок.
                     Err(e) if e.status == 409 => {}
                     Err(e) => crate::scheduler::note_failure(&app, &routine, &e.message).await,
@@ -1288,7 +1288,7 @@ pub fn tick_process(app: &Arc<App>, id: &str, node: &str, trigger: Trigger, late
             }
             Err(e) => {
                 crate::scheduler::note_failure(&app, &routine, &format!("Почта: {e}")).await;
-                crate::workflow_run::note_status(&app, &routine.id, "error");
+                crate::workflow_run::note_status(&app, &routine.wf.id, "error");
             }
         }
     });
@@ -1511,9 +1511,9 @@ pub async fn patch(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, ApiE
         }
     });
     // Бот, у которого забрали ящик, теряет и его триггеры.
-    let routines = app.store.routines();
+    let owners: Vec<(String, String)> = app.workflows.lock().items.iter().map(|s| (s.wf.id.clone(), s.bot_id())).collect();
     app.mail.change(|s| {
-        s.triggers.retain(|t| t.account_id != account.id || routines.iter().any(|r| r.id == t.routine_id && account.open_to(&r.bot_id)));
+        s.triggers.retain(|t| t.account_id != account.id || owners.iter().any(|(id, bot)| *id == t.routine_id && account.open_to(bot)));
     });
     Ok(public(app, &account))
 }
@@ -1589,8 +1589,8 @@ pub async fn finish_oauth(app: &Arc<App>, flow: &str, body: &Value) -> Result<Va
 
 /// `PUT /api/mail/triggers/{routine}`: ящик, папка и фильтры. Начальная точка — текущее последнее письмо.
 pub async fn put_trigger(app: &Arc<App>, routine_id: &str, body: &Value) -> Result<Value, ApiError> {
-    let routine = app.store.routine(routine_id).ok_or_else(|| ApiError::NotFound("рутина не найдена".into()))?;
-    if routine.hook || crate::reminders::is_reminder(&routine) {
+    let routine = app.workflows.find(routine_id).ok_or_else(|| ApiError::NotFound("рутина не найдена".into()))?;
+    if routine.is_hook() {
         return Err(ApiError::Bad("почтовый триггер — только у рутины по расписанию".into()));
     }
     if app.watch.trigger(routine_id).is_some() {
@@ -1598,7 +1598,7 @@ pub async fn put_trigger(app: &Arc<App>, routine_id: &str, body: &Value) -> Resu
     }
     let account_id = text_field(body, "accountId").unwrap_or_default();
     let account = app.mail.account(&account_id).ok_or_else(|| ApiError::Bad("нет такого ящика".into()))?;
-    if !account.open_to(&routine.bot_id) {
+    if !account.open_to(&routine.bot_id()) {
         return Err(ApiError::Bad("сначала откройте этот ящик боту рутины".into()));
     }
     let folder = text_field(body, "folder").filter(|f| !f.is_empty()).unwrap_or_else(|| "INBOX".into());

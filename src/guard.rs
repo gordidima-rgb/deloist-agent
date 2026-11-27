@@ -485,7 +485,7 @@ fn verdict(guard: &Guard, peer: std::net::IpAddr, method: &Method, path: &str, q
     if !session && norm.starts_with("/api/") && guard.has_agent(peer, headers) {
         // Ответы человека и правила — только из окна. Ключ лежит в паспорте копии, его может
         // прочитать скрипт бота в своей папке и выдать себе вечные разрешения.
-        if human_only(&norm) || catalog_write(method, &norm) || config_write(method, &norm) || habit_write(method, &norm) || todo_write(method, &norm) || room_write(method, &norm) || room_picture_write(method, &norm) || bot_room_create(method, &norm) || bot_room_delete(method, &norm) || routine_write(method, &norm) {
+        if human_only(&norm) || catalog_write(method, &norm) || config_write(method, &norm) || habit_write(method, &norm) || todo_write(method, &norm) || room_write(method, &norm) || room_picture_write(method, &norm) || bot_room_create(method, &norm) || bot_room_delete(method, &norm) || reminder_write(method, &norm) {
             return Some(refuse(StatusCode::FORBIDDEN, "это решает человек в окне приложения"));
         }
         return None;
@@ -648,7 +648,7 @@ fn human_only(path: &str) -> bool {
         // Начать с пустыми ключами откладывает файл секретов в сторону: решает только человек.
         || path.starts_with("/api/secrets")
         // Проверка напоминания шлёт сообщение человеку прямо сейчас: это решает человек в окне.
-        || (path.starts_with("/api/routines/") && path.ends_with("/test-reminder"))
+        || (path.starts_with("/api/reminders/") && path.ends_with("/test"))
         // Аккаунт Deloist: согласие с документами даёт только сам человек; выгрузка отдаёт его
         // личные данные; возврат денег и удаление аккаунта — его решение.
         || path.starts_with("/api/account/consent")
@@ -714,16 +714,9 @@ fn bot_room_delete(method: &Method, path: &str) -> bool {
         && ["/api/bots/", "/api/rooms/"].iter().any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| !rest.trim_end_matches('/').is_empty() && !rest.trim_end_matches('/').contains('/')))
 }
 
-/// Рутина для другого бота со «Свободой действий» — это команды без человека. Ключу программы создавать,
-/// менять и удалять рутины нельзя (читать и запускать можно). Агенты ведут свои рутины инструментами
-/// `create_routine` / `update_routine` / `delete_routine` через мост, там действуют карточки одобрения.
-fn routine_write(method: &Method, path: &str) -> bool {
-    let rest = path.trim_end_matches('/');
-    match rest.strip_prefix("/api/routines") {
-        Some("") => method == Method::POST,
-        Some(tail) => tail.strip_prefix('/').is_some_and(|id| !id.is_empty() && !id.contains('/') && !id.contains('.')) && (method == Method::PATCH || method == Method::DELETE),
-        None => false,
-    }
+/// Напоминания создаёт и правит человек в окне (бот ведёт свои задачи и привычки инструментами). Читать ключу можно.
+fn reminder_write(method: &Method, path: &str) -> bool {
+    (path == "/api/reminders" || path.starts_with("/api/reminders/")) && method != Method::GET && method != Method::HEAD
 }
 
 fn config_write(method: &Method, path: &str) -> bool {

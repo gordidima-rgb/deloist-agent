@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::store::{now, uid, Routine};
+use crate::schedule::Timing;
+use crate::store::{now, uid};
 use crate::turn::{start_turn, RoutineRef, StartError, TurnOptions};
 use crate::App;
 
@@ -117,18 +118,13 @@ impl Default for CheckIn {
 }
 
 impl CheckIn {
-    /// Расписание самопроверки считает тот же код, что и у рутин.
-    fn as_routine(&self) -> Routine {
-        Routine {
-            every_minutes: self.every_minutes,
-            window_from: self.window_from.clone(),
-            window_to: self.window_to.clone(),
-            ..Routine::default()
-        }
+    /// Расписание самопроверки считает тот же код, что и у процессов.
+    fn timing(&self) -> Timing {
+        Timing { every_minutes: self.every_minutes, window_from: self.window_from.clone(), window_to: self.window_to.clone(), ..Timing::default() }
     }
 
     fn reschedule(&mut self) {
-        self.next_run = crate::schedule::next_run_ms(&self.as_routine(), now());
+        self.next_run = crate::schedule::next_run_ms(&self.timing(), now());
     }
 }
 
@@ -411,8 +407,9 @@ pub async fn delete(app: &Arc<App>, id: &str) -> bool {
 }
 
 pub async fn release_routines(app: &Arc<App>, goal_id: &str) {
-    for routine in app.store.routines().into_iter().filter(|r| r.goal_id == goal_id && r.enabled) {
-        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false }), false).await;
+    let ids: Vec<String> = app.workflows.lock().items.iter().filter(|s| s.is_simple() && s.wf.enabled && s.goal_id() == goal_id).map(|s| s.wf.id.clone()).collect();
+    for id in ids {
+        let _ = crate::simple_process::patch(&app.workflows, &id, &json!({ "enabled": false }), false);
     }
 }
 
@@ -500,7 +497,7 @@ pub fn routine_run(app: &Arc<App>, goal_id: &str, title: &str) -> Result<GoalRun
 /// Рутина, чья цель завершена или удалена, больше не нужна: выключаем её, а не пропускаем срок за сроком.
 pub async fn release_if_dead(app: &Arc<App>, routine_id: &str, goal_id: &str) {
     if app.goals.get(goal_id).is_none_or(|g| g.status == "completed") {
-        let _ = app.store.update_routine(routine_id, &json!({ "enabled": false }), false).await;
+        let _ = crate::simple_process::patch(&app.workflows, routine_id, &json!({ "enabled": false }), false);
     }
 }
 
@@ -582,8 +579,7 @@ pub async fn tick(app: &Arc<App>) {
         let Some(bot) = app.store.bot(&check.bot_id) else { continue };
         let day = today();
         let count = used_today(&check, &day);
-        let routine = check.as_routine();
-        let out_of_window = !crate::schedule::allowed(&routine, Local::now().naive_local());
+        let out_of_window = !crate::schedule::allowed(&check.timing(), Local::now().naive_local());
         if count >= MAX_CHECKINS_PER_DAY || out_of_window || crate::scheduler::over_limit(app) {
             app.goals.edit_checkin(&check.bot_id, |c| c.reschedule()).await;
             continue;

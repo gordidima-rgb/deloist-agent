@@ -842,9 +842,6 @@ async fn resume(app: &Arc<App>, id: &str, forced: bool, data: Option<&str>) -> R
         app.runs.update(id, |r| r.forced = true);
     }
     launch(app, &run, &text).inspect_err(|_| app.runs.release(id, held))?;
-    if let Some(routine) = origin_routine(&run.origin) {
-        let _ = app.store.set_routine_status(routine, "running").await;
-    }
     app.turns.emit(json!({ "type": "state_changed" }));
     Ok(())
 }
@@ -861,7 +858,7 @@ pub async fn resume_due(app: &Arc<App>) {
         if matches!(run.state, RunState::Paused { until_ms, .. } if until_ms <= at) && !app.turns.is_busy(&run.bot_id) {
             // Рутина на паузе из-за ошибок: её старые ожидания лимита не просыпаются, пока человек не нажал «Возобновить».
             let id = origin_routine(&run.origin).unwrap_or_default();
-            if app.store.routine(id).is_some_and(|r| r.error_paused) || crate::workflow_run::error_paused(app, id) {
+            if crate::workflow_run::error_paused(app, id) {
                 app.runs.drop_stale_pauses(id);
                 if let Origin::Process { run: wf_run, step, .. } = &run.origin {
                     crate::workflow_run::step_stopped(app, wf_run, step, "процесс на паузе из-за ошибок подряд");
@@ -952,17 +949,11 @@ async fn close_stopped(app: &Arc<App>, run: &Run, why: &str) {
 /// Что было связано с запуском (рутина, цель, задача команды), больше не «идёт».
 async fn settle_origin(app: &Arc<App>, run: &Run, status: &str, text: &str) {
     match &run.origin {
-        Origin::Routine { id, title } | Origin::Webhook { id, title } | Origin::Goal { id, title, .. } => {
-            let routine = RoutineRef { id: id.clone(), title: title.clone() };
-            crate::scheduler::routine_finished(app, &routine, status).await;
-            if let Origin::Goal { run: goal_run, .. } = &run.origin {
-                crate::goals::finished(app, &run.bot_id, &Some(goal_run.clone()), status).await;
-            }
-        }
+        Origin::Goal { run: goal_run, .. } => crate::goals::finished(app, &run.bot_id, &Some(goal_run.clone()), status).await,
         Origin::Team { task_id } => crate::team_tasks::finish_interrupted(app, task_id, text).await,
         // Шаг процесса ждёт итога хода: отмена закрывает шаг, ожидание человека его оставляет.
         Origin::Process { run: run_id, step, .. } if status == "stopped" => crate::workflow_run::step_stopped(app, run_id, step, text),
-        Origin::Process { .. } | Origin::Human => {}
+        Origin::Routine { .. } | Origin::Webhook { .. } | Origin::Process { .. } | Origin::Human => {}
     }
 }
 

@@ -50,7 +50,7 @@ pub fn export_with(app: &App, workflows: bool) -> Value {
     let bots = app.store.bots();
     let skills = app.store.skills();
     let rooms = app.store.rooms();
-    let routines = app.store.routines();
+    let routines = crate::simple_process::cards(&app.workflows, None);
     let name_of = |id: &str| bots.iter().find(|b| b.id == id).map(|b| b.name.clone()).unwrap_or_default();
 
     json!({
@@ -72,9 +72,9 @@ pub fn export_with(app: &App, workflows: bool) -> Value {
         })).collect::<Vec<_>>(),
         "workflows": if workflows { export_workflows(app, &name_of) } else { Vec::new() },
         "routines": routines.iter().map(|r| json!({
-            "bot": name_of(&r.bot_id), "title": r.title, "prompt": r.prompt,
-            "everyMinutes": r.every_minutes, "at": r.at, "days": r.days,
-            "windowFrom": r.window_from, "windowTo": r.window_to, "quiet": r.quiet,
+            "bot": name_of(r["botId"].as_str().unwrap_or_default()), "title": r["title"], "prompt": r["prompt"],
+            "everyMinutes": r["everyMinutes"], "at": r["at"], "days": r["days"],
+            "windowFrom": r["windowFrom"], "windowTo": r["windowTo"], "quiet": r["quiet"],
         })).collect::<Vec<_>>(),
     })
 }
@@ -201,7 +201,7 @@ pub async fn import(app: &Arc<App>, team: &Value) -> Result<Value, String> {
         input["enabled"] = json!(false);
         // Вебхук включает только сам человек: адрес из чужого файла не должен появиться незаметно.
         input["hook"] = json!(false);
-        app.store.add_routine(&input, false).await.map_err(|e| e.to_string())?;
+        crate::simple_process::create(&app.workflows, &input, usize::MAX, false).map_err(|e| e.to_string())?;
         made_routines += 1;
     }
 

@@ -5,7 +5,6 @@ use chrono::{Datelike, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, N
 
 use serde::{Deserialize, Serialize};
 
-use crate::store::{Bot, Routine};
 
 pub fn tz_valid(name: &str) -> bool {
     let name = name.trim();
@@ -16,7 +15,7 @@ pub trait AsSchedule {
     fn as_schedule(&self) -> Schedule;
 }
 
-impl AsSchedule for Routine {
+impl AsSchedule for Timing {
     fn as_schedule(&self) -> Schedule {
         self.schedule()
     }
@@ -28,12 +27,42 @@ impl AsSchedule for Schedule {
     }
 }
 
-impl Routine {
+/// Расписание «плоским» видом: так его вводит человек в форме, так его правят боты и так оно лежит у напоминаний.
+/// Расписание триггера процесса — `Schedule`; оба вида переводятся друг в друга.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Timing {
+    pub every_minutes: i64,
+    /// Верх случайного интервала: срок выпадает между `every_minutes` и этим числом, чтобы запуски
+    /// не шли ровной сеткой. 0 или не больше `every_minutes` — интервал ровный.
+    pub every_max_minutes: i64,
+    /// «09:00»: запускать в это время, а не каждые N минут.
+    pub at: String,
+    /// Cron-выражение (5 полей). Если задано, заменяет every/at/days/window.
+    pub cron: String,
+    /// Часовой пояс IANA для cron. Пусто — местное время ПК.
+    pub tz: String,
+    /// Дни недели, 1 — понедельник. Пусто — каждый день.
+    pub days: Vec<i64>,
+    /// Повтор по тому же правилу, что у задач (dates_ru::Recurrence). Пусто — нет правила.
+    pub recurrence: Option<crate::dates_ru::Recurrence>,
+    /// Не раньше этой даты (YYYY-MM-DD, местное время), пусто — без ограничения.
+    pub start_on: String,
+    /// Разовый запуск в миллисекундах; 0 — повторяющийся.
+    pub once_at: i64,
+    /// Окно работы, может переходить через полночь: «22:00»–«07:00». Пусто — всегда.
+    pub window_from: String,
+    pub window_to: String,
+}
+
+impl Default for Timing {
+    fn default() -> Self {
+        Self { every_minutes: 60, every_max_minutes: 0, at: String::new(), cron: String::new(), tz: String::new(), days: Vec::new(), recurrence: None, start_on: String::new(), once_at: 0, window_from: String::new(), window_to: String::new() }
+    }
+}
+
+impl Timing {
     pub fn schedule(&self) -> Schedule {
-        // hook
-        if self.hook {
-            return Schedule { kind: "interval".into(), hook: Some(true), every_minutes: Some(self.every_minutes), ..Schedule::default() };
-        }
         if !self.cron.trim().is_empty() {
             return Schedule {
                 kind: "cron".into(),
@@ -51,29 +80,115 @@ impl Routine {
                 ..Schedule::default()
             };
         }
+        let days = if self.days.is_empty() { None } else { Some(self.days.clone()) };
         if parse_time(&self.at).is_some() {
-            let mut s = Schedule {
+            return Schedule {
                 kind: "daily".into(),
                 time: Some(self.at.clone()),
-                days: if self.days.is_empty() { None } else { Some(self.days.clone()) },
+                days,
                 recurrence: self.recurrence.clone(),
                 start_on: if self.start_on.trim().is_empty() { None } else { Some(self.start_on.clone()) },
                 ..Schedule::default()
             };
-            // if recurrence present keep daily; describe uses recurrence
-            let _ = &mut s;
-            return s;
         }
-        // interval
         Schedule {
             kind: "interval".into(),
             every_minutes: Some(self.every_minutes),
             every_max_minutes: if self.every_max_minutes > self.every_minutes { Some(self.every_max_minutes) } else { None },
-            days: if self.days.is_empty() { None } else { Some(self.days.clone()) },
+            days,
             window_from: if self.window_from.trim().is_empty() { None } else { Some(self.window_from.clone()) },
             window_to: if self.window_to.trim().is_empty() { None } else { Some(self.window_to.clone()) },
             ..Schedule::default()
         }
+    }
+
+    /// Расписание триггера обратно в плоский вид. Виды, которых в форме нет (их рисует человек на холсте), сводятся к ближайшему.
+    pub fn of(s: &Schedule) -> Self {
+        let mut t = Self::default();
+        let days = s.days.clone().unwrap_or_default();
+        match s.kind.as_str() {
+            "cron" => {
+                t.cron = s.cron.clone().unwrap_or_default();
+                t.tz = s.tz.clone().unwrap_or_default();
+            }
+            "once" => t.once_at = schedule_next(s, 0).unwrap_or(0),
+            "interval" => {
+                t.every_minutes = s.every_minutes.or_else(|| s.interval_minutes().map(|m| m as i64)).unwrap_or(60);
+                t.every_max_minutes = s.every_max_minutes.unwrap_or(0);
+                t.window_from = s.window_from.clone().unwrap_or_default();
+                t.window_to = s.window_to.clone().unwrap_or_default();
+                t.days = days;
+            }
+            "hourly" => t.every_minutes = 60,
+            kind => {
+                t.at = s.time.clone().unwrap_or_default();
+                t.days = match kind {
+                    "weekdays" => vec![1, 2, 3, 4, 5],
+                    "weekly" => vec![s.weekday.unwrap_or(1)],
+                    _ => days,
+                };
+                t.recurrence = s.recurrence.clone();
+                t.start_on = s.start_on.clone().unwrap_or_default();
+            }
+        }
+        if t.every_minutes == 0 {
+            t.every_minutes = 60;
+        }
+        t
+    }
+
+    /// Поля расписания из запроса. Формат времени проверяет сервер, пустая строка снимает значение.
+    pub fn apply(&mut self, input: &serde_json::Value) -> Result<(), String> {
+        use crate::store::number;
+        if let Some(max) = input.get("everyMaxMinutes") {
+            self.every_max_minutes = number(Some(max)).filter(|x| x.is_finite() && *x > 0.0).map_or(0, |x| x as i64);
+        }
+        if let Some(at) = input.get("at").and_then(|v| v.as_str()) {
+            self.at = at.trim().to_string();
+        }
+        if let Some(days) = input.get("days").and_then(|v| v.as_array()) {
+            let mut wanted: Vec<i64> = days.iter().filter_map(|d| d.as_i64()).filter(|d| (1..=7).contains(d)).collect();
+            wanted.sort_unstable();
+            wanted.dedup();
+            self.days = wanted;
+        }
+        if let Some(from) = input.get("windowFrom").and_then(|v| v.as_str()) {
+            self.window_from = from.trim().to_string();
+        }
+        if let Some(to) = input.get("windowTo").and_then(|v| v.as_str()) {
+            self.window_to = to.trim().to_string();
+        }
+        if let Some(v) = input.get("recurrence") {
+            if v.is_null() {
+                self.recurrence = None;
+            } else if let Ok(rec) = serde_json::from_value(v.clone()) {
+                self.recurrence = Some(rec);
+            }
+        }
+        if let Some(v) = input.get("startOn").or_else(|| input.get("start_on")) {
+            self.start_on = v.as_str().unwrap_or_default().trim().to_string();
+        }
+        if let Some(v) = input.get("onceAt").or_else(|| input.get("once_at")) {
+            self.once_at = v.as_i64().unwrap_or(0);
+        }
+        if let Some(v) = input.get("cron") {
+            let s = v.as_str().ok_or("поле cron должно быть строкой")?.trim().to_string();
+            if !s.is_empty() {
+                parse_cron(&s).map_err(|e| format!("поле cron: {e}"))?;
+            }
+            self.cron = s;
+        }
+        if let Some(v) = input.get("tz") {
+            let s = v.as_str().ok_or("поле tz должно быть строкой")?.trim().to_string();
+            if !s.is_empty() && !tz_valid(&s) {
+                return Err("поле tz: неизвестный часовой пояс".into());
+            }
+            self.tz = s;
+        }
+        if !self.cron.is_empty() && self.once_at > 0 {
+            return Err("cron несовместим с разовым запуском (onceAt)".into());
+        }
+        Ok(())
     }
 }
 
@@ -106,9 +221,9 @@ pub fn open_now<T: AsSchedule>(x: &T, now_ms: i64) -> bool {
     allowed(x, local(now_ms))
 }
 
-fn window(routine: &Routine) -> Option<(NaiveTime, NaiveTime)> {
-    let from = parse_time(&routine.window_from)?;
-    let to = parse_time(&routine.window_to)?;
+fn window(timing: &Timing) -> Option<(NaiveTime, NaiveTime)> {
+    let from = parse_time(&timing.window_from)?;
+    let to = parse_time(&timing.window_to)?;
     (from != to).then_some((from, to))
 }
 
@@ -117,19 +232,9 @@ pub fn allowed<T: AsSchedule>(x: &T, at: NaiveDateTime) -> bool {
     x.as_schedule().allowed(at)
 }
 
-/// Что делать со сроком после окончания запуска: разовый выключается, повторяющийся получает следующий срок.
-pub fn finish(routine: &mut Routine, now_ms: i64) {
-    if routine.once_at > 0 {
-        routine.enabled = false;
-        routine.next_run = 0;
-    } else {
-        routine.next_run = next_run_ms(routine, now_ms);
-    }
-}
-
 /// Следующий срок рутины по часам, которые задаёт тест (без часового пояса компьютера).
 #[cfg(test)]
-pub(crate) fn next_after(routine: &Routine, now: NaiveDateTime) -> NaiveDateTime {
+pub(crate) fn next_after(routine: &Timing, now: NaiveDateTime) -> NaiveDateTime {
     if !routine.cron.trim().is_empty() {
         return now + Duration::minutes(routine.every_minutes.max(1));
     }
@@ -155,7 +260,7 @@ fn to_ms(at: NaiveDateTime) -> i64 {
         .map_or_else(|| Local::now().timestamp_millis(), |t| t.timestamp_millis())
 }
 
-pub fn next_run_ms(routine: &Routine, now_ms: i64) -> i64 {
+pub fn next_run_ms(routine: &Timing, now_ms: i64) -> i64 {
     if routine.once_at > 0 {
         return routine.once_at;
     }
@@ -203,13 +308,13 @@ pub fn describe_moment(ms: i64) -> String {
 }
 
 /// «Следующий запуск: …» для ответа бота и списка. У выключенной и у вебхука срока нет.
-pub fn describe_next(routine: &Routine) -> String {
-    if routine.hook {
+pub fn describe_next(hook: bool, enabled: bool, next_run: i64) -> String {
+    if hook {
         "Запускается только вебхуком, по расписанию не идёт.".to_string()
-    } else if !routine.enabled {
+    } else if !enabled {
         "Рутина выключена, запусков не будет.".to_string()
     } else {
-        format!("Следующий запуск: {}.", describe_moment(routine.next_run))
+        format!("Следующий запуск: {}.", describe_moment(next_run))
     }
 }
 
@@ -346,9 +451,19 @@ fn ics_stamp(now: i64) -> String {
     Utc.timestamp_millis_opt(now).single().unwrap_or_else(Utc::now).format("%Y%m%dT%H%M%SZ").to_string()
 }
 
-/// Календарь рутин: по одному событию на включённую рутину, вебхуки пропускаем.
+/// Событие календаря: процесс или напоминание. Выключенные и вебхуки в календарь не попадают.
+pub struct IcsItem {
+    pub id: String,
+    pub title: String,
+    /// Имя бота; у напоминания пусто.
+    pub bot: String,
+    pub prompt: String,
+    pub timing: Timing,
+}
+
+/// Календарь процессов и напоминаний: по одному событию на каждое, cron пропускаем.
 /// Время местное и без TZID: календарь человека сам покажет его в своих часах.
-pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
+pub fn tasks_ics(items: &[IcsItem], now: i64) -> String {
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_string(),
         "VERSION:2.0".to_string(),
@@ -358,13 +473,13 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
     ];
     let stamp = format!("DTSTAMP:{}", ics_stamp(now));
     let today = local(now).date();
-    for routine in routines.iter().filter(|r| r.enabled && !r.hook && r.cron.trim().is_empty()) {
-        // cron-рутины пропускаем: ICS не умеет произвольный cron.
-        let bot = bots.iter().find(|b| b.id == routine.bot_id).map_or("", |b| b.name.as_str());
-        let mut title = if bot.is_empty() {
-            routine.title.clone()
+    for item in items.iter().filter(|i| i.timing.cron.trim().is_empty()) {
+        // cron пропускаем: ICS не умеет произвольный cron.
+        let routine = &item.timing;
+        let mut title = if item.bot.is_empty() {
+            item.title.clone()
         } else {
-            format!("{bot}: {}", routine.title)
+            format!("{}: {}", item.bot, item.title)
         };
         let (start, duration, rule) = if let Some(at) = parse_time(&routine.at) {
             let rule = ics_days(&routine.days).map_or_else(|| "FREQ=DAILY".to_string(), |days| format!("FREQ=WEEKLY;BYDAY={days}"));
@@ -380,13 +495,13 @@ pub fn routines_ics(routines: &[Routine], bots: &[Bot], now: i64) -> String {
             (start, 15, rule)
         };
         lines.push("BEGIN:VEVENT".to_string());
-        lines.push(format!("UID:{}@deloist", routine.id));
+        lines.push(format!("UID:{}@deloist", item.id));
         lines.push(stamp.clone());
         lines.push(format!("DTSTART:{}", start.format("%Y%m%dT%H%M%S")));
         lines.push(format!("DURATION:{}", ics_duration(duration)));
         lines.push(format!("RRULE:{rule}"));
         lines.push(format!("SUMMARY:{}", ics_escape(&title)));
-        let prompt: String = routine.prompt.chars().take(300).collect();
+        let prompt: String = item.prompt.chars().take(300).collect();
         lines.push(format!("DESCRIPTION:{}", ics_escape(&prompt)));
         lines.push("END:VEVENT".to_string());
     }
@@ -938,17 +1053,17 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 11, day).unwrap().and_hms_opt(hour, minute, 0).unwrap()
     }
 
-    fn routine(every: i64) -> Routine {
-        Routine { every_minutes: every, ..Routine::default() }
+    fn routine(every: i64) -> Timing {
+        Timing { every_minutes: every, ..Timing::default() }
     }
 
-    fn cron_at(routine: &Routine, now_ms: i64) -> i64 {
+    fn cron_at(routine: &Timing, now_ms: i64) -> i64 {
         cron_next_ms(&routine.schedule(), now_ms).unwrap_or(i64::MAX)
     }
 
     #[test]
     fn a_random_interval_stays_inside_its_range_and_reaches_both_ends() {
-        let r = Routine { every_minutes: 40, every_max_minutes: 80, ..Routine::default() };
+        let r = Timing { every_minutes: 40, every_max_minutes: 80, ..Timing::default() };
         assert_eq!(roll_minutes(40, 80, 0.0), 40);
         assert_eq!(roll_minutes(40, 80, 0.999_999_9), 80);
         assert_eq!(roll_minutes(40, 80, 0.5), 60);
@@ -968,20 +1083,20 @@ mod tests {
 
     #[test]
     fn daily_time_today_or_tomorrow() {
-        let r = Routine { at: "09:00".into(), ..routine(60) };
+        let r = Timing { at: "09:00".into(), ..routine(60) };
         assert_eq!(next_after(&r, at(2, 8, 0)), at(2, 9, 0));
         assert_eq!(next_after(&r, at(2, 9, 0)), at(3, 9, 0), "ровно в срок значит уже следующий день");
     }
 
     #[test]
     fn weekdays_skip_the_weekend() {
-        let r = Routine { at: "09:00".into(), days: vec![1, 2, 3, 4, 5], ..routine(60) };
+        let r = Timing { at: "09:00".into(), days: vec![1, 2, 3, 4, 5], ..routine(60) };
         assert_eq!(next_after(&r, at(6, 10, 0)), at(9, 9, 0), "после пятницы идёт понедельник");
     }
 
     #[test]
     fn night_window_crosses_midnight() {
-        let r = Routine { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
+        let r = Timing { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
         assert!(allowed(&r, at(2, 23, 0)));
         assert!(allowed(&r, at(3, 3, 0)));
         assert!(!allowed(&r, at(3, 7, 0)));
@@ -994,7 +1109,7 @@ mod tests {
     #[test]
     fn night_belongs_to_the_day_it_started() {
         // Только ночь с пятницы на субботу.
-        let r = Routine { window_from: "22:00".into(), window_to: "07:00".into(), days: vec![5], ..routine(60) };
+        let r = Timing { window_from: "22:00".into(), window_to: "07:00".into(), days: vec![5], ..routine(60) };
         assert!(allowed(&r, at(6, 23, 0)));
         assert!(allowed(&r, at(7, 3, 0)), "утро субботы ещё пятничная ночь");
         assert!(!allowed(&r, at(7, 23, 0)));
@@ -1003,7 +1118,7 @@ mod tests {
 
     #[test]
     fn day_window_stays_inside() {
-        let r = Routine { window_from: "09:00".into(), window_to: "18:00".into(), ..routine(60) };
+        let r = Timing { window_from: "09:00".into(), window_to: "18:00".into(), ..routine(60) };
         assert_eq!(next_after(&r, at(2, 17, 30)), at(3, 9, 0));
         assert_eq!(next_after(&r, at(2, 7, 0)), at(2, 9, 0));
     }
@@ -1056,44 +1171,33 @@ mod tests {
     fn moments_and_schedules_read_in_words() {
         assert_eq!(describe_moment(to_ms(at(9, 9, 0))), "пн 09.11 в 09:00");
         assert_eq!(describe_moment(to_ms(at(13, 18, 5))), "пт 13.11 в 18:05");
-        let daily = Routine { at: "09:00".into(), ..routine(60) };
+        let daily = Timing { at: "09:00".into(), ..routine(60) };
         assert_eq!(describe(&daily), "каждый день в 09:00");
-        let weekdays = Routine { days: vec![1, 2, 3, 4, 5], ..daily.clone() };
+        let weekdays = Timing { days: vec![1, 2, 3, 4, 5], ..daily.clone() };
         assert_eq!(describe(&weekdays), "по будням в 09:00");
-        let monday = Routine { days: vec![1], ..daily };
+        let monday = Timing { days: vec![1], ..daily };
         assert_eq!(describe(&monday), "по понедельникам в 09:00");
         assert_eq!(describe(&routine(60)), "каждый час");
         assert_eq!(describe(&routine(30)), "каждые 30 мин");
         assert_eq!(describe(&routine(180)), "каждые 3 ч");
-        let night = Routine { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
+        let night = Timing { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
         assert_eq!(describe(&night), "каждый час, с 22:00 до 07:00");
-        let off = Routine { enabled: false, ..routine(60) };
-        assert!(describe_next(&off).contains("выключена"));
+        assert!(describe_next(false, false, 0).contains("выключена"));
+        assert!(describe_next(true, true, 0).contains("вебхуком"));
     }
 
     fn ics_now() -> i64 {
         Local.with_ymd_and_hms(2026, 11, 2, 8, 0, 0).single().unwrap().timestamp_millis()
     }
 
-    fn ics_bot() -> Bot {
-        Bot { id: "bot_1".into(), name: "Бот".into(), ..Bot::default() }
-    }
-
-    fn ics_routine(title: &str) -> Routine {
-        Routine {
-            id: "rt_1".into(),
-            bot_id: "bot_1".into(),
-            title: title.into(),
-            prompt: "Собери темы дня".into(),
-            at: "09:00".into(),
-            ..Routine::default()
-        }
+    fn ics_routine(title: &str) -> IcsItem {
+        IcsItem { id: "rt_1".into(), title: title.into(), bot: "Бот".into(), prompt: "Собери темы дня".into(), timing: Timing { at: "09:00".into(), ..Timing::default() } }
     }
 
     #[test]
-    fn routines_ics_ends_lines_with_crlf_and_folds_a_long_cyrillic_line_by_octets() {
+    fn tasks_ics_ends_lines_with_crlf_and_folds_a_long_cyrillic_line_by_octets() {
         let title = "Ж".repeat(80);
-        let out = routines_ics(&[ics_routine(&title)], &[ics_bot()], ics_now());
+        let out = tasks_ics(&[ics_routine(&title)], ics_now());
         assert!(out.ends_with("\r\n"), "календарь не кончается CRLF");
         assert!(out.contains("\r\n "), "длинная строка не сложена");
         for line in out.split("\r\n") {
@@ -1105,21 +1209,21 @@ mod tests {
     }
 
     #[test]
-    fn routines_ics_escapes_backslash_semicolon_comma_and_newline() {
-        let routine = Routine {
+    fn tasks_ics_escapes_backslash_semicolon_comma_and_newline() {
+        let routine = IcsItem {
             title: "Сводка; день, ночь\\тест".into(),
             prompt: "Первая\nВторая".into(),
             ..ics_routine("")
         };
-        let out = routines_ics(&[routine], &[ics_bot()], ics_now());
+        let out = tasks_ics(&[routine], ics_now());
         assert!(out.contains("SUMMARY:Бот: Сводка\\; день\\, ночь\\\\тест\r\n"), "{out}");
         assert!(out.contains("DESCRIPTION:Первая\\nВторая\r\n"), "{out}");
     }
 
     #[test]
-    fn routines_ics_daily_at_uses_days_as_weekly_byday() {
-        let routine = Routine { days: vec![5, 1, 3, 3], ..ics_routine("Сводка") };
-        let out = routines_ics(&[routine], &[ics_bot()], ics_now());
+    fn tasks_ics_daily_at_uses_days_as_weekly_byday() {
+        let routine = IcsItem { timing: Timing { days: vec![5, 1, 3, 3], ..ics_routine("").timing }, ..ics_routine("Сводка") };
+        let out = tasks_ics(&[routine], ics_now());
         assert!(out.contains("UID:rt_1@deloist\r\n"), "{out}");
         assert!(out.contains("DTSTART:20261102T090000\r\n"), "{out}");
         assert!(out.contains("DURATION:PT15M\r\n"), "{out}");
@@ -1127,29 +1231,23 @@ mod tests {
     }
 
     #[test]
-    fn routines_ics_daily_at_without_days_repeats_daily() {
-        let out = routines_ics(&[ics_routine("Сводка")], &[ics_bot()], ics_now());
+    fn tasks_ics_daily_at_without_days_repeats_daily() {
+        let out = tasks_ics(&[ics_routine("Сводка")], ics_now());
         assert!(out.contains("RRULE:FREQ=DAILY\r\n"), "{out}");
     }
 
     #[test]
-    fn routines_ics_interval_without_a_window_is_minutely() {
-        let routine = Routine { at: String::new(), every_minutes: 30, ..ics_routine("Проверка") };
-        let out = routines_ics(&[routine], &[ics_bot()], ics_now());
+    fn tasks_ics_interval_without_a_window_is_minutely() {
+        let routine = IcsItem { timing: Timing { at: String::new(), every_minutes: 30, ..Timing::default() }, ..ics_routine("Проверка") };
+        let out = tasks_ics(&[routine], ics_now());
         assert!(out.contains("DTSTART:20261102T080000\r\n"), "{out}");
         assert!(out.contains("RRULE:FREQ=MINUTELY;INTERVAL=30\r\n"), "{out}");
     }
 
     #[test]
-    fn routines_ics_interval_with_a_window_is_a_daily_block() {
-        let routine = Routine {
-            at: String::new(),
-            every_minutes: 30,
-            window_from: "22:00".into(),
-            window_to: "07:00".into(),
-            ..ics_routine("Ночная")
-        };
-        let out = routines_ics(&[routine], &[ics_bot()], ics_now());
+    fn tasks_ics_interval_with_a_window_is_a_daily_block() {
+        let timing = Timing { at: String::new(), every_minutes: 30, window_from: "22:00".into(), window_to: "07:00".into(), ..Timing::default() };
+        let out = tasks_ics(&[IcsItem { timing, ..ics_routine("Ночная") }], ics_now());
         assert!(out.contains("DTSTART:20261102T220000\r\n"), "{out}");
         assert!(out.contains("DURATION:PT9H\r\n"), "{out}");
         assert!(out.contains("RRULE:FREQ=DAILY\r\n"), "{out}");
@@ -1158,14 +1256,12 @@ mod tests {
     }
 
     #[test]
-    fn routines_ics_skips_webhooks_and_disabled_routines() {
-        let normal = Routine { id: "rt_normal".into(), ..ics_routine("Обычная") };
-        let hook = Routine { id: "rt_hook".into(), hook: true, ..ics_routine("Вебхук") };
-        let off = Routine { id: "rt_off".into(), enabled: false, ..ics_routine("Выключена") };
-        let out = routines_ics(&[normal, hook, off], &[ics_bot()], ics_now());
+    fn tasks_ics_skips_cron_which_a_calendar_cannot_hold() {
+        let normal = IcsItem { id: "rt_normal".into(), ..ics_routine("Обычная") };
+        let cron = IcsItem { id: "rt_cron".into(), timing: Timing { cron: "0 9 * * 1".into(), ..Timing::default() }, ..ics_routine("Cron") };
+        let out = tasks_ics(&[normal, cron], ics_now());
         assert!(out.contains("UID:rt_normal@deloist"), "{out}");
-        assert!(!out.contains("rt_hook"), "{out}");
-        assert!(!out.contains("rt_off"), "{out}");
+        assert!(!out.contains("rt_cron"), "{out}");
         assert_eq!(out.matches("BEGIN:VEVENT").count(), 1, "{out}");
     }
 
@@ -1189,8 +1285,8 @@ mod tests {
         }
     }
 
-    fn cron_routine(cron: &str, tz: &str) -> Routine {
-        Routine { cron: cron.into(), tz: tz.into(), ..Routine::default() }
+    fn cron_routine(cron: &str, tz: &str) -> Timing {
+        Timing { cron: cron.into(), tz: tz.into(), ..Timing::default() }
     }
 
     fn utc_ms(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
@@ -1221,7 +1317,7 @@ mod tests {
 
     #[test]
     fn start_on_holds_the_first_run_of_a_weekly_rule() {
-        let r = Routine {
+        let r = Timing {
             at: "10:00".into(),
             start_on: "2026-12-02".into(),
             recurrence: Some(weekly_wednesday()),
@@ -1233,7 +1329,7 @@ mod tests {
 
     #[test]
     fn a_past_start_on_does_not_hold_the_first_run() {
-        let r = Routine {
+        let r = Timing {
             at: "10:00".into(),
             start_on: "2026-01-01".into(),
             recurrence: Some(weekly_wednesday()),
@@ -1245,25 +1341,8 @@ mod tests {
     #[test]
     fn once_at_is_the_moment_itself() {
         let moment_ms = to_ms(moment(2026, 12, 2, 10, 0));
-        let r = Routine { once_at: moment_ms, ..routine(60) };
+        let r = Timing { once_at: moment_ms, ..routine(60) };
         assert_eq!(next_run_ms(&r, to_ms(moment(2026, 11, 18, 8, 0))), moment_ms);
-    }
-
-    #[test]
-    fn a_finished_once_routine_is_disabled_and_has_no_next_run() {
-        let mut r = Routine {
-            once_at: to_ms(moment(2026, 12, 2, 10, 0)),
-            next_run: to_ms(moment(2026, 12, 2, 10, 0)),
-            ..routine(60)
-        };
-        finish(&mut r, to_ms(moment(2026, 12, 2, 10, 1)));
-        assert!(!r.enabled);
-        assert_eq!(r.next_run, 0);
-
-        let mut repeated = Routine { at: "09:00".into(), ..routine(60) };
-        finish(&mut repeated, to_ms(at(2, 9, 0)));
-        assert!(repeated.enabled);
-        assert_eq!(repeated.next_run, to_ms(at(3, 9, 0)));
     }
 
     #[test]
@@ -1365,16 +1444,15 @@ mod tests {
 
     #[test]
     fn routine_schedule_gives_same_next_run_for_each_kind() {
-        use crate::store::Routine;
         let now_ms = to_ms(at(2, 8, 0));
         // time + days
-        let r = Routine { at: "09:00".into(), days: vec![1, 3, 5], ..routine(60) };
+        let r = Timing { at: "09:00".into(), days: vec![1, 3, 5], ..routine(60) };
         assert_eq!(next_run_ms(&r, now_ms), schedule_next(&r.schedule(), now_ms).unwrap());
         // window
-        let r = Routine { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
+        let r = Timing { window_from: "22:00".into(), window_to: "07:00".into(), ..routine(60) };
         assert_eq!(next_run_ms(&r, now_ms), schedule_next(&r.schedule(), now_ms).unwrap());
         // random interval bounds
-        let r = Routine { every_minutes: 40, every_max_minutes: 80, ..Routine::default() };
+        let r = Timing { every_minutes: 40, every_max_minutes: 80, ..Timing::default() };
         let v = roll_minutes(r.every_minutes, r.every_max_minutes, 0.5);
         assert!((40..=80).contains(&v));
         assert_eq!(describe(&r), describe(&r.schedule()));
@@ -1384,7 +1462,7 @@ mod tests {
         // tz describe
         assert!(describe(&r).contains("Europe/Berlin"));
         // allowed parity
-        let r = Routine { window_from: "09:00".into(), window_to: "18:00".into(), ..routine(60) };
+        let r = Timing { window_from: "09:00".into(), window_to: "18:00".into(), ..routine(60) };
         assert_eq!(allowed(&r, at(2, 12, 0)), r.schedule().allowed(at(2, 12, 0)));
     }
 }

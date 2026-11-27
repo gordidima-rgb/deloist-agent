@@ -513,8 +513,9 @@ pub async fn apply(app: &Arc<App>, bundle: &Value) -> Result<Value, String> {
                 continue;
             }
             let title = routine.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
-            if let Some(found) = app.store.routines().into_iter().find(|r| r.bot_id == bot.id && r.title == title) {
-                if let Err(e) = app.store.update_routine(&found.id, &json!({ "enabled": true }), false).await {
+            let found = app.workflows.lock().items.iter().find(|s| s.is_simple() && s.bot_id() == bot.id && s.wf.title == title).map(|s| s.wf.id.clone());
+            if let Some(found) = found {
+                if let Err(e) = crate::simple_process::patch(&app.workflows, &found, &json!({ "enabled": true }), false) {
                     failed.push(format!("рутина {title}: {e}"));
                 }
             }

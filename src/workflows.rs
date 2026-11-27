@@ -135,8 +135,7 @@ pub struct Workflow {
     /// Заметки прошлых запусков (`finish_turn`) по шагам-ботам: хвост до 8000 знаков, идёт в задание следующего запуска.
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub notes: HashMap<String, String>,
-    /// Процесс вырос из рутины «триггер → бот»: старые адреса `/api/routines` и инструменты ботов видят его рутиной.
-    /// 0.4.11 step 5 removes this.
+    /// Простой процесс «триггер → бот» (бывшая рутина): у него своя карточка и простая форма правки (`simple_process`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub from_routine: bool,
 }
@@ -699,6 +698,11 @@ impl Inner {
 }
 
 impl Workflows {
+    /// Копия процесса по номеру.
+    pub fn find(&self, id: &str) -> Option<Stored> {
+        self.lock().get(id).cloned()
+    }
+
     pub fn open(data_dir: &Path) -> Self {
         let dir = data_dir.join("workflows");
         let mut items: Vec<Stored> = Vec::new();

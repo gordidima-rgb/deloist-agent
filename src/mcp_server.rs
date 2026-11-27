@@ -448,8 +448,10 @@ fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "list_workflows" => {
             let state = client.get("/api/state")?;
             let bots = state["bots"].as_array().cloned().unwrap_or_default();
+            // Процессы читаются отдельным адресом: он открыт ключу программы только на чтение (запись — у окна человека).
+            let listed = client.get("/api/processes")?;
             let mut lines = Vec::new();
-            for routine in state["routines"].as_array().cloned().unwrap_or_default() {
+            for routine in listed["processes"].as_array().cloned().unwrap_or_default() {
                 let bot = bots
                     .iter()
                     .find(|b| b["id"] == routine["botId"])
@@ -463,9 +465,7 @@ fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
                     format!("каждые {} мин", routine["everyMinutes"])
                 };
                 let state_text = if routine["enabled"].as_bool().unwrap_or(false) { "" } else { " (выключена)" };
-                let next = serde_json::from_value::<crate::store::Routine>(routine.clone())
-                    .map(|r| format!(". {}", crate::schedule::describe_next(&r)))
-                    .unwrap_or_default();
+                let next = format!(". {}", crate::schedule::describe_next(routine["hook"].as_bool().unwrap_or(false), routine["enabled"].as_bool().unwrap_or(false), routine["nextRun"].as_i64().unwrap_or(0)));
                 lines.push(format!("{} — {}: {}{state_text}{next}", routine["title"].as_str().unwrap_or("?"), bot, when));
             }
             Ok(if lines.is_empty() { "Процессов нет.".into() } else { lines.join("\n") })

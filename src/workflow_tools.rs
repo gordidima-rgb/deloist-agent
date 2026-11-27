@@ -8,9 +8,9 @@ use serde_json::{json, Map, Value};
 
 use crate::dates_ru;
 use crate::schedule;
-use crate::store::{now, uid, Bot, Routine};
+use crate::store::{now, uid, Bot};
 use crate::workflow_run as run;
-use crate::workflows::{self as wf, Edge, Graph, Node};
+use crate::workflows::{self as wf, Edge, Graph, Node, Stored};
 use crate::App;
 
 const MAX_OPS: usize = 30;
@@ -447,10 +447,10 @@ fn render_simple(app: &App, name: &str, args: &Value, limit: usize) -> String {
         let who = app.store.bot(text(args, "bot_id")).map_or_else(|| "этого бота".to_string(), |b| format!("бота «{}»", b.name));
         let mut input = schedule_patch(args).unwrap_or_default();
         input.insert("title".into(), json!("Процесс"));
-        let preview = crate::store::Store::preview_routine(&Value::Object(input));
+        let (when, next) = crate::simple_process::preview(&Value::Object(input));
         let title = if text(args, "name").is_empty() { text(args, "title") } else { text(args, "name") };
-        return format!("Создать процесс «{}» для {who}: {}. {}
-Постановка: {}", clip(title, limit), schedule::describe(&preview), schedule::describe_next(&preview), clip_chars(text(args, "prompt"), limit));
+        return format!("Создать процесс «{}» для {who}: {when}. {next}
+Постановка: {}", clip(title, limit), clip_chars(text(args, "prompt"), limit));
     }
     let title = app.workflows.lock().get(text(args, "workflow_id")).map(|s| s.wf.title.clone());
     let Some(title) = title else { return format!("Процесс «{}» не найден", text(args, "workflow_id")) };
@@ -578,7 +578,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             }
             Ok(rows
                 .into_iter()
-                .map(|(id, row)| app.store.routine(&id).map_or(row.clone(), |r| format!("{row}\n    {}", line(app, &r))))
+                .map(|(id, row)| app.workflows.find(&id).filter(Stored::is_simple).map_or(row.clone(), |r| format!("{row}\n    {}", line(app, &r))))
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -723,14 +723,15 @@ fn for_another_bot(app: &App, bot: &Bot, name: &str, args: &Value) -> bool {
             let wanted = text(args, "bot_id");
             !wanted.is_empty() && wanted != bot.id && app.store.bot(wanted).is_some()
         }
-        _ => app.store.routine(text(args, "workflow_id")).is_some_and(|r| r.bot_id != bot.id),
+        _ => app.workflows.find(text(args, "workflow_id")).is_some_and(|s| s.is_simple() && s.bot_id() != bot.id),
     }
 }
 
-fn line(app: &App, routine: &Routine) -> String {
-    let who = app.store.bot(&routine.bot_id).map_or_else(|| "бот удалён".to_string(), |b| b.name);
-    let mut text = format!("{} · «{}» — {}: {}. {}", routine.id, routine.title, who, schedule::describe(routine), schedule::describe_next(routine));
-    if let Some(w) = app.watch.trigger(&routine.id) {
+fn line(app: &App, process: &Stored) -> String {
+    let who = app.store.bot(&process.bot_id()).map_or_else(|| "бот удалён".to_string(), |b| b.name);
+    let (id, title) = (&process.wf.id, &process.wf.title);
+    let mut text = format!("{id} · «{title}» — {who}: {}. {}", schedule::describe(&process.timing()), schedule::describe_next(process.is_hook(), process.wf.enabled, process.next_run()));
+    if let Some(w) = app.watch.trigger(id) {
         text.push_str(&format!(" Сторож страниц: {} (запись: {}{})", w.urls.join(", "), w.selector, if w.contains.is_empty() { String::new() } else { format!(", содержит «{}»", w.contains) }));
         if !w.last_error.is_empty() {
             text.push_str(&format!(", ошибка: {}", w.last_error));
@@ -798,16 +799,13 @@ async fn create_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String
         let floor = crate::tools::stricter(&bot.approval, &target.approval);
         input.insert("approvalFloor".into(), json!(floor));
     }
-    let made = app
-        .store
-        .add_routine_capped(&Value::Object(input), MAX_ROUTINES, false)
-        .await
+    let made = crate::simple_process::create(&app.workflows, &Value::Object(input), MAX_ROUTINES, false)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("уже {MAX_ROUTINES} процессов «триггер → бот», новые не создаются"))?;
     if args.get("watch_pages").is_some_and(|v| !v.is_null()) {
         // Сторож не встал (адрес не прошёл проверку) — процесс без него будил бы модель впустую: убираем.
-        if let Err(e) = set_watch(app, &made.id, args).await {
-            run::delete_workflow(app, &made.id);
+        if let Err(e) = set_watch(app, &made.wf.id, args).await {
+            run::delete_workflow(app, &made.wf.id);
             return Err(e);
         }
     }
@@ -817,8 +815,9 @@ async fn create_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String
 
 async fn edit_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, String> {
     let id = find_id(app, args)?;
-    let routine = app.store.routine(&id).ok_or("это не простой процесс «триггер → бот»: его граф правится списком ops")?;
-    if routine.hook {
+    let routine = app.workflows.find(&id).filter(Stored::is_simple).ok_or("это не простой процесс «триггер → бот»: его граф правится списком ops")?;
+    let timing = routine.timing();
+    if routine.is_hook() {
         return Err("этот процесс запускается вебхуком, у него нет расписания: его граф правится списком ops".into());
     }
     let mut patch = schedule_patch(args)?;
@@ -830,8 +829,8 @@ async fn edit_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, 
     if new_at.as_deref() == Some("") && !patch.contains_key("everyMinutes") {
         return Err("если снять время at, укажи every_minutes".into());
     }
-    let window_from = patch.get("windowFrom").and_then(Value::as_str).map_or(routine.window_from.clone(), str::to_string);
-    let window_to = patch.get("windowTo").and_then(Value::as_str).map_or(routine.window_to.clone(), str::to_string);
+    let window_from = patch.get("windowFrom").and_then(Value::as_str).map_or(timing.window_from.clone(), str::to_string);
+    let window_to = patch.get("windowTo").and_then(Value::as_str).map_or(timing.window_to.clone(), str::to_string);
     check_window(&window_from, &window_to)?;
     for key in ["title", "prompt"] {
         if let Some(v) = args.get(key).filter(|v| !v.is_null()) {
@@ -846,7 +845,7 @@ async fn edit_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, 
     if let Some(v) = args.get("goal_id").filter(|v| !v.is_null()) {
         let goal = v.as_str().ok_or("поле goal_id должно быть строкой")?.trim();
         if !goal.is_empty() {
-            goal_of(app, goal, &routine.bot_id)?;
+            goal_of(app, goal, &routine.bot_id())?;
         }
         patch.insert("goalId".into(), json!(goal));
     }
@@ -860,26 +859,18 @@ async fn edit_simple(app: &Arc<App>, bot: &Bot, args: &Value) -> Result<String, 
         return Err("не указано, что менять".into());
     }
     // Правка чужого процесса добавляет осторожность правящего: прежний пол остаётся, строже можно, мягче нельзя.
-    if routine.bot_id != bot.id {
-        if let Some(floor) = crate::goals::combine_floor(&routine.approval_floor, &bot.approval) {
+    if routine.bot_id() != bot.id {
+        if let Some(floor) = crate::goals::combine_floor(&routine.approval_floor(), &bot.approval) {
             patch.insert("approvalFloor".into(), json!(floor));
         }
     }
-    // Включённый заново процесс должен получить свежий срок, а не старый, давно прошедший.
-    if patch.get("enabled") == Some(&json!(true)) && !["at", "everyMinutes", "days", "windowFrom", "windowTo", "cron", "tz"].iter().any(|k| patch.contains_key(*k)) {
-        if routine.cron.is_empty() {
-            patch.insert("at".into(), json!(routine.at));
-        } else {
-            patch.insert("cron".into(), json!(routine.cron.clone()));
-        }
-    }
     if watch.is_some() {
-        set_watch(app, &routine.id, args).await?;
+        set_watch(app, &routine.wf.id, args).await?;
     }
     let updated = if patch.is_empty() {
         routine
     } else {
-        app.store.update_routine(&routine.id, &Value::Object(patch), false).await.map_err(|e| e.to_string())?.ok_or("процесс уже удалён")?
+        crate::simple_process::patch(&app.workflows, &id, &Value::Object(patch), false).map_err(|e| e.to_string())?.ok_or("процесс уже удалён")?
     };
     app.turns.emit(json!({ "type": "state_changed" }));
     Ok(format!("Процесс изменён.\n{}", line(app, &updated)))
@@ -957,7 +948,7 @@ mod tests {
         assert_eq!(patch["at"], "09:00");
         assert_eq!(patch["recurrence"], rule);
         let rec: dates_ru::Recurrence = serde_json::from_value(patch["recurrence"].clone()).unwrap();
-        let r = Routine { at: "09:00".into(), recurrence: Some(rec), ..Routine::default() };
+        let r = schedule::Timing { at: "09:00".into(), recurrence: Some(rec), ..schedule::Timing::default() };
         let now = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(10, 0, 0).unwrap();
         let expected = NaiveDate::from_ymd_opt(2026, 9, 19).unwrap().and_hms_opt(9, 0, 0).unwrap();
         assert_eq!(schedule::next_after(&r, now), expected);

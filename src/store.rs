@@ -10,12 +10,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::io::AsyncWriteExt;
 
-use crate::schedule;
-
-/// Следующий срок рутины.
-pub(crate) fn next_run_for(routine: &Routine, now_ms: i64) -> i64 {
-    schedule::next_run_ms(routine, now_ms)
-}
 
 pub fn uid(prefix: &str) -> String {
     let mut bytes = [0u8; 8];
@@ -467,131 +461,6 @@ impl Bot {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Routine {
-    pub id: String,
-    pub bot_id: String,
-    pub title: String,
-    pub prompt: String,
-    pub every_minutes: i64,
-    /// Верх случайного интервала: срок выпадает между `every_minutes` и этим числом, чтобы запуски
-    /// не шли ровной сеткой. 0 или не больше `every_minutes` — интервал ровный.
-    pub every_max_minutes: i64,
-    /// «09:00»: запускать в это время, а не каждые N минут.
-    pub at: String,
-    /// Cron-выражение (5 полей). Если задано, заменяет every/at/days/window.
-    pub cron: String,
-    /// Часовой пояс IANA для cron. Пусто — местное время ПК.
-    pub tz: String,
-    /// Дни недели, 1 — понедельник. Пусто — каждый день.
-    pub days: Vec<i64>,
-    /// Повтор по тому же правилу, что у задач (dates_ru::Recurrence). Пусто — нет правила.
-    #[serde(default)]
-    pub recurrence: Option<crate::dates_ru::Recurrence>,
-    /// Не раньше этой даты (YYYY-MM-DD, местное время), пусто — без ограничения.
-    #[serde(default, rename = "startOn")]
-    pub start_on: String,
-    /// Разовый запуск в миллисекундах; 0 — повторяющийся.
-    #[serde(default, rename = "onceAt")]
-    pub once_at: i64,
-    /// Окно работы, может переходить через полночь: «22:00»–«07:00». Пусто — всегда.
-    pub window_from: String,
-    pub window_to: String,
-    pub enabled: bool,
-    /// Писать в тред и журнал, только если есть что сказать. По умолчанию так и есть.
-    pub quiet: bool,
-    pub last_run: i64,
-    pub next_run: i64,
-    pub created_at: i64,
-    /// Запускается не по расписанию, а вызовом вебхука.
-    pub hook: bool,
-    /// Секрет в адресе вебхука. Пусто у обычной рутины.
-    pub hook_token: String,
-    /// События GitHub, на которые реагирует вебхук. Пусто — на любое.
-    #[serde(default)]
-    pub hook_events: Vec<String>,
-    /// Цель, которую запускает рутина вместо обычного задания. Пусто — рутина как раньше.
-    pub goal_id: String,
-    /// Осторожность создателя, если рутину завёл другой бот: запуски не смелее её.
-    pub approval_floor: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_status: Option<String>,
-    /// Сколько запусков подряд кончились ошибкой: после 3 рутина идёт не чаще раза в час, после 6 — раза в 4 часа.
-    #[serde(skip_serializing_if = "is_zero_u32")]
-    pub failures: u32,
-    /// Причина последней ошибки: подпись в строке рутины и в истории.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_reason: Option<crate::runs::StopReason>,
-    /// Три «вечные» ошибки подряд (вход, проверка, неизвестная): рутина на паузе, пока человек не нажмёт «Возобновить».
-    #[serde(skip_serializing_if = "is_false")]
-    pub error_paused: bool,
-    /// Что делать с пропущенными запусками: "last" — выполнить последний, "skip" — пропустить.
-    #[serde(default = "default_catch_up")]
-    pub catch_up: String,
-    /// Заметка с прошлого запуска (finish_turn note), обрезанная до 8000 знаков, хранится хвост.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub progress_note: String,
-    /// Дешёвая проверка перед ходом: команда оболочки. Непустая — запускается перед turn; код 0 будит бота,
-    /// код 1 значит «нового нет» (модель не вызывается). Задаёт только человек.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub check: String,
-    #[serde(flatten)]
-    pub extra: Map<String, Value>,
-}
-
-fn default_catch_up() -> String {
-    "last".to_string()
-}
-
-fn is_zero_u32(v: &u32) -> bool {
-    *v == 0
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
-}
-
-impl Default for Routine {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            bot_id: String::new(),
-            title: String::new(),
-            prompt: String::new(),
-            every_minutes: 60,
-            every_max_minutes: 0,
-            at: String::new(),
-            cron: String::new(),
-            tz: String::new(),
-            days: Vec::new(),
-            recurrence: None,
-            start_on: String::new(),
-            once_at: 0,
-            window_from: String::new(),
-            window_to: String::new(),
-            enabled: true,
-            quiet: true,
-            last_run: 0,
-            next_run: 0,
-            created_at: 0,
-            hook: false,
-            hook_token: String::new(),
-            hook_events: Vec::new(),
-            goal_id: String::new(),
-            approval_floor: String::new(),
-            last_status: None,
-            failures: 0,
-            stop_reason: None,
-            error_paused: false,
-            catch_up: "last".to_string(),
-            progress_note: String::new(),
-            check: String::new(),
-            extra: Map::new(),
-        }
-    }
-}
-
 /// Навык — блок инструкций, который бот получает целиком и только когда он ему подключён.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -795,7 +664,9 @@ pub(crate) struct State {
     created_at: i64,
     settings: Settings,
     bots: Vec<Bot>,
-    routines: Vec<Routine>,
+    /// Рутины старых версий: читает только переезд в процессы (`routine_migrate`), после него список пуст и в файл не пишется.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    routines: Vec<Value>,
     skills: Vec<Skill>,
     rooms: Vec<Room>,
     mcp: Vec<McpServer>,
@@ -1236,141 +1107,6 @@ pub(crate) fn string_map(v: Option<&Value>) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Поля расписания из запроса. Формат времени проверяет сервер, пустая строка снимает значение.
-pub(crate) fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(), String> {
-    if let Some(max) = input.get("everyMaxMinutes") {
-        routine.every_max_minutes = number(Some(max)).filter(|x| x.is_finite() && *x > 0.0).map_or(0, |x| x as i64);
-    }
-    if let Some(at) = input.get("at").and_then(Value::as_str) {
-        routine.at = at.trim().to_string();
-    }
-    if let Some(days) = input.get("days").and_then(Value::as_array) {
-        let mut wanted: Vec<i64> = days.iter().filter_map(Value::as_i64).filter(|d| (1..=7).contains(d)).collect();
-        wanted.sort_unstable();
-        wanted.dedup();
-        routine.days = wanted;
-    }
-    if let Some(from) = input.get("windowFrom").and_then(Value::as_str) {
-        routine.window_from = from.trim().to_string();
-    }
-    if let Some(to) = input.get("windowTo").and_then(Value::as_str) {
-        routine.window_to = to.trim().to_string();
-    }
-    if let Some(v) = input.get("recurrence") {
-        if v.is_null() {
-            routine.recurrence = None;
-        } else if let Ok(rec) = serde_json::from_value(v.clone()) {
-            routine.recurrence = Some(rec);
-        }
-    }
-    if let Some(v) = input.get("startOn").or_else(|| input.get("start_on")) {
-        routine.start_on = v.as_str().unwrap_or_default().trim().to_string();
-    }
-    if let Some(v) = input.get("onceAt").or_else(|| input.get("once_at")) {
-        routine.once_at = v.as_i64().unwrap_or(0);
-    }
-    if let Some(v) = input.get("cron") {
-        let s = v.as_str().ok_or("поле cron должно быть строкой")?.trim().to_string();
-        if !s.is_empty() {
-            crate::schedule::parse_cron(&s).map_err(|e| format!("поле cron: {e}"))?;
-            if input.get("hook").is_some_and(truthy) {
-                return Err("cron несовместим с вебхуком".into());
-            }
-        }
-        routine.cron = s;
-    }
-    if let Some(v) = input.get("tz") {
-        let s = v.as_str().ok_or("поле tz должно быть строкой")?.trim().to_string();
-        if !s.is_empty() && !crate::schedule::tz_valid(&s) {
-            return Err("поле tz: неизвестный часовой пояс".into());
-        }
-        routine.tz = s;
-    }
-    if !routine.cron.is_empty() && routine.hook {
-        return Err("cron несовместим с вебхуком".into());
-    }
-    if !routine.cron.is_empty() && routine.once_at > 0 {
-        return Err("cron несовместим с разовым запуском (onceAt)".into());
-    }
-    Ok(())
-}
-
-/// Правка полей рутины из тела запроса: одна для рутины в state и для рутины-процесса.
-fn patch_routine(r: &mut Routine, patch: &Value, human: bool) -> std::io::Result<()> {
-        if let Some(v) = patch.get("enabled").filter(|v| !v.is_null()) {
-            r.enabled = truthy(v);
-        }
-        if let Some(v) = patch.get("quiet").filter(|v| !v.is_null()) {
-            r.quiet = truthy(v);
-        }
-        if let Some(v) = patch.get("prompt").filter(|v| !v.is_null()) {
-            r.prompt = as_string(v);
-        }
-        if let Some(v) = patch.get("title").filter(|v| !v.is_null()) {
-            r.title = as_string(v);
-        }
-        if let Some(v) = patch.get("goalId").filter(|v| !v.is_null()) {
-            r.goal_id = as_string(v);
-        }
-        if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) {
-            r.approval_floor = as_string(v);
-        }
-        // «Возобновить» после паузы из-за ошибок.
-        if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
-            r.error_paused = truthy(v);
-            if !r.error_paused {
-                r.failures = 0;
-                r.stop_reason = None;
-            }
-        }
-        if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
-            r.catch_up = as_string(v);
-        }
-        if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
-            r.progress_note = as_string(v);
-        }
-        if human {
-            if let Some(v) = patch.get("check").filter(|v| !v.is_null()) {
-                r.check = as_string(v);
-            }
-        }
-        if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
-            r.every_minutes = minutes(patch.get("everyMinutes"));
-        }
-        if let Some(v) = patch.get("hook").filter(|v| !v.is_null()) {
-            let want = truthy(v);
-            if want && !r.hook {
-                r.hook_token = crate::guard::random_token();
-            }
-            if !want {
-                r.hook_token.clear();
-            }
-            r.hook = want;
-        }
-        if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
-            r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        }
-        apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
-        // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
-        if rescheduled || !r.enabled || r.hook {
-            r.failures = 0;
-            r.stop_reason = None;
-        }
-        if r.hook {
-            r.next_run = 0;
-        } else if rescheduled {
-            r.next_run = next_run_for(r, now());
-        }
-        // Только для проверок: приблизить срок, не дожидаясь его.
-        if cfg!(debug_assertions) {
-            if let Some(at) = number(patch.get("nextRun")) {
-                r.next_run = at as i64;
-            }
-        }
-    Ok(())
-}
-
 pub(crate) fn minutes(v: Option<&Value>) -> i64 {
     let raw = number(v).filter(|x| *x != 0.0 && x.is_finite()).unwrap_or(60.0);
     (raw as i64).max(5)
@@ -1622,43 +1358,6 @@ fn fix_room_lead(room: &mut Room) {
     }
 }
 
-/// Старые расписания переводим на общее правило (at+days -> recurrence, extra.onceAt -> once_at).
-/// Возвращает, менялось ли что-то: по этому флагу состояние дописывается на диск.
-fn migrate_routines(state: &mut State) -> bool {
-    let mut changed = false;
-    for r in &mut state.routines {
-        if !r.at.is_empty() && r.recurrence.is_none() {
-            r.recurrence = Some(if r.days.is_empty() {
-                crate::dates_ru::Recurrence {
-                    freq: crate::dates_ru::Freq::Daily,
-                    interval: 1,
-                    weekdays: vec![],
-                    monthday: None,
-                    nth: None,
-                    month: None,
-                }
-            } else {
-                crate::dates_ru::Recurrence {
-                    freq: crate::dates_ru::Freq::Weekly,
-                    interval: 1,
-                    weekdays: r.days.iter().map(|d| *d as u8).collect(),
-                    monthday: None,
-                    nth: None,
-                    month: None,
-                }
-            });
-            r.days.clear();
-            changed = true;
-        }
-        if let Some(ms) = r.extra.get("onceAt").and_then(Value::as_i64) {
-            r.once_at = ms;
-            r.extra.remove("onceAt");
-            changed = true;
-        }
-    }
-    changed
-}
-
 impl Store {
     pub async fn open(data_dir: PathBuf) -> std::io::Result<Self> {
         for sub in ["threads", "memory", "workspaces", "tmp", "rooms"] {
@@ -1697,15 +1396,12 @@ impl Store {
         if state.version == 0 {
             state.version = 1;
         }
-        if migrate_routines(&mut state) {
-            must_write = true;
-        }
         // Вынос напоминаний из state.routines в reminders.json (шаг 3).
         {
             let reminders_path = data_dir.join("reminders.json");
             // Если файл есть, но не читается — не мигрируем и не затираем: оставляем напоминания
             // в state.routines (как habits.json). Копия сломанного файла остаётся рядом (.bak).
-            let parsed_existing: Option<Vec<Routine>> = if reminders_path.exists() {
+            let parsed_existing: Option<Vec<crate::reminders::Reminder>> = if reminders_path.exists() {
                 std::fs::read_to_string(&reminders_path).ok().and_then(|t| {
                     let v: serde_json::Value = serde_json::from_str(&t).ok()?;
                     let arr = v.get("reminders").and_then(|x| x.as_array()).or_else(|| v.as_array())?;
@@ -1720,13 +1416,15 @@ impl Store {
                 let _ = std::fs::copy(&reminders_path, reminders_path.with_extension("json.bak"));
             } else {
                 let existing = parsed_existing.unwrap_or_default();
-                let mut to_migrate: Vec<Routine> = Vec::new();
-                for r in &state.routines {
-                    if crate::reminders::is_reminder(r) && !existing.iter().any(|e| e.id == r.id) {
-                        to_migrate.push(r.clone());
+                let mut to_migrate: Vec<crate::reminders::Reminder> = Vec::new();
+                for r in state.routines.iter().filter(|r| crate::routine_migrate::is_reminder(r)) {
+                    match serde_json::from_value::<crate::reminders::Reminder>(r.clone()) {
+                        Ok(reminder) if !existing.iter().any(|e| e.id == reminder.id) => to_migrate.push(reminder),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("[store] напоминание из state не читается, остаётся там: {e}"),
                     }
                 }
-                let has_reminder_in_state = state.routines.iter().any(crate::reminders::is_reminder);
+                let has_reminder_in_state = state.routines.iter().any(crate::routine_migrate::is_reminder);
                 if has_reminder_in_state {
                     // Резервная копия state.json только перед реальной миграцией (есть что переносить),
                     // отдельным именем и без перезаписи чужой копии.
@@ -1738,7 +1436,7 @@ impl Store {
                     }
                     if to_migrate.is_empty() {
                         // Дубликаты в reminders.json: просто убираем из state.
-                        state.routines.retain(|r| !crate::reminders::is_reminder(r));
+                        state.routines.retain(|r| !crate::routine_migrate::is_reminder(r));
                         must_write = true;
                     } else {
                         let mut new_list = existing.clone();
@@ -1747,7 +1445,7 @@ impl Store {
                         // Атомарная запись: сначала файл, потом правка state.
                         match write_replace(&reminders_path, text.as_bytes()).await {
                             Ok(()) => {
-                                state.routines.retain(|r| !crate::reminders::is_reminder(r));
+                                state.routines.retain(|r| !crate::routine_migrate::is_reminder(r));
                                 must_write = true;
                             }
                             Err(e) => {
@@ -2715,7 +2413,7 @@ impl Store {
                 return Ok(false);
             };
             state.bots.remove(idx);
-            state.routines.retain(|r| r.bot_id != id);
+            state.routines.retain(|r| r.get("botId").and_then(Value::as_str) != Some(id));
             calm_pets(&mut state);
         }
         for routine in self.process_routines_of(id) {
@@ -3052,26 +2750,14 @@ impl Store {
             .collect())
     }
 
-    // --- рутины ------------------------------------------------------------
+    // --- рутины старых версий ------------------------------------------------
 
-    /// Рутины: вебхук-рутины из state и рутины-процессы (вид для старых адресов, 0.4.11 step 5 removes this).
-    pub fn routines(&self) -> Vec<Routine> {
-        let mut all = self.state.lock().unwrap().routines.clone();
-        all.extend(self.workflows.lock().items.iter().filter_map(crate::routine_migrate::to_routine));
-        all.sort_by_key(|r| r.created_at);
-        all
-    }
-
-    /// Рутины по расписанию переезжают в процессы «триггер → бот» с тем же номером (0.4.11, шаг 4a). Каждый файл
+    /// Рутины из `state.json` переезжают в процессы «триггер → бот» с тем же номером (0.4.11, шаг 4). Каждый файл
     /// пишется целиком и атомарно, и только потом рутина уходит из state; не записался — рутина остаётся и повтор будет на тике.
-    /// Секрет вебхука-рутины переезжает в `secrets` раньше процесса: не записался — рутина остаётся и повтор будет на тике.
+    /// Секрет вебхука-рутины переезжает в `secrets` раньше процесса. Перед первым настоящим переездом рядом ложится копия
+    /// `state.json.before-processes.bak`.
     pub async fn migrate_routines(&self, secrets: &crate::secrets::Secrets) {
-        self.move_routines(secrets).await;
-    }
-
-    /// Перед первым настоящим переездом рядом ложится копия `state.json.before-processes.bak`.
-    async fn move_routines(&self, secrets: &crate::secrets::Secrets) {
-        let pending: Vec<Routine> = self.state.lock().unwrap().routines.iter().filter(|r| !crate::reminders::is_reminder(r)).cloned().collect();
+        let pending: Vec<Value> = self.state.lock().unwrap().routines.iter().filter(|r| !crate::routine_migrate::is_reminder(r)).cloned().collect();
         if pending.is_empty() {
             return;
         }
@@ -3082,198 +2768,45 @@ impl Store {
         let mut moved: Vec<String> = Vec::new();
         {
             let mut workflows = self.workflows.lock();
-            for routine in &pending {
+            for old in &pending {
+                let id = old.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
                 // Процесс с этим номером уже есть (прошлый переезд не успел убрать рутину из state): рутину только убираем.
-                if workflows.get(&routine.id).is_some() {
-                    moved.push(routine.id.clone());
+                if workflows.get(&id).is_some() {
+                    moved.push(id);
                     continue;
                 }
-                if routine.hook {
-                    if let Err(e) = secrets.set(&crate::workflows::hook_scope(&routine.id), &crate::workflows::hook_name(crate::routine_migrate::TRIGGER), &routine.hook_token) {
-                        eprintln!("[routines] секрет вебхука «{}» не переехал, рутина остаётся: {e}", routine.title);
+                let title = old.get("title").and_then(Value::as_str).unwrap_or_default();
+                let stored = match crate::routine_migrate::to_stored(old) {
+                    Ok(stored) => stored,
+                    Err(e) => {
+                        eprintln!("[routines] «{title}» не читается, остаётся в state: {e}");
+                        continue;
+                    }
+                };
+                if let Some((scope, name, token)) = crate::routine_migrate::hook_secret(old) {
+                    if let Err(e) = secrets.set(&scope, &name, &token) {
+                        eprintln!("[routines] секрет вебхука «{title}» не переехал, рутина остаётся: {e}");
                         continue;
                     }
                 }
-                match workflows.insert_new(crate::routine_migrate::to_stored(routine)) {
-                    Ok(()) => moved.push(routine.id.clone()),
-                    Err(e) => eprintln!("[routines] «{}» не переехала в процесс, остаётся рутиной: {e}", routine.title),
+                match workflows.insert_new(stored) {
+                    Ok(()) => moved.push(id),
+                    Err(e) => eprintln!("[routines] «{title}» не переехала в процесс, остаётся в state: {e}"),
                 }
             }
         }
         if moved.is_empty() {
             return;
         }
-        self.state.lock().unwrap().routines.retain(|r| !moved.contains(&r.id));
+        self.state.lock().unwrap().routines.retain(|r| !moved.iter().any(|id| r.get("id").and_then(Value::as_str) == Some(id)));
         if let Err(e) = self.persist().await {
             eprintln!("[routines] state.json не записался после переезда ({e}); при следующем запуске рутины только уберутся из него");
         }
     }
 
-    /// Номера рутин-процессов бота: они уходят вместе с ним.
+    /// Номера простых процессов бота: они уходят вместе с ним.
     fn process_routines_of(&self, bot_id: &str) -> Vec<String> {
-        self.workflows.lock().items.iter().filter(|s| s.wf.from_routine && s.wf.graph.nodes.iter().any(|n| n.kind == "bot" && n.text("bot_id") == bot_id)).map(|s| s.wf.id.clone()).collect()
-    }
-
-    /// Обычная рутина такой, какой её запишет `add_routine_capped` по тому же вводу, но без записи:
-    /// карточка `propose_routine` показывает расписание и ближайший запуск из неё.
-    pub fn preview_routine(input: &Value) -> Routine {
-        let mut routine = Routine {
-            bot_id: text_or(input, "botId", ""),
-            title: take_chars(&text_or(input, "title", "Рутина"), 80),
-            prompt: text_or(input, "prompt", ""),
-            every_minutes: minutes(input.get("everyMinutes")),
-            enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
-            quiet: input.get("quiet").map_or(true, truthy),
-            ..Routine::default()
-        };
-        apply_schedule(&mut routine, input).ok();
-        routine.next_run = next_run_for(&routine, now());
-        routine
-    }
-
-    pub async fn add_routine(&self, input: &Value, human: bool) -> std::io::Result<Routine> {
-        Ok(self.add_routine_capped(input, usize::MAX, human).await?.expect("без предела рутина добавляется всегда"))
-    }
-
-    /// То же с пределом: счёт и вставка под одним замком. `None` — предел достигнут.
-    pub async fn add_routine_capped(&self, input: &Value, cap: usize, human: bool) -> std::io::Result<Option<Routine>> {
-        let mut routine = Routine {
-            id: uid("rt"),
-            bot_id: text_or(input, "botId", ""),
-            title: take_chars(&text_or(input, "title", "Рутина"), 80),
-            prompt: text_or(input, "prompt", ""),
-            every_minutes: minutes(input.get("everyMinutes")),
-            enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
-            quiet: input.get("quiet").map_or(true, truthy),
-            catch_up: text_or(input, "catchUp", "last"),
-            created_at: now(),
-            ..Routine::default()
-        };
-        apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        if input.get("hook").is_some_and(truthy) {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук включается у процесса на холсте, а не у рутины"));
-        }
-        routine.goal_id = text_or(input, "goalId", "");
-        routine.approval_floor = text_or(input, "approvalFloor", "");
-        if human {
-            routine.check = text_or(input, "check", "");
-        }
-        routine.next_run = next_run_for(&routine, now());
-        let mut workflows = self.workflows.lock();
-        if workflows.items.iter().filter(|s| s.wf.from_routine).count() >= cap {
-            return Ok(None);
-        }
-        workflows.insert_new(crate::routine_migrate::to_stored(&routine))?;
-        Ok(Some(routine))
-    }
-
-    pub async fn update_routine(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
-        let updated = {
-            let mut state = self.state.lock().unwrap();
-            match state.routines.iter_mut().find(|r| r.id == id) {
-                Some(r) => {
-                    patch_routine(r, patch, human)?;
-                    r.clone()
-                }
-                None => {
-                    drop(state);
-                    return self.update_process_routine(id, patch, human);
-                }
-            }
-        };
-        self.persist().await?;
-        Ok(Some(updated))
-    }
-
-    /// Правка рутины-процесса: тот же разбор тела, результат записан в граф «триггер → бот».
-    fn update_process_routine(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
-        let mut workflows = self.workflows.lock();
-        let Some(stored) = workflows.get_mut(id) else { return Ok(None) };
-        let Some(mut routine) = crate::routine_migrate::to_routine(stored) else { return Ok(None) };
-        if patch.get("hook").is_some_and(truthy) {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук включается у новой рутины, а не у рутины по расписанию"));
-        }
-        if routine.hook {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук-процесс правится на холсте"));
-        }
-        patch_routine(&mut routine, patch, human)?;
-        let before = serde_json::to_string(&stored.wf.graph).unwrap_or_default();
-        crate::routine_migrate::apply(stored, &routine);
-        if serde_json::to_string(&stored.wf.graph).unwrap_or_default() != before {
-            stored.wf.revision += 1;
-        }
-        let updated = crate::routine_migrate::to_routine(stored);
-        workflows.save_wf(id);
-        Ok(updated)
-    }
-
-    pub async fn remove_routine(&self, id: &str) -> std::io::Result<bool> {
-        {
-            let mut state = self.state.lock().unwrap();
-            let Some(idx) = state.routines.iter().position(|r| r.id == id) else {
-                drop(state);
-                let mut workflows = self.workflows.lock();
-                if !workflows.get(id).is_some_and(|s| s.wf.from_routine) {
-                    return Ok(false);
-                }
-                workflows.items.retain(|s| s.wf.id != id);
-                workflows.runs.remove(id);
-                workflows.remove_files(id);
-                return Ok(true);
-            };
-            state.routines.remove(idx);
-        }
-        self.persist().await?;
-        Ok(true)
-    }
-
-    pub async fn mark_routine_run(&self, id: &str, ok: bool) -> std::io::Result<()> {
-        {
-            let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(());
-            };
-            r.last_run = now();
-            // «Готово» ставит только конец хода: до него рутина «идёт», а обрыв перезапуском виден при старте.
-            r.last_status = Some(if ok { "running" } else { "error" }.to_string());
-            schedule::finish(r, now());
-        }
-        self.persist().await
-    }
-
-    /// Напоминание отработало (или пропущено): статус, подробности по каналам, следующий срок.
-    /// Разовое после срока выключается, чтобы не сработать второй раз.
-    pub async fn finish_reminder(&self, id: &str, status: &str, detail: Value, next_run: i64, disable: bool) -> std::io::Result<()> {
-        {
-            let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(());
-            };
-            r.last_run = now();
-            r.last_status = Some(status.to_string());
-            r.extra.insert("lastDelivery".into(), detail);
-            r.next_run = next_run;
-            if disable {
-                r.enabled = false;
-            }
-        }
-        self.persist().await
-    }
-
-    pub async fn set_routine_status(&self, id: &str, status: &str) -> std::io::Result<()> {
-        {
-            let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(());
-            };
-            r.last_status = Some(status.to_string());
-        }
-        self.persist().await
-    }
-
-    pub fn routine(&self, id: &str) -> Option<Routine> {
-        let found = self.state.lock().unwrap().routines.iter().find(|r| r.id == id).cloned();
-        found.or_else(|| self.workflows.lock().get(id).and_then(crate::routine_migrate::to_routine))
+        self.workflows.lock().items.iter().filter(|s| s.is_simple() && s.bot_id() == bot_id).map(|s| s.wf.id.clone()).collect()
     }
 
     // --- навыки ------------------------------------------------------------
@@ -4034,54 +3567,6 @@ impl Store {
         Ok(true)
     }
 
-    /// Рутина по идентификатору и секрету из адреса вебхука.
-    pub fn routine_by_hook(&self, id: &str, token: &str) -> Option<Routine> {
-        let state = self.state.lock().unwrap();
-        state
-            .routines
-            .iter()
-            .find(|r| r.id == id && r.hook && !r.hook_token.is_empty() && constant_time_eq(&r.hook_token, token))
-            .cloned()
-    }
-}
-
-/// Сравнение секретов без раннего выхода: время не подсказывает, сколько символов совпало.
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-/// Проверка имени события GitHub: `push` или `pull_request.opened`.
-pub(crate) fn valid_hook_event(name: &str) -> bool {
-    let mut parts = name.split('.');
-    let Some(first) = parts.next() else { return false; };
-    if first.is_empty() || !first.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
-        return false;
-    }
-    if let Some(second) = parts.next() {
-        if second.is_empty() || !second.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
-            return false;
-        }
-        if parts.next().is_some() {
-            return false;
-        }
-    }
-    true
-}
-
-pub(crate) fn validate_hook_events(value: &Value) -> Result<Vec<String>, String> {
-    let items = value.as_array().ok_or("hookEvents должен быть списком строк")?;
-    if items.len() > 20 {
-        return Err("hookEvents: не больше 20 событий".into());
-    }
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let name = item.as_str().ok_or("hookEvents: каждое событие — строка")?;
-        if !valid_hook_event(name) {
-            return Err(format!("hookEvents: недопустимое имя события «{name}»"));
-        }
-        out.push(name.to_string());
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -4790,7 +4275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_migrates_old_routine_schedules_once() {
+    async fn old_routine_schedules_move_into_processes_once() {
         let dir = temp_dir("routine-migrate");
         let legacy = json!({
             "version": 1,
@@ -4802,45 +4287,39 @@ mod tests {
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("state.json"), legacy.to_string()).await.unwrap();
         let store = Store::open(dir.clone()).await.unwrap();
-        let migrated = store.routine("r1").unwrap();
-        assert_eq!(migrated.recurrence, Some(crate::dates_ru::Recurrence {
-            freq: crate::dates_ru::Freq::Weekly,
-            interval: 1,
-            weekdays: vec![3],
-            monthday: None,
-            nth: None,
-            month: None,
-        }));
-        assert!(migrated.days.is_empty());
-        let loaded_once = store.routine("r2").unwrap();
-        assert_eq!(loaded_once.once_at, 1_800_000_000_000);
-        assert!(!loaded_once.extra.contains_key("onceAt"));
-
-        let mut state = State::default();
-        let mut reminder = Routine { id: "r2".into(), ..Routine::default() };
-        reminder.extra.insert("onceAt".into(), json!(1_800_000_000_000_i64));
-        state.routines.push(reminder);
-        assert!(migrate_routines(&mut state));
-        assert_eq!(state.routines[0].once_at, 1_800_000_000_000);
-        assert!(!state.routines[0].extra.contains_key("onceAt"));
-        assert!(!migrate_routines(&mut state), "вторая миграция ничего не меняет");
+        store.migrate_routines(&crate::secrets::Secrets::open(&dir)).await;
+        {
+            let workflows = store.workflows.lock();
+            let weekly = workflows.get("r1").unwrap();
+            assert_eq!((weekly.timing().at.as_str(), weekly.timing().days.clone()), ("09:00", vec![3]));
+            assert_eq!(workflows.get("r2").unwrap().timing().once_at, 1_800_000_000_000);
+        }
+        assert!(state_routine_ids(&store).is_empty());
 
         let saved = tokio::fs::read_to_string(dir.join("state.json")).await.unwrap();
-        let _ = Store::open(dir.clone()).await.unwrap();
+        let again = Store::open(dir.clone()).await.unwrap();
+        again.migrate_routines(&crate::secrets::Secrets::open(&dir)).await;
         assert_eq!(tokio::fs::read_to_string(dir.join("state.json")).await.unwrap(), saved);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
-    fn reminder_routine(id: &str, enabled: bool, next_run: i64) -> Routine {
-        let mut r = Routine { id: id.into(), title: format!("rem {id}"), prompt: "ping".into(), every_minutes: 60, enabled, next_run, ..Routine::default() };
-        r.extra.insert("kind".into(), serde_json::json!("reminder"));
-        r
-    }
-    fn normal_routine(id: &str) -> Routine {
-        Routine { id: id.into(), bot_id: "bot1".into(), title: format!("rt {id}"), prompt: "do".into(), every_minutes: 60, enabled: true, next_run: 10, ..Routine::default() }
+    fn reminder_routine(id: &str, enabled: bool, next_run: i64) -> Value {
+        json!({ "id": id, "title": format!("rem {id}"), "prompt": "ping", "everyMinutes": 60, "enabled": enabled, "nextRun": next_run, "kind": "reminder" })
     }
 
-    async fn open_with(dir: &PathBuf, routines: Vec<Routine>) -> Store {
+    fn normal_routine(id: &str) -> Value {
+        json!({ "id": id, "botId": "bot1", "title": format!("rt {id}"), "prompt": "do", "everyMinutes": 60, "enabled": true, "nextRun": 10 })
+    }
+
+    /// Рутина с полями поверх основы.
+    fn with(mut base: Value, extra: Value) -> Value {
+        for (key, value) in extra.as_object().unwrap() {
+            base[key] = value.clone();
+        }
+        base
+    }
+
+    async fn open_with(dir: &PathBuf, routines: Vec<Value>) -> Store {
         tokio::fs::create_dir_all(dir).await.unwrap();
         let state = serde_json::json!({ "version": 1, "createdAt": 0, "settings": {}, "bots": [], "routines": routines, "skills": [], "rooms": [], "mcp": [] });
         tokio::fs::write(dir.join("state.json"), state.to_string()).await.unwrap();
@@ -4850,7 +4329,7 @@ mod tests {
     }
 
     fn state_routine_ids(store: &Store) -> Vec<String> {
-        store.state.lock().unwrap().routines.iter().map(|r| r.id.clone()).collect()
+        store.state.lock().unwrap().routines.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect()
     }
 
     #[tokio::test]
@@ -4858,11 +4337,11 @@ mod tests {
         let dir = temp_dir("rt-to-proc");
         let at = 1_900_000_000_000;
         let routines = vec![
-            Routine { next_run: at, ..normal_routine("rt_a") },
-            Routine { at: "09:00".into(), next_run: at, ..normal_routine("rt_b") },
-            Routine { cron: "0 9 * * 1".into(), next_run: at, ..normal_routine("rt_c") },
-            Routine { once_at: at, next_run: at, ..normal_routine("rt_d") },
-            Routine { hook: true, hook_token: "secret-of-rt_h".into(), hook_events: vec!["push".into()], ..normal_routine("rt_h") },
+            with(normal_routine("rt_a"), json!({ "nextRun": at })),
+            with(normal_routine("rt_b"), json!({ "at": "09:00", "nextRun": at })),
+            with(normal_routine("rt_c"), json!({ "cron": "0 9 * * 1", "nextRun": at })),
+            with(normal_routine("rt_d"), json!({ "onceAt": at, "nextRun": at })),
+            with(normal_routine("rt_h"), json!({ "hook": true, "hookToken": "secret-of-rt_h", "hookEvents": ["push"] })),
         ];
         let store = open_with(&dir, routines).await;
         for id in ["rt_a", "rt_b", "rt_c", "rt_d"] {
@@ -4881,10 +4360,10 @@ mod tests {
         }
         let secrets = crate::secrets::Secrets::open(&dir);
         assert_eq!(secrets.get(&crate::workflows::hook_scope("rt_h"), &crate::workflows::hook_name("t1")).as_deref(), Some("secret-of-rt_h"), "секрет переехал в секреты");
-        assert_eq!(store.routines().len(), 5, "старое окно видит все пять");
-        assert_eq!(store.routine("rt_b").unwrap().next_run, at);
+        assert_eq!(store.workflows.lock().items.len(), 5, "все пять стали процессами");
+        assert_eq!(store.workflows.lock().get("rt_b").unwrap().next_run(), at);
         let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).unwrap()).unwrap();
-        assert_eq!(on_disk["routines"].as_array().unwrap().len(), 0, "state.json переписан");
+        assert_eq!(on_disk["routines"].as_array().map_or(0, Vec::len), 0, "state.json переписан: в нём рутин нет");
         let backup = dir.join("state.json.before-processes.bak");
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
         assert_eq!(saved["routines"].as_array().unwrap().len(), 5, "копия снята до переезда");
@@ -4893,7 +4372,7 @@ mod tests {
         let before = std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap();
         drop(store);
         let again = Store::open(dir.clone()).await.unwrap();
-        assert_eq!(again.routines().len(), 5);
+        assert_eq!(again.workflows.lock().items.len(), 5);
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), "моя копия");
         assert_eq!(std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap(), before);
         let _ = tokio::fs::remove_dir_all(dir).await;
@@ -4917,28 +4396,24 @@ mod tests {
         assert!(store.workflows.lock().get("rt_y").is_some(), "соседняя рутина переехала");
         assert_eq!(state_routine_ids(&store), vec!["rt_x".to_string()], "с нечитаемым файлом рутина остаётся в state");
         assert_eq!(std::fs::read_to_string(dir.join("workflows").join("rt_x.json")).unwrap(), "{broken", "битый файл не тронут");
-        assert!(store.routine("rt_x").is_some(), "и по-прежнему видна окну");
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
     #[tokio::test]
-    async fn edits_and_deletes_of_a_routine_process_go_through_the_old_api() {
+    async fn a_simple_process_is_made_and_edited_in_place() {
         let dir = temp_dir("rt-to-proc-edit");
-        let store = open_with(&dir, vec![Routine { next_run: 1_900_000_000_000, ..normal_routine("rt_a") }]).await;
-        let edited = store.update_routine("rt_a", &serde_json::json!({ "prompt": "новое", "at": "10:30", "enabled": false }), true).await.unwrap().unwrap();
-        assert_eq!((edited.prompt.as_str(), edited.at.as_str(), edited.enabled), ("новое", "10:30", false));
+        let store = open_with(&dir, vec![with(normal_routine("rt_a"), json!({ "nextRun": 1_900_000_000_000_i64 }))]).await;
+        let edited = crate::simple_process::patch(&store.workflows, "rt_a", &json!({ "prompt": "новое", "at": "10:30", "enabled": false }), true).unwrap().unwrap();
+        assert_eq!((edited.prompt().as_str(), edited.timing().at.as_str(), edited.wf.enabled), ("новое", "10:30", false));
         let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap()).unwrap();
         assert_eq!(on_disk["enabled"], false);
         assert_eq!(on_disk["revision"], 2, "правка графа поднимает ревизию");
-        assert!(store.update_routine("rt_a", &serde_json::json!({ "hook": true }), true).await.is_err(), "вебхук у рутины-процесса не включается");
-        assert!(store.update_routine("нет", &serde_json::json!({}), true).await.unwrap().is_none());
-        let made = store.add_routine(&serde_json::json!({ "botId": "bot1", "title": "Новая", "prompt": "x", "everyMinutes": 30 }), true).await.unwrap();
-        assert!(store.workflows.lock().get(&made.id).is_some(), "новая рутина сразу процесс");
+        assert!(crate::simple_process::patch(&store.workflows, "rt_a", &json!({ "hook": true }), true).is_err(), "вебхук у простого процесса не включается");
+        assert!(crate::simple_process::patch(&store.workflows, "нет", &json!({}), true).unwrap().is_none());
+        let made = crate::simple_process::create(&store.workflows, &json!({ "botId": "bot1", "title": "Новая", "prompt": "x", "everyMinutes": 30 }), usize::MAX, true).unwrap().unwrap();
+        assert!(store.workflows.lock().get(&made.wf.id).is_some(), "новый процесс сразу в хранилище");
+        assert!(made.next_run() > 0, "срок у нового посчитан");
         assert!(state_routine_ids(&store).is_empty());
-        assert!(store.remove_routine(&made.id).await.unwrap());
-        assert!(store.remove_routine("rt_a").await.unwrap());
-        assert!(!dir.join("workflows").join("rt_a.json").exists());
-        assert!(!store.remove_routine("rt_a").await.unwrap());
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -4959,8 +4434,7 @@ mod tests {
         tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
 
         let store = Store::open(dir.clone()).await.unwrap();
-        assert_eq!(store.routines().len(), 2);
-        assert_eq!(store.routines()[0].id, "r1");
+        assert_eq!(store.state.lock().unwrap().routines.len(), 2, "рутины ждут переезда в процессы, напоминаний среди них нет");
         let rems = store.reminders.list();
         assert_eq!(rems.len(), 2);
         assert!(rems.iter().any(|r| r.id == "m1" && r.enabled && r.next_run == 200));
@@ -5042,8 +4516,7 @@ mod tests {
         tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
 
         let store = Store::open(dir.clone()).await.unwrap();
-        assert_eq!(store.routines().len(), 1);
-        assert_eq!(store.routines()[0].id, "m1");
+        assert_eq!(state_routine_ids(&store), vec!["m1".to_string()]);
         assert!(store.reminders.is_broken());
         assert_eq!(tokio::fs::read_to_string(dir.join("reminders.json")).await.unwrap(), "{not json");
         assert!(dir.join("reminders.json.bak").exists());

@@ -232,8 +232,8 @@ pub enum Check {
 }
 
 /// Проверить страницы рутины. Без новых подходящих записей — `Nothing`; просмотренные неподходящие запоминаются сразу.
-pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trigger: &PageTrigger) -> Result<Check, String> {
-    let session = app.browsers.session(&app.store, &routine.bot_id).await?;
+pub async fn check_trigger(app: &Arc<App>, routine: &crate::workflows::Stored, trigger: &PageTrigger) -> Result<Check, String> {
+    let session = app.browsers.session(&app.store, &routine.bot_id()).await?;
     let (mut items, mut errors) = (Vec::new(), Vec::new());
     for url in &trigger.urls {
         match fetch(&session, url, &trigger.selector).await {
@@ -243,11 +243,11 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
     }
     let error = errors.join("; ");
     if items.is_empty() && !errors.is_empty() {
-        app.watch.update_trigger(&routine.id, |t| t.last_error = error.clone());
+        app.watch.update_trigger(&routine.wf.id, |t| t.last_error = error.clone());
         return Err(error);
     }
     let (fresh, skip) = select(trigger, items);
-    app.watch.update_trigger(&routine.id, |t| {
+    app.watch.update_trigger(&routine.wf.id, |t| {
         remember(&mut t.seen, skip);
         t.last_check = now();
         t.last_error = error;
@@ -267,19 +267,19 @@ pub fn commit(app: &App, routine_id: &str, keys: Vec<String>) {
 /// Срок процесса со сторожем страниц. Проверка идёт в фоне: медленная страница не держит другие процессы.
 /// Есть новые записи — запуск с ними во входе; нет — срок просто пройден. `late` — пометка, что срок опоздал.
 pub fn tick_process(app: &Arc<App>, id: &str, node: &str, trigger: PageTrigger, late: Option<String>) {
-    let Some(routine) = app.store.routine(id) else { return };
+    let Some(routine) = app.workflows.find(id) else { return };
     if !app.watch.checking.lock().unwrap().insert(id.to_string()) {
         return;
     }
     let (app, node) = (app.clone(), node.to_string());
     tokio::spawn(async move {
         match check_trigger(&app, &routine, &trigger).await {
-            Ok(Check::Nothing) => crate::workflow_run::note_status(&app, &routine.id, "no_change"),
+            Ok(Check::Nothing) => crate::workflow_run::note_status(&app, &routine.wf.id, "no_change"),
             Ok(Check::Items { text, keys }) => {
                 let data = format!("{}{text}", late.map(|l| format!("{l}
 ")).unwrap_or_default());
-                match crate::workflow_run::start_run_with(&app, &routine.id, "schedule", None, None, Some(node), false, Some(data)) {
-                    Ok(_) => commit(&app, &routine.id, keys),
+                match crate::workflow_run::start_run_with(&app, &routine.wf.id, "schedule", None, None, Some(node), false, Some(data)) {
+                    Ok(_) => commit(&app, &routine.wf.id, keys),
                     // У процесса уже идёт запуск: записи никуда не денутся, их заберёт следующий срок.
                     Err(e) if e.status == 409 => {}
                     Err(e) => crate::scheduler::note_failure(&app, &routine, &e.message).await,
@@ -287,10 +287,10 @@ pub fn tick_process(app: &Arc<App>, id: &str, node: &str, trigger: PageTrigger, 
             }
             Err(e) => {
                 crate::scheduler::note_failure(&app, &routine, &format!("Сторож страниц: {e}")).await;
-                crate::workflow_run::note_status(&app, &routine.id, "error");
+                crate::workflow_run::note_status(&app, &routine.wf.id, "error");
             }
         }
-        app.watch.checking.lock().unwrap().remove(&routine.id);
+        app.watch.checking.lock().unwrap().remove(&routine.wf.id);
     });
 }
 
@@ -335,8 +335,8 @@ fn build(routine_id: &str, body: &Value, other_trigger: bool) -> Result<PageTrig
 
 /// `PUT /api/watch/triggers/{routine}`: страницы, селектор и фильтр. Первая проверка только запоминает.
 pub async fn put_trigger(app: &Arc<App>, routine_id: &str, body: &Value) -> Result<Value, ApiError> {
-    let routine = app.store.routine(routine_id).ok_or_else(|| ApiError::NotFound("рутина не найдена".into()))?;
-    if routine.hook || crate::reminders::is_reminder(&routine) {
+    let routine = app.workflows.find(routine_id).ok_or_else(|| ApiError::NotFound("рутина не найдена".into()))?;
+    if routine.is_hook() {
         return Err(ApiError::Bad("сторож страниц — только у рутины по расписанию".into()));
     }
     let mut trigger = build(routine_id, body, app.mail.trigger(routine_id).is_some()).map_err(ApiError::Bad)?;

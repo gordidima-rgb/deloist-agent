@@ -107,6 +107,10 @@ async fn create(State(app): Shared, bytes: Bytes) -> Response {
         Ok(b) => b,
         Err(r) => return r,
     };
+    // Форма «триггер → бот»: бот, постановка и расписание одним телом.
+    if body.get("prompt").is_some() && body.get("botId").is_some() {
+        return create_simple(&app, &body);
+    }
     let Some(title) = title_of(&body) else { return fail(StatusCode::BAD_REQUEST, "нужно название") };
     let graph = match body.get("graph").filter(|g| !g.is_null()) {
         Some(value) => match graph_of(&app, value) {
@@ -116,6 +120,27 @@ async fn create(State(app): Shared, bytes: Bytes) -> Response {
         None => Graph::default(),
     };
     reply(StatusCode::OK, json!({ "workflow": run::create_workflow(&app, &title, graph) }))
+}
+
+fn create_simple(app: &Arc<App>, body: &Value) -> Response {
+    let bot_id = body.get("botId").and_then(Value::as_str).unwrap_or_default();
+    if bot_id.is_empty() || app.store.bot(bot_id).is_none() {
+        return fail(StatusCode::BAD_REQUEST, "нужен существующий бот");
+    }
+    if body.get("prompt").and_then(Value::as_str).unwrap_or_default().trim().is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "нужна постановка для бота");
+    }
+    if let Err(r) = crate::server::check_schedule(body) {
+        return r;
+    }
+    match crate::simple_process::create(&app.workflows, body, usize::MAX, true) {
+        Ok(Some(stored)) => {
+            changed(app, &stored.wf.id);
+            reply(StatusCode::CREATED, json!({ "workflow": stored.wf.clone(), "process": crate::simple_process::card(&stored) }))
+        }
+        Ok(None) => fail(StatusCode::CONFLICT, "слишком много процессов"),
+        Err(e) => fail(if e.kind() == std::io::ErrorKind::InvalidInput { StatusCode::BAD_REQUEST } else { StatusCode::INTERNAL_SERVER_ERROR }, &e.to_string()),
+    }
 }
 
 async fn read(State(app): Shared, Path(id): Path<String>) -> Response {
@@ -172,6 +197,20 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
         Ok(b) => b,
         Err(r) => return r,
     };
+    // Простой процесс правится полями формы: постановка, расписание, пауза.
+    if app.workflows.lock().get(&id).is_some_and(Stored::is_simple) && body.as_object().is_some_and(|o| o.keys().any(|k| k != "title" && k != "enabled")) {
+        if let Err(r) = crate::server::check_schedule(&body) {
+            return r;
+        }
+        return match crate::simple_process::patch(&app.workflows, &id, &body, true) {
+            Ok(Some(stored)) => {
+                changed(&app, &id);
+                reply(StatusCode::OK, json!({ "workflow": stored.wf.clone(), "process": crate::simple_process::card(&stored) }))
+            }
+            Ok(None) => not_found(),
+            Err(e) => fail(if e.kind() == std::io::ErrorKind::InvalidInput { StatusCode::BAD_REQUEST } else { StatusCode::INTERNAL_SERVER_ERROR }, &e.to_string()),
+        };
+    }
     let title = title_of(&body);
     let enabled = body.get("enabled").and_then(Value::as_bool);
     if title.is_none() && enabled.is_none() {
@@ -231,8 +270,39 @@ async fn start(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Resp
     };
     let request_id = body.get("request_id").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 100).map(str::to_string);
     let from_node = body.get("from_node").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
-    match run::start_run(&app, &id, "manual", request_id, from_node, None, false) {
-        Ok(run) => reply(StatusCode::OK, json!({ "run": run })),
+    // Кнопку нажал человек, он и ответит на карточки. Без него запускает только расписание.
+    let attended = body.get("attended").and_then(Value::as_bool).unwrap_or(true);
+    let source = if attended { "manual" } else { "request" };
+    // Почтовый триггер или сторож страниц: кнопка тоже смотрит источник; нового нет — бот узнаёт об этом из задания.
+    type Commit = Box<dyn FnOnce(&App) + Send>;
+    let process = app.workflows.find(&id).filter(Stored::is_simple);
+    let triggered: Option<(String, Option<Commit>)> = match (&process, app.mail.trigger(&id), app.watch.trigger(&id)) {
+        (Some(process), Some(trigger), _) => match crate::mail::check_trigger(&app, process, &trigger).await {
+            Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => {
+                let (bot, id) = (process.bot_id(), id.clone());
+                Some((text, Some(Box::new(move |app: &App| crate::mail::commit(app, &id, &bot, &senders, uid_validity, last_uid)))))
+            }
+            Ok(crate::mail::Check::Nothing) => Some(("\n\nНовых подходящих писем нет.".to_string(), None)),
+            Err(e) => return fail(StatusCode::BAD_GATEWAY, &format!("почта: {e}")),
+        },
+        (Some(process), None, Some(trigger)) => match crate::watch::check_trigger(&app, process, &trigger).await {
+            Ok(crate::watch::Check::Items { text, keys }) => {
+                let id = id.clone();
+                Some((text, Some(Box::new(move |app: &App| crate::watch::commit(app, &id, keys)))))
+            }
+            Ok(crate::watch::Check::Nothing) => Some(("\n\nНовых подходящих записей на странице нет.".to_string(), None)),
+            Err(e) => return fail(StatusCode::BAD_GATEWAY, &format!("страницы: {e}")),
+        },
+        _ => None,
+    };
+    let (extra, commit) = triggered.unzip();
+    match run::start_run_with(&app, &id, source, request_id, from_node, None, false, extra) {
+        Ok(run) => {
+            if let Some(commit) = commit.flatten() {
+                commit(&app);
+            }
+            reply(StatusCode::OK, json!({ "run": run }))
+        }
         Err(e) => run_fail(e),
     }
 }
@@ -399,7 +469,7 @@ const HOOK_MIN_GAP_MS: i64 = 10_000;
 
 /// Старый адрес вебхука рутины `/hooks/<номер>/<секрет>`: рутина стала процессом с тем же номером, вебхук — его узел `t1`.
 async fn routine_hook(app: State<Arc<App>>, headers: HeaderMap, Path((id, secret)): Path<(String, String)>, body: Bytes) -> Response {
-    incoming_hook(app, headers, Path((id, crate::routine_migrate::TRIGGER.to_string(), secret)), body).await
+    incoming_hook(app, headers, Path((id, crate::simple_process::TRIGGER.to_string(), secret)), body).await
 }
 
 /// Входящий вебхук процесса. Неверный адрес, неверный секрет и выключенный процесс отвечают одинаково.

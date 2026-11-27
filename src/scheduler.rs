@@ -1,5 +1,5 @@
-//! Рутины: бот сам просыпается по расписанию. Раз в 30 секунд смотрим, что созрело.
-//! Если бот занят, рутина ждёт следующего окна, а не копит очередь.
+//! Таймер: раз в 30 секунд смотрим, что созрело (процессы, напоминания, цели, фоновые дела).
+//! Если бот занят, запуск ждёт следующего окна, а не копит очередь.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::store::{now, uid, Routine};
-use crate::turn::{start_turn, RoutineRef, TurnOptions};
+use crate::store::{now, uid};
+use crate::workflows::Stored;
 use crate::App;
 
 const TICK: Duration = Duration::from_secs(30);
@@ -35,11 +35,6 @@ fn tick_period() -> Duration {
     TICK
 }
 
-/// Запись журнала о том, что запуск не состоялся, и сообщение интерфейсу.
-async fn note(app: &Arc<App>, routine: &Routine, status: &str, text: &str) {
-    note_of(app, &routine.id, &routine.title, &routine.bot_id, status, text).await;
-}
-
 /// Та же запись для процесса: `id` — процесс, `bot_id` может быть пуст, если запуск не дошёл до бота.
 pub async fn note_of(app: &Arc<App>, id: &str, title: &str, bot_id: &str, status: &str, text: &str) {
     let bot = app.store.bot(bot_id).map(|b| b.name).unwrap_or_default();
@@ -51,9 +46,9 @@ pub async fn note_of(app: &Arc<App>, id: &str, title: &str, bot_id: &str, status
     app.turns.emit(json!({ "type": "journal", "entry": entry }));
 }
 
-/// Запуск не состоялся (почта не ответила, бот не стартовал): строка в журнале рутин.
-pub async fn note_failure(app: &Arc<App>, routine: &Routine, text: &str) {
-    note(app, routine, "failed", text).await;
+/// Запуск не состоялся (почта не ответила, бот не стартовал): строка в журнале.
+pub async fn note_failure(app: &Arc<App>, process: &Stored, text: &str) {
+    note_of(app, &process.wf.id, &process.wf.title, &process.bot_id(), "failed", text).await;
 }
 
 /// Дневной предел токенов исчерпан. Спрашивают только те, кто идёт без человека (рутины, цели, процессы):
@@ -67,58 +62,6 @@ pub fn over_limit(app: &App) -> bool {
     over
 }
 
-/// Запуск по просьбе («Запустить» в окне, инструмент бота): рутина идёт как процесс «триггер → бот», вебхук-рутина — прежним ходом.
-pub async fn run_now(app: &Arc<App>, id: &str, unattended: bool) -> Result<Routine, crate::turn::StartError> {
-    run_now_as(app, id, unattended, if unattended { "request" } else { "manual" }).await
-}
-
-/// То же с пометкой источника в журнале («device:iPhone», когда рутину запустили с устройства). Человек на устройстве рядом.
-pub async fn run_now_as(app: &Arc<App>, id: &str, unattended: bool, source: &str) -> Result<Routine, crate::turn::StartError> {
-    let refuse = |status: u16, message: &str| crate::turn::StartError { status, message: message.into() };
-    if app.reminders.get(id).is_some() {
-        return Err(refuse(400, "напоминание шлёт таймер, бота у него нет: для проверки есть «проверить напоминание»"));
-    }
-    let routine = app.store.routine(id).ok_or_else(|| refuse(404, "рутина не найдена"))?;
-    let Some(bot) = app.store.bot(&routine.bot_id) else {
-        return Err(refuse(400, "бота этой рутины уже нет"));
-    };
-    // Кнопку нажали сейчас: занятому боту отказ сразу, а не ожидание в очереди запуска.
-    if app.turns.is_busy(&bot.id) {
-        return Err(refuse(409, &format!("бот «{}» {}", bot.name, crate::turn::BUSY_SUFFIX)));
-    }
-    if routine.hook {
-        run_hook_routine(app, &routine, unattended, source).await?;
-    } else {
-        crate::workflow_run::start_run(app, id, source, None, None, None, false).map_err(|e| refuse(e.status, &e.message))?;
-    }
-    Ok(app.store.routine(id).unwrap_or(routine))
-}
-
-/// Вебхук-рутина по кнопке: обычный ход бота с её заданием. Процессом она не стала (секрет вебхука у процесса только отпечатком).
-async fn run_hook_routine(app: &Arc<App>, routine: &Routine, unattended: bool, source: &str) -> Result<(), crate::turn::StartError> {
-    let opts = TurnOptions {
-        source: Some(source.to_string()),
-        unattended,
-        routine: Some(RoutineRef { id: routine.id.clone(), title: routine.title.clone() }),
-        // Кнопку «Запустить» нажал человек и ждёт ответа: скрывать от него нечего.
-        quiet: routine.quiet && unattended,
-        approval_floor: crate::goals::combine_floor(&routine.approval_floor, ""),
-        ..TurnOptions::default()
-    };
-    // «Идёт» ставим до старта: быстрый ход не должен закончиться раньше, чем его отметили запущенным.
-    if let Err(e) = app.store.mark_routine_run(&routine.id, true).await {
-        eprintln!("[routine] {}: {e}", routine.title);
-    }
-    let started = start_turn(app, &routine.bot_id, &format!("[рутина] {}
-{}", routine.title, routine.prompt), opts);
-    if started.is_err() {
-        if let Err(e) = app.store.set_routine_status(&routine.id, "error").await {
-            eprintln!("[routine] {}: {e}", routine.title);
-        }
-    }
-    started
-}
-
 /// Время срока для человека: «16:00», а не сегодня — с датой, «22.11 16:00». Без даты недельный лимит Claude
 /// читался как «сегодня в 16:00» (19.11.2026).
 pub fn clock(ms: i64) -> String {
@@ -128,13 +71,6 @@ pub fn clock(ms: i64) -> String {
         at.format("%H:%M").to_string()
     } else {
         at.format("%d.%m %H:%M").to_string()
-    }
-}
-
-/// Ход вебхук-рутины кончился: статус по итогу. Серию ошибок, паузы и «Возобновить» ведёт процесс (`workflow_run::step_ended`).
-pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, status: &str) {
-    if let Err(e) = app.store.set_routine_status(&routine.id, status).await {
-        eprintln!("[routine] {}: {e}", routine.title);
     }
 }
 
@@ -162,28 +98,23 @@ async fn tick(app: &Arc<App>) {
     app.browsers.close_stale(&app.store).await;
     app.browsers.close_idle(browser_idle_ms(), |bot| app.turns.is_busy(bot)).await;
 
-    let routines = app.store.routines();
     let settings = app.store.settings();
     // Идёт работа или человек попросил дежурить: компьютер не должен уснуть от простоя.
-    let soon = routines.iter().any(|r| {
-        r.enabled && !r.hook && r.next_run <= now() + 60 * 60 * 1000
-    });
-    if !app.turns.busy_bots().is_empty()
-        || (settings.keep_awake && routines.iter().any(|r| r.enabled))
-        || soon
-    {
+    let (any_on, soon) = {
+        let guard = app.workflows.lock();
+        let on = guard.items.iter().filter(|s| s.wf.enabled);
+        (on.clone().next().is_some(), on.clone().any(|s| !s.is_hook() && s.next_run() > 0 && s.next_run() <= now() + 60 * 60 * 1000))
+    };
+    if !app.turns.busy_bots().is_empty() || (settings.keep_awake && any_on) || soon {
         crate::system::hold_off_sleep();
     }
 
     // Напоминания стреляют таймером из своего хранилища: без бота, без хода и без модели.
-    for routine in app.reminders.list() {
-        if routine.hook {
+    for reminder in app.reminders.list() {
+        if !reminder.enabled || now() < reminder.next_run {
             continue;
         }
-        if !routine.enabled || now() < routine.next_run {
-            continue;
-        }
-        crate::reminders::fire(app, &routine).await;
+        crate::reminders::fire(app, &reminder).await;
     }
 }
 
@@ -253,15 +184,25 @@ pub(crate) mod tests {
 
     /// Рутина с проверкой запускается процессом; ждём, пока запуск закончится.
     async fn run_with_check(app: &Arc<App>, bot_id: &str, check: &str) -> String {
-        let routine = app.store.add_routine(&json!({ "botId": bot_id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": check }), true).await.unwrap();
-        crate::workflow_run::start_run(app, &routine.id, "routine", None, None, None, false).ok().expect("run starts");
+        let routine = make_process(app, &json!({ "botId": bot_id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": check }));
+        crate::workflow_run::start_run(app, &routine, "routine", None, None, None, false).ok().expect("run starts");
         for _ in 0..100 {
-            if journal_has(app, &routine.id, &["error", "no_change"]).await.is_some() {
+            if journal_has(app, &routine, &["error", "no_change"]).await.is_some() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        routine.id
+        routine
+    }
+
+    /// Простой процесс из тела запроса; возвращает его номер.
+    pub(crate) fn make_process(app: &Arc<App>, input: &Value) -> String {
+        crate::simple_process::create(&app.workflows, input, usize::MAX, true).unwrap().unwrap().wf.id
+    }
+
+    /// Карточка простого процесса: то, что видит интерфейс.
+    fn card(app: &Arc<App>, id: &str) -> Value {
+        crate::simple_process::card(app.workflows.lock().get(id).unwrap())
     }
 
     async fn journal_has(app: &Arc<App>, id: &str, statuses: &[&str]) -> Option<String> {
@@ -277,8 +218,8 @@ pub(crate) mod tests {
         let dir = temp_dir("zero");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
-        let routine = app.store.add_routine(&json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": "cmd /c echo new post" }), true).await.unwrap();
-        assert!(crate::workflow_run::start_run(&app, &routine.id, "routine", None, None, None, false).is_ok(), "run should start");
+        let routine = make_process(&app, &json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": "cmd /c echo new post" }));
+        assert!(crate::workflow_run::start_run(&app, &routine, "routine", None, None, None, false).is_ok(), "run should start");
         // Ход без модели кончается сразу: смотрим не «идёт ли он», а что ушло боту.
         let mut text = String::new();
         for _ in 0..80 {
@@ -324,9 +265,9 @@ pub(crate) mod tests {
     /// Рутина, у которой срок уже наступил.
     async fn due_routine(app: &Arc<App>) -> String {
         let bot = app.store.bots().into_iter().next().unwrap();
-        let routine = app.store.add_routine(&json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60 }), true).await.unwrap();
-        app.store.update_routine(&routine.id, &json!({ "nextRun": crate::store::now() - 1000 }), true).await.unwrap();
-        routine.id
+        let id = make_process(app, &json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60 }));
+        crate::simple_process::patch(&app.workflows, &id, &json!({ "nextRun": crate::store::now() - 1000 }), true).unwrap();
+        id
     }
 
     fn run_count(app: &Arc<App>, id: &str) -> usize {
@@ -362,11 +303,11 @@ pub(crate) mod tests {
         crate::workflow_run::tick_schedule(&app).await;
         assert_eq!(run_count(&app, &id), 0, "на паузе из-за ошибок запуска нет");
         assert!(journal_has(&app, &id, &["paused"]).await.is_some());
-        let view = app.store.routine(&id).unwrap();
-        assert!(view.error_paused && view.failures == 3, "пауза и серия видны в старом виде рутины");
-        // «Возобновить» из старого окна снимает паузу в процессе.
-        let back = app.store.update_routine(&id, &json!({ "errorPaused": false }), true).await.unwrap().unwrap();
-        assert!(!back.error_paused && back.failures == 0);
+        let view = card(&app, &id);
+        assert!(view["errorPaused"] == true && view["failures"] == 3, "пауза и серия видны на карточке");
+        // «Возобновить» с карточки снимает паузу в процессе.
+        let back = crate::simple_process::patch(&app.workflows, &id, &json!({ "errorPaused": false }), true).unwrap().unwrap();
+        assert!(!back.wf.error_paused && back.wf.failures == 0);
         assert!(!crate::workflow_run::error_paused(&app, &id));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -388,7 +329,7 @@ pub(crate) mod tests {
         let entry = app.ledger.read_journal(20).await.into_iter().find(|e| e["routineId"] == id.as_str()).expect("запись в журнале");
         assert!(entry["text"].as_str().unwrap().contains("Почта:"), "{entry}");
         assert_eq!(run_count(&app, &id), 0, "письма не проверены, бот не звался");
-        assert_eq!(app.store.routine(&id).unwrap().last_status.as_deref(), Some("error"));
+        assert_eq!(card(&app, &id)["lastStatus"], "error");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -404,7 +345,7 @@ pub(crate) mod tests {
         }
         crate::workflow_run::tick_schedule(&app).await;
         assert_eq!(run_count(&app, &id), 0);
-        assert!(!app.store.routine(&id).unwrap().enabled, "рутина без бота выключена");
+        assert_eq!(card(&app, &id)["enabled"], false, "рутина без бота выключена");
         let _ = std::fs::remove_dir_all(dir);
     }
 
