@@ -136,12 +136,61 @@ async fn begin(app: &Arc<App>) -> Result<(String, String), String> {
     Ok((id, url))
 }
 
+#[cfg(windows)]
+fn bind_exclusive() -> Result<tokio::net::TcpListener, String> {
+    use std::mem;
+    use std::os::windows::io::{FromRawSocket, RawSocket};
+    use windows_sys::Win32::Networking::WinSock::*;
+    unsafe {
+        // Winsock может быть ещё не поднят в этом процессе: вызов со счётчиком, повторы безвредны.
+        let mut wsa: WSADATA = mem::zeroed();
+        if WSAStartup(0x202, &mut wsa) != 0 {
+            return Err("winsock failed".into());
+        }
+        // Как в std: без наследования, иначе порт входа унаследуют программы, которые запускают боты.
+        let sock = WSASocketW(AF_INET as i32, SOCK_STREAM, IPPROTO_TCP, std::ptr::null(), 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+        if sock == INVALID_SOCKET {
+            return Err("socket failed".into());
+        }
+        let opt: i32 = 1;
+        if setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, &opt as *const i32 as *const u8, mem::size_of::<i32>() as i32) != 0 {
+            closesocket(sock);
+            return Err("setsockopt failed".into());
+        }
+        let mut addr: SOCKADDR_IN = mem::zeroed();
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(PORT);
+        addr.sin_addr.S_un.S_addr = inet_addr(b"127.0.0.1\0".as_ptr());
+        if bind(sock, &addr as *const SOCKADDR_IN as *const SOCKADDR, mem::size_of::<SOCKADDR_IN>() as i32) != 0 {
+            closesocket(sock);
+            return Err("bind failed".into());
+        }
+        if listen(sock, 16) != 0 {
+            closesocket(sock);
+            return Err("listen failed".into());
+        }
+        let std_listener = <std::net::TcpListener as FromRawSocket>::from_raw_socket(sock as RawSocket);
+        std_listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        tokio::net::TcpListener::from_std(std_listener).map_err(|e| e.to_string())
+    }
+}
+
 async fn bind_port() -> Result<tokio::net::TcpListener, String> {
-    let mut last = None;
+    let mut last: Option<String> = None;
     for _ in 0..6 {
-        match tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await {
-            Ok(listener) => return Ok(listener),
-            Err(e) => last = Some(e),
+        #[cfg(windows)]
+        {
+            match bind_exclusive() {
+                Ok(listener) => return Ok(listener),
+                Err(e) => last = Some(e),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            match tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await {
+                Ok(listener) => return Ok(listener),
+                Err(e) => last = Some(e.to_string()),
+            }
         }
         tokio::time::sleep(Duration::from_millis(60)).await;
     }
@@ -427,5 +476,27 @@ mod tests {
         assert_eq!(fresh_token(&s, "mail.m1", &url, "cid", false).await.unwrap(), "new-a");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn an_exclusive_port_rejects_a_reuseaddr_binder() {
+        let listener = bind_port().await.expect("bind_port");
+        use windows_sys::Win32::Networking::WinSock::*;
+        let res = unsafe {
+            let s = socket(AF_INET as i32, SOCK_STREAM, IPPROTO_TCP);
+            assert!(s != INVALID_SOCKET);
+            let opt: i32 = 1;
+            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt as *const i32 as *const u8, std::mem::size_of::<i32>() as i32);
+            let mut addr: SOCKADDR_IN = std::mem::zeroed();
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(PORT);
+            addr.sin_addr.S_un.S_addr = inet_addr(b"127.0.0.1\0".as_ptr());
+            let r = bind(s, &addr as *const SOCKADDR_IN as *const SOCKADDR, std::mem::size_of::<SOCKADDR_IN>() as i32);
+            closesocket(s);
+            r
+        };
+        drop(listener);
+        assert_ne!(res, 0, "a SO_REUSEADDR socket must not bind the exclusive port");
     }
 }
