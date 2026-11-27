@@ -1,4 +1,4 @@
-// Из разобранной фразы (Composer, /api/dates/parse) собирает поля напоминания для /api/routines.
+// Из разобранной фразы (Composer, /api/dates/parse) собирает поля напоминания для POST /api/reminders.
 // Ошибка — код ('when' | 'time' | 'past' | 'repeat'); текст по коду подбирает вкладка через tr().
 import { localMs, isoOf } from './composer.js';
 

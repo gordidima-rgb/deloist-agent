@@ -23,7 +23,7 @@ export function scheduleProblem(s, now = Date.now()) {
   return '';
 }
 
-// Поля расписания для POST/PATCH /api/routines: взаимоисключающие виды обнуляют чужие поля.
+// Поля расписания для POST/PATCH /api/workflows и /api/reminders: взаимоисключающие виды обнуляют чужие поля.
 export function scheduleFields(s) {
   if (s.kind === 'at') return { at: s.at, recurrence: s.recurrence, startOn: s.startOn || '', onceAt: 0, days: [] };
   if (s.kind === 'once') return { at: '', recurrence: null, startOn: '', onceAt: onceMoment(s.date, s.at), days: [] };

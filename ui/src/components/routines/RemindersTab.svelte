@@ -122,9 +122,9 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '.
         if (plan) {
           Object.assign(body, plan.fields, { enabled: true });
         }
-        await api(`/api/routines/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body });
+        await api(`/api/reminders/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body });
       } else {
-        await api('/api/routines', { method: 'POST', body: { kind: 'reminder', leadMinutes: Number(lead), channels, ...plan.fields } });
+        await api('/api/reminders', { method: 'POST', body: { leadMinutes: Number(lead), channels, ...plan.fields } });
       }
       reset();
       await onchanged?.();
@@ -147,7 +147,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '.
 
   async function remove(r) {
     try {
-      await api(`/api/routines/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+      await api(`/api/reminders/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
       if (editingId === r.id) reset();
       await onchanged?.();
     } catch (err) {
@@ -157,7 +157,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '.
 
   async function toggleEnabled(r, on) {
     try {
-      await api(`/api/routines/${encodeURIComponent(r.id)}`, { method: 'PATCH', body: { enabled: on } });
+      await api(`/api/reminders/${encodeURIComponent(r.id)}`, { method: 'PATCH', body: { enabled: on } });
       await onchanged?.();
     } catch (err) {
       fail(err);
@@ -168,7 +168,7 @@ import { Button, IconButton, Select, Switch, EmptyState, Icon, ListRow } from '.
   export async function testSend(r) {
     tests[r.id] = { busy: true, results: null };
     try {
-      const res = await api(`/api/routines/${encodeURIComponent(r.id)}/test-reminder`, { method: 'POST' });
+      const res = await api(`/api/reminders/${encodeURIComponent(r.id)}/test`, { method: 'POST' });
       tests[r.id] = { busy: false, results: res?.deliveries ?? [] };
     } catch (err) {
       tests[r.id] = { busy: false, results: [{ channel: '', ok: false, error: serverText(err?.data?.error || err?.message) }] };

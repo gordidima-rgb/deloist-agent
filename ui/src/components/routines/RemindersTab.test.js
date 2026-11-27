@@ -78,7 +78,7 @@ describe('RemindersTab', () => {
     expect(telegramChip.disabled).toBe(true);
     [...host.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Проверить').click();
     await drain();
-    expect(api).toHaveBeenCalledWith('/api/routines/rt_1/test-reminder', { method: 'POST' });
+    expect(api).toHaveBeenCalledWith('/api/reminders/rt_1/test', { method: 'POST' });
     expect(host.querySelector('.rm-test').textContent).toContain('отправлено');
   });
 });
