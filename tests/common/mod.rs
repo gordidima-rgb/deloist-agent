@@ -187,6 +187,9 @@ impl Crew {
             // Тесты ждут прежних стартовых ботов; новая установка с оркестратором включается через `("CREW_LEGACY_STARTERS", "0")`.
             .env("CREW_LEGACY_STARTERS", "1")
             .env("CREW_SECRETS_KEY_FILE", key_file_for(&data_dir))
+            // Уведомления Windows из тестов — в файлы, а не на экран человека (тест может переопределить путь).
+            .env("CREW_TEST_TOAST_SINK", data_dir.join("test-toasts.jsonl"))
+            .env("CREW_TEST_REMINDER_SINK", data_dir.join("test-reminders.jsonl"))
             .envs(env.iter().copied())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
