@@ -70,7 +70,7 @@
     <EmptyState title={tr('Пока тихо')} text={tr('Здесь появится всё, что боты сделали без тебя.')} />
   {:else}
     {#if usageText}<p class="pj-usage">{usageText}</p>{/if}
-    {#each important as e (e.id ?? `${e.at}:${e.routineId}`)}
+    {#each important as e}
       <article class="pj-row">
         <header class="pj-head">
           <span class="pj-dim">{whenText(e.at)}</span>
@@ -95,7 +95,7 @@
         {tr('Тихих проверок, сообщать нечего: {count}', { count: quiet.length })}
       </Button>
       {#if quietOpen}
-        {#each quiet as e (e.id ?? `${e.at}:${e.routineId}`)}
+        {#each quiet as e}
           <p class="pj-quiet-row"><span class="pj-dim">{whenText(e.at)}</span> <span class="pj-dim">{e.botName}</span> {trServer(e.title)}</p>
         {/each}
       {/if}
