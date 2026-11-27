@@ -135,6 +135,10 @@ pub struct Workflow {
     /// Заметки прошлых запусков (`finish_turn`) по шагам-ботам: хвост до 8000 знаков, идёт в задание следующего запуска.
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub notes: HashMap<String, String>,
+    /// Процесс вырос из рутины «триггер → бот»: старые адреса `/api/routines` и инструменты ботов видят его рутиной.
+    /// 0.4.11 step 5 removes this.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub from_routine: bool,
 }
 
 fn is_zero(n: &u32) -> bool {

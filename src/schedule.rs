@@ -675,7 +675,7 @@ impl Schedule {
         Ok(())
     }
 
-    fn interval_minutes(&self) -> Option<f64> {
+    pub(crate) fn interval_minutes(&self) -> Option<f64> {
         let amount = self.amount?;
         let per = match self.unit.as_deref()? {
             "minutes" => 1.0,
