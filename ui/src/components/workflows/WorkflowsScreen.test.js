@@ -34,24 +34,12 @@ async function drain(n = 25) {
 function backend(over = {}) {
   const wf = { id: 'w1', title: 'Первый', revision: 2, graph: starterGraph(), last_run: { status: 'done', at: 1700000000 } };
   firstNode = wf.graph.nodes[0].id;
-  const state = { wf, calls: [], list: [{ id: 'w1', title: 'Первый', steps: 3, last_run: wf.last_run }] };
+  const state = { wf, calls: [] };
   const api = vi.fn(async (path, opts = {}) => {
     const method = opts.method || 'GET';
     state.calls.push(`${method} ${path}`);
     if (over[`${method} ${path}`]) return over[`${method} ${path}`](opts);
-    if (path === '/api/workflows' && method === 'GET') return { workflows: state.list };
-    if (path === '/api/workflows' && method === 'POST') {
-      const nid = state.list.length === 1 ? 'w2' : `w${state.list.length + 1}`;
-      const w = { id: nid, title: opts.body.title, revision: 1, graph: opts.body.graph };
-      state.list = [...state.list, { id: nid, title: w.title, steps: 3, last_run: null }];
-      return { workflow: w };
-    }
     if (path === '/api/workflows/w1' && method === 'GET') return { workflow: state.wf, triggers: [] };
-    if (/^\/api\/workflows\/w[2-9]$/.test(path) && method === 'GET') return { workflow: { id: 'w2', title: 'Новый процесс', revision: 1, graph: starterGraph() }, triggers: [] };
-    if (path === '/api/workflows/w1' && method === 'DELETE') {
-      state.list = [];
-      return { ok: true };
-    }
     if (path.endsWith('/runs?limit=1')) return { runs: [] };
     throw Object.assign(new Error('unexpected ' + method + ' ' + path), { status: 404 });
   });
@@ -59,13 +47,10 @@ function backend(over = {}) {
 }
 
 async function render(api) {
-  try {
-    localStorage.clear();
-  } catch {}
   host = document.createElement('div');
   host.style.cssText = 'width:1200px;height:800px';
   document.body.append(host);
-  instance = mount(WorkflowsScreen, { target: host, props: { api, bots: [{ id: 'a', name: 'Аналитик', color: '#4fb4ff' }] } });
+  instance = mount(WorkflowsScreen, { target: host, props: { id: 'w1', api, bots: [{ id: 'a', name: 'Аналитик', color: '#4fb4ff' }] } });
   await drain();
 }
 
@@ -76,46 +61,18 @@ afterEach(() => {
 });
 
 describe('WorkflowsScreen', () => {
-  it('lists workflows and opens the first one on the canvas', async () => {
+  it('opens the given workflow on the canvas', async () => {
     const { api, state } = backend();
     await render(api);
-    expect(host.textContent).toContain('Первый');
-    expect(host.textContent).toContain('Шагов: 3');
     expect(state.calls).toContain('GET /api/workflows/w1');
     expect(host.querySelectorAll('.svelte-flow__node').length).toBe(3);
   });
 
-  it('shows the empty state with a create button when there are no workflows', async () => {
-    const { api } = backend({ 'GET /api/workflows': async () => ({ workflows: [] }) });
+  it('shows a retry when the workflow cannot be loaded', async () => {
+    const { api } = backend({ 'GET /api/workflows/w1': async () => Promise.reject(Object.assign(new Error('нет такого'), { status: 404 })) });
     await render(api);
-    expect(host.textContent).toContain('Соберите процесс из шагов');
-    expect([...host.querySelectorAll('button')].some((b) => b.textContent.includes('Создать процесс'))).toBe(true);
-  });
-
-  it('creates a workflow from the starter graph and opens it', async () => {
-    const { api, state } = backend();
-    await render(api);
-    host.querySelector('.wfl-new').click();
-    await drain();
-    expect(state.calls).toContain('POST /api/workflows');
-    expect(state.calls).toContain('GET /api/workflows/w2');
-    // «Новый процесс» уже есть в списке: следующее имя получает номер
-    host.querySelector('.wfl-new').click();
-    await drain();
-    const posts = api.mock.calls.filter((c) => c[0] === '/api/workflows' && c[1]?.method === 'POST');
-    expect(posts.map((c) => c[1].body.title)).toEqual(['Новый процесс', 'Новый процесс 2']);
-  });
-
-  it('deletes only after a second click on the trash button', async () => {
-    const { api, state } = backend();
-    await render(api);
-    const trash = host.querySelectorAll('.wfl-acts button')[2];
-    trash.click();
-    await drain(3);
-    expect(state.calls).not.toContain('DELETE /api/workflows/w1');
-    host.querySelectorAll('.wfl-acts button')[2].click();
-    await drain();
-    expect(state.calls).toContain('DELETE /api/workflows/w1');
+    expect(host.textContent).toContain('Не удалось загрузить процессы');
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent.includes('Повторить'))).toBe(true);
   });
 
   it('saves an edit with the loaded revision and reloads on a 409', async () => {
@@ -246,7 +203,7 @@ describe('WorkflowsScreen', () => {
     expect(host.textContent).toContain('Показан прошлый запуск');
   });
 
-  it('toggles enabled from the list and the top bar through PATCH', async () => {
+  it('toggles enabled from the top bar through PATCH', async () => {
     const patches = [];
     const { api } = backend({
       'PATCH /api/workflows/w1': async (opts) => {
@@ -255,17 +212,14 @@ describe('WorkflowsScreen', () => {
       },
     });
     await render(api);
-    const rowSwitch = host.querySelector('.wfl-sw [role="switch"]');
-    expect(rowSwitch.getAttribute('aria-checked')).toBe('true');
-    rowSwitch.click();
+    host.querySelector('.wf-en [role="switch"]').click();
     await drain();
     expect(patches).toEqual([{ enabled: false }]);
-    expect(host.querySelector('.wfl-item.off')).not.toBeNull();
     expect(host.querySelector('.wf-en.off')).not.toBeNull();
     host.querySelector('.wf-en [role="switch"]').click();
     await drain();
     expect(patches[1]).toEqual({ enabled: true });
-    expect(host.querySelector('.wfl-item.off')).toBeNull();
+    expect(host.querySelector('.wf-en.off')).toBeNull();
   });
 
   it('applies a bot edit in place and keeps the canvas mounted', async () => {

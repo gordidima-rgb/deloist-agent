@@ -1,6 +1,7 @@
 <script module>
   // Подписи рабочих процессов в одном месте: так check_i18n видит каждый ключ.
   import { tr } from '../../lib/i18n.js';
+  import { recurrenceSummary } from '../../lib/todos.js';
 
   export function kindTitle(kind) {
     switch (kind) {
@@ -114,8 +115,42 @@
     return [tr('понедельник'), tr('вторник'), tr('среду'), tr('четверг'), tr('пятницу'), tr('субботу'), tr('воскресенье')][(n || 1) - 1];
   }
 
+  // Дни недели рутины: «по будням», «по выходным» или список «Пн Ср».
+  function daysText(days) {
+    const list = [...new Set((days || []).map(Number).filter((d) => d >= 1 && d <= 7))].sort((a, b) => a - b);
+    const key = list.join('');
+    if (!list.length || list.length === 7) return '';
+    if (key === '12345') return tr('по будням');
+    if (key === '67') return tr('по выходным');
+    const names = [tr('Пн'), tr('Вт'), tr('Ср'), tr('Чт'), tr('Пт'), tr('Сб'), tr('Вс')];
+    return list.map((d) => names[d - 1]).join(' ');
+  }
+
+  // Расписание, как оно пришло из рутины: время с днями и правилом повтора, интервал с окном, cron, вебхук.
+  function routineScheduleText(s) {
+    if (s.hook) return tr('по внешнему вызову');
+    if (s.kind === 'cron') return s.tz ? `${s.cron} (${s.tz})` : s.cron || tr('Не задано');
+    if (s.kind === 'daily' && (s.days?.length || s.recurrence || s.start_on)) {
+      const parts = [tr('в {time}', { time: s.time || '09:00' }), recurrenceSummary(s.recurrence, tr, window.LOCALE) || daysText(s.days) || tr('каждый день')];
+      if (s.start_on) parts.push(tr('с {date}', { date: new Date(`${s.start_on}T00:00:00`).toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'long' }) }));
+      return parts.join(', ');
+    }
+    if (s.kind === 'interval' && s.every_minutes) {
+      const low = s.every_minutes;
+      const high = s.every_max_minutes || 0;
+      const parts = [high > low ? tr('каждые {from}–{to} мин', { from: low, to: high }) : tr('каждые {minutes} мин', { minutes: low })];
+      if (s.window_from && s.window_to) parts.push(`${s.window_from}–${s.window_to}`);
+      const days = daysText(s.days);
+      if (days) parts.push(days);
+      return parts.join(', ');
+    }
+    return '';
+  }
+
   export function scheduleText(s) {
     if (!s) return tr('Не задано');
+    const fromRoutine = routineScheduleText(s);
+    if (fromRoutine) return fromRoutine;
     switch (s.kind) {
       case 'hourly':
         return tr('Каждый час в :{m}', { m: String(s.minute ?? 0).padStart(2, '0') });

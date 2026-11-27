@@ -1266,8 +1266,9 @@ async fn a_phrase_makes_a_trigger_bot_process_with_a_card_and_quiet_and_resume_f
     let crew = Crew::start("wf-simple").await;
     let bot = crew.ok("GET", "/api/state", None).await["bots"][0]["id"].as_str().unwrap().to_string();
 
-    let (status, _) = crew.send("POST", "/api/workflows/simple", Some(json!({ "phrase": "собери отчёт", "bot_id": bot }))).await;
+    let (status, body) = crew.send("POST", "/api/workflows/simple", Some(json!({ "phrase": "собери отчёт", "bot_id": bot }))).await;
     assert_eq!(status, 400, "без срока в фразе процесс не создаётся");
+    assert_eq!(body["code"], "no_when");
     let (status, _) = crew.send("POST", "/api/workflows/simple", Some(json!({ "phrase": "каждый понедельник собери отчёт", "bot_id": "нет-такого" }))).await;
     assert_eq!(status, 400, "бота выбирает человек, чужого номера нет");
 

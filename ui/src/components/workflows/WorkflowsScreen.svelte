@@ -1,27 +1,23 @@
 <script>
-  // Экран «Рабочие процессы»: список слева, холст справа. Все запросы идут через api (в тестах подменяется).
+  // Холст одного процесса: открывается из карточки раздела «Задачи и процессы» (id), кнопка «Список процессов» зовёт onback. Все запросы идут через api (в тестах подменяется).
   // Перечитываем по событию окна {type:"workflows"}; пока запуск открыт, добавлен запасной опрос (watchOpenRun).
   import { untrack } from 'svelte';
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import { tr, trServer } from '../../lib/i18n.js';
   import { api as realApi } from '../../lib/api.js';
   import { toast } from '../../lib/workflows/notify.js';
-  import { isRunOpen, newId, starterGraph, toMs } from '../../lib/workflows/graph.js';
+  import { isRunOpen, newId, toMs } from '../../lib/workflows/graph.js';
   import { versionKindLabel, whenText } from './Labels.svelte';
-  import WorkflowList from './WorkflowList.svelte';
   import WorkflowCanvas from './WorkflowCanvas.svelte';
-  import WfIcon from './WfIcon.svelte';
   import { Button } from '../kit';
 
-  /** api(path,{method,body}); bots [{id,name,color,emoji}]; onmenu() открывает боковую панель на узком окне. */
-  let { api = realApi, bots = [], models = () => ({}), onconnect, onmenu, onsettings, uploadAsset, fileUrl } = $props();
+  /** id — процесс на холсте; api(path,{method,body}); bots [{id,name,color,emoji}]; onback() возвращает к списку. */
+  let { id, api = realApi, bots = [], models = () => ({}), onconnect, onback, onsettings, uploadAsset, fileUrl } = $props();
 
   const POLL_MS = 3000;
   const request = (path, opts) => untrack(() => api)(path, opts);
 
-  let items = $state.raw([]);
-  let listLoading = $state(true);
-  let selected = $state(readSelected());
+  let selected = $state(untrack(() => id));
   let workflow = $state.raw(null);
   let triggers = $state.raw([]);
   let run = $state.raw(null);
@@ -29,38 +25,11 @@
   let previewV = $state.raw(null);
   let epoch = $state(0);
   let loadError = $state('');
-  let listOpen = $state(false);
+  let loading = $state(true);
   let connections = $state.raw({});
   let handle = null;
 
-  function readSelected() {
-    try {
-      return localStorage.getItem('wf-selected') || '';
-    } catch {
-      return '';
-    }
-  }
-
-  function remember(id) {
-    try {
-      if (id) localStorage.setItem('wf-selected', id);
-      else localStorage.removeItem('wf-selected');
-    } catch {}
-  }
-
   const fail = (err) => toast(trServer(err?.message || tr('Не получилось')));
-
-  async function loadList() {
-    try {
-      const res = await request('/api/workflows');
-      items = res.workflows || [];
-      loadError = '';
-    } catch (err) {
-      loadError = trServer(err?.message || '');
-    } finally {
-      listLoading = false;
-    }
-  }
 
   // Подключены ли мессенджеры: триггеры и выводы Telegram, Discord и Slack работают только с привязанным местом.
   async function loadConnections() {
@@ -76,18 +45,14 @@
     connections = { telegram, discord, slack };
   }
 
-  async function setEnabled(id, value) {
-    const before = items.find((i) => i.id === id)?.enabled ?? workflow?.enabled ?? true;
-    items = items.map((i) => (i.id === id ? { ...i, enabled: value } : i));
-    if (workflow?.id === id) workflow = { ...workflow, enabled: value };
+  async function setEnabled(value) {
+    const before = workflow?.enabled ?? true;
+    workflow = { ...workflow, enabled: value };
     try {
-      const res = await request(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: { enabled: value } });
-      const real = res.workflow?.enabled ?? value;
-      items = items.map((i) => (i.id === id ? { ...i, enabled: real } : i));
-      if (workflow?.id === id) workflow = { ...workflow, enabled: real };
+      const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}`, { method: 'PATCH', body: { enabled: value } });
+      workflow = { ...workflow, enabled: res.workflow?.enabled ?? value };
     } catch (err) {
-      items = items.map((i) => (i.id === id ? { ...i, enabled: before } : i));
-      if (workflow?.id === id) workflow = { ...workflow, enabled: before };
+      workflow = { ...workflow, enabled: before };
       fail(err);
     }
   }
@@ -102,8 +67,6 @@
   async function open(id) {
     selected = id;
     conflict = null;
-    remember(id);
-    listOpen = false;
     run = null;
     viewRun = null;
     previewV = null;
@@ -116,11 +79,10 @@
       loadRun(id);
       loadConnections();
     } catch (err) {
-      if (err?.status === 404) {
-        selected = '';
-        workflow = null;
-        remember('');
-      } else fail(err);
+      loadError = trServer(err?.message || '');
+      if (err?.status !== 404) fail(err);
+    } finally {
+      loading = false;
     }
   }
 
@@ -130,60 +92,12 @@
     conflict = null;
     workflow = fresh;
     epoch += 1;
-    loadList();
   }
 
-  // «Новый процесс», «Новый процесс 2», …: первое имя, которого ещё нет в списке.
-  function freshTitle() {
-    const base = tr('Новый процесс');
-    const used = new Set(items.map((i) => i.title));
-    if (!used.has(base)) return base;
-    let n = 2;
-    while (used.has(`${base} ${n}`)) n += 1;
-    return `${base} ${n}`;
-  }
-
-  async function create() {
+  async function rename(title) {
     try {
-      const res = await request('/api/workflows', { method: 'POST', body: { title: freshTitle(), graph: starterGraph() } });
-      await loadList();
-      await open(res.workflow.id);
-    } catch (err) {
-      fail(err);
-    }
-  }
-
-  async function rename(id, title) {
-    try {
-      const res = await request(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: { title } });
-      items = items.map((i) => (i.id === id ? { ...i, title: res.workflow?.title ?? title } : i));
-      if (workflow?.id === id) workflow = { ...workflow, title: res.workflow?.title ?? title };
-    } catch (err) {
-      fail(err);
-    }
-  }
-
-  async function duplicate(id) {
-    try {
-      const res = await request(`/api/workflows/${encodeURIComponent(id)}/duplicate`, { method: 'POST' });
-      await loadList();
-      await open(res.workflow.id);
-    } catch (err) {
-      fail(err);
-    }
-  }
-
-  async function remove(id) {
-    try {
-      await request(`/api/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (selected === id) {
-        selected = '';
-        workflow = null;
-        run = null;
-        remember('');
-      }
-      await loadList();
-      if (!selected && items.length) open(items[0].id);
+      const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}`, { method: 'PATCH', body: { title } });
+      workflow = { ...workflow, title: res.workflow?.title ?? title };
     } catch (err) {
       fail(err);
     }
@@ -197,7 +111,6 @@
       const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/nodes/${encodeURIComponent(nodeId)}/run`, { method: 'POST', body: { request_id: newId('r') } });
       viewRun = null;
       run = res.run ?? run;
-      loadList();
     } catch (err) {
       fail(err);
     }
@@ -233,7 +146,6 @@
       const res = await request(`/api/workflows/${encodeURIComponent(workflow.id)}/run`, { method: 'POST', body: { request_id: newId('r') } });
       viewRun = null;
       run = res.run ?? run;
-      loadList();
     } catch (err) {
       fail(err);
     }
@@ -268,7 +180,6 @@
 
   // Что-то изменилось на сервере: процесс или запуск.
   async function refresh(workflowId) {
-    loadList();
     if (!workflowId || workflowId !== selected) return;
     await loadRun(workflowId);
     if (handle) await pullRemote(workflowId, 0);
@@ -346,23 +257,11 @@
   $effect(() => watchOpenRun());
 
   $effect(() => {
-    untrack(async () => {
-      await loadList();
-      if (selected && items.some((i) => i.id === selected)) await open(selected);
-      else if (items.length) await open(items[0].id);
-      else selected = '';
-    });
+    untrack(() => open(selected));
   });
 </script>
 
-<div class="wfs" class:list-open={listOpen}>
-  <div class="wfs-list">
-    <WorkflowList {items} {selected} loading={listLoading} onselect={open} onenabled={setEnabled} oncreate={create} onrename={rename} onduplicate={duplicate} ondelete={remove} {onmenu} />
-  </div>
-  {#if listOpen}
-    <button type="button" class="wfs-scrim" aria-label={tr('Закрыть список')} onclick={() => (listOpen = false)}></button>
-  {/if}
-
+<div class="wfs">
   <section class="wfs-main">
     {#if workflow}
       {#key `${workflow.id}:${epoch}`}
@@ -378,7 +277,7 @@
             {uploadAsset}
             {fileUrl}
             enabled={workflow.enabled !== false}
-            onenabled={(v) => setEnabled(workflow.id, v)}
+            onenabled={setEnabled}
             {connections}
             {onsettings}
             api={request}
@@ -388,9 +287,9 @@
             onrunstep={startStep}
             onrun={startRun}
             onstop={stopRun}
-            onrename={(t) => rename(workflow.id, t)}
+            onrename={rename}
             onconflict={askConflict}
-            onlist={() => (listOpen = !listOpen)}
+            onlist={onback}
             onready={(h) => (handle = h)}
           />
         </SvelteFlowProvider>
@@ -417,18 +316,11 @@
           {/key}
         </div>
       {/if}
-    {:else if !listLoading}
+    {:else if !loading}
       <div class="wfs-empty">
-        <div class="wfs-empty__ico"><WfIcon name="graph" size={30} /></div>
-        {#if loadError}
-          <b>{tr('Не удалось загрузить процессы')}</b>
-          <p>{loadError}</p>
-          <Button variant="secondary" onclick={loadList}>{tr('Повторить')}</Button>
-        {:else}
-          <b>{tr('Соберите процесс из шагов')}</b>
-          <p>{tr('Триггер запускает цепочку: промпт, боты, одобрение, вывод. Шаги соединяются линиями, результат виден на каждом узле.')}</p>
-          <Button variant="primary" iconName="plus" onclick={create}>{tr('Создать процесс')}</Button>
-        {/if}
+        <b>{tr('Не удалось загрузить процессы')}</b>
+        {#if loadError}<p>{loadError}</p>{/if}
+        <Button variant="secondary" onclick={() => open(selected)}>{tr('Повторить')}</Button>
       </div>
     {/if}
   </section>
@@ -438,23 +330,15 @@
   .wfs {
     position: relative;
     display: grid;
-    grid-template-columns: 276px minmax(0, 1fr);
-    width: 100%;
+        width: 100%;
     height: 100%;
     min-height: 0;
     background: var(--k-canvas);
-  }
-  .wfs-list {
-    min-width: 0;
-    min-height: 0;
   }
   .wfs-main {
     position: relative;
     min-width: 0;
     min-height: 0;
-  }
-  .wfs-scrim {
-    display: none;
   }
   .wfs-conflict {
     position: absolute;
@@ -494,16 +378,6 @@
     text-align: center;
     animation: wfs-in 0.6s var(--k-ease-spring, ease) both;
   }
-  .wfs-empty__ico {
-    display: grid;
-    place-items: center;
-    width: 64px;
-    height: 64px;
-    margin-bottom: 6px;
-    border-radius: var(--k-radius-lg);
-    background: var(--k-brand-tint);
-    color: var(--k-brand);
-  }
   .wfs-empty b {
     font: 700 var(--k-text-xl) / 1.2 var(--k-font-display);
   }
@@ -520,37 +394,9 @@
       filter: blur(6px);
     }
   }
-  @media (max-width: 820px) {
-    .wfs {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .wfs-list {
-      position: absolute;
-      z-index: 30;
-      inset: 0 auto 0 0;
-      width: min(300px, 86%);
-      translate: -102% 0;
-      box-shadow: var(--k-shadow-3);
-      transition: translate 320ms var(--k-ease-morph, ease);
-    }
-    .list-open .wfs-list {
-      translate: 0 0;
-    }
-    .wfs-scrim {
-      display: block;
-      position: absolute;
-      z-index: 20;
-      inset: 0;
-      border: 0;
-      background: var(--k-backdrop);
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     .wfs-empty {
       animation: none;
-    }
-    .wfs-list {
-      transition: none;
     }
   }
 </style>

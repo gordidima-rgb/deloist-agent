@@ -1064,9 +1064,6 @@
     border-color: var(--k-brand);
     box-shadow: var(--k-focus);
   }
-  .wf-canvas :global(.wf-ib--list) {
-    display: none;
-  }
   .wf-canvas :global(.wf-ib[aria-pressed='true']),
   .wf-canvas :global(.wf-tool[aria-pressed='true']) {
     color: var(--k-brand-text);
@@ -1325,9 +1322,6 @@
     }
   }
   @media (max-width: 820px) {
-    .wf-canvas :global(.wf-ib--list) {
-      display: inline-flex;
-    }
     .wf-bar :global(.wf-save),
     .wf-tools :global(.wf-add span),
     .wf-bar :global(.wf-run span) {

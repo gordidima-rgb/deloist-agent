@@ -145,7 +145,7 @@ async fn create_simple(State(app): Shared, bytes: Bytes) -> Response {
     } else if parsed.due_time.is_some() {
         Schedule { kind: "daily".into(), time: Some(time), ..Schedule::default() }
     } else {
-        return fail(StatusCode::BAD_REQUEST, "не понял, когда запускать: напишите, например, «каждый понедельник в 9:00 собери отчёт»");
+        return reply(StatusCode::BAD_REQUEST, json!({ "error": "не понял, когда запускать: напишите, например, «каждый понедельник в 9:00 собери отчёт»", "code": "no_when" }));
     };
     if let Err(e) = schedule.validate() {
         return fail(StatusCode::BAD_REQUEST, &e);
