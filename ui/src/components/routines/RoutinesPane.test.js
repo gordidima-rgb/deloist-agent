@@ -40,17 +40,31 @@ describe('RoutinesPane', () => {
     expect(host.querySelector('[role="switch"]').getAttribute('aria-checked')).toBe('true');
   });
 
-  it('opens the whole task under the card by a click on the gist', () => {
-    const prompt = 'Каждое утро собери новые посты\nи прокомментируй каждый: коротко, без ссылок.';
+  it('clamps a long task and opens it in full by the button, keeping the line breaks', () => {
+    const prompt = 'Каждое утро собери новые посты\nи прокомментируй каждый.\n' + 'Правило. '.repeat(40);
     render({ routines: [routine({ prompt })] });
-    expect(host.querySelector('.rc-prompt')).toBeNull();
-    host.querySelector('.rc-gist').click();
+    const text = host.querySelector('.rc-prompt');
+    expect(text.textContent).toBe(prompt);
+    expect(text.classList.contains('is-clamped')).toBe(true);
+    host.querySelector('.rc-more').click();
     flushSync();
-    expect(host.querySelector('.rc-prompt').textContent).toBe(prompt);
-    expect(host.querySelector('.rc-gist').getAttribute('aria-expanded')).toBe('true');
-    host.querySelector('.rc-gist').click();
+    expect(host.querySelector('.rc-prompt').classList.contains('is-open')).toBe(true);
+    expect(host.querySelector('.rc-more').getAttribute('aria-expanded')).toBe('true');
+    host.querySelector('.rc-more').click();
     flushSync();
-    expect(host.querySelector('.rc-prompt')).toBeNull();
+    expect(host.querySelector('.rc-prompt').classList.contains('is-clamped')).toBe(true);
+  });
+
+  it('a short task is shown whole without the expand button', () => {
+    render({ routines: [routine({ prompt: 'Собери новости.' })] });
+    expect(host.querySelector('.rc-prompt').classList.contains('is-clamped')).toBe(false);
+    expect(host.querySelector('.rc-more')).toBeNull();
+  });
+
+  it('takes the lead and empty texts from the props (bot drawer)', () => {
+    render({ routines: [], lead: 'Что Редактор делает сам', empty: 'Рутин пока нет.' });
+    expect(host.querySelector('.rp-empty').textContent).toBe('Рутин пока нет.');
+    expect(host.querySelector('.rp-lead').textContent).toBe('Что Редактор делает сам');
   });
 
   it('fades a disabled routine and marks a failed last run in red', () => {
@@ -66,10 +80,10 @@ describe('RoutinesPane', () => {
     const ondelete = vi.fn();
     const onnew = vi.fn();
     render({ routines: [routine({ quiet: true })], onrun, onquiet, ontoggle, ondelete, onnew });
-    host.querySelector('.rt-run').click();
-    host.querySelector('.rt-quiet').click();
+    host.querySelector('.rc-run').click();
+    host.querySelector('.rc-quiet').click();
     host.querySelector('[role="switch"]').click();
-    host.querySelector('.rt-del').click();
+    host.querySelector('.rc-del').click();
     host.querySelector('.rp-new').click();
     expect(onrun).toHaveBeenCalledWith('r1');
     expect(onquiet).toHaveBeenCalledWith('r1', false);

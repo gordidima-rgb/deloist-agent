@@ -6604,28 +6604,16 @@ function renderDrawer() {
   }
 }
 
-// Вкладка «Рутины»: что этот бот делает сам по расписанию. Те же строки, что в окне «Рутины»;
+// Вкладка «Рутины»: что этот бот делает сам по расписанию. Те же карточки, что в окне «Рутины» (RoutinesPane);
 // новая — той же формой, где бот уже выбран. Боту можно и сказать в чате — рутина появится здесь.
 function renderDrawerRoutines(bot, body) {
   const mine = ordinaryRoutines().filter((r) => r.botId === bot.id);
-  const head = document.createElement('div');
-  head.className = 'drawer-rt-head';
-  head.innerHTML = `
-    <p class="note">${mine.length
-      ? tr('Что {name} делает сам по расписанию.', { name: escapeHtml(bot.name) })
-      : tr('Рутин пока нет. Добавь здесь или скажи боту в чате, например: «каждое утро в 9 собирай новости».')}</p>
-    <button type="button" class="k-btn k-btn--primary" id="drawer-rt-new">${tr('Новая рутина')}</button>`;
-  $('#drawer-rt-new', head).addEventListener('click', () => openRoutineFormFor(bot.id));
-  body.append(head);
-  if (!mine.length) return;
-  const list = document.createElement('div');
-  list.className = 'drawer-rt-list';
-  const rerender = () => {
-    if (drawerShown() && S.tab === 'routines') renderDrawer();
-    if (routinesOpen()) renderRoutines();
-  };
-  for (const r of mine) list.append(routineRow(r, rerender));
-  body.append(list);
+  tabView = window.DeloistUI.mountRoutinesPane(body, {
+    ...routinePaneProps(mine),
+    lead: mine.length ? tr('Что {name} делает сам по расписанию.', { name: bot.name }) : '',
+    empty: tr('Рутин пока нет. Добавь здесь или скажи боту в чате, например: «каждое утро в 9 собирай новости».'),
+    onnew: () => openRoutineFormFor(bot.id),
+  });
 }
 
 function openRoutineFormFor(botId) {
@@ -8464,82 +8452,6 @@ function routineParts(r) {
   return { gist, chips };
 }
 
-// Строка рутины: одна и та же в окне «Рутины» и во вкладке панели бота.
-function routineRow(r, rerender) {
-  const bot = botById(r.botId);
-  const el = document.createElement('div');
-  el.className = `routine${r.enabled ? '' : ' off'}`;
-  const icon = (name) => ic(name);
-  const { gist, chips } = routineParts(r);
-  el.innerHTML = `
-    <div class="rt-text">
-      <div class="rt-title" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
-      ${gist ? `<div class="rt-gist" role="button" tabindex="0" aria-expanded="false" title="${tr('Показать задание целиком')}">${escapeHtml(gist)}</div>` : ''}
-    </div>
-    <div class="rt-actions">
-      <button type="button" class="icon-btn rt-quiet${r.quiet ? ' on' : ''}" aria-pressed="${r.quiet}" title="${r.quiet ? tr('только важное') : tr('писать всё')}: ${tr('Писать в чат, только если есть что сказать')}" aria-label="${tr('Писать в чат, только если есть что сказать')}">${icon(r.quiet ? 'bell' : 'bell-off')}</button>
-      <button type="button" class="icon-btn rt-run" title="${tr('Запустить')}" aria-label="${tr('Запустить')}">${icon('play')}</button>
-      <label class="k-switch-box"><input type="checkbox" ${r.enabled ? 'checked' : ''}><span></span></label>
-      <button class="icon-btn" title="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ICONS.close}</button>
-    </div>
-    <div class="rt-chips">${chips}</div>`;
-  $('.rt-run', el).addEventListener('click', () => runRoutine(r.id));
-  const gistEl = $('.rt-gist', el);
-  const toggleGist = () => {
-    const open = el.classList.toggle('rt-open');
-    gistEl.textContent = open ? String(r.prompt || '').trim() : gist;
-    gistEl.setAttribute('aria-expanded', String(open));
-    gistEl.title = open ? tr('Свернуть') : tr('Показать задание целиком');
-  };
-  gistEl?.addEventListener('click', toggleGist);
-  gistEl?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggleGist();
-    }
-  });
-  if (r.errorPaused) {
-    const resume = document.createElement('button');
-    resume.type = 'button';
-    resume.className = 'k-btn k-btn--ghost';
-    resume.textContent = tr('Возобновить');
-    resume.addEventListener('click', async () => {
-      await resumeRoutineErrors(r.id);
-      rerender();
-    });
-    $('.rt-chips', el).append(resume);
-  }
-  $('.rt-quiet', el).addEventListener('click', async () => {
-    try {
-      const { routine } = await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { quiet: !r.quiet } });
-      r.quiet = routine.quiet;
-      rerender();
-    } catch (err) {
-      toast(err.message);
-    }
-  });
-  $('.k-switch-box input', el).addEventListener('change', async (e) => {
-    try {
-      await api(`/api/routines/${r.id}`, { method: 'PATCH', body: { enabled: e.target.checked } });
-      r.enabled = e.target.checked;
-      rerender();
-    } catch (err) {
-      toast(err.message);
-      e.target.checked = r.enabled;
-    }
-  });
-  $('.rt-actions button:last-of-type', el).addEventListener('click', async () => {
-    try {
-      await api(`/api/routines/${r.id}`, { method: 'DELETE' });
-      S.routines = S.routines.filter((x) => x.id !== r.id);
-      rerender();
-    } catch (err) {
-      toast(err.message);
-    }
-  });
-  return el;
-}
-
 // Модель карточки рутины для RoutinesPane (кит «Угли»): строки и даты считает app.js, карточка только рисует.
 function routineCardModel(r) {
   const bot = botById(r.botId);
@@ -8567,7 +8479,8 @@ function routineCardModel(r) {
 }
 
 let routinesPane = null;
-function renderRoutines() {
+// Свойства списка карточек: общие для окна «Рутины» и вкладки панели бота.
+function routinePaneProps(list) {
   // Рутины поменялись здесь — вкладка панели бота показывает те же.
   const both = () => {
     renderRoutines();
@@ -8585,7 +8498,7 @@ function renderRoutines() {
     both();
   };
   const props = {
-    routines: ordinaryRoutines().map(routineCardModel),
+    routines: list.map(routineCardModel),
     onrun: (id) => runRoutine(id),
     onresume: async (runId) => {
       await runAction(runId, 'resume');
@@ -8606,6 +8519,13 @@ function renderRoutines() {
       }
       both();
     },
+  };
+  return props;
+}
+
+function renderRoutines() {
+  const props = {
+    ...routinePaneProps(ordinaryRoutines()),
     onnew: () => {
       const form = $('#rt-new');
       form.open = !form.open;
