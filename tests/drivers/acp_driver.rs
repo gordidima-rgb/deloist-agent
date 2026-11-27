@@ -501,7 +501,8 @@ async fn the_agent_hands_a_task_to_another_bot_through_its_team_tools() {
     let thread = s.crew.ok("GET", &format!("/api/bots/{other}/thread?limit=10"), None).await;
     assert!(thread.to_string().contains("задача от агента"), "второй бот не получил задачу: {thread}");
     // Закрытая задача будит выдавшего своим ходом: его ответ не должен сойти за ответ на следующую просьбу.
-    let turns = |kind: &'static str| s.crew.count_events(move |e| e["type"] == kind && e["botId"] == s.bot.as_str());
+    let lead = s.bot.as_str();
+    let turns = |kind: &'static str| s.crew.count_events(move |e| e["type"] == kind && e["botId"] == lead);
     common::wait_until("итог разбудил выдавшего", 30, || async { turns("turn_end") >= 2 && turns("turn_start") == turns("turn_end") }).await;
 
     // Без упоминания и вне команды поручить нельзя: вне команды общаются только ведущие (владелец, 16.11.2026).
