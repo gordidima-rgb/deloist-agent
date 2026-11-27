@@ -482,12 +482,11 @@ import { ListItem, Icon, Badge } from '../kit';
   }
   .sb-branch.is-open { grid-template-rows: 1fr; }
   .sb-branch > .sb-group { min-height: 0; overflow: hidden; }
-  /* Ступенька 24px на уровень, линия связи тонкая и в оттенке акцента («Угли», #teams). */
+  /* Участники команды — без ступеньки и линии: имя и превью получают всю ширину (владелец 27.11.2026). */
   .sb-group {
-    margin: 0 0 0 var(--k-space-5);
+    margin: 0;
     padding: 0;
     list-style: none;
-    border-left: 1px solid color-mix(in srgb, var(--k-brand) 30%, var(--k-line));
   }
   /* Свёрнутая ветка не держит фокус и не читается (inert), но и не мигает при раскрытии. */
   .sb-branch:not(.is-open) { visibility: hidden; transition: grid-template-rows var(--k-dur-base) var(--k-ease-out), visibility 0s linear var(--k-dur-base); }
@@ -557,8 +556,7 @@ import { ListItem, Icon, Badge } from '../kit';
   .sb-gear[aria-expanded='true'] { opacity: 1; background: var(--k-surface-3); color: var(--k-text); }
   :global(body.side-collapsed) .sb-gear { display: none; }
 
-  /* Узкая панель: только аватары, без линий и стрелок; закрытая команда остаётся закрытой. */
-  :global(body.side-collapsed) .sb-group { margin-left: 0; border-left: 0; }
+  /* Узкая панель: только аватары, без стрелок; закрытая команда остаётся закрытой. */
   :global(body.side-collapsed) .sb-chev-btn,
   :global(body.side-collapsed) .sb-members,
   :global(body.side-collapsed) .sb-roll { display: none; }

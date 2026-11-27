@@ -30,7 +30,7 @@ window.DeloistUpdates = (() => {
       try { localStorage.setItem('deloist-provider-update-seen', JSON.stringify(providerSeen)); } catch {}
       providerCards.set(id, {
         id, version: p.latest, title: tr('Вышло обновление {name}', { name: p.name }),
-        meta: p.latest, action: tr('Обновить'),
+        meta: `${p.installed} → ${p.latest}`, action: tr('Обновить'),
         run: () => { providerCards.delete(id); renderCards(); window.DeloistProviders.update(p.id); },
         close: p.latest,
       });
