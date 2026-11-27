@@ -886,7 +886,26 @@ async fn center(session: &Session, backend: i64) -> Result<(f64, f64), String> {
     let quads = session.call("DOM.getContentQuads", json!({ "backendNodeId": backend })).await.map_err(|_| "элемент не виден на странице".to_string())?;
     let quad = quads["quads"][0].as_array().filter(|q| q.len() == 8).ok_or("элемент не виден на странице")?;
     let at = |i: usize| quad[i].as_f64().unwrap_or(0.0);
-    Ok(((at(0) + at(2) + at(4) + at(6)) / 4.0, (at(1) + at(3) + at(5) + at(7)) / 4.0))
+    let (left, right) = (at(0).min(at(2)).min(at(4)).min(at(6)), at(0).max(at(2)).max(at(4)).max(at(6)));
+    let (top, bottom) = (at(1).min(at(3)).min(at(5)).min(at(7)), at(1).max(at(3)).max(at(5)).max(at(7)));
+    // Высокий элемент (поле ответа с картинкой или цитатой) выше окна: его середина оказывается за краем, клик бьёт мимо.
+    let view = session.call("Page.getLayoutMetrics", json!({})).await.ok().map(|m| (m["cssVisualViewport"]["clientWidth"].as_f64().unwrap_or(0.0), m["cssVisualViewport"]["clientHeight"].as_f64().unwrap_or(0.0)));
+    let (width, height) = view.filter(|(w, h)| *w > 0.0 && *h > 0.0).unwrap_or((f64::MAX, f64::MAX));
+    let (x0, x1, y0, y1) = (left.max(0.0), right.min(width), top.max(0.0), bottom.min(height));
+    if x0 < x1 && y0 < y1 {
+        return Ok(((x0 + x1) / 2.0, (y0 + y1) / 2.0));
+    }
+    Ok(((left + right) / 2.0, (top + bottom) / 2.0))
+}
+
+/// Клик по полю ввода должен дать ему фокус. Редактор на contenteditable (ответ в X) нередко не получает фокус от самого клика:
+/// слой поверх, перерисовка. Тогда ставим фокус на тот же элемент, по которому кликали, а не просим бота кликать снова.
+const FOCUS_FN: &str = "function(){if(this.contains(document.activeElement))return false;this.focus();return true}";
+
+async fn focus_after_click(session: &Session, backend: i64) {
+    let Ok(node) = session.call("DOM.resolveNode", json!({ "backendNodeId": backend })).await else { return };
+    let Some(object) = node["object"]["objectId"].as_str() else { return };
+    let _ = session.call("Runtime.callFunctionOn", json!({ "objectId": object, "functionDeclaration": FOCUS_FN, "returnByValue": true })).await;
 }
 
 async fn target_point(session: &Session, args: &Value, ref_key: &str, x_key: &str, y_key: &str) -> Result<(f64, f64), String> {
@@ -1029,6 +1048,9 @@ async fn mouse(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
                 _ => (button, 1),
             };
             click_at(session, x, y, button, count).await?;
+            if let (Some(backend), true) = (backend_of(session, args, "ref")?, info["edit"] == json!(true) && action == "click") {
+                focus_after_click(session, backend).await;
+            }
             fresh_snapshot(session).await
         }
         "down" | "up" => {

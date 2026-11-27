@@ -67,6 +67,14 @@ document.addEventListener('mouseup',function(e){if(start){document.getElementByI
 window.addEventListener('scroll',function(){document.getElementById('sc').textContent='прокручено'});
 </script></body></html>"##;
 
+// Редактор ответа, как в X: contenteditable, который ниже окна и сам гасит фокус от мыши (mousedown без действия по умолчанию).
+const EDITOR: &str = r##"<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Редактор</title></head><body>
+<h1>Редактор</h1><div id="st">нет-фокуса</div>
+<div style="height:2000px"></div>
+<div contenteditable="true" role="textbox" aria-label="Ответ" style="height:120px;border:1px solid #888"
+ onmousedown="event.preventDefault()" onfocus="document.getElementById('st').textContent='фокус-есть'"></div>
+</body></html>"##;
+
 const LOGIN: &str = r##"<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Вход в кабинет</title></head><body>
 <h1>Вход</h1>
 <form onsubmit="event.preventDefault()"><input aria-label="Логин"><input type="password" aria-label="Пароль"><button type="submit">Войти</button></form>
@@ -91,6 +99,7 @@ async fn start_site() -> String {
         )
         .route("/form", get(|| async { Html(FORM) }))
         .route("/canvas", get(|| async { Html(CANVAS) }))
+        .route("/editor", get(|| async { Html(EDITOR) }))
         .route(
             "/tab",
             get(|| async { Html(r#"<!doctype html><html><head><meta charset="utf-8"><title>Вкладка</title></head><body><h1>Вторая вкладка</h1></body></html>"#) }),
@@ -563,6 +572,20 @@ async fn keyboard_types_cyrillic_and_refuses_passwords_and_cards() {
     // Единственный вопрос за весь ход: разрешение на сайт при первой печати.
     assert_eq!(run.approvals.len(), 1, "{:?}", run.approvals);
     assert_eq!(run.asked("browser_site"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_click_on_an_editor_below_the_fold_gives_it_focus() {
+    let env = setup("br-editor-focus").await;
+    let steps = vec![
+        open(&env, "/editor"),
+        with("browser_mouse", |last| json!({ "action": "click", "ref": ref_of(last, "Ответ") })),
+        with("browser_keyboard", |last| json!({ "action": "type", "ref": ref_of(last, "Ответ"), "text": "привет" })),
+    ];
+    let run = env.run(steps, |_| true).await;
+    run.ok(1);
+    run.expect(1, "фокус-есть");
+    run.ok(2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
