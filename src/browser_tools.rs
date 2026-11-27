@@ -1047,8 +1047,10 @@ async fn mouse(app: &Arc<App>, bot: &Bot, session: &Session, args: &Value) -> Re
                 "right_click" => ("right", 1),
                 _ => (button, 1),
             };
+            // Узел поля — до клика: клик может открыть другую вкладку или страницу, и в новом снимке его уже нет.
+            let editor = if info["edit"] == json!(true) && action == "click" { backend_of(session, args, "ref").ok().flatten() } else { None };
             click_at(session, x, y, button, count).await?;
-            if let (Some(backend), true) = (backend_of(session, args, "ref")?, info["edit"] == json!(true) && action == "click") {
+            if let Some(backend) = editor {
                 focus_after_click(session, backend).await;
             }
             fresh_snapshot(session).await
