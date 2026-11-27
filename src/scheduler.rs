@@ -358,6 +358,17 @@ async fn tick(app: &Arc<App>) {
             }
             continue;
         }
+        // Прошлый запуск ждёт человека (карточка без ответа): второй такой же ход получил бы вторую карточку и вторую
+        // строку в чате каждый час (Маркетолог X, 19.11.2026: 17 часов). Срок пропускаем молча, ждёт одна запись.
+        if app.runs.routine_waits_for_human(&routine.id) {
+            let _ = app.store.reschedule_routine(&routine.id, "needs").await;
+            continue;
+        }
+        // Лимит ещё не кончился: пауза сама разбудит ход в срок. Новый ход упёрся бы в тот же лимит и оставил строку в треде.
+        if app.runs.limit_pause_ahead(&routine.id) {
+            let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
+            continue;
+        }
         // Новый срок заменяет прежний запуск этой рутины, застрявший на паузе: пауз не копится, будится одна.
         app.runs.drop_stale_pauses(&routine.id);
         if over_limit(app) {
@@ -400,7 +411,7 @@ async fn pause_for_budget(app: &Arc<App>, routine: &Routine) {
     let origin = crate::runs::Origin::Routine { id: routine.id.clone(), title: routine.title.clone() };
     crate::runs::pause_unstarted(app, &routine.bot_id, origin, &opts, &text, until, crate::runs::StopReason::Budget, "дневной предел");
     note(app, routine, "paused", &format!("Дневной предел токенов исчерпан: запуск на паузе до {}.", clock(until))).await;
-    let _ = app.store.reschedule_routine(&routine.id, "paused").await;
+    let _ = app.store.reschedule_routine(&routine.id, "skipped").await;
 }
 
 #[cfg(test)]

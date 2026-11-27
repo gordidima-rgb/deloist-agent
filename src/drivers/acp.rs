@@ -1997,7 +1997,10 @@ async fn permission(req: &Request<'_>, params: &Value, turn: &mut TurnState, can
         let title = match &touch {
             Some(touch) => touch.title(),
             None if mcp.is_some() => "вызов инструмента".to_string(),
-            None => kind_label(kind).to_string(),
+            None => match crate::describe::acp_what(call) {
+                Some(what) => format!("{}: {what}", kind_label(kind)),
+                None => kind_label(kind).to_string(),
+            },
         };
         let human = crate::describe::acp(req.app, bot, call, &paths);
         let detail = human.details.clone();

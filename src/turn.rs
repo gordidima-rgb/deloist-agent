@@ -1312,11 +1312,12 @@ pub(crate) fn time_context_text(now_ms: i64, previous_ms: Option<i64>) -> String
     }
 }
 
-/// Пора ли показать модели часы: отметки ещё нет или прошлая старше интервала.
-pub(crate) fn time_context_due(previous: Option<i64>, now_ms: i64) -> Option<String> {
+/// Пора ли показать модели часы: отметки ещё нет или прошлая старше интервала. `last_mark` — последняя отметка вообще
+/// (и в тихом ходе): от неё считается пройденное время, чтобы тихие ходы его не раздували.
+pub(crate) fn time_context_due(previous: Option<i64>, last_mark: Option<i64>, now_ms: i64) -> Option<String> {
     match previous {
         Some(at) if now_ms.saturating_sub(at) < time_context_every() => None,
-        _ => Some(time_context_text(now_ms, previous)),
+        _ => Some(time_context_text(now_ms, last_mark.max(previous))),
     }
 }
 
@@ -2269,7 +2270,7 @@ fn run_turn_body(
             }
 
             // Часы — сообщением в конце истории, а не строкой системного промпта.
-            if let Some(text) = time_context_due(app.store.last_time_context(&bot_id).await, now()) {
+            if let Some(text) = time_context_due(app.store.last_time_context(&bot_id).await, app.store.last_time_mark(&bot_id).await, now()) {
                 let mut entry = json!({ "role": "time", "text": text, "at": now() });
                 // Тихий ход рутины исчезает из истории целиком, вместе со своими часами.
                 if opts.routine.is_some() {
@@ -2783,7 +2784,9 @@ fn run_turn_body(
         let waiting = app.turns.take_waiting(&bot_id);
         let result = if waiting.is_some() { Ok(()) } else { result };
         // Ход не дал ответа: ждёт сброса, события или человека. `held` — тем, кто читает тред (`deloist run`, MCP): это не ответ.
-        if let Some(line) = pause.as_ref().map(|p| p.line.clone()).or_else(|| waiting.clone()) {
+        // Повторная пауза того же запуска из-за лимита строки в треде не добавляет: одна строка на ожидание, а не по строке на каждую попытку.
+        let repeated_limit = pause.as_ref().is_some_and(|p| matches!(p.state, crate::runs::RunState::Paused { reason: StopReason::Limit, .. })) && app.runs.pauses(&bot_id) > 0;
+        if let Some(line) = pause.as_ref().filter(|_| !repeated_limit).map(|p| p.line.clone()).or_else(|| waiting.clone()) {
             let entry = json!({ "id": uid("msg"), "role": "assistant", "text": line, "held": true, "at": now() });
             app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));
             saved.push(entry);
@@ -3441,9 +3444,12 @@ mod tests {
     #[test]
     fn the_clock_is_skipped_inside_the_interval() {
         let now = 1_760_000_000_000;
-        assert!(time_context_due(None, now).is_some(), "первый ход без часов");
-        assert!(time_context_due(Some(now - 60_000), now).is_none(), "минуту назад часы уже были");
-        assert!(time_context_due(Some(now - super::time_context_every() - 1), now).is_some());
+        assert!(time_context_due(None, None, now).is_some(), "первый ход без часов");
+        assert!(time_context_due(Some(now - 60_000), None, now).is_none(), "минуту назад часы уже были");
+        assert!(time_context_due(Some(now - super::time_context_every() - 1), None, now).is_some());
+        // Тихий ход, чьих часов модель не видела, всё равно считается: промежуток от него, а не от видимой отметки.
+        let text = time_context_due(Some(now - 45 * 60_000), Some(now - 14 * 60_000), now).unwrap();
+        assert!(text.contains("прошло: 14 мин"), "{text}");
     }
 
     #[test]

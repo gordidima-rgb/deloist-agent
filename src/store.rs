@@ -70,6 +70,11 @@ fn last_clock(all: &[Value]) -> Option<i64> {
     model_visible(all).into_iter().rev().find(|&i| all[i]["role"] == "time").and_then(|i| all[i]["at"].as_i64())
 }
 
+/// Последние часы в треде, включая часы тихих ходов, которых модель не видит: от них считается, сколько прошло с прошлого хода.
+fn last_clock_any(all: &[Value]) -> Option<i64> {
+    all.iter().rev().find(|m| m["role"] == "time").and_then(|m| m["at"].as_i64())
+}
+
 /// Куда поставить новый якорь, если окно переполнилось. Считаем только то, что видит модель:
 /// иначе ночь тихих рутин вытеснила бы из окна живую переписку.
 fn anchor_position(all: &[Value], keep: usize, retain: usize) -> Option<usize> {
@@ -2677,6 +2682,11 @@ impl Store {
         last_clock(&self.load_thread(bot_id).await)
     }
 
+    /// Когда в треде последний раз ставились часы, даже в тихом ходе (модель их не видит, но время с них прошло).
+    pub async fn last_time_mark(&self, bot_id: &str) -> Option<i64> {
+        last_clock_any(&self.load_thread(bot_id).await)
+    }
+
     /// Сдвинуть окно истории целиком: оставить около `retain` последних записей, если модель
     /// видит больше `keep`. Возвращает, поставили ли новый якорь.
     #[cfg(test)]
@@ -4146,6 +4156,7 @@ mod tests {
         let model = store.read_model_thread("bot").await;
         assert_eq!(model.len(), 4, "разговор на месте: {model:?}");
         assert_eq!(store.last_time_context("bot").await, None, "часы тихого хода модель не видела");
+        assert_eq!(store.last_time_mark("bot").await, Some(5), "но время с них прошло");
 
         // И когда окно всё же сдвигается, в нём остаются живые записи, а не тихие.
         for i in 4..9 {

@@ -395,6 +395,12 @@ impl Runs {
             run.state = state;
             run.updated_ms = now();
         }
+        // Ход встал на паузу, а у рутины уже есть другая: старая устарела, проснуться должна одна.
+        if let Some(run) = inner.items.iter().find(|r| r.id == id).filter(|r| matches!(r.state, RunState::Paused { .. })) {
+            if let Some(routine) = origin_routine(&run.origin).map(str::to_string) {
+                drop_pauses_of(&mut inner.items, &routine, Some(&id));
+            }
+        }
         prune(&mut inner.items);
         self.save(&inner.items);
     }
@@ -534,19 +540,25 @@ impl Runs {
     /// Ожидание, которое бот поставил сам (`await_event`), не трогаем.
     pub fn drop_stale_pauses(&self, routine_id: &str) -> usize {
         let mut inner = self.inner.lock().unwrap();
-        let mut dropped = 0;
-        for run in inner.items.iter_mut().filter(|r| origin_routine(&r.origin) == Some(routine_id)) {
-            if matches!(run.state, RunState::Paused { reason: StopReason::Limit | StopReason::Network | StopReason::Budget, .. }) {
-                run.state = RunState::Done;
-                run.steps.clear();
-                run.updated_ms = now();
-                dropped += 1;
-            }
-        }
+        let dropped = drop_pauses_of(&mut inner.items, routine_id, None);
         if dropped > 0 {
             self.save(&inner.items);
         }
         dropped
+    }
+
+    /// Лимит у рутины ещё не кончился: пауза ждёт срока, и новый срок рутины ход не начинает (иначе каждый час
+    /// в тред писалась строка «ждёт лимит», а в журнал — ещё одна пауза: Маркетолог Reddit, 26.11.2026).
+    pub fn limit_pause_ahead(&self, routine_id: &str) -> bool {
+        let at = now();
+        self.inner.lock().unwrap().items.iter().any(|r| {
+            origin_routine(&r.origin) == Some(routine_id) && matches!(r.state, RunState::Paused { reason: StopReason::Limit, until_ms, .. } if until_ms > at)
+        })
+    }
+
+    /// Рутина ждёт решения человека: карточка без ответа или остановка, которую человек не снял.
+    pub fn routine_waits_for_human(&self, routine_id: &str) -> bool {
+        self.inner.lock().unwrap().items.iter().any(|r| matches!(r.origin, Origin::Routine { .. }) && origin_routine(&r.origin) == Some(routine_id) && matches!(r.state, RunState::NeedsHuman { .. }))
     }
 
     /// Запись, которая сразу на паузе (ход ещё не начинался).
@@ -576,6 +588,20 @@ impl Runs {
             .find(|r| r.is_running() && matches!(&r.origin, Origin::Team { task_id: t } if t == task_id) && !inner.active.values().any(|a| *a == r.id))
             .cloned()
     }
+}
+
+/// Паузы рутины (лимит, сеть, предел токенов) закрываются, кроме `keep`: у одной рутины живёт одна пауза.
+fn drop_pauses_of(items: &mut [Run], routine_id: &str, keep: Option<&str>) -> usize {
+    let mut dropped = 0;
+    for run in items.iter_mut().filter(|r| origin_routine(&r.origin) == Some(routine_id) && Some(r.id.as_str()) != keep) {
+        if matches!(run.state, RunState::Paused { reason: StopReason::Limit | StopReason::Network | StopReason::Budget, .. }) {
+            run.state = RunState::Done;
+            run.steps.clear();
+            run.updated_ms = now();
+            dropped += 1;
+        }
+    }
+    dropped
 }
 
 fn push_step(run: &mut Run, call_id: &str, label: &str, effect: Effect, state: StepState) {
@@ -787,6 +813,11 @@ pub async fn resume_due(app: &Arc<App>) {
     let at = now();
     for run in app.runs.paused() {
         if matches!(run.state, RunState::Paused { until_ms, .. } if until_ms <= at) && !app.turns.is_busy(&run.bot_id) {
+            // Рутина на паузе из-за ошибок: её старые ожидания лимита не просыпаются, пока человек не нажал «Возобновить».
+            if origin_routine(&run.origin).and_then(|id| app.store.routine(id)).is_some_and(|r| r.error_paused) {
+                app.runs.drop_stale_pauses(origin_routine(&run.origin).unwrap_or_default());
+                continue;
+            }
             if let Err(e) = resume(app, &run.id, false, None).await {
                 eprintln!("[runs] пауза не продолжена: {e}");
             }
@@ -1015,6 +1046,45 @@ mod stale_pause_tests {
         assert_eq!(left.len(), 2, "{left:?}");
         assert!(left.iter().any(|(id, s)| id == "rt_a" && matches!(s, RunState::Paused { reason: StopReason::Event, .. })), "своё ожидание бота остаётся");
         assert!(left.iter().any(|(id, _)| id == "rt_b"), "чужая рутина не трогается");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn temp_runs(name: &str) -> (Runs, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("runs-{name}-{}", crate::guard::random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        (Runs::open(&dir), dir)
+    }
+
+    #[test]
+    fn a_routine_with_a_future_limit_pause_or_a_waiting_card_does_not_start_again() {
+        let (runs, dir) = temp_runs("ahead");
+        runs.add(paused("rt_a", StopReason::Limit));
+        assert!(runs.limit_pause_ahead("rt_a"));
+        assert!(!runs.limit_pause_ahead("rt_b"), "чужая рутина");
+        let mut over = paused("rt_c", StopReason::Limit);
+        over.state = RunState::Paused { until_ms: now() - 1, reason: StopReason::Limit, webhook: None, note: String::new() };
+        runs.add(over);
+        assert!(!runs.limit_pause_ahead("rt_c"), "срок вышел: пауза проснётся сама, держать нечего");
+        let mut waiting = paused("rt_w", StopReason::Limit);
+        waiting.state = RunState::NeedsHuman { reason: StopReason::Human, text: "Ждёт решения человека по: действие.".into() };
+        runs.add(waiting);
+        assert!(runs.routine_waits_for_human("rt_w"));
+        assert!(!runs.routine_waits_for_human("rt_a"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_new_pause_of_a_routine_replaces_its_older_one() {
+        let (runs, dir) = temp_runs("one-pause");
+        runs.add(paused("rt_a", StopReason::Limit));
+        runs.add(paused("rt_a", StopReason::Event));
+        let origin = Origin::Routine { id: "rt_a".into(), title: "Комментарии".into() };
+        let id = runs.begin(Run::new("bot", origin, &TurnOptions::default()));
+        runs.close("bot", RunState::Paused { until_ms: now() + 60_000, reason: StopReason::Limit, webhook: None, note: String::new() });
+        let left: Vec<_> = runs.paused().into_iter().map(|r| (r.id, r.state)).collect();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert!(left.iter().any(|(rid, _)| *rid == id), "новая пауза осталась");
+        assert!(left.iter().any(|(_, s)| matches!(s, RunState::Paused { reason: StopReason::Event, .. })), "ожидание бота не трогается");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

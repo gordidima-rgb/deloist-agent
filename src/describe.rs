@@ -935,6 +935,20 @@ pub fn acp_mcp_tool(call: &Value) -> Option<(String, String)> {
     (ok(server) && ok(tool)).then(|| (server.to_string(), tool.to_string()))
 }
 
+/// Что за действие просит агент, когда вид ничего не говорит (`other`): инструмент нашего браузера, спрятанный в обёртке
+/// агента (`execute` у OpenCode), либо название вызова. Только для подписи карточки: решения по нему не принимаются.
+pub fn acp_what(call: &Value) -> Option<String> {
+    let inner = bridge_tool_in(&call["rawInput"].to_string());
+    let title = scrub_urls(call["title"].as_str().unwrap_or_default().trim());
+    let title: String = title.chars().take(60).collect();
+    match (inner, title.is_empty()) {
+        (Some(tool), false) if tool != title => Some(format!("{title} → {tool}")),
+        (Some(tool), _) => Some(tool),
+        (None, false) => Some(title),
+        (None, true) => None,
+    }
+}
+
 /// Описание запроса агента ACP: по тому, что он реально прислал.
 pub fn acp(app: &App, bot: &Bot, call: &Value, paths: &[PathBuf]) -> Described {
     let me = who(bot);
@@ -1035,8 +1049,7 @@ pub fn acp(app: &App, bot: &Bot, call: &Value, paths: &[PathBuf]) -> Described {
             d.text = ph!(format!("{me}: агент хочет обратиться в интернет {what}"), format!("{me}: the agent wants to reach the internet {what}"));
         }
         _ => {
-            let title = scrub_urls(call["title"].as_str().unwrap_or_default());
-            let title: String = title.chars().take(120).collect();
+            let title = acp_what(call).unwrap_or_default();
             d.text = ph!(
                 format!("{me}: агент просит действие «{title}», что именно оно делает, программа не определила"),
                 format!("{me}: the agent asks for the action “{title}”; the program could not determine what exactly it does")
@@ -1105,6 +1118,15 @@ mod tests {
         assert_eq!(acp_mcp_tool(&json!({ "title": "Run shell command" })), None);
         // Название без разделителя сервера — не наш инструмент.
         assert_eq!(acp_mcp_tool(&json!({ "title": "mcp.browser_nav" })), None);
+    }
+
+    #[test]
+    fn a_wrapped_browser_call_is_named_on_the_card() {
+        let bridge = crate::drivers::acp::bridge_name();
+        let wrapped = json!({ "kind": "other", "title": "execute", "rawInput": { "code": format!("await {bridge}_browser_nav({{url:'https://x.com'}})") } });
+        assert_eq!(acp_what(&wrapped).as_deref(), Some("execute → browser_nav"));
+        assert_eq!(acp_what(&json!({ "title": "ToolSearch" })).as_deref(), Some("ToolSearch"));
+        assert_eq!(acp_what(&json!({ "rawInput": {} })), None);
     }
 
     #[test]

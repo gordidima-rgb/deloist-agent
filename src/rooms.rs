@@ -384,7 +384,8 @@ async fn run(app: Arc<App>, room: Room, room_id: String, text: String, attachmen
     // Выпавшее из окна сворачивается в сводку, а не забывается.
     crate::compact::room_thread(&app, &room, false).await;
     // Часы идут перед сообщением человека: последним модель должна видеть вопрос, а не время.
-    if let Some(clock) = crate::turn::time_context_due(app.store.last_room_time_context(&room_id).await, now()) {
+    let last_clock = app.store.last_room_time_context(&room_id).await;
+    if let Some(clock) = crate::turn::time_context_due(last_clock, last_clock, now()) {
         let _ = app.store.append_room_message(&room_id, json!({ "role": "time", "text": clock, "at": now() })).await;
     }
 
