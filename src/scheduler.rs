@@ -260,6 +260,9 @@ pub(crate) mod tests {
         })
     }
 
+    /// Проверки идут по одной: тест предела времени ставит переменную окружения на весь процесс.
+    static CHECK_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// Рутина с проверкой запускается процессом; ждём, пока запуск закончится.
     async fn run_with_check(app: &Arc<App>, bot_id: &str, check: &str) -> String {
         let routine = app.store.add_routine(&json!({ "botId": bot_id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": check }), true).await.unwrap();
@@ -282,6 +285,7 @@ pub(crate) mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn routine_check_exit_zero_starts_turn() {
+        let _gate = CHECK_GATE.lock().await;
         let dir = temp_dir("zero");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
@@ -306,17 +310,19 @@ pub(crate) mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn routine_check_exit_one_marks_no_change() {
+        let _gate = CHECK_GATE.lock().await;
         let dir = temp_dir("one");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
         let id = run_with_check(&app, &bot.id, "cmd /c exit 1").await;
-        assert_eq!(journal_has(&app, &id, &["no_change"]).await.as_deref(), Some("no_change"));
+        assert_eq!(journal_has(&app, &id, &["no_change"]).await.as_deref(), Some("no_change"), "{:?}", app.ledger.read_journal(5).await);
         assert!(!app.turns.is_busy(&bot.id), "no turn should start");
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn routine_check_exit_two_marks_error() {
+        let _gate = CHECK_GATE.lock().await;
         let dir = temp_dir("two");
         let app = make_app(dir.clone()).await;
         let bot = app.store.bots().into_iter().next().unwrap();
@@ -430,6 +436,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn routine_check_timeout_marks_error() {
+        let _gate = CHECK_GATE.lock().await;
         std::env::set_var("CREW_TEST_ROUTINE_CHECK_TIMEOUT_MS", "200");
         let dir = temp_dir("timeout");
         let app = make_app(dir.clone()).await;
