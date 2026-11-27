@@ -425,7 +425,7 @@ async fn pause_for_budget(app: &Arc<App>, routine: &Routine) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{goals, store, turn};
     use serde_json::json;
@@ -438,7 +438,7 @@ mod tests {
         dir
     }
 
-    async fn make_app(dir: PathBuf) -> Arc<App> {
+    pub(crate) async fn make_app(dir: PathBuf) -> Arc<App> {
         let store = store::Store::open(dir.clone()).await.unwrap();
         store.set_env_file(std::collections::HashMap::new());
         let ledger = crate::ledger::Ledger::open(store.data_dir().to_path_buf()).await;

@@ -1473,6 +1473,10 @@ pub async fn patch(app: &Arc<App>, id: &str, body: &Value) -> Result<Value, ApiE
     let mut account = app.mail.account(id).ok_or_else(|| ApiError::NotFound("ящик не найден".into()))?;
     let before = account.clone();
     apply(app, &mut account, body).map_err(ApiError::Bad)?;
+    // Токен Яндекса уходит на сервер из настроек ящика: сменить сервер или адрес значит отдать токен чужому хосту.
+    if before.auth == AUTH_YANDEX && (login_target_changed(&before, &account) || before.preset != account.preset) {
+        return Err(ApiError::Bad("Ящик подключён через Яндекс: чтобы сменить сервер или адрес, удалите его и подключите заново".into()));
+    }
     let password = text_field(body, "password").filter(|p| !p.is_empty());
     // Сменили сервер или логин, а пароль не ввели: старый пароль ушёл бы на новый адрес.
     if password.is_none() && login_target_changed(&before, &account) {
@@ -1991,5 +1995,27 @@ mod batch_tests {
         assert_eq!(second.retry, Some((7, 2)));
         let third = fetch_batch(&mut imap, vec![7, 8], &sizes, 6, (7, 2)).await.unwrap();
         assert_eq!((third.gave_up, third.retry, third.skipped, third.last), (vec![7], None, vec![8], 8), "после третьей попытки пропуск, исчезнувшее — сразу");
+    }
+
+    fn yandex_account(id: &str, address: &str) -> Account {
+        Account { id: id.into(), address: address.into(), auth: AUTH_YANDEX.into(), preset: "yandex".into(), imap_host: crate::mail_oauth::IMAP_HOST.into(), imap_port: 993, imap_tls: "tls".into(), smtp_host: crate::mail_oauth::SMTP_HOST.into(), smtp_port: 465, smtp_tls: "tls".into(), ..Account::default() }
+    }
+
+    async fn app_in(name: &str) -> (Arc<App>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("mail-{name}-{}", uid("t")));
+        std::fs::create_dir_all(&dir).unwrap();
+        (crate::scheduler::tests::make_app(dir.clone()).await, dir)
+    }
+
+    #[tokio::test]
+    async fn a_yandex_account_cannot_be_pointed_at_another_server_or_address() {
+        let (app, dir) = app_in("patch-yandex").await;
+        app.mail.change(|s| s.accounts.push(yandex_account("m1", "me@yandex.ru")));
+        for body in [json!({ "imapHost": "imap.evil.ru" }), json!({ "smtpPort": 25 }), json!({ "imapTls": "starttls" }), json!({ "address": "x@evil.ru" }), json!({ "login": "other" }), json!({ "preset": "custom" })] {
+            assert!(matches!(patch(&app, "m1", &body).await, Err(ApiError::Bad(m)) if m.contains("через Яндекс")), "{body}");
+        }
+        assert_eq!(app.mail.account("m1").unwrap().imap_host, crate::mail_oauth::IMAP_HOST, "ничего не сохранилось");
+        assert!(patch(&app, "m1", &json!({ "label": "Работа" })).await.is_ok(), "подпись менять можно");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
