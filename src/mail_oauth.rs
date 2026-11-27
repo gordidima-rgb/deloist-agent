@@ -25,6 +25,8 @@ const PORT: u16 = 47831;
 const REDIRECT_URI: &str = "http://127.0.0.1:47831/yandex-mail";
 const CALLBACK_PATH: &str = "/yandex-mail";
 const WAIT: Duration = Duration::from_secs(600);
+/// Готовый вход, который не завершили, не держит токены в памяти дольше этого.
+const READY_TTL_MS: i64 = 15 * 60 * 1000;
 /// Хосты из справки OAuth Яндекса (imap.yandex.com / smtp.yandex.com).
 pub const IMAP_HOST: &str = "imap.yandex.com";
 pub const SMTP_HOST: &str = "smtp.yandex.com";
@@ -38,12 +40,13 @@ pub fn enabled() -> bool {
 
 enum Outcome {
     Waiting,
-    Ready(Tokens, String),
+    /// Токены, адрес и время получения (мс).
+    Ready(Tokens, String, i64),
     Failed(String),
 }
 
-/// Вход в процессе: один на программу, новый «Войти через Яндекс» гасит прежний. Токены ждут здесь, в памяти, пока человек
-/// не завершит подключение.
+/// Вход в процессе: один на программу, новый «Войти через Яндекс» гасит прежний (его слушатель закрывается в `Drop`).
+/// Токены ждут здесь, в памяти, пока человек не завершит подключение, но не дольше `READY_TTL_MS`.
 pub struct Flow {
     id: String,
     outcome: Arc<Mutex<Outcome>>,
@@ -89,13 +92,22 @@ async fn fetch_email(info_url: &str, token: &str) -> Result<String, String> {
 
 /// `POST /api/mail/oauth/yandex/start`: открыть браузер и ждать возврата. Результат — через `status`.
 pub async fn start(app: &Arc<App>) -> Result<Value, String> {
+    let (id, url) = begin(app).await?;
+    crate::desktop::open_in_browser(&url);
+    Ok(json!({ "flow": id }))
+}
+
+/// Занять порт, запустить ожидание возврата; номер входа и адрес для браузера.
+async fn begin(app: &Arc<App>) -> Result<(String, String), String> {
     if !enabled() {
         return Err("вход через Яндекс не настроен в этой сборке".into());
     }
     if crate::cloud::active() {
         return Err("в облаке вход через браузер недоступен: создайте пароль приложения".into());
     }
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await.map_err(|_| "не удалось занять порт 47831 на этом компьютере (его держит другая программа): закройте её или создайте пароль приложения".to_string())?;
+    // Прежний вход гасим первым: он держит порт. Слушатель закрывается, когда рантайм дойдёт до отмены, поэтому занимаем порт с повторами.
+    drop(app.mail.oauth.lock().unwrap_or_else(|e| e.into_inner()).take());
+    let listener = bind_port().await?;
     let verifier = oauth::new_verifier();
     let state = crate::guard::random_token();
     let url = authorize_url(crate::mail::YANDEX_CLIENT_ID, &oauth::challenge(&verifier), &state);
@@ -110,7 +122,7 @@ pub async fn start(app: &Arc<App>) -> Result<Value, String> {
         let next = match code {
             Ok(code) => match exchange(TOKEN_URL, crate::mail::YANDEX_CLIENT_ID, &code, &verifier).await {
                 Ok(tokens) => match fetch_email(INFO_URL, &tokens.access).await {
-                    Ok(address) => Outcome::Ready(tokens, address),
+                    Ok(address) => Outcome::Ready(tokens, address, crate::store::now()),
                     Err(e) => Outcome::Failed(e),
                 },
                 Err(e) => Outcome::Failed(e),
@@ -121,18 +133,44 @@ pub async fn start(app: &Arc<App>) -> Result<Value, String> {
     });
     let id = crate::store::uid("oa");
     *app.mail.oauth.lock().unwrap_or_else(|e| e.into_inner()) = Some(Flow { id: id.clone(), outcome, task: task.abort_handle() });
-    crate::desktop::open_in_browser(&url);
-    Ok(json!({ "flow": id }))
+    Ok((id, url))
+}
+
+async fn bind_port() -> Result<tokio::net::TcpListener, String> {
+    let mut last = None;
+    for _ in 0..6 {
+        match tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) => last = Some(e),
+        }
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+    drop(last);
+    Err("не удалось занять порт 47831 на этом компьютере (его держит другая программа): закройте её или создайте пароль приложения".into())
+}
+
+const EXPIRED: &str = "вход в Яндекс устарел: начните заново";
+
+/// Готовый вход старше `READY_TTL_MS` — вход закрыт, токены забыты. Возвращает, закрыли ли.
+fn drop_if_stale(slot: &mut Option<Flow>) -> bool {
+    let stale = slot.as_ref().is_some_and(|f| matches!(&*f.outcome.lock().unwrap_or_else(|e| e.into_inner()), Outcome::Ready(_, _, at) if crate::store::now() - at > READY_TTL_MS));
+    if stale {
+        *slot = None;
+    }
+    stale
 }
 
 /// `GET /api/mail/oauth/yandex/{flow}`: `waiting`, `ready` (можно завершать) или `failed` с текстом.
 pub fn status(app: &App, id: &str) -> Option<Value> {
-    let slot = app.mail.oauth.lock().unwrap_or_else(|e| e.into_inner());
-    let flow = slot.as_ref().filter(|f| f.id == id)?;
-    let outcome = flow.outcome.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = app.mail.oauth.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref().filter(|f| f.id == id)?;
+    if drop_if_stale(&mut slot) {
+        return Some(json!({ "status": "failed", "error": EXPIRED }));
+    }
+    let outcome = slot.as_ref()?.outcome.lock().unwrap_or_else(|e| e.into_inner());
     Some(match &*outcome {
         Outcome::Waiting => json!({ "status": "waiting" }),
-        Outcome::Ready(_, address) => json!({ "status": "ready", "address": address }),
+        Outcome::Ready(_, address, _) => json!({ "status": "ready", "address": address }),
         Outcome::Failed(e) => json!({ "status": "failed", "error": e }),
     })
 }
@@ -140,10 +178,13 @@ pub fn status(app: &App, id: &str) -> Option<Value> {
 /// Забрать токены завершённого входа и адрес; вход закрывается. `None` — нет такого входа; `Err` — вход не удался или ещё идёт.
 pub fn take(app: &App, id: &str) -> Option<Result<(String, Tokens), String>> {
     let mut slot = app.mail.oauth.lock().unwrap_or_else(|e| e.into_inner());
-    let flow = slot.as_ref().filter(|f| f.id == id)?;
-    let mut outcome = flow.outcome.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref().filter(|f| f.id == id)?;
+    if drop_if_stale(&mut slot) {
+        return Some(Err(EXPIRED.into()));
+    }
+    let mut outcome = slot.as_ref()?.outcome.lock().unwrap_or_else(|e| e.into_inner());
     let result = match std::mem::replace(&mut *outcome, Outcome::Waiting) {
-        Outcome::Ready(tokens, address) => Ok((address, tokens)),
+        Outcome::Ready(tokens, address, _) => Ok((address, tokens)),
         Outcome::Failed(e) => Err(e),
         Outcome::Waiting => return Some(Err("вход в Яндекс ещё не завершён".into())),
     };
@@ -158,7 +199,8 @@ pub async fn fresh_token(secrets: &Secrets, scope: &str, token_url: &str, client
     let read = || secrets.get(scope, oauth::ACCESS).filter(|t| !t.is_empty());
     let expired = || {
         let expires: i64 = secrets.get(scope, oauth::EXPIRES).and_then(|v| v.parse().ok()).unwrap_or(0);
-        expires != 0 && crate::store::now() + oauth::REFRESH_AHEAD_MS >= expires
+        // Срок не записан, а обновить можно (есть refresh-токен): считаем токен просроченным, а не вечным.
+        if expires == 0 { secrets.get(scope, oauth::REFRESH).is_some() } else { crate::store::now() + oauth::REFRESH_AHEAD_MS >= expires }
     };
     let before = read().ok_or("у ящика нет входа через Яндекс: войдите заново")?;
     if !force && !expired() {
@@ -329,5 +371,61 @@ mod tests {
         // После этого порт закрыт.
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "слушатель закрыт");
+    }
+
+    async fn app_in(name: &str) -> (Arc<App>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("mail-oauth-{name}-{}", crate::store::uid("t")));
+        std::fs::create_dir_all(&dir).unwrap();
+        (crate::scheduler::tests::make_app(dir.clone()).await, dir)
+    }
+
+    fn ready_flow(app: &App, id: &str, at: i64) {
+        let outcome = Arc::new(Mutex::new(Outcome::Ready(Tokens { access: "a".into(), refresh: Some("r".into()), expires_in: Some(3600) }, "me@yandex.ru".into(), at)));
+        *app.mail.oauth.lock().unwrap() = Some(Flow { id: id.into(), outcome, task: tokio::spawn(async {}).abort_handle() });
+    }
+
+    #[tokio::test]
+    async fn a_second_sign_in_takes_the_port_from_the_first() {
+        let (app, dir) = app_in("twice").await;
+        let (first, _) = begin(&app).await.expect("первый вход");
+        let (second, _) = begin(&app).await.expect("второй вход сразу после первого");
+        assert_ne!(first, second);
+        assert!(status(&app, &first).is_none(), "прежний вход погашен");
+        assert_eq!(status(&app, &second).unwrap()["status"], "waiting");
+        drop(app.mail.oauth.lock().unwrap().take());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_finished_sign_in_nobody_completed_is_forgotten_after_fifteen_minutes() {
+        let (app, dir) = app_in("stale").await;
+        ready_flow(&app, "f1", crate::store::now());
+        assert_eq!(status(&app, "f1").unwrap()["status"], "ready");
+        ready_flow(&app, "f2", crate::store::now() - READY_TTL_MS - 1000);
+        let state = status(&app, "f2").unwrap();
+        assert_eq!(state["status"], "failed");
+        assert!(app.mail.oauth.lock().unwrap().is_none(), "токены удалены из памяти");
+        ready_flow(&app, "f3", crate::store::now() - READY_TTL_MS - 1000);
+        assert!(take(&app, "f3").unwrap().is_err());
+        assert!(take(&app, "f3").is_none());
+        ready_flow(&app, "f4", crate::store::now());
+        assert_eq!(take(&app, "f4").unwrap().unwrap().0, "me@yandex.ru");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_token_without_a_recorded_expiry_is_refreshed_when_it_can_be() {
+        let (s, dir) = secrets("noexpiry");
+        let (url, hits, _) = token_stub(vec![(200, r#"{"access_token":"new-a","expires_in":3600}"#)]).await;
+        s.set("mail.m1", oauth::ACCESS, "old-a").unwrap();
+        s.set("mail.m1", oauth::REFRESH, "r1").unwrap();
+        assert_eq!(fresh_token(&s, "mail.m1", &url, "cid", false).await.unwrap(), "new-a");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        // Обновить нечем: токен используем как есть.
+        s.delete("mail.m1", oauth::REFRESH).unwrap();
+        s.delete("mail.m1", oauth::EXPIRES).unwrap();
+        assert_eq!(fresh_token(&s, "mail.m1", &url, "cid", false).await.unwrap(), "new-a");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
