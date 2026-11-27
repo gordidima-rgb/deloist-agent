@@ -3,6 +3,8 @@
 
 use chrono::{Datelike, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 
+use serde::{Deserialize, Serialize};
+
 use crate::dates_ru;
 use crate::store::{Bot, Routine};
 
@@ -624,6 +626,169 @@ pub fn next_cron_run_ms(routine: &Routine, now_ms: i64) -> i64 {
     i64::MAX
 }
 
+// ---------------------------------------------------------------------------
+// Расписание запускающего узла процесса (бывшее workflows::Schedule).
+// ---------------------------------------------------------------------------
+
+pub const MIN_INTERVAL_MINUTES: f64 = 3.0;
+
+const SCHEDULE_KINDS: [&str; 7] = ["hourly", "daily", "weekdays", "weekly", "monthly", "interval", "once"];
+
+const WEEKDAYS_EACH_WF: [&str; 7] = ["понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам", "воскресеньям"];
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Schedule {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minute: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+}
+
+impl Schedule {
+    pub fn validate(&self) -> Result<(), String> {
+        if !SCHEDULE_KINDS.contains(&self.kind.as_str()) {
+            return Err("неизвестный вид расписания".into());
+        }
+        let time_ok = || self.time.as_deref().and_then(parse_time).is_some();
+        match self.kind.as_str() {
+            "hourly" => {
+                if self.minute.is_some_and(|m| !(0..=59).contains(&m)) {
+                    return Err("минута от 0 до 59".into());
+                }
+            }
+            "daily" | "weekdays" => {
+                if !time_ok() {
+                    return Err("нужно время ЧЧ:ММ".into());
+                }
+            }
+            "weekly" => {
+                if !time_ok() {
+                    return Err("нужно время ЧЧ:ММ".into());
+                }
+                if !self.weekday.is_some_and(|d| (1..=7).contains(&d)) {
+                    return Err("день недели от 1 до 7".into());
+                }
+            }
+            "monthly" => {
+                if !time_ok() {
+                    return Err("нужно время ЧЧ:ММ".into());
+                }
+                if !self.day.is_some_and(|d| (1..=31).contains(&d)) {
+                    return Err("число месяца от 1 до 31".into());
+                }
+            }
+            "interval" => match self.interval_minutes() {
+                None => return Err("нужны количество и единица (минуты, часы, дни)".into()),
+                Some(m) if m < MIN_INTERVAL_MINUTES => return Err("интервал не меньше 3 минут".into()),
+                Some(_) => {}
+            },
+            "once" => {
+                if !time_ok() {
+                    return Err("нужно время ЧЧ:ММ".into());
+                }
+                if self.date.as_deref().and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_none() {
+                    return Err("нужна дата ГГГГ-ММ-ДД".into());
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn interval_minutes(&self) -> Option<f64> {
+        let amount = self.amount?;
+        let per = match self.unit.as_deref()? {
+            "minutes" => 1.0,
+            "hours" => 60.0,
+            "days" => 1440.0,
+            _ => return None,
+        };
+        (amount.is_finite() && amount > 0.0).then_some(amount * per)
+    }
+
+    pub fn describe(&self) -> String {
+        let time = self.time.clone().unwrap_or_default();
+        match self.kind.as_str() {
+            "hourly" => format!("каждый час в {:02} минут", self.minute.unwrap_or(0)),
+            "daily" => format!("каждый день в {time}"),
+            "weekdays" => format!("по будням в {time}"),
+            "weekly" => format!("по {} в {time}", WEEKDAYS_EACH_WF[(self.weekday.unwrap_or(1).clamp(1, 7) - 1) as usize]),
+            "monthly" => format!("каждого {}-го числа в {time}", self.day.unwrap_or(1)),
+            "interval" => format!(
+                "каждые {} {}",
+                self.amount.unwrap_or(0.0),
+                match self.unit.as_deref() { Some("hours") => "ч", Some("days") => "дн", _ => "мин" }
+            ),
+            "once" => format!("один раз {} в {time}", self.date.clone().unwrap_or_default()),
+            other => other.to_string(),
+        }
+    }
+}
+
+fn days_in_month_wf(date: NaiveDate) -> u32 {
+    let (y, m) = if date.month() == 12 { (date.year() + 1, 1) } else { (date.year(), date.month() + 1) };
+    NaiveDate::from_ymd_opt(y, m, 1).and_then(|first| first.pred_opt()).map_or(28, |last| last.day())
+}
+
+/// Ближайший срок строго после `now_ms`. `None` — больше срока нет (разовый уже прошёл).
+pub fn schedule_next(s: &Schedule, now_ms: i64) -> Option<i64> {
+    schedule_next_with(s, now_ms, local, to_ms)
+}
+
+pub fn schedule_next_with(
+    s: &Schedule,
+    now_ms: i64,
+    local_of: impl Fn(i64) -> NaiveDateTime,
+    ms_of: impl Fn(NaiveDateTime) -> i64,
+) -> Option<i64> {
+    let now = local_of(now_ms);
+    if s.kind == "interval" {
+        return Some(now_ms + (s.interval_minutes().unwrap_or(0.0).max(MIN_INTERVAL_MINUTES) * 60_000.0) as i64);
+    }
+    if s.kind == "hourly" {
+        let minute = s.minute.unwrap_or(0).clamp(0, 59) as u32;
+        let mut at = now.date().and_hms_opt(now.hour(), minute, 0)?;
+        if at <= now {
+            at += Duration::hours(1);
+        }
+        return Some(ms_of(at));
+    }
+    let time = s.time.as_deref().and_then(parse_time)?;
+    if s.kind == "once" {
+        let date = NaiveDate::parse_from_str(s.date.as_deref()?, "%Y-%m-%d").ok()?;
+        let at = date.and_time(time);
+        return (at > now).then(|| ms_of(at));
+    }
+    let mut date = now.date();
+    for _ in 0..=400 {
+        let day_ok = match s.kind.as_str() {
+            "daily" => true,
+            "weekdays" => date.weekday().number_from_monday() <= 5,
+            "weekly" => i64::from(date.weekday().number_from_monday()) == s.weekday.unwrap_or(1),
+            "monthly" => i64::from(date.day()) == s.day.unwrap_or(1).min(i64::from(days_in_month_wf(date))),
+            _ => return None,
+        };
+        let at = date.and_time(time);
+        if day_ok && at > now {
+            return Some(ms_of(at));
+        }
+        date = date.succ_opt()?;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,5 +1214,49 @@ mod tests {
         assert_eq!(describe(&cron_routine("30 10 1 * *", "")), "1-го числа в 10:30");
         assert_eq!(describe(&cron_routine("0 9 * * 1-5", "Europe/Berlin")), "по будням в 09:00 (Europe/Berlin)");
         assert_eq!(describe(&cron_routine("0 9 13 * 5", "")), "по cron: 0 9 13 * 5");
+    }
+
+    // ---- портированные тесты расписания процесса ----
+
+    #[test]
+    fn schedule_rules_wf() {
+        let daily = Schedule { kind: "daily".into(), time: Some("09:00".into()), ..Schedule::default() };
+        assert!(daily.validate().is_ok());
+        let fast = Schedule { kind: "interval".into(), amount: Some(2.0), unit: Some("minutes".into()), ..Schedule::default() };
+        assert!(fast.validate().is_err(), "интервал меньше трёх минут");
+        let okay = Schedule { amount: Some(3.0), ..fast };
+        assert!(okay.validate().is_ok());
+        let weekly = Schedule { kind: "weekly".into(), time: Some("09:00".into()), weekday: Some(8), ..Schedule::default() };
+        assert!(weekly.validate().is_err());
+    }
+
+    fn at_wf(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 0).unwrap()
+    }
+
+    fn next_wf(s: &Schedule, now: NaiveDateTime) -> Option<NaiveDateTime> {
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+        let now_ms = (now - epoch).num_milliseconds();
+        schedule_next_with(s, now_ms, |ms| epoch + Duration::milliseconds(ms), |t| (t - epoch).num_milliseconds()).map(|ms| epoch + Duration::milliseconds(ms))
+    }
+
+    #[test]
+    fn next_slots_wf() {
+        // 2026-11-16 — понедельник.
+        let time = Some("09:00".to_string());
+        let daily = Schedule { kind: "daily".into(), time: time.clone(), ..Schedule::default() };
+        assert_eq!(next_wf(&daily, at_wf(2026, 11, 16, 8, 0)), Some(at_wf(2026, 11, 16, 9, 0)));
+        assert_eq!(next_wf(&daily, at_wf(2026, 11, 16, 9, 0)), Some(at_wf(2026, 11, 17, 9, 0)));
+        let weekdays = Schedule { kind: "weekdays".into(), time: time.clone(), ..Schedule::default() };
+        assert_eq!(next_wf(&weekdays, at_wf(2026, 11, 20, 10, 0)), Some(at_wf(2026, 11, 23, 9, 0)), "пятница вечером — понедельник");
+        let weekly = Schedule { kind: "weekly".into(), time: time.clone(), weekday: Some(3), ..Schedule::default() };
+        assert_eq!(next_wf(&weekly, at_wf(2026, 11, 16, 12, 0)), Some(at_wf(2026, 11, 18, 9, 0)));
+        let monthly = Schedule { kind: "monthly".into(), time: time.clone(), day: Some(31), ..Schedule::default() };
+        assert_eq!(next_wf(&monthly, at_wf(2026, 11, 16, 12, 0)), Some(at_wf(2026, 11, 30, 9, 0)), "в ноябре 31-го нет: последний день");
+        let hourly = Schedule { kind: "hourly".into(), minute: Some(15), ..Schedule::default() };
+        assert_eq!(next_wf(&hourly, at_wf(2026, 11, 16, 8, 20)), Some(at_wf(2026, 11, 16, 9, 15)));
+        let once = Schedule { kind: "once".into(), time, date: Some("2026-11-20".into()), ..Schedule::default() };
+        assert_eq!(next_wf(&once, at_wf(2026, 11, 16, 8, 0)), Some(at_wf(2026, 11, 20, 9, 0)));
+        assert_eq!(next_wf(&once, at_wf(2026, 11, 21, 8, 0)), None);
     }
 }

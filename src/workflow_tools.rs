@@ -203,7 +203,7 @@ fn render(app: &App, name: &str, args: &Value, limit: usize) -> String {
                             line.push_str(&format!(": {}", fields_list(app, &node.fields, limit)));
                         }
                         if let Some(s) = &node.schedule {
-                            line.push_str(&format!("; расписание: {}", wf::describe_schedule(s)));
+                            line.push_str(&format!("; расписание: {}", s.describe()));
                         }
                         line
                     }
@@ -213,7 +213,7 @@ fn render(app: &App, name: &str, args: &Value, limit: usize) -> String {
                             line.push_str(&format!(": {}", fields_list(app, fields, limit)));
                         }
                         if let Some(s) = op.get("schedule") {
-                            let words = if s.is_null() { "«сбросит»".to_string() } else { serde_json::from_value::<wf::Schedule>(s.clone()).map_or_else(|_| "не разобрано".to_string(), |s| wf::describe_schedule(&s)) };
+                            let words = if s.is_null() { "«сбросит»".to_string() } else { serde_json::from_value::<crate::schedule::Schedule>(s.clone()).map_or_else(|_| "не разобрано".to_string(), |s| s.describe()) };
                             line.push_str(&format!("; расписание: {words}"));
                         }
                         line

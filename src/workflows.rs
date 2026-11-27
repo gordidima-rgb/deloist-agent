@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
+use crate::schedule::{schedule_next, Schedule};
 use crate::store::{now, uid};
 
 pub const MAX_NODES: usize = 200;
@@ -20,7 +20,6 @@ pub const MAX_STROKES: usize = 500;
 pub const MAX_POINTS: usize = 2000;
 pub const MAX_GRAPH_BYTES: usize = 1024 * 1024;
 pub const KEEP_RUNS: usize = 50;
-pub const MIN_INTERVAL_MINUTES: f64 = 3.0;
 
 pub const ANNOTATIONS: [&str; 3] = ["note", "text", "shape"];
 pub const KINDS: [&str; 12] = ["trigger", "prompt", "bot", "approval", "output", "llm", "condition", "asset", "image", "note", "text", "shape"];
@@ -32,26 +31,6 @@ pub fn is_annotation(kind: &str) -> bool {
 // ---------------------------------------------------------------------------
 // Данные
 // ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Schedule {
-    pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub time: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub minute: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub weekday: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub day: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amount: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unit: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub date: Option<String>,
-}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -261,11 +240,6 @@ fn err_plain(code: &'static str, message: impl Into<String>) -> GraphError {
 
 const TRIGGERS: [&str; 6] = ["manual", "schedule", "webhook", "telegram", "discord", "slack"];
 const TARGETS: [&str; 6] = ["notify", "chat", "telegram", "discord", "slack", "file"];
-const SCHEDULE_KINDS: [&str; 7] = ["hourly", "daily", "weekdays", "weekly", "monthly", "interval", "once"];
-
-fn parse_time(text: &str) -> Option<NaiveTime> {
-    crate::schedule::parse_time(text)
-}
 
 /// Допустимый провайдер модели в шаге: по умолчанию, подписка, нативный драйвер или `openai:<имя>`.
 /// Внешние агенты (`acp:`, `cli`) и демо сюда не годятся.
@@ -287,26 +261,6 @@ pub fn check_providers(app: &crate::App, graph: &Graph) -> Result<(), GraphError
         }
     }
     Ok(())
-}
-
-/// Расписание словами.
-pub fn describe_schedule(s: &Schedule) -> String {
-    let time = s.time.clone().unwrap_or_default();
-    const DAYS: [&str; 7] = ["понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам", "воскресеньям"];
-    match s.kind.as_str() {
-        "hourly" => format!("каждый час в {:02} минут", s.minute.unwrap_or(0)),
-        "daily" => format!("каждый день в {time}"),
-        "weekdays" => format!("по будням в {time}"),
-        "weekly" => format!("по {} в {time}", DAYS[(s.weekday.unwrap_or(1).clamp(1, 7) - 1) as usize]),
-        "monthly" => format!("каждого {}-го числа в {time}", s.day.unwrap_or(1)),
-        "interval" => format!(
-            "каждые {} {}",
-            s.amount.unwrap_or(0.0),
-            match s.unit.as_deref() { Some("hours") => "ч", Some("days") => "дн", _ => "мин" }
-        ),
-        "once" => format!("один раз {} в {time}", s.date.clone().unwrap_or_default()),
-        other => other.to_string(),
-    }
 }
 
 /// Тип на выходе узла: текст, картинка или файл. У вывода и аннотаций выхода нет.
@@ -336,68 +290,6 @@ pub fn accepts(kind: &str, ty: &str) -> bool {
 /// Тип связи: указанный или тот, что отдаёт источник.
 pub fn edge_type_of(graph: &Graph, edge: &Edge) -> String {
     edge.edge_type.clone().or_else(|| graph.node(&edge.from).and_then(natural_out).map(str::to_string)).unwrap_or_else(|| "text".into())
-}
-
-/// Интервал в минутах, если он задан верно.
-fn interval_minutes(s: &Schedule) -> Option<f64> {
-    let amount = s.amount?;
-    let per = match s.unit.as_deref()? {
-        "minutes" => 1.0,
-        "hours" => 60.0,
-        "days" => 1440.0,
-        _ => return None,
-    };
-    (amount.is_finite() && amount > 0.0).then_some(amount * per)
-}
-
-pub fn validate_schedule(s: &Schedule) -> Result<(), String> {
-    if !SCHEDULE_KINDS.contains(&s.kind.as_str()) {
-        return Err("неизвестный вид расписания".into());
-    }
-    let time_ok = || s.time.as_deref().and_then(parse_time).is_some();
-    match s.kind.as_str() {
-        "hourly" => {
-            if s.minute.is_some_and(|m| !(0..=59).contains(&m)) {
-                return Err("минута от 0 до 59".into());
-            }
-        }
-        "daily" | "weekdays" => {
-            if !time_ok() {
-                return Err("нужно время ЧЧ:ММ".into());
-            }
-        }
-        "weekly" => {
-            if !time_ok() {
-                return Err("нужно время ЧЧ:ММ".into());
-            }
-            if !s.weekday.is_some_and(|d| (1..=7).contains(&d)) {
-                return Err("день недели от 1 до 7".into());
-            }
-        }
-        "monthly" => {
-            if !time_ok() {
-                return Err("нужно время ЧЧ:ММ".into());
-            }
-            if !s.day.is_some_and(|d| (1..=31).contains(&d)) {
-                return Err("число месяца от 1 до 31".into());
-            }
-        }
-        "interval" => match interval_minutes(s) {
-            None => return Err("нужны количество и единица (минуты, часы, дни)".into()),
-            Some(m) if m < MIN_INTERVAL_MINUTES => return Err("интервал не меньше 3 минут".into()),
-            Some(_) => {}
-        },
-        "once" => {
-            if !time_ok() {
-                return Err("нужно время ЧЧ:ММ".into());
-            }
-            if s.date.as_deref().and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_none() {
-                return Err("нужна дата ГГГГ-ММ-ДД".into());
-            }
-        }
-        _ => {}
-    }
-    Ok(())
 }
 
 pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
@@ -492,7 +384,7 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
             }
         }
         if let Some(schedule) = &node.schedule {
-            validate_schedule(schedule).map_err(|m| err_node("bad_schedule", m, &node.id))?;
+            schedule.validate().map_err(|m| err_node("bad_schedule", m, &node.id))?;
         }
     }
     let mut ids: HashSet<&str> = HashSet::new();
@@ -546,69 +438,6 @@ pub fn validate_graph(graph: &Graph) -> Result<(), GraphError> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Расписание
-// ---------------------------------------------------------------------------
-
-fn local(ms: i64) -> NaiveDateTime {
-    Local.timestamp_millis_opt(ms).single().map_or_else(|| Local::now().naive_local(), |at| at.naive_local())
-}
-
-fn to_ms(at: NaiveDateTime) -> i64 {
-    Local
-        .from_local_datetime(&at)
-        .earliest()
-        .or_else(|| Local.from_local_datetime(&(at + Duration::hours(1))).earliest())
-        .map_or_else(|| Local::now().timestamp_millis(), |t| t.timestamp_millis())
-}
-
-fn days_in_month(date: NaiveDate) -> u32 {
-    let (y, m) = if date.month() == 12 { (date.year() + 1, 1) } else { (date.year(), date.month() + 1) };
-    NaiveDate::from_ymd_opt(y, m, 1).and_then(|first| first.pred_opt()).map_or(28, |last| last.day())
-}
-
-/// Ближайший срок строго после `now_ms`. `None` — больше срока нет (разовый уже прошёл).
-pub fn next_after(s: &Schedule, now_ms: i64) -> Option<i64> {
-    next_after_with(s, now_ms, local, to_ms)
-}
-
-pub fn next_after_with(s: &Schedule, now_ms: i64, local_of: impl Fn(i64) -> NaiveDateTime, ms_of: impl Fn(NaiveDateTime) -> i64) -> Option<i64> {
-    let now = local_of(now_ms);
-    if s.kind == "interval" {
-        return Some(now_ms + (interval_minutes(s)?.max(MIN_INTERVAL_MINUTES) * 60_000.0) as i64);
-    }
-    if s.kind == "hourly" {
-        let minute = s.minute.unwrap_or(0).clamp(0, 59) as u32;
-        let mut at = now.date().and_hms_opt(now.hour(), minute, 0)?;
-        if at <= now {
-            at += Duration::hours(1);
-        }
-        return Some(ms_of(at));
-    }
-    let time = s.time.as_deref().and_then(parse_time)?;
-    if s.kind == "once" {
-        let date = NaiveDate::parse_from_str(s.date.as_deref()?, "%Y-%m-%d").ok()?;
-        let at = date.and_time(time);
-        return (at > now).then(|| ms_of(at));
-    }
-    let mut date = now.date();
-    for _ in 0..=400 {
-        let day_ok = match s.kind.as_str() {
-            "daily" => true,
-            "weekdays" => date.weekday().number_from_monday() <= 5,
-            "weekly" => i64::from(date.weekday().number_from_monday()) == s.weekday.unwrap_or(1),
-            "monthly" => i64::from(date.day()) == s.day.unwrap_or(1).min(i64::from(days_in_month(date))),
-            _ => return None,
-        };
-        let at = date.and_time(time);
-        if day_ok && at > now {
-            return Some(ms_of(at));
-        }
-        date = date.succ_opt()?;
-    }
-    None
-}
-
 /// Когда сработает запускающий узел: срок и подпись расписания (при смене подписи срок считается заново).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -651,7 +480,7 @@ pub fn refresh_slots(stored: &mut Stored, now_ms: i64) -> bool {
         if stored.slots.get(&node.id).is_some_and(|slot| slot.sig == sig) {
             continue;
         }
-        stored.slots.insert(node.id.clone(), Slot { sig, next: next_after(schedule, now_ms) });
+        stored.slots.insert(node.id.clone(), Slot { sig, next: schedule_next(schedule, now_ms) });
         changed = true;
     }
     let before = stored.slots.len();
@@ -667,7 +496,7 @@ pub fn collect_due(stored: &mut Stored, now_ms: i64) -> (Vec<String>, bool) {
     for (id, schedule) in nodes {
         let Some(slot) = stored.slots.get_mut(&id) else { continue };
         if slot.next.is_some_and(|next| now_ms >= next) {
-            slot.next = next_after(&schedule, now_ms);
+            slot.next = schedule_next(&schedule, now_ms);
             changed = true;
             due.push(id);
         }
@@ -949,49 +778,6 @@ mod tests {
     }
 
     #[test]
-    fn schedule_rules() {
-        let daily = Schedule { kind: "daily".into(), time: Some("09:00".into()), ..Schedule::default() };
-        assert!(validate_schedule(&daily).is_ok());
-        let fast = Schedule { kind: "interval".into(), amount: Some(2.0), unit: Some("minutes".into()), ..Schedule::default() };
-        assert!(validate_schedule(&fast).is_err(), "интервал меньше трёх минут");
-        let okay = Schedule { amount: Some(3.0), ..fast };
-        assert!(validate_schedule(&okay).is_ok());
-        let weekly = Schedule { kind: "weekly".into(), time: Some("09:00".into()), weekday: Some(8), ..Schedule::default() };
-        assert!(validate_schedule(&weekly).is_err());
-    }
-
-    fn at(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 0).unwrap()
-    }
-
-    /// Часы без пояса: местное время равно «мс с начала эпохи», так срок можно сверить глазами.
-    fn next(s: &Schedule, now: NaiveDateTime) -> Option<NaiveDateTime> {
-        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
-        let now_ms = (now - epoch).num_milliseconds();
-        next_after_with(s, now_ms, |ms| epoch + Duration::milliseconds(ms), |t| (t - epoch).num_milliseconds()).map(|ms| epoch + Duration::milliseconds(ms))
-    }
-
-    #[test]
-    fn next_slots() {
-        // 2026-11-16 — понедельник.
-        let time = Some("09:00".to_string());
-        let daily = Schedule { kind: "daily".into(), time: time.clone(), ..Schedule::default() };
-        assert_eq!(next(&daily, at(2026, 11, 16, 8, 0)), Some(at(2026, 11, 16, 9, 0)));
-        assert_eq!(next(&daily, at(2026, 11, 16, 9, 0)), Some(at(2026, 11, 17, 9, 0)));
-        let weekdays = Schedule { kind: "weekdays".into(), time: time.clone(), ..Schedule::default() };
-        assert_eq!(next(&weekdays, at(2026, 11, 20, 10, 0)), Some(at(2026, 11, 23, 9, 0)), "пятница вечером — понедельник");
-        let weekly = Schedule { kind: "weekly".into(), time: time.clone(), weekday: Some(3), ..Schedule::default() };
-        assert_eq!(next(&weekly, at(2026, 11, 16, 12, 0)), Some(at(2026, 11, 18, 9, 0)));
-        let monthly = Schedule { kind: "monthly".into(), time: time.clone(), day: Some(31), ..Schedule::default() };
-        assert_eq!(next(&monthly, at(2026, 11, 16, 12, 0)), Some(at(2026, 11, 30, 9, 0)), "в ноябре 31-го нет: последний день");
-        let hourly = Schedule { kind: "hourly".into(), minute: Some(15), ..Schedule::default() };
-        assert_eq!(next(&hourly, at(2026, 11, 16, 8, 20)), Some(at(2026, 11, 16, 9, 15)));
-        let once = Schedule { kind: "once".into(), time, date: Some("2026-11-20".into()), ..Schedule::default() };
-        assert_eq!(next(&once, at(2026, 11, 16, 8, 0)), Some(at(2026, 11, 20, 9, 0)));
-        assert_eq!(next(&once, at(2026, 11, 21, 8, 0)), None);
-    }
-
-    #[test]
     fn due_slots_advance_first_and_collapse_missed() {
         let mut trigger = node("t", "trigger");
         trigger.fields.insert("trigger".into(), Value::String("schedule".into()));
@@ -1014,5 +800,43 @@ mod tests {
         let (_, changed) = collect_due(&mut stored, late + 2000);
         assert!(changed);
         assert_eq!(stored.slots["t"].next, Some(late + 2000 + 10 * 60_000));
+    }
+
+    #[test]
+    fn old_format_workflow_json_loads_each_schedule_kind() {
+        // Старый формат: расписание без новых полей (days/window/amount_max). Каждый вид должен читаться и давать срок.
+        let kinds = [
+            ("hourly", serde_json::json!({"kind":"hourly","minute":15})),
+            ("daily", serde_json::json!({"kind":"daily","time":"09:00"})),
+            ("weekdays", serde_json::json!({"kind":"weekdays","time":"09:00"})),
+            ("weekly", serde_json::json!({"kind":"weekly","time":"09:00","weekday":3})),
+            ("monthly", serde_json::json!({"kind":"monthly","time":"09:00","day":31})),
+            ("interval", serde_json::json!({"kind":"interval","amount":5.0,"unit":"minutes"})),
+            ("once", serde_json::json!({"kind":"once","time":"09:00","date":"2026-11-20"})),
+        ];
+        for (label, sched) in kinds {
+            let json = serde_json::json!({
+                "id": "wf1", "title": "t", "enabled": true, "approval_floor": "", "revision": 1,
+                "graph": { "nodes": [
+                    { "id": "t", "kind": "trigger", "x":0.0,"y":0.0, "fields": {"trigger":"schedule"}, "schedule": sched }
+                ], "edges": [], "strokes": [] },
+                "created_at": 1, "updated_at": 1,
+                "slots": {}, "hooks": {}
+            });
+            let mut stored: Stored = serde_json::from_value(json).expect(label);
+            // refresh_slots выдаёт срок, не сдвигая его на повторный тик.
+            let t0 = 1_000_000_000_000_i64;
+            let changed = refresh_slots(&mut stored, t0);
+            assert!(stored.slots.contains_key("t"), "{label}: слот не создан (changed={changed})");
+            let first = stored.slots["t"].next.expect(label);
+            assert!(first > t0, "{label}: срок впереди");
+            // Повторный refresh не сбрасывает срок.
+            let before = stored.slots["t"].next;
+            assert!(!refresh_slots(&mut stored, t0 + 1000), "{label}: не должно меняться");
+            assert_eq!(stored.slots["t"].next, before, "{label}: срок не сдвинулся");
+            // collect_due не стреляет дважды.
+            let (due, _) = collect_due(&mut stored, t0 + 1000);
+            assert!(due.is_empty(), "{label}: не сработало раньше срока");
+        }
     }
 }
