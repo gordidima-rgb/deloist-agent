@@ -10,16 +10,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::io::AsyncWriteExt;
 
-use crate::reminders;
 use crate::schedule;
 
-/// Следующий срок рутины: у напоминания — свой расчёт (опережение, разовая дата), у обычной рутины — как раньше.
-fn next_run_for(routine: &Routine, now_ms: i64) -> i64 {
-    if reminders::is_reminder(routine) {
-        reminders::schedule_from(routine, now_ms)
-    } else {
-        schedule::next_run_ms(routine, now_ms)
-    }
+/// Следующий срок рутины.
+pub(crate) fn next_run_for(routine: &Routine, now_ms: i64) -> i64 {
+    schedule::next_run_ms(routine, now_ms)
 }
 
 pub fn uid(prefix: &str) -> String {
@@ -1057,7 +1052,7 @@ fn seed_starters() -> State {
 // Приведение значений: API принимает JSON от интерфейса и ведёт себя как раньше
 // ---------------------------------------------------------------------------
 
-fn as_string(v: &Value) -> String {
+pub(crate) fn as_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Null => String::new(),
@@ -1083,14 +1078,14 @@ pub(crate) fn truthy(v: &Value) -> bool {
     }
 }
 
-fn text_or(input: &Value, key: &str, default: &str) -> String {
+pub(crate) fn text_or(input: &Value, key: &str, default: &str) -> String {
     match input.get(key) {
         Some(v) if truthy(v) => as_string(v),
         _ => default.to_string(),
     }
 }
 
-fn take_chars(s: &str, n: usize) -> String {
+pub(crate) fn take_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
@@ -1216,7 +1211,7 @@ fn look_index(v: Option<&Value>, max: i64) -> Option<i64> {
     number(v).map(|x| (x as i64).clamp(0, max))
 }
 
-fn number(v: Option<&Value>) -> Option<f64> {
+pub(crate) fn number(v: Option<&Value>) -> Option<f64> {
     match v? {
         Value::Number(n) => n.as_f64(),
         Value::String(s) => s.trim().parse().ok(),
@@ -1257,7 +1252,7 @@ pub(crate) fn string_map(v: Option<&Value>) -> BTreeMap<String, String> {
 }
 
 /// Поля расписания из запроса. Формат времени проверяет сервер, пустая строка снимает значение.
-fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(), String> {
+pub(crate) fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(), String> {
     if let Some(max) = input.get("everyMaxMinutes") {
         routine.every_max_minutes = number(Some(max)).filter(|x| x.is_finite() && *x > 0.0).map_or(0, |x| x as i64);
     }
@@ -1315,7 +1310,7 @@ fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn minutes(v: Option<&Value>) -> i64 {
+pub(crate) fn minutes(v: Option<&Value>) -> i64 {
     let raw = number(v).filter(|x| *x != 0.0 && x.is_finite()).unwrap_or(60.0);
     (raw as i64).max(5)
 }
@@ -1339,6 +1334,7 @@ pub(crate) fn plain_file_name(name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 pub struct Store {
+    pub reminders: crate::reminders::Reminders,
     data_dir: PathBuf,
     state: Mutex<State>,
     secrets: Mutex<Secrets>,
@@ -1614,6 +1610,10 @@ impl Store {
             }
         }
         let state_file = data_dir.join("state.json");
+        // Резервная копия исходного state.json до любых миграций (напоминания/привычки выносятся в свои файлы).
+        if state_file.exists() && !data_dir.join("state.json.bak").exists() {
+            let _ = tokio::fs::copy(&state_file, data_dir.join("state.json.bak")).await;
+        }
         let mut must_write = false;
         let mut state = match tokio::fs::read_to_string(&state_file).await {
             Ok(text) => match serde_json::from_str::<State>(&text) {
@@ -1636,6 +1636,64 @@ impl Store {
         }
         if migrate_routines(&mut state) {
             must_write = true;
+        }
+        // Вынос напоминаний из state.routines в reminders.json (шаг 3).
+        {
+            let reminders_path = data_dir.join("reminders.json");
+            // Если файл есть, но не читается — не мигрируем и не затираем: оставляем напоминания
+            // в state.routines (как habits.json). Копия сломанного файла остаётся рядом (.bak).
+            let parsed_existing: Option<Vec<Routine>> = if reminders_path.exists() {
+                std::fs::read_to_string(&reminders_path).ok().and_then(|t| {
+                    let v: serde_json::Value = serde_json::from_str(&t).ok()?;
+                    let arr = v.get("reminders").and_then(|x| x.as_array()).or_else(|| v.as_array())?;
+                    // Одна нечитаемая запись — файл сломан: иначе её молча потеряет следующая перезапись.
+                    arr.iter().map(|x| serde_json::from_value(x.clone())).collect::<Result<Vec<_>, _>>().ok()
+                })
+            } else {
+                Some(Vec::new())
+            };
+            if reminders_path.exists() && parsed_existing.is_none() {
+                eprintln!("[store] reminders.json не читается; напоминания остаются в state.routines, копия reminders.json.bak");
+                let _ = std::fs::copy(&reminders_path, reminders_path.with_extension("json.bak"));
+            } else {
+                let existing = parsed_existing.unwrap_or_default();
+                let mut to_migrate: Vec<Routine> = Vec::new();
+                for r in &state.routines {
+                    if crate::reminders::is_reminder(r) && !existing.iter().any(|e| e.id == r.id) {
+                        to_migrate.push(r.clone());
+                    }
+                }
+                let has_reminder_in_state = state.routines.iter().any(crate::reminders::is_reminder);
+                if has_reminder_in_state {
+                    // Резервная копия state.json только перед реальной миграцией (есть что переносить),
+                    // отдельным именем и без перезаписи чужой копии.
+                    if !to_migrate.is_empty() {
+                        let backup_path = data_dir.join("state.json.before-reminders.bak");
+                        if !backup_path.exists() && state_file.exists() {
+                            let _ = tokio::fs::copy(&state_file, &backup_path).await;
+                        }
+                    }
+                    if to_migrate.is_empty() {
+                        // Дубликаты в reminders.json: просто убираем из state.
+                        state.routines.retain(|r| !crate::reminders::is_reminder(r));
+                        must_write = true;
+                    } else {
+                        let mut new_list = existing.clone();
+                        new_list.extend(to_migrate);
+                        let text = serde_json::to_string_pretty(&serde_json::json!({ "reminders": new_list })).unwrap_or_default();
+                        // Атомарная запись: сначала файл, потом правка state.
+                        match write_replace(&reminders_path, text.as_bytes()).await {
+                            Ok(()) => {
+                                state.routines.retain(|r| !crate::reminders::is_reminder(r));
+                                must_write = true;
+                            }
+                            Err(e) => {
+                                eprintln!("[store] reminders.json не записался ({e}); state.routines не трогаем, повтор при следующем запуске");
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Модель уже настроена руками до появления экрана «Собери команду»: человеку он не нужен.
         if !state.settings.team_onboarded && state.settings.driver != "demo" {
@@ -1664,7 +1722,9 @@ impl Store {
             }
         }
 
+        let reminders = crate::reminders::Reminders::open(data_dir.clone());
         let store = Self {
+            reminders,
             data_dir,
             state: Mutex::new(state),
             secrets: Mutex::new(secrets),
@@ -2950,12 +3010,10 @@ impl Store {
 
     /// То же с пределом: счёт и вставка под одним замком. `None` — предел достигнут.
     pub async fn add_routine_capped(&self, input: &Value, cap: usize, human: bool) -> std::io::Result<Option<Routine>> {
-        // Напоминание не привязано к боту: его шлёт таймер, а название по умолчанию — текст напоминания.
-        let reminder = reminders::wants(input);
         let mut routine = Routine {
             id: uid("rt"),
-            bot_id: if reminder { String::new() } else { text_or(input, "botId", "") },
-            title: take_chars(&text_or(input, "title", if reminder { "" } else { "Рутина" }), 80),
+            bot_id: text_or(input, "botId", ""),
+            title: take_chars(&text_or(input, "title", "Рутина"), 80),
             prompt: text_or(input, "prompt", ""),
             every_minutes: minutes(input.get("everyMinutes")),
             enabled: input.get("enabled").map_or(true, |v| v != &Value::Bool(false)),
@@ -2964,13 +3022,6 @@ impl Store {
             created_at: now(),
             ..Routine::default()
         };
-        if reminder {
-            routine.extra.insert("kind".into(), json!(reminders::KIND));
-            reminders::apply(&mut routine, input);
-            if routine.title.is_empty() {
-                routine.title = take_chars(&routine.prompt, 80);
-            }
-        }
         apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         routine.hook = input.get("hook").is_some_and(truthy);
         routine.goal_id = text_or(input, "goalId", "");
@@ -3059,9 +3110,6 @@ impl Store {
                 r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             }
             apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-            if reminders::is_reminder(r) {
-                reminders::apply(r, patch);
-            }
             let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
             // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
             if rescheduled || !r.enabled || r.hook {
@@ -4814,6 +4862,123 @@ mod tests {
         let saved = tokio::fs::read_to_string(dir.join("state.json")).await.unwrap();
         let _ = Store::open(dir.clone()).await.unwrap();
         assert_eq!(tokio::fs::read_to_string(dir.join("state.json")).await.unwrap(), saved);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    fn reminder_routine(id: &str, enabled: bool, next_run: i64) -> Routine {
+        let mut r = Routine { id: id.into(), title: format!("rem {id}"), prompt: "ping".into(), every_minutes: 60, enabled, next_run, ..Routine::default() };
+        r.extra.insert("kind".into(), serde_json::json!("reminder"));
+        r
+    }
+    fn normal_routine(id: &str) -> Routine {
+        Routine { id: id.into(), bot_id: "bot1".into(), title: format!("rt {id}"), prompt: "do".into(), every_minutes: 60, enabled: true, next_run: 10, ..Routine::default() }
+    }
+
+    #[tokio::test]
+    async fn reminders_migrate_out_of_state_on_load() {
+        let dir = temp_dir("rem-migrate");
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let state = serde_json::json!({
+            "version": 1,
+            "createdAt": 0,
+            "settings": {},
+            "bots": [],
+            "routines": [normal_routine("r1"), normal_routine("r2"), reminder_routine("m1", true, 200), reminder_routine("m2", false, 300)],
+            "skills": [],
+            "rooms": [],
+            "mcp": []
+        });
+        tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
+
+        let store = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(store.routines().len(), 2);
+        assert_eq!(store.routines()[0].id, "r1");
+        let rems = store.reminders.list();
+        assert_eq!(rems.len(), 2);
+        assert!(rems.iter().any(|r| r.id == "m1" && r.enabled && r.next_run == 200));
+        assert!(rems.iter().any(|r| r.id == "m2" && !r.enabled && r.next_run == 300));
+        assert!(dir.join("state.json.before-reminders.bak").exists(), "backup must exist");
+
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn reminders_migration_is_idempotent() {
+        let dir = temp_dir("rem-idempotent");
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let state = serde_json::json!({
+            "version": 1,
+            "createdAt": 0,
+            "settings": {},
+            "bots": [],
+            "routines": [normal_routine("r1"), reminder_routine("m1", true, 200)],
+            "skills": [],
+            "rooms": [],
+            "mcp": []
+        });
+        tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
+
+        let _ = Store::open(dir.clone()).await.unwrap();
+        let state_bytes = tokio::fs::read(dir.join("state.json")).await.unwrap();
+        let rem_bytes = tokio::fs::read(dir.join("reminders.json")).await.unwrap();
+
+        let _ = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(tokio::fs::read(dir.join("state.json")).await.unwrap(), state_bytes);
+        assert_eq!(tokio::fs::read(dir.join("reminders.json")).await.unwrap(), rem_bytes);
+        let store = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(store.reminders.list().len(), 1);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn reminders_existing_store_merges_without_duplicates() {
+        let dir = temp_dir("rem-merge");
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let rem = serde_json::json!({ "reminders": [reminder_routine("m1", true, 200)] });
+        tokio::fs::write(dir.join("reminders.json"), serde_json::to_string_pretty(&rem).unwrap()).await.unwrap();
+        let state = serde_json::json!({
+            "version": 1,
+            "createdAt": 0,
+            "settings": {},
+            "bots": [],
+            "routines": [normal_routine("r1"), reminder_routine("m1", true, 200), reminder_routine("m2", false, 300)],
+            "skills": [],
+            "rooms": [],
+            "mcp": []
+        });
+        tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
+
+        let store = Store::open(dir.clone()).await.unwrap();
+        let rems = store.reminders.list();
+        assert_eq!(rems.len(), 2);
+        assert_eq!(rems.iter().filter(|r| r.id == "m1").count(), 1);
+        assert!(rems.iter().any(|r| r.id == "m2"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn reminders_corrupt_file_keeps_state_and_bak() {
+        let dir = temp_dir("rem-corrupt");
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        tokio::fs::write(dir.join("reminders.json"), "{not json").await.unwrap();
+        let state = serde_json::json!({
+            "version": 1,
+            "createdAt": 0,
+            "settings": {},
+            "bots": [],
+            "routines": [reminder_routine("m1", true, 200)],
+            "skills": [],
+            "rooms": [],
+            "mcp": []
+        });
+        tokio::fs::write(dir.join("state.json"), serde_json::to_string_pretty(&state).unwrap()).await.unwrap();
+
+        let store = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(store.routines().len(), 1);
+        assert_eq!(store.routines()[0].id, "m1");
+        assert!(store.reminders.is_broken());
+        assert_eq!(tokio::fs::read_to_string(dir.join("reminders.json")).await.unwrap(), "{not json");
+        assert!(dir.join("reminders.json.bak").exists());
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }

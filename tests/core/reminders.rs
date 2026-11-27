@@ -205,6 +205,59 @@ async fn the_test_route_sends_now_and_leaves_the_schedule_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reminder_crud_through_routines_api_keeps_json_shape() {
+    let (crew, _model, _sink) = setup("rem-crud", None).await;
+    let (status, data) = crew.send("POST", "/api/routines", Some(json!({ "kind": "reminder", "prompt": "позвонить", "at": "09:00", "channels": ["windows"] }))).await;
+    assert_eq!(status, 201, "{data}");
+    let id = data["routine"]["id"].as_str().unwrap().to_string();
+    assert_eq!(data["routine"]["prompt"], "позвонить");
+    assert!(data["routine"]["nextRun"].is_number());
+
+    let ics = crew.client.get(format!("{}/api/routines.ics", crew.base)).header("cookie", &crew.cookie).send().await.unwrap().text().await.unwrap();
+    assert!(ics.contains(&id), "ics не содержит напоминание");
+
+    let (status, data) = crew.send("PATCH", &format!("/api/routines/{id}"), Some(json!({ "prompt": "обновлено", "enabled": false }))).await;
+    assert_eq!(status, 200, "{data}");
+    assert_eq!(data["routine"]["prompt"], "обновлено");
+    assert_eq!(data["routine"]["enabled"], false);
+
+    let (status, data) = crew.send("DELETE", &format!("/api/routines/{id}"), None).await;
+    assert_eq!(status, 200, "{data}");
+    assert_eq!(data["ok"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_seeded_reminder_in_reminders_json_fires() {
+    let data_dir = crate::common::temp_data_dir("rem-seeded");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let sink = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("rem-seeded-sink.jsonl");
+    let _ = std::fs::remove_file(&sink);
+    let sink_text = sink.display().to_string();
+    let now = now_ms();
+    let rem = json!({
+        "reminders": [{
+            "id": "rt_seeded",
+            "title": "seeded",
+            "prompt": "seeded prompt",
+            "everyMinutes": 60,
+            "enabled": true,
+            "quiet": true,
+            "nextRun": now + 5000,
+            "createdAt": now,
+            "extra": { "kind": "reminder", "leadMinutes": 0, "channels": ["windows"] }
+        }]
+    });
+    std::fs::write(data_dir.join("reminders.json"), serde_json::to_string_pretty(&rem).unwrap()).unwrap();
+
+    let env = [("CREW_TEST_TICK_MS", "100"), ("CREW_TEST_REMINDER_SINK", sink_text.as_str())];
+    let crew = Crew::start_at(data_dir, &env).await;
+    crew.listen().await;
+    let event = crew.wait_event("напоминание в окне", |e| e["type"] == "reminder").await;
+    assert_eq!(event["text"], "seeded prompt");
+    let _ = std::fs::remove_file(&sink);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn ordinary_routines_still_start_a_turn() {
     let (crew, model, _sink) = setup("rem-ordinary", None).await;
     let state = crew.ok("GET", "/api/state", None).await;

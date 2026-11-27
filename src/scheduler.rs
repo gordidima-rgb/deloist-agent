@@ -70,10 +70,10 @@ pub fn over_limit(app: &App) -> bool {
 /// Запуск по просьбе («Запустить» в окне, инструмент бота): те же проверки, что и перед ходом по расписанию.
 pub async fn run_now(app: &Arc<App>, id: &str, unattended: bool) -> Result<Routine, crate::turn::StartError> {
     let refuse = |status: u16, message: &str| crate::turn::StartError { status, message: message.into() };
-    let routine = app.store.routine(id).ok_or_else(|| refuse(404, "рутина не найдена"))?;
-    if crate::reminders::is_reminder(&routine) {
+    if app.reminders.get(id).is_some() {
         return Err(refuse(400, "напоминание шлёт таймер, бота у него нет: для проверки есть «проверить напоминание»"));
     }
+    let routine = app.store.routine(id).ok_or_else(|| refuse(404, "рутина не найдена"))?;
     if app.store.bot(&routine.bot_id).is_none() {
         return Err(refuse(400, "бота этой рутины уже нет"));
     }
@@ -265,7 +265,7 @@ pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, bot_id: &str
 /// Ход продолжает или закрывает `runs::recover`, здесь остаётся только не оставить рутину «идущей» навсегда.
 pub async fn settle_orphans(app: &Arc<App>) {
     for routine in app.store.routines() {
-        if routine.last_status.as_deref() != Some("running") || crate::reminders::is_reminder(&routine) || app.turns.is_busy(&routine.bot_id) {
+        if routine.last_status.as_deref() != Some("running") || app.turns.is_busy(&routine.bot_id) {
             continue;
         }
         note(app, &routine, "failed", "Программа закрылась посреди хода.").await;
@@ -299,7 +299,7 @@ async fn tick(app: &Arc<App>) {
     let settings = app.store.settings();
     // Идёт работа или человек попросил дежурить: компьютер не должен уснуть от простоя.
     let soon = routines.iter().any(|r| {
-        r.enabled && !r.hook && !crate::reminders::is_reminder(r) && r.next_run <= now() + 60 * 60 * 1000
+        r.enabled && !r.hook && r.next_run <= now() + 60 * 60 * 1000
     });
     if !app.turns.busy_bots().is_empty()
         || (settings.keep_awake && routines.iter().any(|r| r.enabled))
@@ -308,17 +308,22 @@ async fn tick(app: &Arc<App>) {
         crate::system::hold_off_sleep();
     }
 
-    for routine in routines {
-        // Вебхук запускает внешний вызов, а не тикер.
+    // Напоминания стреляют таймером из своего хранилища: без бота, без хода и без модели.
+    for routine in app.reminders.list() {
         if routine.hook {
             continue;
         }
         if !routine.enabled || now() < routine.next_run {
             continue;
         }
-        // Напоминание стреляет таймером: без бота, без хода и без модели.
-        if crate::reminders::is_reminder(&routine) {
-            crate::reminders::fire(app, &routine).await;
+        crate::reminders::fire(app, &routine).await;
+    }
+    for routine in routines {
+        // Вебхук запускает внешний вызов, а не тикер.
+        if routine.hook {
+            continue;
+        }
+        if !routine.enabled || now() < routine.next_run {
             continue;
         }
         if app.store.bot(&routine.bot_id).is_none() {
@@ -440,6 +445,7 @@ mod tests {
         let data = store.data_dir().to_path_buf();
         let turns = turn::Turns::open(store.data_dir());
         let queues = crate::queue::Queues::open(store.data_dir().to_path_buf(), turns.sender()).await;
+         let reminders = store.reminders.clone();
         Arc::new(App {
             store,
             turns,
@@ -456,6 +462,7 @@ mod tests {
             providers: std::sync::Arc::default(),
             goals: goals::Goals::open(data.clone()).await,
             habits: crate::habits::Habits::open(data.clone()),
+            reminders,
             todos: crate::todos::Todos::open(data.clone()),
             catalog: crate::catalog::Installs::default(),
             connectors: crate::connectors::Connectors::open(&data),
@@ -593,3 +600,4 @@ mod clock_tests {
         assert!(later.len() == 11 && later.contains('.'), "{later}");
     }
 }
+

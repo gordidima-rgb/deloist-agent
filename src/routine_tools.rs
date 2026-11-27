@@ -322,14 +322,15 @@ fn find(app: &App, args: &Value) -> Result<Routine, String> {
     if id.is_empty() {
         return Err("нужен номер рутины из list_routines".into());
     }
-    app.store.routine(id).ok_or_else(|| "рутины с таким номером нет, посмотри list_routines".to_string())
+    app.reminders.get(id).or_else(|| app.store.routine(id)).ok_or_else(|| "рутины с таким номером нет, посмотри list_routines".to_string())
 }
 
 pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result<String, String> {
     let store = &app.store;
     match name {
         "list_routines" => {
-            let routines = store.routines();
+            let mut routines = store.routines();
+            routines.extend(app.reminders.list());
             if routines.is_empty() {
                 return Ok("Рутин нет.".into());
             }
@@ -459,6 +460,8 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
             }
             let updated = if patch.is_empty() {
                 routine
+            } else if app.reminders.get(&routine.id).is_some() {
+                app.reminders.update_reminder(&routine.id, &Value::Object(patch), false).map_err(|e| e.to_string())?.ok_or("рутина уже удалена")?
             } else {
                 store.update_routine(&routine.id, &Value::Object(patch), false).await.map_err(|e| e.to_string())?.ok_or("рутина уже удалена")?
             };
@@ -474,7 +477,11 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
 
         "delete_routine" => {
             let routine = find(app, args)?;
-            store.remove_routine(&routine.id).await.map_err(|e| e.to_string())?;
+            if app.reminders.get(&routine.id).is_some() {
+                app.reminders.remove_reminder(&routine.id).map_err(|e| e.to_string())?;
+            } else {
+                store.remove_routine(&routine.id).await.map_err(|e| e.to_string())?;
+            }
             app.turns.emit(json!({ "type": "state_changed" }));
             Ok(format!("Рутина «{}» удалена.", routine.title))
         }

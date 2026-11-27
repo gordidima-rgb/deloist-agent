@@ -256,7 +256,7 @@ pub async fn fire(app: &Arc<App>, routine: &Routine) {
         next = schedule_from(routine, next + lead_ms(routine));
         guard += 1;
     }
-    if let Err(e) = app.store.finish_reminder(&routine.id, status, detail, next, once).await {
+    if let Err(e) = app.reminders.finish(&routine.id, status, detail, next, once) {
         eprintln!("[reminder] {}: {e}", routine.title);
     }
 }
@@ -299,6 +299,208 @@ pub(crate) fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
+// ---------------------------------------------------------------------------
+// Своё хранилище напоминаний: reminders.json в папке данных.
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+#[derive(Clone)]
+pub struct Reminders {
+    inner: Arc<RemindersInner>,
+}
+
+struct RemindersInner {
+    path: std::path::PathBuf,
+    items: Mutex<Vec<Routine>>,
+    broken: AtomicBool,
+}
+
+impl Reminders {
+    pub fn open(data_dir: std::path::PathBuf) -> Self {
+        let path = data_dir.join("reminders.json");
+        let mut broken = false;
+        let saved: Vec<Routine> = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                // Формат: { "reminders": [...] } или голый массив (на всякий случай).
+                let parsed: Result<serde_json::Value, _> = serde_json::from_str(&text);
+                match parsed {
+                    Ok(value) => {
+                        if let Some(arr) = value.get("reminders").and_then(|v| v.as_array()) {
+                            arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect()
+                        } else if let Some(arr) = value.as_array() {
+                            arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect()
+                        } else {
+                            broken = true;
+                            Vec::new()
+                        }
+                    }
+                    Err(_) => {
+                        broken = true;
+                        Vec::new()
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => {
+                broken = true;
+                Vec::new()
+            }
+        };
+        if broken {
+            let _ = std::fs::copy(&path, path.with_extension("json.bak"));
+        }
+        Self { inner: Arc::new(RemindersInner { path, items: Mutex::new(saved), broken: AtomicBool::new(broken) }) }
+    }
+
+    fn writable(&self) -> bool {
+        !self.inner.broken.load(Ordering::Relaxed)
+    }
+
+    fn save(&self) {
+        if !self.writable() { return; }
+        let items = self.inner.items.lock().unwrap().clone();
+        let text = match serde_json::to_string_pretty(&serde_json::json!({ "reminders": items })) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let tmp = self.inner.path.with_extension("json.tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &self.inner.path);
+        }
+    }
+
+    pub fn list(&self) -> Vec<Routine> {
+        self.inner.items.lock().unwrap().clone()
+    }
+
+    pub fn get(&self, id: &str) -> Option<Routine> {
+        self.inner.items.lock().unwrap().iter().find(|r| r.id == id).cloned()
+    }
+
+    pub fn add_reminder(&self, input: &Value, human: bool) -> std::io::Result<Routine> {
+        if !self.writable() {
+            return Err(std::io::Error::other("reminders store broken"));
+        }
+        let reminder = wants(input);
+        let mut routine = Routine {
+            id: crate::store::uid("rt"),
+            bot_id: if reminder { String::new() } else { crate::store::text_or(input, "botId", "") },
+            title: crate::store::take_chars(&crate::store::text_or(input, "title", if reminder { "" } else { "Рутина" }), 80),
+            prompt: crate::store::text_or(input, "prompt", ""),
+            every_minutes: crate::store::minutes(input.get("everyMinutes")),
+            enabled: input.get("enabled").map_or(true, |v| v != &serde_json::Value::Bool(false)),
+            quiet: input.get("quiet").map_or(true, crate::store::truthy),
+            catch_up: crate::store::text_or(input, "catchUp", "last"),
+            created_at: crate::store::now(),
+            ..Routine::default()
+        };
+        if reminder {
+            routine.extra.insert("kind".into(), serde_json::json!(KIND));
+            apply(&mut routine, input);
+            if routine.title.is_empty() {
+                routine.title = crate::store::take_chars(&routine.prompt, 80);
+            }
+        }
+        crate::store::apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        routine.hook = input.get("hook").is_some_and(crate::store::truthy);
+        routine.goal_id = crate::store::text_or(input, "goalId", "");
+        routine.approval_floor = crate::store::text_or(input, "approvalFloor", "");
+        if human {
+            routine.check = crate::store::text_or(input, "check", "");
+        }
+        if let Some(v) = input.get("hookEvents").filter(|v| !v.is_null()) {
+            routine.hook_events = crate::store::validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        }
+        if routine.hook {
+            routine.hook_token = crate::guard::random_token();
+            routine.next_run = 0;
+        } else {
+            routine.next_run = schedule_from(&routine, crate::store::now());
+        }
+        {
+            let mut items = self.inner.items.lock().unwrap();
+            items.push(routine.clone());
+        }
+        self.save();
+        Ok(routine)
+    }
+
+    pub fn update_reminder(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
+        if !self.writable() {
+            return Err(std::io::Error::other("reminders store broken"));
+        }
+        let updated = {
+            let mut items = self.inner.items.lock().unwrap();
+            let Some(r) = items.iter_mut().find(|r| r.id == id) else { return Ok(None); };
+            if let Some(v) = patch.get("enabled").filter(|v| !v.is_null()) { r.enabled = crate::store::truthy(v); }
+            if let Some(v) = patch.get("quiet").filter(|v| !v.is_null()) { r.quiet = crate::store::truthy(v); }
+            if let Some(v) = patch.get("prompt").filter(|v| !v.is_null()) { r.prompt = crate::store::as_string(v); }
+            if let Some(v) = patch.get("title").filter(|v| !v.is_null()) { r.title = crate::store::as_string(v); }
+            if let Some(v) = patch.get("goalId").filter(|v| !v.is_null()) { r.goal_id = crate::store::as_string(v); }
+            if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) { r.approval_floor = crate::store::as_string(v); }
+            if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
+                r.error_paused = crate::store::truthy(v);
+                if !r.error_paused { r.failures = 0; r.stop_reason = None; }
+            }
+            if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) { r.catch_up = crate::store::as_string(v); }
+            if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) { r.progress_note = crate::store::as_string(v); }
+            if human {
+                if let Some(v) = patch.get("check").filter(|v| !v.is_null()) { r.check = crate::store::as_string(v); }
+            }
+            if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) { r.every_minutes = crate::store::minutes(patch.get("everyMinutes")); }
+            if let Some(v) = patch.get("hook").filter(|v| !v.is_null()) {
+                let want = crate::store::truthy(v);
+                if want && !r.hook { r.hook_token = crate::guard::random_token(); }
+                if !want { r.hook_token.clear(); }
+                r.hook = want;
+            }
+            if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
+                r.hook_events = crate::store::validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            }
+            crate::store::apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            if is_reminder(r) { apply(r, patch); }
+            let rescheduled = ["everyMinutes","everyMaxMinutes","at","days","windowFrom","windowTo","hook","leadMinutes","recurrence","startOn","onceAt","cron","tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
+            if rescheduled || !r.enabled || r.hook { r.failures = 0; r.stop_reason = None; }
+            if r.hook { r.next_run = 0; } else if rescheduled { r.next_run = schedule_from(r, crate::store::now()); }
+            if cfg!(debug_assertions) {
+                if let Some(at) = crate::store::number(patch.get("nextRun")) { r.next_run = at as i64; }
+            }
+            r.clone()
+        };
+        self.save();
+        Ok(Some(updated))
+    }
+
+    pub fn remove_reminder(&self, id: &str) -> std::io::Result<bool> {
+        let mut items = self.inner.items.lock().unwrap();
+        let Some(idx) = items.iter().position(|r| r.id == id) else { return Ok(false); };
+        items.remove(idx);
+        drop(items);
+        self.save();
+        Ok(true)
+    }
+
+    pub fn finish(&self, id: &str, status: &str, detail: serde_json::Value, next_run: i64, disable: bool) -> std::io::Result<()> {
+        let mut items = self.inner.items.lock().unwrap();
+        if let Some(r) = items.iter_mut().find(|r| r.id == id) {
+            r.last_run = crate::store::now();
+            r.last_status = Some(status.to_string());
+            r.extra.insert("lastDelivery".into(), detail);
+            r.next_run = next_run;
+            if disable { r.enabled = false; }
+        }
+        drop(items);
+        self.save();
+        Ok(())
+    }
+
+    pub fn is_broken(&self) -> bool { self.inner.broken.load(Ordering::Relaxed) }
+}
+
+// crate::store::number may be private; add accessor? We'll implement number parsing here if needed.
+// Actually used crate::store::number above; ensure pub(crate).
 #[cfg(test)]
 mod tests {
     use super::*;

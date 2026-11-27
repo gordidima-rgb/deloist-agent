@@ -634,6 +634,8 @@ async fn state(State(app): Shared) -> Response {
         item["activeBot"] = json!(app.rooms.active_bot(&room.id));
         rooms.push(item);
     }
+    let mut routines = app.store.routines();
+    routines.extend(app.reminders.list());
     ok(json!({
         "bots": bots,
         "rooms": rooms,
@@ -641,7 +643,7 @@ async fn state(State(app): Shared) -> Response {
         // Адрес сервера отдаём без ключа: интерфейсу он нужен только чтобы показать, куда подключено.
         // Адрес без ключа, шаблоны без вписанных руками значений: секреты живут не здесь.
         "mcp": app.store.mcp_servers().into_iter().map(|s| shown_mcp(&app, s)).collect::<Vec<_>>(),
-        "routines": app.store.routines(),
+        "routines": routines,
         "goals": app.goals.list(),
         "checkins": app.goals.checkins(),
         "settings": settings_json(&app),
@@ -2749,7 +2751,7 @@ async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum:
 
 /// Проверка напоминания: отправить его сейчас по его каналам, расписание не трогаем.
 async fn test_reminder(State(app): Shared, Path(id): Path<String>) -> Response {
-    let Some(routine) = app.store.routine(&id) else {
+    let Some(routine) = app.reminders.get(&id).or_else(|| app.store.routine(&id)) else {
         return fail(StatusCode::NOT_FOUND, "рутина не найдена");
     };
     if !crate::reminders::is_reminder(&routine) {
@@ -2820,7 +2822,9 @@ async fn report_week(State(app): Shared, Query(query): Query<ReportQuery>) -> Re
 
 /// Рутины файлом календаря: только чтение, без секретов вебхуков и с тем же входом, что у остальных GET.
 async fn routines_calendar(State(app): Shared) -> Response {
-    let body = crate::schedule::routines_ics(&app.store.routines(), &app.store.bots(), crate::store::now());
+    let mut all_routines = app.store.routines();
+    all_routines.extend(app.reminders.list());
+    let body = crate::schedule::routines_ics(&all_routines, &app.store.bots(), crate::store::now());
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
@@ -2852,9 +2856,16 @@ async fn add_routine(State(app): Shared, body: axum::body::Bytes) -> Response {
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    match app.store.add_routine(&body, true).await {
-        Ok(routine) => created(json!({ "routine": routine })),
-        Err(e) => io_fail(e),
+    if crate::reminders::wants(&body) {
+        match app.reminders.add_reminder(&body, true) {
+            Ok(routine) => created(json!({ "routine": routine })),
+            Err(e) => io_fail(e),
+        }
+    } else {
+        match app.store.add_routine(&body, true).await {
+            Ok(routine) => created(json!({ "routine": routine })),
+            Err(e) => io_fail(e),
+        }
     }
 }
 
@@ -2863,7 +2874,14 @@ async fn patch_routine(State(app): Shared, Path(id): Path<String>, body: axum::b
         Ok(v) => v,
         Err(r) => return r,
     };
-    if let Some(existing) = app.store.routine(&id).filter(crate::reminders::is_reminder) {
+    let is_reminder = app.reminders.get(&id).is_some();
+    if is_reminder {
+        if let Some(existing) = app.reminders.get(&id) {
+            if let Err(message) = crate::reminders::validate(&body, Some(&existing)) {
+                return fail(StatusCode::BAD_REQUEST, message);
+            }
+        }
+    } else if let Some(existing) = app.store.routine(&id).filter(crate::reminders::is_reminder) {
         if let Err(message) = crate::reminders::validate(&body, Some(&existing)) {
             return fail(StatusCode::BAD_REQUEST, message);
         }
@@ -2871,22 +2889,38 @@ async fn patch_routine(State(app): Shared, Path(id): Path<String>, body: axum::b
     if let Err(r) = check_schedule(&body) {
         return r;
     }
-    match app.store.update_routine(&id, &body, true).await {
-        Ok(Some(routine)) => ok(json!({ "routine": routine })),
-        Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-        Err(e) => io_fail(e),
+    if is_reminder {
+        match app.reminders.update_reminder(&id, &body, true) {
+            Ok(Some(routine)) => ok(json!({ "routine": routine })),
+            Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
+            Err(e) => io_fail(e),
+        }
+    } else {
+        match app.store.update_routine(&id, &body, true).await {
+            Ok(Some(routine)) => ok(json!({ "routine": routine })),
+            Ok(None) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
+            Err(e) => io_fail(e),
+        }
     }
 }
 
 async fn remove_routine(State(app): Shared, Path(id): Path<String>) -> Response {
-    match app.store.remove_routine(&id).await {
-        Ok(true) => {
-            app.mail.remove_trigger(&id);
-            app.watch.remove_trigger(&id);
-            ok(json!({ "ok": true }))
+    if app.reminders.get(&id).is_some() {
+        match app.reminders.remove_reminder(&id) {
+            Ok(true) => ok(json!({ "ok": true })),
+            Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
+            Err(e) => io_fail(e),
         }
-        Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
-        Err(e) => io_fail(e),
+    } else {
+        match app.store.remove_routine(&id).await {
+            Ok(true) => {
+                app.mail.remove_trigger(&id);
+                app.watch.remove_trigger(&id);
+                ok(json!({ "ok": true }))
+            }
+            Ok(false) => fail(StatusCode::NOT_FOUND, "рутина не найдена"),
+            Err(e) => io_fail(e),
+        }
     }
 }
 
