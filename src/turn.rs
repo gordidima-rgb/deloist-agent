@@ -1883,6 +1883,28 @@ fn window_end(app: &App, choice: &ModelChoice) -> Option<i64> {
     (left <= 5).then(|| reset.unwrap_or_else(|| now() + crate::limit::backoff_ms(0)))
 }
 
+const LOW_DISK_RU: &str = "
+
+На диске с данными почти не осталось места — вероятно, из-за этого. Освободи место и повтори.";
+const LOW_DISK_EN: &str = "
+
+The data disk is almost full, which is the likely cause. Free some space and try again.";
+
+/// На диске с данными меньше 500 МБ: агенты в таких случаях падают с невнятными ошибками базы и файлов.
+fn disk_is_full(dir: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut free = 0u64;
+        let probed = unsafe { windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(&windows::core::HSTRING::from(dir.as_os_str()), Some(&mut free), None, None) };
+        return probed.is_ok() && free < 500 << 20;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+        false
+    }
+}
+
 /// Когда модель снова можно спрашивать: общий «отдых» после лимита, а для хода без человека ещё и почти исчерпанное окно подписки.
 fn unavailable_until(app: &App, choice: &ModelChoice, unattended: bool) -> Option<i64> {
     app.rest.until(&choice.key()).max(unattended.then(|| window_end(app, choice)).flatten())
@@ -2794,11 +2816,12 @@ fn run_turn_body(
         if let Err(message) = result {
             let aborted = cancel.is_cancelled();
             let english = app.store.settings().ui_lang == "en";
+            let low_disk = !aborted && disk_is_full(app.store.data_dir());
             let text = match (aborted, english) {
                 (true, false) => "Остановлено. Дальше не иду.".to_string(),
                 (true, true) => "Stopped. Not going any further.".to_string(),
-                (false, false) => format!("Не смог ответить: {message}"),
-                (false, true) => format!("Couldn't answer: {message}"),
+                (false, false) => format!("Не смог ответить: {message}{}", if low_disk { LOW_DISK_RU } else { "" }),
+                (false, true) => format!("Couldn't answer: {message}{}", if low_disk { LOW_DISK_EN } else { "" }),
             };
             let entry = json!({ "id": uid("msg"), "role": "assistant", "text": text, "error": !aborted, "at": now() });
             app.turns.emit(json!({ "type": "message", "botId": bot_id, "turnId": turn_id, "message": entry }));

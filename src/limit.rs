@@ -238,7 +238,27 @@ pub fn backoff_ms(pauses: u32) -> i64 {
 /// Срок сброса из текста ошибки провайдера: «… resets 4pm», «… resets Nov 13, 11:10am». Не назван — `None`.
 pub fn reset_in_error(message: &str, now: DateTime<Local>) -> Option<i64> {
     let at = message.char_indices().map(|(i, _)| i).find(|&i| message[i..].get(..6).is_some_and(|s| s.eq_ignore_ascii_case("resets")))?;
-    parse_reset(&format!("resets{}", &message[at + 6..]), now).filter(|&ms| ms > now.timestamp_millis())
+    let rest = &message[at + 6..];
+    let found = reset_after(rest).map(|ms| now.timestamp_millis() + ms).or_else(|| parse_reset(&format!("resets{rest}"), now));
+    found.filter(|&ms| ms > now.timestamp_millis())
+}
+
+/// «in 2h5m», «in 1h50m57s», «in 45m»: через сколько мс сброс. Другой вид строки — `None`.
+fn reset_after(text: &str) -> Option<i64> {
+    let text = text.trim().strip_prefix("in ")?;
+    let (mut total, mut number, mut any) = (0i64, 0i64, false);
+    for c in text.chars() {
+        match c {
+            '0'..='9' => number = number * 10 + c as i64 - '0' as i64,
+            'd' | 'h' | 'm' | 's' => {
+                total += number * match c { 'd' => 86_400_000, 'h' => 3_600_000, 'm' => 60_000, _ => 1000 };
+                (number, any) = (0, true);
+            }
+            _ if any => break,
+            _ => return None,
+        }
+    }
+    any.then_some(total)
 }
 
 /// Ответ вместо вызова модели, когда бот выбрал свой месячный предел токенов.
@@ -365,6 +385,8 @@ mod tests {
         assert_eq!(reset_in_error("API 429: usage limit reached, resets 4pm (Europe/Moscow)", now), Some(expected));
         assert_eq!(reset_in_error("Resets 16:00", now), Some(expected));
         assert_eq!(reset_in_error("API 429: rate limit exceeded", now), None);
+        assert_eq!(reset_in_error("Individual quota reached. Resets in 2h5m.", now), Some(now.timestamp_millis() + 7_500_000));
+        assert_eq!(reset_in_error("quota. Resets in 1h50m57s.", now), Some(now.timestamp_millis() + 6_657_000));
     }
 
     #[test]

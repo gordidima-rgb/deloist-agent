@@ -50,6 +50,8 @@ fn silence_timeout() -> Duration {
     }
     SILENCE_TIMEOUT
 }
+/// Разница стенных и монотонных часов, после которой считаем, что компьютер спал.
+const SLEEP_GAP: Duration = Duration::from_secs(120);
 const STDERR_LINES: usize = 30;
 /// Сколько прошлых сообщений пересказать новой сессии и сколько символов на каждое.
 const RECAP_MESSAGES: usize = 12;
@@ -668,6 +670,17 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
     let mut deadline: Option<tokio::time::Instant> = None;
     let mut last_activity = tokio::time::Instant::now();
     let mut silenced = false;
+    // Что агент сказал и делал за ход: только предупреждение о лимите без единого действия — не ответ, а отказ.
+    let (mut said, mut acted) = (String::new(), false);
+    let mut tap = |event: DriverEvent| {
+        match &event {
+            DriverEvent::Text(text) if said.len() < 2000 => said.push_str(text),
+            DriverEvent::Tool(_) | DriverEvent::Activity(_) => acted = true,
+            _ => {}
+        }
+        sink(event)
+    };
+    let mut last_wall = std::time::SystemTime::now();
     let outcome = loop {
         if turn.cancelled && deadline.is_none() {
             deadline = Some(tokio::time::Instant::now() + CANCEL_GRACE);
@@ -690,10 +703,18 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
                     // Агент закрылся, ответа на prompt уже не будет.
                     break Err(CallError::Closed);
                 };
-                handle_message(&agent, &req, &session_id, &message, &mut turn, cancel, sink).await;
+                handle_message(&agent, &req, &session_id, &message, &mut turn, cancel, &mut tap).await;
                 last_activity = tokio::time::Instant::now();
+                last_wall = std::time::SystemTime::now();
             }
             _ = tokio::time::sleep_until(last_activity + silence_timeout()), if !turn.cancelled && !silenced => {
+                // Часы стены ушли дальше монотонных: компьютер спал. Тишина за это время — не вина агента,
+                // даём ему целое окно после пробуждения.
+                if last_wall.elapsed().is_ok_and(|wall| wall > last_activity.elapsed() + SLEEP_GAP) {
+                    last_activity = tokio::time::Instant::now();
+                    last_wall = std::time::SystemTime::now();
+                    continue;
+                }
                 silenced = true;
                 turn.cancelled = true;
                 agent.notify("session/cancel", json!({ "sessionId": session_id })).await;
@@ -710,7 +731,7 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
         if message.get("id").is_some() {
             answer_outside_turn(&agent, &message).await;
         } else {
-            handle_update(&message, &mut turn, sink);
+            handle_update(&message, &mut turn, &mut tap);
         }
     }
 
@@ -720,6 +741,8 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
             "cancelled" => stopped(),
             "refusal" => Err("агент отказался выполнять просьбу".into()),
             _ if turn.cancelled => stopped(),
+            // Antigravity отдаёт «Individual quota reached… Resets in 2h5m» обычным текстом, а не ошибкой.
+            _ if !acted && said.len() < 400 && super::is_limit_error(&said) => Err(said.trim().trim_start_matches('⚠').trim().to_string()),
             _ => Ok(()),
         },
         Err(_) if turn.cancelled => stopped(),
