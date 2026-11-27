@@ -19,8 +19,10 @@ const AUTHORIZE_URL: &str = "https://oauth.yandex.ru/authorize";
 pub const TOKEN_URL: &str = "https://oauth.yandex.ru/token";
 const SCOPE: &str = "login:email mail:imap_full mail:smtp";
 const INFO_URL: &str = "https://login.yandex.ru/info?format=json";
-/// Зарегистрирован без порта; Яндекс при неточном совпадении `redirect_uri` игнорирует параметр (справка code-url), поэтому слушаем порт 80.
-const REDIRECT_URI: &str = "http://127.0.0.1/yandex-mail";
+/// Зарегистрирован в приложении Яндекса с этим портом; при неточном совпадении `redirect_uri` Яндекс игнорирует параметр (справка code-url),
+/// поэтому порт один и тот же, запасного случайного нет.
+const PORT: u16 = 47831;
+const REDIRECT_URI: &str = "http://127.0.0.1:47831/yandex-mail";
 const CALLBACK_PATH: &str = "/yandex-mail";
 const WAIT: Duration = Duration::from_secs(600);
 /// Хосты из справки OAuth Яндекса (imap.yandex.com / smtp.yandex.com).
@@ -93,7 +95,7 @@ pub async fn start(app: &Arc<App>) -> Result<Value, String> {
     if crate::cloud::active() {
         return Err("в облаке вход через браузер недоступен: создайте пароль приложения".into());
     }
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 80)).await.map_err(|_| "не удалось занять порт 80 на этом компьютере (его держит другая программа): закройте её или создайте пароль приложения".to_string())?;
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await.map_err(|_| "не удалось занять порт 47831 на этом компьютере (его держит другая программа): закройте её или создайте пароль приложения".to_string())?;
     let verifier = oauth::new_verifier();
     let state = crate::guard::random_token();
     let url = authorize_url(crate::mail::YANDEX_CLIENT_ID, &oauth::challenge(&verifier), &state);
@@ -246,7 +248,7 @@ mod tests {
         let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(q["response_type"], "code");
         assert_eq!(q["client_id"], "cid");
-        assert_eq!(q["redirect_uri"], "http://127.0.0.1/yandex-mail");
+        assert_eq!(q["redirect_uri"], "http://127.0.0.1:47831/yandex-mail");
         assert_eq!(q["scope"], "login:email mail:imap_full mail:smtp");
         assert_eq!((q["code_challenge"].as_str(), q["code_challenge_method"].as_str(), q["state"].as_str()), ("chal", "S256", "st"));
         assert!(!q.contains_key("client_secret"), "секрета клиента нет");

@@ -45,7 +45,7 @@ const SENT_LOG_BYTES: u64 = 5 * 1024 * 1024;
 const SEEN_PER_ACCOUNT: usize = 1000;
 const SECRET_NAME: &str = "password";
 /// client id (публичный, не секрет) приложения «Deloist — почта для ботов» на oauth.yandex.ru. Пусто — кнопки «Войти через Яндекс» нет.
-/// Redirect URI зарегистрирован как `http://127.0.0.1/yandex-mail` (без порта).
+/// Redirect URI зарегистрирован как `http://127.0.0.1:47831/yandex-mail` (есть и вариант без порта).
 pub const YANDEX_CLIENT_ID: &str = "8f09b28cef53474a9866b5fc799221be";
 /// Значение `Account.auth` для входа через Яндекс.
 const AUTH_YANDEX: &str = "yandex";
