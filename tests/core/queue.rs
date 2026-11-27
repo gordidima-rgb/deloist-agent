@@ -590,10 +590,10 @@ async fn a_queued_chat_after_a_night_delegation_is_not_treated_as_unattended() {
         Step::Hold(gate_other.clone()),
     ];
     let created = crew
-        .ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Ночь", "prompt": "работай", "everyMinutes": 60 })))
+        .ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Ночь", "prompt": "работай", "everyMinutes": 60 })))
         .await;
-    let routine = created["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    let routine = created["process"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
 
     // Делегат думает, человек пишет ему: сообщение в очереди.
     common::wait_until("делегат занят", 20, || {
@@ -642,12 +642,12 @@ async fn a_paused_queue_does_not_hold_back_a_routine() {
     let created = crew
         .ok(
             "POST",
-            "/api/routines",
+            "/api/workflows",
             Some(json!({ "botId": bot, "title": "Проверка", "prompt": "сделай работу", "everyMinutes": 60 })),
         )
         .await;
-    let routine = created["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "nextRun": common::due_now() }))).await;
+    let routine = created["process"]["id"].as_str().unwrap().to_string();
+    crew.ok("PATCH", &format!("/api/workflows/{routine}"), Some(json!({ "nextRun": common::due_now() }))).await;
 
     let event = crew.wait_event("запуск рутины", |e| e["type"] == "journal").await;
     assert_eq!(event["entry"]["title"], "Проверка", "{event}");

@@ -98,21 +98,21 @@ async fn finish_turn_continue_then_nothing_saves_the_note_for_the_next_run() {
     let s = Setup::new("acp-finish-turn", json!({}), "auto").await;
     let created = s.crew.ok(
         "POST",
-        "/api/routines",
+        "/api/workflows",
         Some(json!({ "botId": s.bot, "title": "Проверка", "prompt": "сделай finish_turn", "everyMinutes": 60 })),
     ).await;
-    let id = created["routine"]["id"].as_str().unwrap().to_string();
-    s.crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    let id = created["process"]["id"].as_str().unwrap().to_string();
+    s.crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
     s.crew.wait_event("журнал", |e| e["type"] == "journal").await;
     assert_eq!(s.count("session/prompt"), 2, "continue → один дозапрос, итог без третьего");
     let state = s.crew.ok("GET", "/api/state", None).await;
-    let routine = state["routines"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap();
+    let routine = state["processes"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap();
     assert_eq!(routine["lastStatus"], "quiet");
     assert_eq!(routine["progressNote"], "x");
 
     let log_before = std::fs::read_to_string(&s.log).unwrap_or_default();
     s.crew.clear_events();
-    s.crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    s.crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
     s.crew.wait_event("журнал", |e| e["type"] == "journal").await;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let log_after = std::fs::read_to_string(&s.log).unwrap_or_default();
@@ -563,7 +563,7 @@ async fn the_agent_manages_routines_through_the_bridge_under_the_usual_approval(
     let answer = s.last_answer().await;
     assert!(answer.contains("создание ответ: Процесс создан") && answer.contains("список ответ:") && answer.contains("Цены"), "{answer}");
     let state = s.crew.ok("GET", "/api/state", None).await;
-    let routines = state["routines"].as_array().unwrap();
+    let routines = state["processes"].as_array().unwrap();
     assert_eq!(routines.len(), 1, "{state}");
     assert_eq!(routines[0]["title"], "Цены");
     assert_eq!(routines[0]["everyMinutes"], 30);
@@ -578,7 +578,7 @@ async fn the_agent_manages_routines_through_the_bridge_under_the_usual_approval(
     let answer = s.last_answer().await;
     assert!(answer.contains("создание ошибка:") && answer.contains("не разрешил"), "{answer}");
     let state = s.crew.ok("GET", "/api/state", None).await;
-    assert_eq!(state["routines"].as_array().unwrap().len(), 1, "{state}");
+    assert_eq!(state["processes"].as_array().unwrap().len(), 1, "{state}");
 }
 
 #[tokio::test]

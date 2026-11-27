@@ -809,10 +809,10 @@ async fn unattended_run_refuses_a_login_without_a_saved_always() {
     ];
     v.fake.0.lock().unwrap().next = 0;
     let body = json!({ "botId": v.bot, "title": "Вход", "prompt": "войди на сайт", "everyMinutes": 60 });
-    let (status, data) = v.crew.send("POST", "/api/routines", Some(body)).await;
+    let (status, data) = v.crew.send("POST", "/api/workflows", Some(body)).await;
     assert_eq!(status, 201, "{data}");
-    let id = data["routine"]["id"].as_str().unwrap().to_string();
-    v.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
+    let id = data["process"]["id"].as_str().unwrap().to_string();
+    v.crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
     let started = Instant::now();
     while v.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == v.bot.as_str()) <= before {
         assert!(started.elapsed() < Duration::from_secs(90), "рутина не закончилась");

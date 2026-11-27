@@ -301,7 +301,7 @@ async fn team_file_round_trips_and_routines_arrive_disabled() {
 
     crew.ok(
         "POST",
-        "/api/routines",
+        "/api/workflows",
         Some(json!({ "botId": bot, "title": "Сводка", "prompt": "Собери темы", "everyMinutes": 60 })),
     )
     .await;
@@ -330,7 +330,7 @@ async fn team_file_round_trips_and_routines_arrive_disabled() {
 
     let after = crew.ok("GET", "/api/state", None).await;
     assert_eq!(after["bots"].as_array().unwrap().len(), before * 2, "боты не добавились");
-    let routines = after["routines"].as_array().unwrap();
+    let routines = after["processes"].as_array().unwrap();
     let copy = routines.iter().filter(|r| r["title"] == "Сводка").count();
     assert_eq!(copy, 2, "рутина не скопировалась: {routines:?}");
     let imported_routine = routines

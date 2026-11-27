@@ -1683,10 +1683,10 @@ async fn an_unattended_turn_does_not_wait_for_a_held_screen_forever() {
     env.fake.set_script(vec![snapshot()]);
     // Рутина по расписанию — ход без человека.
     let body = json!({ "botId": env.bot, "title": "Проверка", "prompt": "проверь сайт", "everyMinutes": 60 });
-    let (status, data) = env.crew.send("POST", "/api/routines", Some(body)).await;
+    let (status, data) = env.crew.send("POST", "/api/workflows", Some(body)).await;
     assert_eq!(status, 201, "{data}");
-    let id = data["routine"]["id"].as_str().unwrap().to_string();
-    env.crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
+    let id = data["process"]["id"].as_str().unwrap().to_string();
+    env.crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "nextRun": common::due_now() }))).await;
     let update = env.crew.wait_event("шаг рутины", |e| e["type"] == "tool_update" && e["botId"] == env.bot.as_str()).await;
     assert_eq!(update["status"], "ok", "{update}");
     assert!(env.crew.find_event(|e| e["type"] == "screen_control" && e["held"] == false).is_some(), "удержание не снято по сроку");

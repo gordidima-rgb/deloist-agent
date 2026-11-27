@@ -136,10 +136,10 @@ async fn a_team_file_cannot_choose_the_driver_or_open_a_webhook() {
     assert_eq!(bot["model"], "", "чужой файл выбрал модель");
     assert_ne!(bot["color"], "url(x)");
     assert_eq!(bot["persona"].as_str().unwrap().chars().count(), 20_000, "длинный текст обрезается");
-    let routine = &state["routines"][0];
+    let routine = &state["processes"][0];
     assert_eq!(routine["enabled"], false);
     assert_eq!(routine["hook"], false, "вебхук из файла не включается");
-    assert_eq!(routine["hookToken"], "");
+    assert!(routine["hookToken"].is_null(), "в карточке процесса секрета вебхука нет вовсе");
 
     let export = crew.ok("GET", "/api/team/export", None).await;
     let raw = export["team"]["bots"][0].as_object().unwrap().clone();
@@ -367,7 +367,7 @@ async fn a_hook_for_a_busy_bot_waits_and_its_secret_is_long() {
     let started = Instant::now();
     loop {
         let thread = crew.ok("GET", &format!("/api/bots/{}/thread?limit=50", bots[0]), None).await;
-        let done = thread["messages"].as_array().unwrap().iter().filter_map(|m| m["text"].as_str()).any(|t| t.contains("[вебхук]") && t.contains("заявка"));
+        let done = thread["messages"].as_array().unwrap().iter().filter_map(|m| m["text"].as_str()).any(|t| t.contains("поручает тебе шаг") && t.contains("заявка"));
         if done {
             break;
         }

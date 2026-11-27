@@ -54,7 +54,7 @@ async fn setup(name: &str, approval: &str, env: &[(&str, &str)]) -> (Crew, Fake,
 }
 
 async fn routines(crew: &Crew) -> Vec<Value> {
-    crew.ok("GET", "/api/state", None).await["routines"].as_array().cloned().unwrap_or_default()
+    crew.ok("GET", "/api/state", None).await["processes"].as_array().cloned().unwrap_or_default()
 }
 
 /// Сказать боту и дождаться конца хода.
@@ -75,7 +75,7 @@ async fn seed(crew: &Crew, bot: &str, extra: Value) -> String {
     for (key, value) in extra.as_object().unwrap() {
         body[key] = value.clone();
     }
-    crew.ok("POST", "/api/routines", Some(body)).await["routine"]["id"].as_str().unwrap().to_string()
+    crew.ok("POST", "/api/workflows", Some(body)).await["process"]["id"].as_str().unwrap().to_string()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -244,7 +244,7 @@ async fn an_unattended_routine_run_cannot_create_a_routine_without_a_card() {
         say("Ждёт решения человека"),
     ];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
     assert_eq!(card["tool"], "create_workflow", "ночью бот в режиме «решай сам» всё равно показывает карточку");
     crew.wait_event("журнал", |e| e["type"] == "journal").await;
@@ -421,8 +421,8 @@ async fn a_goal_run_cannot_set_new_goals_without_a_card() {
     *fake.script.lock().unwrap() = vec![tool("create_goal", json!({ "title": "Размножение", "description": "ещё одна" })), say("Ждёт решения")];
     crew.clear_events();
     // Рутина с целью идёт по расписанию, без человека: бот в режиме «решай сам» всё равно показывает карточку.
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["process"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
     assert_eq!(card["tool"], "create_goal");
     crew.wait_event("журнал", |e| e["type"] == "journal").await;
@@ -433,12 +433,12 @@ async fn a_goal_run_cannot_set_new_goals_without_a_card() {
 async fn a_routine_with_a_goal_runs_the_goal_and_skips_a_paused_one() {
     let (crew, fake, bot) = setup("goal-routine", "auto", &[]).await;
     let id = goal(&crew, &bot, true).await;
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["routine"]["id"].as_str().unwrap().to_string();
-    assert_eq!(crew.ok("GET", "/api/state", None).await["routines"][0]["goalId"], id.as_str());
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["process"]["id"].as_str().unwrap().to_string();
+    assert_eq!(crew.ok("GET", "/api/state", None).await["processes"][0]["goalId"], id.as_str());
 
     *fake.script.lock().unwrap() = vec![tool("report_goal_progress", json!({ "text": "Дозор: тихо" })), say("Записал")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["title"], "Дозор");
     assert_eq!(goal_of(&crew, &id).await["progress"][0]["text"], "Дозор: тихо");
@@ -447,7 +447,7 @@ async fn a_routine_with_a_goal_runs_the_goal_and_skips_a_paused_one() {
     crew.ok("PATCH", &format!("/api/goals/{id}"), Some(json!({ "status": "paused" }))).await;
     let calls = fake.requests.lock().unwrap().len();
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "skipped", "{entry}");
     assert!(entry["text"].as_str().unwrap().contains("на паузе"));
@@ -566,15 +566,15 @@ async fn a_bot_cannot_turn_a_recurring_goal_into_a_one_off_one_so_it_can_end_it(
 async fn pressing_run_on_a_routine_does_not_wipe_the_mark_of_a_goal_run_in_progress() {
     let (crew, fake, bot) = setup("goal-mark", "auto", &[]).await;
     let id = goal(&crew, &bot, true).await;
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Обычная", "prompt": "проверь", "everyMinutes": 60 }))).await["routine"]["id"].as_str().unwrap().to_string();
-    let linked = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["routine"]["id"].as_str().unwrap().to_string();
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Обычная", "prompt": "проверь", "everyMinutes": 60 }))).await["process"]["id"].as_str().unwrap().to_string();
+    let linked = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60, "goalId": id }))).await["process"]["id"].as_str().unwrap().to_string();
     // Запуск цели ждёт ответа человека, и пока он идёт, на рутину нажимают «Запустить».
     *fake.script.lock().unwrap() = vec![tool("ask_user", json!({ "question": "продолжать?" })), tool("complete_goal", json!({ "goal_id": id })), say("ок")];
     crew.clear_events();
     crew.ok("POST", &format!("/api/goals/{id}/run"), None).await;
     let question = crew.wait_event("вопрос", |e| e["type"] == "question").await;
     for rt in [&routine, &linked] {
-        let (status, _) = crew.send("POST", &format!("/api/routines/{rt}/run"), None).await;
+        let (status, _) = crew.send("POST", &format!("/api/workflows/{rt}/run"), None).await;
         assert_eq!(status, 409, "бот занят запуском цели");
     }
     crew.ok("POST", &format!("/api/questions/{}", question["id"].as_str().unwrap()), Some(json!({ "answer": "да" }))).await;
@@ -602,7 +602,7 @@ async fn a_routine_made_by_a_careful_bot_for_a_bold_one_keeps_the_caution() {
     // Смелый бот запускает её без человека, но пишет файл только с карточкой.
     *fake.script.lock().unwrap() = vec![tool("write_file", json!({ "path": "отчёт.txt", "content": "1" })), say("Ждёт решения")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{}/run", routine["id"].as_str().unwrap()), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{}/run", routine["id"].as_str().unwrap()), Some(json!({ "attended": false }))).await;
     let card = crew.wait_event("карточка получателя", |e| e["type"] == "approval").await;
     assert_eq!(card["botId"], other.as_str());
     assert_eq!(card["tool"], "write_file");
@@ -630,7 +630,7 @@ async fn a_careful_bot_editing_a_bold_bots_goal_raises_its_floor() {
 async fn touching_another_bots_routine_or_goal_asks_even_in_auto() {
     let (crew, fake, bot) = setup("routine-owner", "auto", &[]).await;
     let other = second_bot(&crew, "auto").await;
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": other, "title": "Чужая", "prompt": "p", "everyMinutes": 60 }))).await["routine"]["id"].as_str().unwrap().to_string();
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": other, "title": "Чужая", "prompt": "p", "everyMinutes": 60 }))).await["process"]["id"].as_str().unwrap().to_string();
     let theirs = goal(&crew, &other, false).await;
     for (name, args, tool_name) in [
         ("edit_workflow", json!({ "workflow_id": routine, "enabled": false }), "edit_workflow"),
@@ -672,13 +672,13 @@ async fn old_reports_reach_the_next_prompt_as_quoted_data_and_are_capped() {
 async fn routines_of_a_completed_or_deleted_goal_are_switched_off_and_a_paused_one_logs_once() {
     let (crew, _fake, bot) = setup("goal-release", "auto", &[]).await;
     let id = goal(&crew, &bot, true).await;
-    let rt = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 5, "goalId": id }))).await["routine"]["id"].as_str().unwrap().to_string();
+    let rt = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 5, "goalId": id }))).await["process"]["id"].as_str().unwrap().to_string();
 
     // Пауза: запись о пропуске одна, а не на каждый срок.
     crew.ok("PATCH", &format!("/api/goals/{id}"), Some(json!({ "status": "paused" }))).await;
     crew.clear_events();
     for _ in 0..3 {
-        crew.ok("POST", &format!("/api/routines/{rt}/run"), Some(json!({ "attended": false }))).await;
+        crew.ok("POST", &format!("/api/workflows/{rt}/run"), Some(json!({ "attended": false }))).await;
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     }
     assert_eq!(crew.count_events(|e| e["type"] == "journal"), 1);
@@ -687,7 +687,7 @@ async fn routines_of_a_completed_or_deleted_goal_are_switched_off_and_a_paused_o
     // Завершение и удаление выключают рутины цели.
     crew.ok("PATCH", &format!("/api/goals/{id}"), Some(json!({ "status": "completed" }))).await;
     assert_eq!(routines(&crew).await[0]["enabled"], false);
-    crew.ok("PATCH", &format!("/api/routines/{rt}"), Some(json!({ "enabled": true }))).await;
+    crew.ok("PATCH", &format!("/api/workflows/{rt}"), Some(json!({ "enabled": true }))).await;
     crew.ok("DELETE", &format!("/api/goals/{id}"), None).await;
     assert_eq!(routines(&crew).await[0]["enabled"], false);
 }
@@ -747,7 +747,7 @@ async fn running_own_routine_in_auto_needs_no_card_but_an_unattended_run_asks() 
     // Тот же вызов в ходе без человека спрашивает карточкой, а не отказывает.
     *fake.script.lock().unwrap() = vec![tool("run_workflow", json!({ "workflow_id": spare })), say("Ждёт решения человека")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{own}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{own}/run"), Some(json!({ "attended": false }))).await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
     assert_eq!(card["tool"], "run_workflow");
 }

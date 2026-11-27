@@ -110,12 +110,12 @@ async fn wait_state(crew: &Crew, kind: &str) -> Value {
 async fn add_routine(crew: &Crew, bot: &str, title: &str, extra: Value) -> String {
     let mut body = json!({ "botId": bot, "title": title, "prompt": "сделай работу", "everyMinutes": 600 });
     body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-    crew.ok("POST", "/api/routines", Some(body)).await["routine"]["id"].as_str().unwrap().to_string()
+    crew.ok("POST", "/api/workflows", Some(body)).await["process"]["id"].as_str().unwrap().to_string()
 }
 
 async fn run_unattended(crew: &Crew, id: &str) -> Value {
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
     crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone()
 }
 

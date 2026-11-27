@@ -687,7 +687,7 @@ async fn the_agent_key_cannot_set_routine_check() {
     let token = runtime["token"].as_str().unwrap().to_string();
     let response = crew
         .client
-        .patch(format!("{}/api/routines/rt_x", crew.base))
+        .patch(format!("{}/api/workflows/rt_x", crew.base))
         .bearer_auth(&token)
         .json(&json!({ "check": "cmd /c exit 0" }))
         .send()
@@ -704,7 +704,7 @@ async fn the_agent_key_cannot_send_a_test_reminder() {
     // Проверка напоминания шлёт сообщение человеку сейчас: ключ программы не решает за него.
     let response = crew
         .client
-        .post(format!("{}/api/routines/rt_x/test-reminder", crew.base))
+        .post(format!("{}/api/reminders/rt_x/test", crew.base))
         .bearer_auth(&token)
         .send()
         .await
@@ -3252,7 +3252,7 @@ async fn the_agent_key_cannot_delete_bots_rooms_or_touch_routines() {
     let crew = Crew::start("sec-delete-agent").await;
     let bot = crew.ok("POST", "/api/bots", Some(json!({ "name": "Жертва", "role": "р" }))).await["bot"]["id"].as_str().unwrap().to_string();
     let room = crew.ok("POST", "/api/rooms", Some(json!({ "name": "Команда", "botIds": [bot] }))).await["room"]["id"].as_str().unwrap().to_string();
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60 }))).await["routine"]["id"].as_str().unwrap().to_string();
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Дозор", "prompt": "-", "everyMinutes": 60 }))).await["process"]["id"].as_str().unwrap().to_string();
     let before = crew.ok("GET", "/api/state", None).await;
     let token = agent_token(&crew);
     let call = |method: reqwest::Method, path: String, body: Value| crew.client.request(method, format!("{}{path}", crew.base)).bearer_auth(&token).json(&body).send();
@@ -3261,10 +3261,14 @@ async fn the_agent_key_cannot_delete_bots_rooms_or_touch_routines() {
         (reqwest::Method::DELETE, format!("/api/bots/{bot}")),
         (reqwest::Method::DELETE, format!("/api/rooms/{room}")),
         (reqwest::Method::DELETE, format!("/api/rooms/{room}/")),
-        (reqwest::Method::POST, "/api/routines".to_string()),
-        (reqwest::Method::POST, "/api/routines/".to_string()),
-        (reqwest::Method::PATCH, format!("/api/routines/{routine}")),
-        (reqwest::Method::DELETE, format!("/api/routines/{routine}")),
+        (reqwest::Method::POST, "/api/workflows".to_string()),
+        (reqwest::Method::POST, "/api/workflows/".to_string()),
+        (reqwest::Method::PATCH, format!("/api/workflows/{routine}")),
+        (reqwest::Method::DELETE, format!("/api/workflows/{routine}")),
+        (reqwest::Method::POST, "/api/reminders".to_string()),
+        (reqwest::Method::PATCH, "/api/reminders/rt_x".to_string()),
+        (reqwest::Method::DELETE, "/api/reminders/rt_x".to_string()),
+        (reqwest::Method::POST, format!("/api/workflows/{routine}/run")),
     ] {
         let body = json!({ "botId": bot, "title": "Чужая", "prompt": "делай что хочешь", "everyMinutes": 5, "enabled": false, "errorPaused": false });
         let response = call(method.clone(), path.clone(), body).await.unwrap();
@@ -3273,12 +3277,21 @@ async fn the_agent_key_cannot_delete_bots_rooms_or_touch_routines() {
     let state = crew.ok("GET", "/api/state", None).await;
     assert_eq!(state["bots"], before["bots"], "ключом тронуты боты");
     assert_eq!(state["rooms"], before["rooms"], "ключом тронуты команды");
-    assert_eq!(state["routines"], before["routines"], "ключом тронуты рутины");
+    assert_eq!(state["processes"], before["processes"], "ключом тронуты рутины");
+
+    // Читать процессы ключу можно (так бот узнаёт свои), а старого адреса рутин больше нет.
+    let listed = call(reqwest::Method::GET, "/api/processes".to_string(), json!({})).await.unwrap();
+    assert_eq!(listed.status().as_u16(), 200);
+    assert!(listed.json::<Value>().await.unwrap()["processes"].as_array().unwrap().iter().any(|p| p["id"] == routine.as_str()));
+    for gone in ["/api/routines", "/api/routines.ics"] {
+        let (status, _) = crew.send("POST", gone, Some(json!({}))).await;
+        assert!(status == 404 || status == 405, "{gone}: {status}");
+    }
 
     // Окно работает как раньше.
-    let (status, _) = crew.send("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "title": "Новое" }))).await;
+    let (status, _) = crew.send("PATCH", &format!("/api/workflows/{routine}"), Some(json!({ "title": "Новое" }))).await;
     assert_eq!(status, 200, "окно правит рутину");
-    let (status, _) = crew.send("DELETE", &format!("/api/routines/{routine}"), None).await;
+    let (status, _) = crew.send("DELETE", &format!("/api/workflows/{routine}"), None).await;
     assert!(status == 200 || status == 204, "окно удаляет рутину: {status}");
     let (status, _) = crew.send("DELETE", &format!("/api/rooms/{room}"), None).await;
     assert!(status == 200 || status == 204, "окно удаляет команду: {status}");
@@ -3388,14 +3401,14 @@ async fn bridge_team_change_cards_wait_for_the_human_and_refuse_strangers() {
     let card = crew.wait_event("карточка рутины из моста", |e| e["type"] == "team_proposal" && e["botId"] == bot.as_str()).await;
     assert_eq!(card["proposal"]["kind"], "routine", "{card}");
     assert_eq!(card["proposal"]["freeMode"], true, "{card}");
-    assert!(crew.ok("GET", "/api/state", None).await["routines"].as_array().unwrap().is_empty(), "рутина создана до решения");
+    assert!(crew.ok("GET", "/api/state", None).await["processes"].as_array().unwrap().is_empty(), "рутина создана до решения");
     let id = card["proposal"]["id"].as_str().unwrap();
     let (status, reply) = crew.send("POST", &format!("/api/bots/{bot}/offers/{id}/accept"), None).await;
     assert_eq!(status, 200, "{reply}");
     let done = waiting.await.unwrap();
     assert_eq!(done["status"], "ok", "{done}");
     assert!(done["result"].as_str().unwrap().contains("Рутина создана"), "{done}");
-    let routines = crew.ok("GET", "/api/state", None).await["routines"].clone();
+    let routines = crew.ok("GET", "/api/state", None).await["processes"].clone();
     assert_eq!((routines[0]["botId"].as_str(), routines[0]["enabled"].as_bool()), (Some(mate.as_str()), Some(true)), "{routines}");
     crew.ok("POST", &format!("/api/bots/{bot}/stop"), Some(json!({}))).await;
 }
@@ -3452,7 +3465,7 @@ async fn a_team_import_request_changes_nothing_until_the_window_approves_it_once
 
     // Ничего не создано, а статус не отдаёт содержимое файла.
     let state = crew.ok("GET", "/api/state", None).await;
-    assert_eq!((&state["bots"], &state["rooms"], &state["routines"], &state["skills"]), (&before["bots"], &before["rooms"], &before["routines"], &before["skills"]), "заявка уже что-то создала");
+    assert_eq!((&state["bots"], &state["rooms"], &state["processes"], &state["skills"]), (&before["bots"], &before["rooms"], &before["processes"], &before["skills"]), "заявка уже что-то создала");
     let (status, polled) = agent_call(&crew, reqwest::Method::GET, &format!("/api/team/import-request/{handle}"), None).await;
     assert_eq!((status, polled["status"].as_str()), (200, Some("pending")), "{polled}");
     assert!(!polled.to_string().contains("СЕКРЕТНАЯ-ПЕРСОНА") && !polled.to_string().contains("evil.example") && !polled.to_string().contains("tir_"), "статус отдал лишнее: {polled}");
@@ -3504,7 +3517,7 @@ async fn a_team_import_request_changes_nothing_until_the_window_approves_it_once
         assert!(empty_list(&bot["browserSites"]), "{bot}");
     }
     assert!(state["rooms"].as_array().unwrap().iter().filter(|r| r["name"] == "Группа заявки").all(|r| empty_list(&r["folders"])), "{}", state["rooms"]);
-    let routines: Vec<&Value> = state["routines"].as_array().unwrap().iter().filter(|r| r["title"] == "Дозор заявки").collect();
+    let routines: Vec<&Value> = state["processes"].as_array().unwrap().iter().filter(|r| r["title"] == "Дозор заявки").collect();
     assert_eq!(routines.len(), 1);
     assert!(routines.iter().all(|r| r["enabled"] == false && r["hook"] != true && r["approvalFloor"].as_str().unwrap_or("").is_empty() && r["goalId"].as_str().unwrap_or("").is_empty()), "{routines:?}");
     let (_, polled) = agent_call(&crew, reqwest::Method::GET, &format!("/api/team/import-request/{handle}"), None).await;

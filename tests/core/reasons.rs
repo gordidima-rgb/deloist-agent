@@ -121,17 +121,17 @@ async fn wait_run(crew: &Crew, label: &str, pred: impl Fn(&Value) -> bool) -> Va
 
 async fn add_routine(crew: &Crew, bot: &str, title: &str) -> String {
     let body = json!({ "botId": bot, "title": title, "prompt": "сделай работу", "everyMinutes": 600 });
-    crew.ok("POST", "/api/routines", Some(body)).await["routine"]["id"].as_str().unwrap().to_string()
+    crew.ok("POST", "/api/workflows", Some(body)).await["process"]["id"].as_str().unwrap().to_string()
 }
 
 async fn run_unattended(crew: &Crew, id: &str) -> Value {
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
     crew.wait_event("журнал", |e| e["type"] == "journal" && e["entry"]["status"] != "paused").await["entry"].clone()
 }
 
 async fn routine(crew: &Crew, id: &str) -> Value {
-    crew.ok("GET", "/api/state", None).await["routines"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap()
+    crew.ok("GET", "/api/state", None).await["processes"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap()
 }
 
 const FAST: [(&str, &str); 2] = [("CREW_TEST_TICK_MS", "200"), ("CREW_TEST_HOUR_MS", "60000")];
@@ -217,14 +217,14 @@ async fn three_login_failures_pause_the_routine_with_one_chat_message() {
     // Срок пришёл, а рутина на паузе: запуска нет, в журнале сказано почему.
     let calls = fake.calls();
     crew.clear_events();
-    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": now_ms() - 1_000 }))).await;
+    crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "nextRun": now_ms() - 1_000 }))).await;
     let skipped = crew.wait_event("пропуск", |e| e["type"] == "journal" && e["entry"]["text"].as_str().is_some_and(|t| t.contains("на паузе из-за ошибок"))).await;
     assert_eq!(skipped["entry"]["status"], "paused");
     assert_eq!(fake.calls(), calls);
 
     // «Возобновить»: тот же PATCH рутины, который ключ программы не может подать.
-    let resumed = crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "errorPaused": false }))).await;
-    assert!(resumed["routine"]["errorPaused"].is_null() && resumed["routine"]["failures"].is_null(), "{resumed}");
+    let resumed = crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "errorPaused": false }))).await;
+    assert!(resumed["process"]["errorPaused"].is_null() && resumed["process"]["failures"].is_null(), "{resumed}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -246,7 +246,7 @@ async fn a_busy_bot_is_awaited_for_an_hour_then_the_run_is_skipped_with_a_journa
     crew.say(&bot, "долгое дело").await;
     let id = add_routine(&crew, &bot, "Ночная").await;
     crew.clear_events();
-    crew.ok("PATCH", &format!("/api/routines/{id}"), Some(json!({ "nextRun": now_ms() - 1_000 }))).await;
+    crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "nextRun": now_ms() - 1_000 }))).await;
     let entry = crew.wait_event("запись «бот был занят»", |e| e["type"] == "journal" && e["entry"]["status"] == "busy").await["entry"].clone();
     assert!(entry["text"].as_str().unwrap().contains("Бот был занят"), "{entry}");
     assert_eq!(fake.calls(), 1, "рутина не стартовала");

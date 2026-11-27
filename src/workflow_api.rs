@@ -197,8 +197,8 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
         Ok(b) => b,
         Err(r) => return r,
     };
-    // Простой процесс правится полями формы: постановка, расписание, пауза.
-    if app.workflows.lock().get(&id).is_some_and(Stored::is_simple) && body.as_object().is_some_and(|o| o.keys().any(|k| k != "title" && k != "enabled")) {
+    // Простой процесс правится полями формы: название, постановка, расписание, пауза.
+    if app.workflows.lock().get(&id).is_some_and(Stored::is_simple) {
         if let Err(r) = crate::server::check_schedule(&body) {
             return r;
         }
@@ -276,6 +276,13 @@ async fn start(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Resp
     // Почтовый триггер или сторож страниц: кнопка тоже смотрит источник; нового нет — бот узнаёт об этом из задания.
     type Commit = Box<dyn FnOnce(&App) + Send>;
     let process = app.workflows.find(&id).filter(Stored::is_simple);
+    // Кнопку нажали сейчас: занятому боту отказ сразу, а не ожидание в очереди запуска.
+    if let Some(process) = &process {
+        let Some(bot) = app.store.bot(&process.bot_id()) else { return fail(StatusCode::BAD_REQUEST, "бота этого процесса уже нет") };
+        if app.turns.is_busy(&bot.id) {
+            return fail(StatusCode::CONFLICT, &format!("бот «{}» {}", bot.name, crate::turn::BUSY_SUFFIX));
+        }
+    }
     let triggered: Option<(String, Option<Commit>)> = match (&process, app.mail.trigger(&id), app.watch.trigger(&id)) {
         (Some(process), Some(trigger), _) => match crate::mail::check_trigger(&app, process, &trigger).await {
             Ok(crate::mail::Check::Letters { text, senders, uid_validity, last_uid, .. }) => {

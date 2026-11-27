@@ -104,12 +104,12 @@ async fn run_routine(crew: &Crew, bot: &str) -> Value {
     let created = crew
         .ok(
             "POST",
-            "/api/routines",
+            "/api/workflows",
             Some(json!({ "botId": bot, "title": "Проверка", "prompt": "сделай работу", "everyMinutes": 60 })),
         )
         .await;
-    let id = created["routine"]["id"].as_str().unwrap().to_string();
-    crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({}))).await;
+    let id = created["process"]["id"].as_str().unwrap().to_string();
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({}))).await;
     let event = crew.wait_event("журнал", |e| e["type"] == "journal").await;
     event["entry"].clone()
 }

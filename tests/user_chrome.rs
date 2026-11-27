@@ -316,7 +316,7 @@ async fn run(crew: &Crew, fake: &Fake, bot: &str, steps: Vec<Step>, routine: Opt
     let mut seen = crew.events.lock().unwrap().len();
     match routine {
         Some(id) => {
-            crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
+            crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({ "attended": false }))).await;
         }
         None => crew.say(bot, "поехали").await,
     }
@@ -607,9 +607,9 @@ async fn a_bot_works_in_a_test_profile_of_the_persons_browser() {
 
     // Без человека: пока не включено боту — нельзя вовсе.
     let body = json!({ "botId": bot, "title": "Ночью", "prompt": "проверь кабинет", "everyMinutes": 60 });
-    let (code, data) = crew.send("POST", "/api/routines", Some(body)).await;
+    let (code, data) = crew.send("POST", "/api/workflows", Some(body)).await;
     assert_eq!(code, 201, "{data}");
-    let routine = data["routine"]["id"].as_str().unwrap().to_string();
+    let routine = data["process"]["id"].as_str().unwrap().to_string();
     let night = |url: &str| vec![call("browser_nav", json!({ "action": "open", "url": url }))];
     let r = run(&crew, &fake, &bot, night(&here), Some(&routine), |_| "deny").await;
     r.err(0, "без человека");

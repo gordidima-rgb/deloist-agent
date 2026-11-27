@@ -208,7 +208,7 @@ async fn an_interrupted_routine_continues_instead_of_starting_over() {
     let (fake, port) = fake_server().await;
     let (mut first, dir, bot) = first_start("runs-routine", port).await;
     let body = json!({ "botId": bot, "title": "Проверка", "prompt": "проверь сайт", "everyMinutes": 600 });
-    let routine = first.ok("POST", "/api/routines", Some(body)).await["routine"]["id"].as_str().unwrap().to_string();
+    let routine = first.ok("POST", "/api/workflows", Some(body)).await["process"]["id"].as_str().unwrap().to_string();
     first.keep_data();
     drop(first);
     // Рутина числилась «идёт», когда программа закрылась: запись хода с прежним происхождением «рутина» живёт в runs.json.
@@ -223,7 +223,7 @@ async fn an_interrupted_routine_continues_instead_of_starting_over() {
     assert_eq!(entry["status"], "ok", "{entry}");
     assert!(!entries.iter().any(|e| e["status"] == "interrupted"), "перезапуск больше не «повтор с нуля»: {entries:?}");
     let state = second.ok("GET", "/api/state", None).await;
-    let saved = state["routines"].as_array().unwrap().iter().find(|r| r["id"] == routine.as_str()).unwrap().clone();
+    let saved = state["processes"].as_array().unwrap().iter().find(|r| r["id"] == routine.as_str()).unwrap().clone();
     assert_eq!(saved["failures"].as_u64().unwrap_or(0), 0, "{saved}");
 }
 

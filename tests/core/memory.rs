@@ -564,10 +564,10 @@ async fn a_contact_without_remember_asks_first_and_the_room_card_stays_in_the_ro
 #[tokio::test(flavor = "multi_thread")]
 async fn routines_alone_do_not_spend_extraction() {
     let (fake, crew, bots) = setup("memory-extract-routine", json!({}), &[QUIET]).await;
-    let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": bots[0], "title": "Склад", "prompt": "запомни телефон склада +7 913 000-00-00, проверь остатки", "everyMinutes": 60 }))).await["routine"]["id"].as_str().unwrap().to_string();
+    let routine = crew.ok("POST", "/api/workflows", Some(json!({ "botId": bots[0], "title": "Склад", "prompt": "запомни телефон склада +7 913 000-00-00, проверь остатки", "everyMinutes": 60 }))).await["process"]["id"].as_str().unwrap().to_string();
     for _ in 0..2 {
         crew.clear_events();
-        crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+        crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
         crew.wait_event("журнал", |e| e["type"] == "journal").await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;

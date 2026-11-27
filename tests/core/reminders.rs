@@ -100,13 +100,13 @@ fn sink_lines(sink: &PathBuf) -> Vec<Value> {
 
 async fn routine(crew: &Crew, id: &str) -> Value {
     let state = crew.ok("GET", "/api/state", None).await;
-    state["routines"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap_or(Value::Null)
+    state["reminders"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap_or(Value::Null)
 }
 
 async fn create_reminder(crew: &Crew, body: Value) -> String {
-    let (status, data) = crew.send("POST", "/api/routines", Some(body)).await;
+    let (status, data) = crew.send("POST", "/api/reminders", Some(body)).await;
     assert_eq!(status, 201, "{data}");
-    data["routine"]["id"].as_str().unwrap().to_string()
+    data["reminder"]["id"].as_str().unwrap().to_string()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -196,7 +196,7 @@ async fn the_test_route_sends_now_and_leaves_the_schedule_alone() {
     let future = now_ms() + 3 * 3_600_000;
     let id = create_reminder(&crew, json!({ "kind": "reminder", "prompt": "проверка", "onceAt": future })).await;
 
-    let data = crew.ok("POST", &format!("/api/routines/{id}/test-reminder"), None).await;
+    let data = crew.ok("POST", &format!("/api/reminders/{id}/test"), None).await;
     assert_eq!(data["ok"], true, "{data}");
     assert_eq!(sink_lines(&sink).len(), 1);
     let after = routine(&crew, &id).await;
@@ -205,23 +205,27 @@ async fn the_test_route_sends_now_and_leaves_the_schedule_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn reminder_crud_through_routines_api_keeps_json_shape() {
+async fn reminder_crud_through_its_own_api_keeps_json_shape() {
     let (crew, _model, _sink) = setup("rem-crud", None).await;
-    let (status, data) = crew.send("POST", "/api/routines", Some(json!({ "kind": "reminder", "prompt": "позвонить", "at": "09:00", "channels": ["windows"] }))).await;
+    let (status, data) = crew.send("POST", "/api/reminders", Some(json!({ "kind": "reminder", "prompt": "позвонить", "at": "09:00", "channels": ["windows"] }))).await;
     assert_eq!(status, 201, "{data}");
-    let id = data["routine"]["id"].as_str().unwrap().to_string();
-    assert_eq!(data["routine"]["prompt"], "позвонить");
-    assert!(data["routine"]["nextRun"].is_number());
+    let id = data["reminder"]["id"].as_str().unwrap().to_string();
+    assert_eq!(data["reminder"]["prompt"], "позвонить");
+    assert_eq!(data["reminder"]["kind"], "reminder");
+    assert!(data["reminder"]["nextRun"].is_number());
+    let listed = crew.ok("GET", "/api/state", None).await;
+    assert!(listed["reminders"].as_array().unwrap().iter().any(|r| r["id"] == id.as_str()), "список напоминаний в /api/state");
+    assert!(listed["processes"].as_array().unwrap().iter().all(|r| r["id"] != id.as_str()), "напоминание — не процесс");
 
-    let ics = crew.client.get(format!("{}/api/routines.ics", crew.base)).header("cookie", &crew.cookie).send().await.unwrap().text().await.unwrap();
+    let ics = crew.client.get(format!("{}/api/tasks.ics", crew.base)).header("cookie", &crew.cookie).send().await.unwrap().text().await.unwrap();
     assert!(ics.contains(&id), "ics не содержит напоминание");
 
-    let (status, data) = crew.send("PATCH", &format!("/api/routines/{id}"), Some(json!({ "prompt": "обновлено", "enabled": false }))).await;
+    let (status, data) = crew.send("PATCH", &format!("/api/reminders/{id}"), Some(json!({ "prompt": "обновлено", "enabled": false }))).await;
     assert_eq!(status, 200, "{data}");
-    assert_eq!(data["routine"]["prompt"], "обновлено");
-    assert_eq!(data["routine"]["enabled"], false);
+    assert_eq!(data["reminder"]["prompt"], "обновлено");
+    assert_eq!(data["reminder"]["enabled"], false);
 
-    let (status, data) = crew.send("DELETE", &format!("/api/routines/{id}"), None).await;
+    let (status, data) = crew.send("DELETE", &format!("/api/reminders/{id}"), None).await;
     assert_eq!(status, 200, "{data}");
     assert_eq!(data["ok"], true);
 }
@@ -262,12 +266,12 @@ async fn ordinary_routines_still_start_a_turn() {
     let (crew, model, _sink) = setup("rem-ordinary", None).await;
     let state = crew.ok("GET", "/api/state", None).await;
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
-    let (status, data) = crew.send("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Сводка", "prompt": "сделай сводку", "everyMinutes": 60 }))).await;
+    let (status, data) = crew.send("POST", "/api/workflows", Some(json!({ "botId": bot, "title": "Сводка", "prompt": "сделай сводку", "everyMinutes": 60 }))).await;
     assert_eq!(status, 201, "{data}");
-    let id = data["routine"]["id"].as_str().unwrap().to_string();
+    let id = data["process"]["id"].as_str().unwrap().to_string();
 
-    crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({}))).await;
+    crew.ok("POST", &format!("/api/workflows/{id}/run"), Some(json!({}))).await;
     crew.wait_event("конец хода рутины", |e| e["type"] == "turn_end").await;
     assert!(*model.calls.lock().unwrap() >= 1, "обычная рутина не начала ход");
-    assert!(routine(&crew, &id).await["kind"].is_null());
+    assert!(routine(&crew, &id).await.is_null(), "обычная рутина не попала в напоминания");
 }

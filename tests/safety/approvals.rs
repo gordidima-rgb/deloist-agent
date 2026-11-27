@@ -220,9 +220,9 @@ async fn a_conversation_grant_ends_on_turn_off_and_on_chat_clear() {
 
 async fn add_routine(crew: &Crew, bot: &str) -> String {
     let body = json!({ "botId": bot, "title": "Ночью", "prompt": "запиши отчёт", "everyMinutes": 60 });
-    let (status, data) = crew.send("POST", "/api/routines", Some(body)).await;
+    let (status, data) = crew.send("POST", "/api/workflows", Some(body)).await;
     assert_eq!(status, 201, "{data}");
-    data["routine"]["id"].as_str().unwrap().to_string()
+    data["process"]["id"].as_str().unwrap().to_string()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -235,7 +235,7 @@ async fn a_rule_works_at_night_and_a_conversation_grant_does_not() {
 
     *fake.script.lock().unwrap() = vec![write(&dir.join("a").join("night.txt")), say("записал")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "ok", "{entry}");
     assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "правило должно сработать без карточки");
@@ -247,7 +247,7 @@ async fn a_rule_works_at_night_and_a_conversation_grant_does_not() {
     // Разрешение разговора ночью не действует: карточка и, как раньше, «на утро».
     *fake.script.lock().unwrap() = vec![write(&dir.join("a-evil").join("night.txt")), say("не смог")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "needs", "{entry}");
     assert!(!dir.join("a-evil").join("night.txt").exists());
@@ -300,7 +300,7 @@ async fn a_question_waits_across_a_restart_and_the_answer_comes_as_a_message() {
     let (mut crew, fake, bot) = setup("ap-restart", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
     let routine = add_routine(&crew, &bot).await;
     *fake.script.lock().unwrap() = vec![tool("ask_user", json!({ "question": "Какой склад?", "choices": ["Коледино", "Казань"] })), say("жду ответа")];
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     crew.wait_event("журнал", |e| e["type"] == "journal").await;
     let list = needs(&crew).await;
     assert_eq!(list["count"], 1, "{list}");
@@ -380,7 +380,7 @@ async fn deleting_a_routine_is_never_remembered_and_schedule_tools_ask_at_night(
     let before = by_rule(&activity(&crew, &bot).await);
     *fake.script.lock().unwrap() = vec![create(), say("не смог")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{night}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{night}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "needs", "{entry}");
     assert_eq!(by_rule(&activity(&crew, &bot).await), before, "ночью правило не сработало");
@@ -500,7 +500,7 @@ async fn project_keys_need_a_secret_card_and_never_reach_the_model() {
     let routine = add_routine(&crew, &bot).await;
     *fake.script.lock().unwrap() = vec![read(), say("не смог")];
     crew.clear_events();
-    crew.ok("POST", &format!("/api/routines/{routine}/run"), Some(json!({ "attended": false }))).await;
+    crew.ok("POST", &format!("/api/workflows/{routine}/run"), Some(json!({ "attended": false }))).await;
     let entry = crew.wait_event("журнал", |e| e["type"] == "journal").await["entry"].clone();
     assert_eq!(entry["status"], "needs", "{entry}");
     let update = crew.find_event(|e| e["type"] == "tool_update").unwrap();

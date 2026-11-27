@@ -12,7 +12,7 @@ async fn routines_are_served_as_a_calendar_file() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.ok(
         "POST",
-        "/api/routines",
+        "/api/workflows",
         Some(json!({
             "botId": bot,
             "title": "Утренняя сводка",
@@ -23,12 +23,12 @@ async fn routines_are_served_as_a_calendar_file() {
     )
     .await;
 
-    let anonymous = crew.client.get(format!("{}/api/routines.ics", crew.base)).send().await.unwrap();
+    let anonymous = crew.client.get(format!("{}/api/tasks.ics", crew.base)).send().await.unwrap();
     assert_eq!(anonymous.status().as_u16(), 403, "файл открыт без сессии окна");
 
     let res = crew
         .client
-        .get(format!("{}/api/routines.ics", crew.base))
+        .get(format!("{}/api/tasks.ics", crew.base))
         .header("cookie", &crew.cookie)
         .send()
         .await
@@ -38,7 +38,7 @@ async fn routines_are_served_as_a_calendar_file() {
     assert!(kind.starts_with("text/calendar"), "тип ответа: {kind}");
     assert_eq!(
         res.headers()["content-disposition"].to_str().unwrap(),
-        "attachment; filename=\"deloist-routines.ics\""
+        "attachment; filename=\"deloist-tasks.ics\""
     );
     let text = res.text().await.unwrap();
     assert!(text.contains("BEGIN:VCALENDAR"), "{text}");

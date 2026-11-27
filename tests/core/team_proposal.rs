@@ -432,7 +432,7 @@ async fn bot_json(crew: &Crew, id: &str) -> Value {
 }
 
 async fn routines_of(crew: &Crew) -> Vec<Value> {
-    crew.ok("GET", "/api/state", None).await["routines"].as_array().cloned().unwrap_or_default()
+    crew.ok("GET", "/api/state", None).await["processes"].as_array().cloned().unwrap_or_default()
 }
 
 #[tokio::test(flavor = "multi_thread")]

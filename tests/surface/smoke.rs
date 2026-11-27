@@ -269,16 +269,16 @@ async fn crud_keeps_the_file_format() {
     let (status, _) = crew.send("PATCH", "/api/bots/bot_none", Some(json!({}))).await;
     assert_eq!(status, 404);
 
-    let (status, _) = crew.send("POST", "/api/routines", Some(json!({ "botId": "нет", "prompt": "x" }))).await;
+    let (status, _) = crew.send("POST", "/api/workflows", Some(json!({ "botId": "нет", "prompt": "x" }))).await;
     assert_eq!(status, 400);
     let (status, routine) = crew
-        .send("POST", "/api/routines", Some(json!({ "botId": bot, "prompt": "проверь", "everyMinutes": 1 })))
+        .send("POST", "/api/workflows", Some(json!({ "botId": bot, "prompt": "проверь", "everyMinutes": 1 })))
         .await;
     assert_eq!(status, 201);
-    assert_eq!(routine["routine"]["everyMinutes"], 5, "минимум пять минут");
-    let routine = routine["routine"]["id"].as_str().unwrap().to_string();
-    let toggled = crew.ok("PATCH", &format!("/api/routines/{routine}"), Some(json!({ "enabled": false }))).await;
-    assert_eq!(toggled["routine"]["enabled"], false);
+    assert_eq!(routine["process"]["everyMinutes"], 5, "минимум пять минут");
+    let routine = routine["process"]["id"].as_str().unwrap().to_string();
+    let toggled = crew.ok("PATCH", &format!("/api/workflows/{routine}"), Some(json!({ "enabled": false }))).await;
+    assert_eq!(toggled["process"]["enabled"], false);
 
     crew.ok("PUT", "/api/settings", Some(json!({ "model": "m", "historyLimit": 7 }))).await;
     let settings = crew.ok("GET", "/api/state", None).await["settings"].clone();
@@ -289,13 +289,16 @@ async fn crud_keeps_the_file_format() {
     let raw = std::fs::read_to_string(crew.data_dir.join("state.json")).unwrap();
     let state: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(state["version"], 1);
-    for key in ["createdAt", "settings", "bots", "routines"] {
+    for key in ["createdAt", "settings", "bots"] {
         assert!(state.get(key).is_some(), "в state.json нет {key}");
     }
     assert!(state["settings"].get("apiKeyEnv").is_some());
-    assert!(state["routines"][0].get("botId").is_some());
+    // Рутины в state.json больше нет: простой процесс лежит своим файлом с ботом в узле шага.
+    let file = std::fs::read_to_string(crew.data_dir.join("workflows").join(format!("{routine}.json"))).unwrap();
+    assert!(file.contains(&bot), "бот процесса записан в его файле");
+    assert!(crew.ok("GET", "/api/state", None).await["processes"][0].get("botId").is_some());
 
-    crew.ok("DELETE", &format!("/api/routines/{routine}"), None).await;
+    crew.ok("DELETE", &format!("/api/workflows/{routine}"), None).await;
     crew.ok("DELETE", &format!("/api/bots/{bot}"), None).await;
     let (status, _) = crew.send("GET", &format!("/api/bots/{bot}/thread"), None).await;
     assert_eq!(status, 404);
