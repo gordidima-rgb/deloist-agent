@@ -78,6 +78,7 @@
   .tp-tabs {
     padding: 0 var(--k-space-4) var(--k-space-3);
     overflow-x: auto;
+    scrollbar-width: none;
   }
   .tp-body {
     flex: 1;
@@ -86,8 +87,7 @@
     padding: 0 var(--k-space-4) var(--k-space-5);
   }
   .tp-pane {
-    max-width: 760px;
-    margin: 0 auto;
+    max-width: 820px;
   }
   @media (max-width: 820px) {
     .tp-head :global(.tp-menu) {
