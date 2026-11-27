@@ -1154,17 +1154,23 @@ async fn fetch_batch(imap: &mut Imap, uids: Vec<u32>, sizes: &HashMap<u32, usize
     Ok(batch)
 }
 
-/// Проверить ящик для рутины. Без новых подходящих писем — `Nothing`; просмотренные неподходящие запоминаются сразу.
-pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trigger: &Trigger) -> Result<Check, String> {
-    let account = app.mail.account(&trigger.account_id).ok_or("ящик триггера удалён")?;
-    if !account.open_to(&routine.bot_id) {
-        return Err(format!("бот рутины не допущен к ящику {}", account.address));
+/// Яндекс мог отозвать токен раньше срока: при отказе во входе один раз обновляем токен и повторяем.
+async fn retry_after_refresh<T, ReFut, Fut>(yandex: bool, first: Result<T, String>, refresh: impl FnOnce() -> ReFut, again: impl FnOnce(Login) -> Fut) -> Result<T, String>
+where
+    ReFut: std::future::Future<Output = Result<Login, String>>,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    if !yandex || !first.as_ref().is_err_and(|e| auth_failed(e)) {
+        return first;
     }
-    let login = login_of(app, &account, false).await?;
-    let folder = if trigger.folder.is_empty() { "INBOX".to_string() } else { trigger.folder.clone() };
-    let result: Result<(u32, Batch), String> = tokio::time::timeout(TRIGGER_TIMEOUT, async {
-        let mut imap = imap_session(&account, &login).await?;
-        let (validity, _) = imap.examine(&folder).await?;
+    again(refresh().await?).await
+}
+
+/// Один проход по папке триггера: письма после `last_uid`.
+async fn trigger_pass(account: &Account, login: &Login, folder: &str, trigger: &Trigger) -> Result<(u32, Batch), String> {
+    tokio::time::timeout(TRIGGER_TIMEOUT, async {
+        let mut imap = imap_session(account, login).await?;
+        let (validity, _) = imap.examine(folder).await?;
         if validity != trigger.uid_validity || trigger.uid_validity == 0 {
             // Папку пересоздали (или триггер новый): старые номера ничего не значат, начинаем с текущего письма.
             let last = imap.uid_search(&[Part::Text("UID *".into())]).await?.into_iter().max().unwrap_or(0);
@@ -1179,10 +1185,25 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
         Ok((validity, batch))
     })
     .await
-    .unwrap_or_else(|_| Err("почтовый сервер не ответил вовремя".into()));
+    .unwrap_or_else(|_| Err("почтовый сервер не ответил вовремя".into()))
+}
+
+/// Проверить ящик для рутины. Без новых подходящих писем — `Nothing`; просмотренные неподходящие запоминаются сразу.
+pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trigger: &Trigger) -> Result<Check, String> {
+    let account = app.mail.account(&trigger.account_id).ok_or("ящик триггера удалён")?;
+    if !account.open_to(&routine.bot_id) {
+        return Err(format!("бот рутины не допущен к ящику {}", account.address));
+    }
+    let login = login_of(app, &account, false).await?;
+    let folder = if trigger.folder.is_empty() { "INBOX".to_string() } else { trigger.folder.clone() };
+    let first = trigger_pass(&account, &login, &folder, trigger).await;
+    let (acc, fol) = (&account, folder.as_str());
+    let result = retry_after_refresh(account.auth == AUTH_YANDEX, first, || login_of(app, acc, true), |login| async move { trigger_pass(acc, &login, fol, trigger).await }).await;
     let (validity, Batch { fetched, skipped, gave_up, last, retry, error }) = match result {
         Ok(v) => v,
         Err(e) => {
+            // Токен Яндекса не помог и после обновления: человеку нужно войти заново.
+            let e = if account.auth == AUTH_YANDEX && auth_failed(&e) { friendly(e, true) } else { e };
             app.mail.update_trigger(&routine.id, |t| {
                 t.last_check = now();
                 t.last_error = e.clone();
@@ -2057,5 +2078,24 @@ mod batch_tests {
         let other = sign_in_account(&app, "other@yandex.ru".into(), &json!({})).ok().unwrap();
         assert_ne!(other.id, first.id, "другой адрес — другой ящик");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_trigger_refreshes_a_yandex_token_once_after_a_refusal() {
+        let refused = || Err::<u32, String>("IMAP отказал: NO [AUTHENTICATIONFAILED] Invalid credentials".into());
+        let login = || async { Ok(Login { user: "me@yandex.ru".into(), password: "fresh".into(), oauth: true }) };
+        let refreshes = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async { refreshes.fetch_add(1, std::sync::atomic::Ordering::SeqCst); login().await };
+        // Отказ, обновление, второй проход удался.
+        assert_eq!(retry_after_refresh(true, refused(), counted, |l| async move { assert_eq!(l.password, "fresh"); Ok(7) }).await, Ok(7));
+        assert_eq!(refreshes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // Отказ и после обновления: повтора нет, ошибка остаётся отказом (check_trigger скажет «войдите заново»).
+        let again = retry_after_refresh(true, refused(), counted, |_| async { refused() }).await;
+        assert!(again.as_ref().is_err_and(|e| auth_failed(e)) && friendly(again.unwrap_err(), true).contains("Войдите через Яндекс заново"));
+        assert_eq!(refreshes.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // Ящик с паролем и сетевая ошибка токен не трогают.
+        assert!(retry_after_refresh(false, refused(), counted, |_| async { Ok(1) }).await.is_err());
+        assert!(retry_after_refresh(true, Err("нет связи с сервером".into()), counted, |_| async { Ok(1) }).await.is_err());
+        assert_eq!(refreshes.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }
