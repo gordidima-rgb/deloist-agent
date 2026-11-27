@@ -12,7 +12,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::schedule::Schedule;
+use crate::schedule::{Schedule, Timing};
 use crate::store::now;
 use crate::workflow_run::{self as run, RunError};
 use crate::workflows::{self as wf, Graph, Stored};
@@ -23,7 +23,7 @@ type Shared = State<Arc<App>>;
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/workflows", get(list).post(create))
-        .route("/api/workflows/simple", post(create_simple))
+        .route("/api/workflows/simple", post(create_from_phrase))
         .route("/api/workflows/{id}", get(read).patch(rename).delete(remove))
         .route("/api/workflows/{id}/graph", put(save_graph))
         .route("/api/workflows/{id}/duplicate", post(duplicate))
@@ -121,8 +121,9 @@ fn summary_with_card(s: &Stored) -> Value {
     item
 }
 
-/// «Каждый понедельник собери отчёт»: процесс «триггер → бот» из одной фразы и бота. Срок и повтор читает тот же разбор, что у напоминаний.
-async fn create_simple(State(app): Shared, bytes: Bytes) -> Response {
+/// «Каждый понедельник собери отчёт»: процесс «триггер → бот» из одной фразы и бота. Срок и повтор читает тот же разбор, что у напоминаний;
+/// дальше процесс заводится тем же путём, что и из формы.
+async fn create_from_phrase(State(app): Shared, bytes: Bytes) -> Response {
     let body = match body_of(&bytes) {
         Ok(b) => b,
         Err(r) => return r,
@@ -147,12 +148,11 @@ async fn create_simple(State(app): Shared, bytes: Bytes) -> Response {
     } else {
         return reply(StatusCode::BAD_REQUEST, json!({ "error": "не понял, когда запускать: напишите, например, «каждый понедельник в 9:00 собери отчёт»", "code": "no_when" }));
     };
-    if let Err(e) = schedule.validate() {
-        return fail(StatusCode::BAD_REQUEST, &e);
-    }
-    let title: String = parsed.title.chars().take(80).collect();
-    let graph = wf::two_step_graph(schedule, bot_id, &parsed.title);
-    reply(StatusCode::OK, json!({ "workflow": run::create_workflow(&app, &title, graph) }))
+    let mut input = serde_json::to_value(Timing::of(&schedule)).unwrap_or_default();
+    input["botId"] = json!(bot_id);
+    input["title"] = json!(parsed.title);
+    input["prompt"] = json!(parsed.title);
+    create_simple(&app, &input)
 }
 
 async fn create(State(app): Shared, bytes: Bytes) -> Response {
@@ -268,9 +268,9 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
     let enabled = body.get("enabled").and_then(Value::as_bool);
     let quiet = body.get("quiet").and_then(Value::as_bool);
     // «Продолжить» после паузы из-за ошибок подряд: серия сбрасывается, расписание идёт дальше.
-    let resume = body.get("error_paused").and_then(Value::as_bool) == Some(false);
+    let resume = body.get("errorPaused").and_then(Value::as_bool) == Some(false);
     if title.is_none() && enabled.is_none() && quiet.is_none() && !resume {
-        return fail(StatusCode::BAD_REQUEST, "нужно название, enabled, quiet или error_paused");
+        return fail(StatusCode::BAD_REQUEST, "нужно название, enabled, quiet или errorPaused");
     }
     let view = {
         let mut guard = app.workflows.lock();

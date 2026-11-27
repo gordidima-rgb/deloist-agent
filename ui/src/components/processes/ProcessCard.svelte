@@ -13,9 +13,10 @@
 
   /**
    * item — строка списка `GET /api/workflows` (id, title, enabled, last_run, failures, stop_reason, error_paused, updated_at, card);
-   * bots [{id,name}]. Действия: onrun(id), onquiet(id, value), ontoggle(id, value), onresume(id), ondelete(id), onopen(id) — холст.
+   * bots [{id,name}]. wait — запуск на паузе из-за лимита (`GET /api/needs`: id, until, reason) или пусто.
+   * Действия: onrun(id), onquiet(id, value), ontoggle(id, value), onresume(id), onresumenow(runId), ondelete(id), onopen(id) — холст.
    */
-  let { item, bots = [], api = realApi, onrun, onquiet, ontoggle, onresume, ondelete, onopen } = $props();
+  let { item, bots = [], api = realApi, onrun, onquiet, ontoggle, onresume, wait = null, onresumenow, ondelete, onopen } = $props();
 
   const card = $derived(item.card ?? {});
   const text = $derived(card.task || '');
@@ -29,6 +30,9 @@
   const reasons = { network: tr('сеть'), login: tr('нужен вход'), check: tr('проверка не прошла'), stuck: tr('застрял') };
   const why = $derived(reasons[item.stop_reason] || '');
   const pauseText = $derived(tr('на паузе: серия ошибок ({n}) — {why}', { n: item.failures || 3, why: why || tr('ошибка') }));
+
+  const waitReasons = { limit: tr('лимит'), budget: tr('предел токенов'), event: tr('ждёт события'), network: tr('сеть') };
+  const waitText = $derived(wait ? tr('на паузе до {time} ({why})', { time: nextRunText(wait.until), why: waitReasons[wait.reason] || '' }) : '');
 
   let open = $state(false);
   let confirming = $state(false);
@@ -114,6 +118,10 @@
       <Tag tone={lastBad ? 'danger' : 'neutral'} title={`${tr('Последний запуск {time}', { time: whenText(toMs(last.at)) })}: ${statusLabel(last.status)}${why && lastBad ? ` (${why})` : ''}`}>
         <Icon name={lastBad ? 'alert-circle' : 'check-long'} size={13} />{agoText(last.at)}
       </Tag>
+    {/if}
+    {#if wait}
+      <Tag tone="accent" title={waitText}><Icon name="clock" size={13} />{waitText}</Tag>
+      <Button class="pc-resume-now" size="sm" variant="ghost" onclick={() => onresumenow?.(wait.id)}>{tr('Продолжить сейчас')}</Button>
     {/if}
     {#if item.error_paused}
       <Tag tone="danger" title={pauseText}><Icon name="alert-circle" size={13} />{pauseText}</Tag>

@@ -89,15 +89,16 @@ results — all in one window, with no switching between services.
 
 </details>
 
-## Routines: repeating tasks run by themselves
+## Tasks & workflows: repeating work runs by itself
 
 Describe a task once and say when to do it. The bots start on schedule, split the work between them and come to
-you only for permission. The same Routines hold your personal tasks, reminders and habits: dates, times and
+you only for permission. Every workflow has a short card (when, which bot, what it does, last run) that opens into the
+chain of steps and onto the canvas. The same section holds your personal tasks, reminders and habits: dates, times and
 repeats in a phrase are parsed by the app itself, at no model cost.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/routines-en-dark.webp">
-  <img src="docs/images/routines-en-light.webp" alt="A routine: every Monday four bots prepare a weekly report and ask before posting it">
+  <img src="docs/images/routines-en-light.webp" alt="A workflow: every Monday four bots prepare a weekly report and ask before posting it">
 </picture>
 
 ## It asks before it acts

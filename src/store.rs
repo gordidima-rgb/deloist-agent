@@ -4347,7 +4347,7 @@ mod tests {
         for id in ["rt_a", "rt_b", "rt_c", "rt_d"] {
             let workflows = store.workflows.lock();
             let stored = workflows.get(id).unwrap_or_else(|| panic!("{id}: процесса нет"));
-            assert!(stored.wf.from_routine && stored.wf.enabled, "{id}");
+            assert!(stored.wf.simple && stored.wf.enabled, "{id}");
             assert_eq!(stored.slots["t1"].next, Some(at), "{id}: срок тот же, второго запуска при переезде нет");
             assert!(dir.join("workflows").join(format!("{id}.json")).is_file(), "{id}: файл записан");
         }

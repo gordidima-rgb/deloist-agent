@@ -171,7 +171,7 @@ mod tests {
             json!({ "enabled": false, "quiet": false, "goalId": "g1", "approvalFloor": "ask", "check": "echo 1", "catchUp": "skip", "failures": 4, "errorPaused": true, "stopReason": "login", "lastStatus": "failed", "lastRun": 77, "progressNote": "заметка", "everyMinutes": 60 }),
         );
         let stored = to_stored(&value).unwrap();
-        assert!(!stored.wf.enabled && stored.wf.error_paused && stored.wf.failures == 4 && stored.wf.from_routine);
+        assert!(!stored.wf.enabled && stored.wf.error_paused && stored.wf.failures == 4 && stored.wf.simple);
         assert_eq!(stored.wf.notes[BOT], "заметка");
         let bot = stored.wf.graph.node(BOT).unwrap();
         assert_eq!((bot.text("quiet").as_str(), bot.text("goal_id").as_str(), bot.text("approval_floor").as_str(), bot.text("check").as_str()), ("false", "g1", "ask", "echo 1"));

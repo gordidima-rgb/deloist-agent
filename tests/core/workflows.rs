@@ -1286,7 +1286,7 @@ async fn a_phrase_makes_a_trigger_bot_process_with_a_card_and_quiet_and_resume_f
     assert_eq!(card["quiet"], true);
     assert!(card["next_run"].as_i64().unwrap() > 0, "срок виден в списке: {card}");
 
-    let patched = crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "quiet": false, "error_paused": false }))).await;
+    let patched = crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "quiet": false, "errorPaused": false }))).await;
     assert_eq!(patched["workflow"]["graph"]["nodes"][1]["fields"]["quiet"], "false");
     assert_eq!(patched["workflow"]["revision"], 2, "правка узла поднимает ревизию: холст увидит конфликт");
 }

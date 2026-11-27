@@ -41,15 +41,10 @@
             <button type="button" class="side-nav side-sub" data-catalog="apps">Приложения</button>
           </div>
           <button type="button" class="k-btn k-btn--ghost side-link" id="btn-catalog" title="Каталог" aria-expanded="false" aria-controls="catalog-nav"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="apps-add"></svg>Каталог</button>
-          <button class="k-btn k-btn--ghost side-link" id="btn-workflows" title="Рабочие процессы">
+          <button class="k-btn k-btn--ghost side-link" id="btn-workflows" title="Задачи и процессы">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="workflow"></svg>
-            Рабочие процессы
+            Задачи и процессы
             <span class="badge" id="workflows-dot" hidden></span>
-          </button>
-          <button class="k-btn k-btn--ghost side-link" id="btn-routines" title="Задачи и автоматизация">
-            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="clock"></svg>
-            Задачи и автоматизация
-            <span class="badge" id="routines-dot" hidden></span>
           </button>
           <button class="k-btn k-btn--ghost side-link" id="btn-report" title="Отчёт">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="chart-bars"></svg>
@@ -1009,108 +1004,6 @@
         <div id="report-host"></div>
         <div class="modal-actions">
           <button type="button" class="k-btn k-btn--ghost" id="report-close">Закрыть</button>
-        </div>
-      </div>
-    </dialog>
-
-    <dialog id="modal-routines" class="modal kit-dialog kit-form kit-sheet" aria-labelledby="rt-title">
-      <div class="modal-inner sheet">
-        <div class="sheet-head">
-          <h3 id="rt-title" tabindex="-1" autofocus>Задачи и автоматизация</h3>
-          <button type="button" class="icon-btn" data-close title="Закрыть" aria-label="Закрыть"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="close"></svg></button>
-        </div>
-        <div id="rt-tabs" class="rt-tabs"></div>
-        <div class="sheet-body">
-        <div id="rt-pane-routines" role="tabpanel">
-        <div id="routines-list" class="routines-list"></div>
-        <details class="group" id="rt-new">
-          <summary><svg class="i t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="chevron-right"></svg>Новая рутина</summary>
-          <div class="group-body">
-            <form id="form-routine" class="routine-form">
-              <div class="row">
-                <label class="field">
-                  <span>Бот</span>
-                  <select name="botId" id="routine-bot"></select>
-                </label>
-              </div>
-              <div id="rt-schedule"></div>
-              <div class="row" id="rt-every-box">
-                <label class="field small">
-                  <span>Каждые, мин</span>
-                  <input name="everyMinutes" type="number" min="5" value="60" class="k-input" />
-                </label>
-                <label class="field small" title="Случайный срок между двумя числами, чтобы запуски не шли ровной сеткой">
-                  <span>До, мин (случайно)</span>
-                  <input name="everyMaxMinutes" type="number" min="0" placeholder="—" class="k-input" />
-                </label>
-                <label class="field small">
-                  <span>Cron</span>
-                  <input name="cron" type="text" placeholder="" class="k-input" />
-                </label>
-                <label class="field small">
-                  <span>Часовой пояс</span>
-                  <input name="tz" type="text" placeholder="Europe/Moscow" class="k-input" />
-                </label>
-                <label class="field small">
-                  <span>Работать только с</span>
-                  <input name="windowFrom" type="time" class="k-input" />
-                </label>
-                <label class="field small">
-                  <span>до</span>
-                  <input name="windowTo" type="time" class="k-input" />
-                </label>
-                <button type="button" class="k-btn k-btn--ghost" id="rt-night">Ночью</button>
-              </div>
-              <label class="field">
-                <span>Если пропущен запуск</span>
-                <select name="catchUp">
-                  <option value="last">Выполнить последний</option>
-                  <option value="skip">Пропустить</option>
-                </select>
-              </label>
-              <div class="field" id="rt-days-box">
-                <span>Дни (ни одного значит каждый день)</span>
-                <div class="days" id="rt-days">
-                  <button type="button" class="day-btn" data-day="1" aria-pressed="false">Пн</button>
-                  <button type="button" class="day-btn" data-day="2" aria-pressed="false">Вт</button>
-                  <button type="button" class="day-btn" data-day="3" aria-pressed="false">Ср</button>
-                  <button type="button" class="day-btn" data-day="4" aria-pressed="false">Чт</button>
-                  <button type="button" class="day-btn" data-day="5" aria-pressed="false">Пт</button>
-                  <button type="button" class="day-btn" data-day="6" aria-pressed="false">Сб</button>
-                  <button type="button" class="day-btn" data-day="7" aria-pressed="false">Вс</button>
-                </div>
-              </div>
-              <label class="field">
-                <span>Название</span>
-                <input name="title" placeholder="Утренняя сводка" required />
-              </label>
-              <label class="field">
-                <span>Что делать</span>
-                <textarea name="prompt" rows="3" placeholder="Собери три темы дня и запиши их в файл digest.md"></textarea>
-              </label>
-              <label class="field">
-                <span>Проверка перед ходом (команда)</span>
-                <input name="check" class="k-input" placeholder="код 0 — будить бота, вывод уйдёт ему; код 1 — нового нет, модель не вызывается" />
-              </label>
-              <label class="k-check"><input class="k-check__input" type="checkbox" name="quiet" checked /><span class="k-check__box" aria-hidden="true"></span><span class="k-check__label">Писать, только если есть что сказать</span></label>
-              <div class="modal-actions">
-                <button type="submit" class="k-btn k-btn--primary">Добавить</button>
-              </div>
-            </form>
-          </div>
-        </details>
-        </div>
-        <div id="rt-pane-journal" role="tabpanel" hidden>
-        <p class="note" id="journal-usage"></p>
-        <div id="journal-list" class="journal-list"></div>
-        </div>
-        <div id="rt-pane-reminders" role="tabpanel" hidden></div>
-        <div id="rt-pane-todos" role="tabpanel" hidden></div>
-        <div id="rt-pane-habits" role="tabpanel" hidden></div>
-        </div>
-        <div class="modal-actions sheet-foot">
-          <a class="k-btn k-btn--ghost" id="rt-ics" href="/api/tasks.ics" download="deloist-tasks.ics">Скачать для календаря (.ics)</a>
-          <span class="note">Файл для Google, Outlook или Apple Календаря: рутины появятся в нём повторяющимися событиями. Это снимок на сегодня, сам он не обновляется.</span>
         </div>
       </div>
     </dialog>

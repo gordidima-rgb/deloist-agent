@@ -1307,7 +1307,7 @@ function stepDurNode(ms) {
   return el;
 }
 
-// Рутина или задача, которую завёл бот: под строкой шага показываем карточку, как в окне «Задачи и автоматизация».
+// Рутина или задача, которую завёл бот: под строкой шага показываем карточку, как в разделе «Задачи и процессы».
 const madeKind = (call) => ({ create_routine: 'routine', add_todo: 'todo' })[CrewToolLabels.plainName(call.name)] || '';
 
 function madeRoutine(args, result) {
@@ -1361,7 +1361,7 @@ function madeCard(kind, args, result) {
     </div>
     ${gist ? `<div class="rt-gist">${escapeHtml(gist)}</div>` : ''}
     ${chips ? `<div class="rt-chips">${chips}</div>` : ''}`;
-  $('.made-open', card).addEventListener('click', () => openRoutines(kind === 'routine' ? 'routines' : 'todos'));
+  $('.made-open', card).addEventListener('click', () => showTasks({ tab: kind === 'routine' ? 'processes' : 'todos' }));
   return card;
 }
 
@@ -4506,8 +4506,6 @@ function handleEvent(ev) {
       refreshState().then(() => {
         markPets();
         markDock();
-        // Бот мог поменять рутины из чата: открытый список и экран команды не должны показывать старое.
-        if (routinesOpen()) renderRoutines();
         scheduleTeam();
         refreshCatalog();
         refreshWorkflowBots();
@@ -5078,7 +5076,6 @@ function teamImportCard(request) {
       if (action === 'approve') {
         await refreshState();
         renderSkills();
-        renderRoutines();
         const imported = done.imported || {};
         toast(tr('Добавлено. Ботов: {bots}, навыков: {skills}, команд: {rooms}, рутин: {routines} (выключены).', { bots: imported.bots || 0, skills: imported.skills || 0, rooms: imported.rooms || 0, routines: imported.routines || 0 }), 6000);
       }
@@ -5174,6 +5171,7 @@ async function refreshState() {
     S.mcp = data.mcp || [];
     S.routines = data.processes;
     S.reminders = data.reminders;
+    S.workflowsUi?.update({ reminders: S.reminders });
     S.goals = data.goals || [];
     S.checkins = data.checkins || [];
     S.settings = data.settings;
@@ -6606,23 +6604,16 @@ function renderDrawer() {
   }
 }
 
-// Вкладка «Рутины»: что этот бот делает сам по расписанию. Те же карточки, что в окне «Рутины» (RoutinesPane);
-// новая — той же формой, где бот уже выбран. Боту можно и сказать в чате — рутина появится здесь.
+// Вкладка «Рутины»: процессы этого бота, те же карточки, что в разделе «Задачи и процессы». Новый — фразой, бот уже выбран.
+// Боту можно и сказать в чате — процесс появится здесь.
 function renderDrawerRoutines(bot, body) {
-  const mine = ordinaryRoutines().filter((r) => r.botId === bot.id);
-  tabView = window.DeloistUI.mountRoutinesPane(body, {
-    ...routinePaneProps(mine),
-    lead: mine.length ? tr('Что {name} делает сам по расписанию.', { name: bot.name }) : '',
-    empty: tr('Рутин пока нет. Добавь здесь или скажи боту в чате, например: «каждое утро в 9 собирай новости».'),
-    onnew: () => openRoutineFormFor(bot.id),
+  tabView = window.DeloistUI.mountProcessList(body, {
+    api,
+    bots: workflowBots(),
+    botId: bot.id,
+    lead: tr('Что {name} делает сам по расписанию.', { name: bot.name }),
+    onopen: (id) => showTasks({ tab: 'processes', canvas: id }),
   });
-}
-
-function openRoutineFormFor(botId) {
-  openRoutines('routines');
-  $('#rt-new').open = true;
-  $('#routine-bot').value = botId;
-  $('#form-routine').title.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -7385,7 +7376,6 @@ async function importTeam(file) {
     await refreshState();
     renderSkills();
     renderMcp();
-    renderRoutines();
     $('#team-note').textContent = tr('Добавлено. Ботов: {bots}, навыков: {skills}, команд: {rooms}, рутин: {routines} (выключены).', { bots: imported.bots, skills: imported.skills, rooms: imported.rooms, routines: imported.routines });
     toast(tr('Команда загружена'));
   } catch (err) {
@@ -8351,21 +8341,11 @@ const STATUS_LABELS = {
 };
 // Почему запуск остановился: слово рядом со статусом в истории и в строке рутины (приходит с сервера как `reason`).
 const REASON_LABELS = { network: tr('сеть'), login: tr('нужен вход'), check: tr('проверка не прошла'), stuck: tr('застрял') };
-const statusText = (e) => [STATUS_LABELS[e.status], REASON_LABELS[e.reason]].filter(Boolean).join(': ');
 // «на паузе: 3 ошибки подряд — нужен вход»: рутину остановила серия «вечных» ошибок, ждёт «Возобновить».
 const errorPauseText = (r) => {
   const n = Number(r.failures) || 3;
   return tr('на паузе: {errors} подряд — {why}', { errors: `${n} ${plural(n, 'ошибка', 'ошибки', 'ошибок')}`, why: REASON_LABELS[r.stopReason] || tr('ошибка') });
 };
-async function resumeRoutineErrors(id) {
-  try {
-    const res = await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: { errorPaused: false } });
-    const r = S.routines.find((x) => x.id === id);
-    if (r) Object.assign(r, { errorPaused: false, failures: 0, stopReason: undefined }, res?.process || {});
-  } catch (err) {
-    toast(err.message);
-  }
-}
 // Чип прошлого запуска с тревожным значком: рутина не дошла до «готово».
 const BAD_STATUSES = ['failed', 'error', 'limit', 'needs'];
 const statusClass = (status) => (STATUS_LABELS[status] ? `st-${status}` : '');
@@ -8410,20 +8390,6 @@ function whenText(ts) {
   return `${d.toLocaleDateString(window.LOCALE, { day: 'numeric', month: 'short' })} ${timeOf(n)}`;
 }
 
-async function runRoutine(id) {
-  try {
-    await api(`/api/workflows/${encodeURIComponent(id)}/run`, { method: 'POST' });
-    toast(tr('Запустил, смотри в чате бота'));
-  } catch (err) {
-    toast(err.message);
-  }
-}
-
-const routinesOpen = () => $('#modal-routines').open;
-
-// Напоминания живут на своей вкладке и в своём списке (`S.reminders`): у них нет бота и задания.
-const ordinaryRoutines = () => S.routines;
-
 // Название-суть и чипы рутины (бот, расписание, следующий и прошлый запуск): один вид и в списке рутин, и карточкой в чате.
 function routineParts(r) {
   const bot = botById(r.botId);
@@ -8447,191 +8413,9 @@ function routineParts(r) {
   return { gist, chips };
 }
 
-// Модель карточки рутины для RoutinesPane (кит «Угли»): строки и даты считает app.js, карточка только рисует.
-function routineCardModel(r) {
-  const bot = botById(r.botId);
-  const next = r.hook ? tr('вебхук') : r.enabled ? nextText(r.nextRun) : '';
-  const last = STATUS_LABELS[r.lastStatus];
-  const wait = needsItems.find((item) => item.paused && item.routineId === r.id);
-  return {
-    id: r.id,
-    paused: wait ? { id: wait.id, label: pauseLabel(wait) } : null,
-    title: r.title,
-    gist: String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 140),
-    prompt: String(r.prompt || '').trim(),
-    enabled: Boolean(r.enabled),
-    quiet: Boolean(r.quiet),
-    bot: { name: bot?.name || '' },
-    schedule: scheduleText(r),
-    next,
-    nextIcon: r.hook ? 'link' : 'clock',
-    nextTitle: r.hook ? tr('по вебхуку') : tr('Следующий запуск: {time}', { time: next }),
-    last: r.lastRun ? whenText(r.lastRun) : '',
-    lastTitle: r.lastRun ? `${tr('Последний запуск {time}', { time: whenText(r.lastRun) })}${last ? `: ${last}` : ''}${REASON_LABELS[r.stopReason] ? ` (${REASON_LABELS[r.stopReason]})` : ''}` : '',
-    lastBad: BAD_STATUSES.includes(r.lastStatus),
-    errorPaused: r.errorPaused ? { label: errorPauseText(r) } : null,
-  };
-}
-
-let routinesPane = null;
-// Свойства списка карточек: общие для окна «Рутины» и вкладки панели бота.
-function routinePaneProps(list) {
-  // Рутины поменялись здесь — вкладка панели бота показывает те же.
-  const both = () => {
-    renderRoutines();
-    if (drawerShown() && S.tab === 'routines') renderDrawer();
-  };
-  const patch = async (id, body, apply) => {
-    const r = S.routines.find((x) => x.id === id);
-    if (!r) return;
-    try {
-      const res = await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body });
-      apply(r, res?.process);
-    } catch (err) {
-      toast(err.message);
-    }
-    both();
-  };
-  const props = {
-    routines: list.map(routineCardModel),
-    onrun: (id) => runRoutine(id),
-    onresume: async (runId) => {
-      await runAction(runId, 'resume');
-      renderRoutines();
-    },
-    onunpause: async (id) => {
-      await resumeRoutineErrors(id);
-      both();
-    },
-    onquiet: (id, value) => patch(id, { quiet: value }, (r, saved) => { r.quiet = saved ? saved.quiet : value; }),
-    ontoggle: (id, value) => patch(id, { enabled: value }, (r) => { r.enabled = value; }),
-    ondelete: async (id) => {
-      try {
-        await api(`/api/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        S.routines = S.routines.filter((x) => x.id !== id);
-      } catch (err) {
-        toast(err.message);
-      }
-      both();
-    },
-  };
-  return props;
-}
-
-function renderRoutines() {
-  const props = {
-    ...routinePaneProps(ordinaryRoutines()),
-    onnew: () => {
-      const form = $('#rt-new');
-      form.open = !form.open;
-      if (form.open) form.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    },
-  };
-  if (routinesPane) routinesPane.update(props);
-  else routinesPane = window.DeloistUI.mountRoutinesPane($('#routines-list'), props);
-  syncRoutineTabs();
-}
-
-// ---------------------------------------------------------------------------
-// Журнал ночной смены
-// ---------------------------------------------------------------------------
-
 const numberRu = (n) => Number(n || 0).toLocaleString(window.LOCALE);
 
-function renderJournal() {
-  const { entries, usage, limit } = S.journal;
-  const usageEl = $('#journal-usage');
-  if (usage) {
-    const spent = `${usage.estimated ? tr('примерно ') : ''}${numberRu(usage.tokens)}`;
-    const cache = Number(usage.cacheRate) > 0 ? ` · ${tr('из кэша {n}%', { n: numberRu(usage.cacheRate) })}` : '';
-    const total = Number(limit) > 0
-      ? tr('Сегодня потрачено {spent} токенов из {limit}', { spent, limit: numberRu(limit) })
-      : tr('Сегодня потрачено {spent} токенов', { spent });
-    usageEl.textContent = `${total}${cache}`;
-  } else {
-    usageEl.textContent = '';
-  }
-
-  const list = $('#journal-list');
-  list.innerHTML = '';
-  if (!entries.length) {
-    list.innerHTML = `<p class="note">${tr('Пока тихо. Здесь появится всё, что боты сделали без тебя.')}</p>`;
-    return;
-  }
-
-  // Тихие проверки не карточки, а одна строка: иначе они вытеснят важное.
-  const quiet = entries.filter((e) => e.status === 'quiet');
-  const important = entries.filter((e) => e.status !== 'quiet');
-  if (quiet.length) {
-    const box = document.createElement('div');
-    box.className = 'jr-quiet';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'jr-quiet-summary';
-    btn.setAttribute('aria-expanded', String(S.journalQuietOpen));
-    const count = `${quiet.length} ${plural(quiet.length, 'тихая проверка', 'тихие проверки', 'тихих проверок')}`;
-    btn.textContent = important.length ? tr('Ещё {count}, сообщать нечего', { count }) : tr('{count}, сообщать нечего', { count });
-    btn.addEventListener('click', () => {
-      S.journalQuietOpen = !S.journalQuietOpen;
-      renderJournal();
-    });
-    box.append(btn);
-    if (S.journalQuietOpen) {
-      const rows = document.createElement('div');
-      rows.className = 'jr-quiet-list';
-      for (const e of quiet) {
-        const row = document.createElement('div');
-        row.className = 'jr-quiet-row';
-        const when = document.createElement('span');
-        when.className = 'jr-when';
-        when.textContent = whenText(e.at);
-        const bot = document.createElement('span');
-        bot.className = 'jr-bot';
-        bot.textContent = e.botName || '';
-        const title = document.createElement('span');
-        title.className = 'jr-title';
-        title.textContent = trServer(e.title || '');
-        row.append(when, bot, title);
-        rows.append(row);
-      }
-      box.append(rows);
-    }
-    list.append(box);
-  }
-  if (!important.length) return;
-
-  for (const e of important.slice(0, 30)) {
-    const el = document.createElement('div');
-    el.className = 'jr';
-    const missed = Array.isArray(e.missed) ? e.missed : [];
-    const canRerun = missed.length && S.routines.some((r) => r.id === e.routineId);
-    el.innerHTML = `
-      <div class="jr-head">
-        <span class="jr-when">${escapeHtml(whenText(e.at))}</span>
-        <span class="jr-bot">${escapeHtml(e.botName)}</span>
-        <span class="jr-title">${escapeHtml(trServer(e.title))}</span>
-        <span class="jr-status ${statusClass(e.status)}">${escapeHtml(statusText(e))}</span>
-      </div>
-      ${e.text ? `<div class="jr-text">${escapeHtml(trServer(e.text))}</div>` : ''}
-      ${e.fallback ? `<div class="jr-fallback">${tr('на запасной: {name}', { name: escapeHtml(e.fallback) })}</div>` : ''}
-      ${Number(e.tokens) > 0 ? `<div class="jr-tokens">${numberRu(e.tokens)} ${plural(Number(e.tokens), 'токен', 'токена', 'токенов')}</div>` : ''}
-      ${
-        missed.length
-          ? `<div class="jr-missed"><b>${tr('Ждёт твоего решения:')}</b><ul>${missed.map((m) => `<li>${escapeHtml(m)}</li>`).join('')}</ul>${
-              canRerun ? `<button type="button" class="k-btn k-btn--ghost">${tr('Запустить снова')}</button>` : ''
-            }</div>`
-          : ''
-      }`;
-    $('.jr-missed .k-btn', el)?.addEventListener('click', () => runRoutine(e.routineId));
-    list.append(el);
-  }
-}
-
 const newJournalEntries = () => S.journal.entries.filter((e) => e.status !== 'quiet' && Number(e.at) > Number(S.journal.seenAt || 0));
-
-function updateRoutinesDot() {
-  $('#routines-dot').hidden = !newJournalEntries().length;
-}
 
 async function loadJournal() {
   try {
@@ -8642,7 +8426,6 @@ async function loadJournal() {
       usage: data.usage || null,
       limit: Number(data.limit) || 0,
     };
-    updateRoutinesDot();
     return true;
   } catch {
     return false;
@@ -8652,7 +8435,6 @@ async function loadJournal() {
 async function markJournalSeen() {
   const now = Date.now();
   S.journal.seenAt = now;
-  updateRoutinesDot();
   try {
     const { settings } = await api('/api/settings', { method: 'PUT', body: { journalSeenAt: now } });
     if (settings) S.settings = settings;
@@ -8661,110 +8443,15 @@ async function markJournalSeen() {
   }
 }
 
-// Правая панель «Задачи и автоматизация»: «Рутины» и «Журнал» рисует этот файл, «Задачи», «Напоминания» и «Привычки» — компоненты Svelte (ui/src/components/routines).
-let routineTab = 'routines';
-let routineTabsView = null;
-let remindersView = null;
-let habitsView = null;
-let todosView = null;
-let routinesCloseBound = false;
-
-function openTelegramFromRoutines() {
-  $('#modal-routines').close();
+function openTelegramSettings() {
   openSettings();
   openSettingsSub('telegram');
-}
-
-function reminderProps() {
-  return {
-    api,
-    routines: S.reminders,
-    onchanged: async () => {
-      await refreshState();
-      syncRoutineTabs();
-    },
-    onopentelegram: openTelegramFromRoutines,
-  };
-}
-
-// Список напоминаний приходит из общего состояния: после его обновления передаём свежий.
-function syncRoutineTabs() {
-  if (routineTab === 'reminders' && remindersView) remindersView.update({ routines: S.reminders });
-}
-
-function dropRoutineTabViews() {
-  remindersView?.destroy();
-  remindersView = null;
-  habitsView?.destroy();
-  habitsView = null;
-  todosView?.destroy();
-  todosView = null;
-}
-
-function setRoutineTab(id) {
-  const ui = window.DeloistUI;
-  routineTab = id;
-  $('#rt-pane-routines').hidden = id !== 'routines';
-  $('#rt-pane-journal').hidden = id !== 'journal';
-  $('#rt-pane-reminders').hidden = id !== 'reminders';
-  $('#rt-pane-todos').hidden = id !== 'todos';
-  $('#rt-pane-habits').hidden = id !== 'habits';
-  $('#rt-ics').closest('.sheet-foot').hidden = id !== 'routines';
-  dropRoutineTabViews();
-  if (id === 'reminders' && ui?.mountRemindersTab) remindersView = ui.mountRemindersTab($('#rt-pane-reminders'), reminderProps());
-  if (id === 'habits' && ui?.mountHabitsTab) habitsView = ui.mountHabitsTab($('#rt-pane-habits'), { api, onopentelegram: openTelegramFromRoutines });
-  if (id === 'todos' && ui?.mountTodosTab) todosView = ui.mountTodosTab($('#rt-pane-todos'), { api, onopentask: (id) => openTasks(id) });
-  routineTabsView?.update({ value: id });
-}
-
-function mountRoutineTabs() {
-  const ui = window.DeloistUI;
-  const host = $('#rt-tabs');
-  if (routineTabsView || !ui?.mountComponent || !host) return;
-  routineTabsView = ui.mountComponent(ui.Tabs, host, {
-    label: tr('Разделы'),
-    value: 'routines',
-    items: [
-      { id: 'routines', label: tr('Рутины'), panelId: 'rt-pane-routines' },
-      { id: 'journal', label: tr('Журнал'), panelId: 'rt-pane-journal' },
-      { id: 'todos', label: tr('Задачи'), panelId: 'rt-pane-todos' },
-      { id: 'reminders', label: tr('Напоминания'), panelId: 'rt-pane-reminders' },
-      { id: 'habits', label: tr('Привычки'), panelId: 'rt-pane-habits' },
-    ],
-    onchange: setRoutineTab,
-  });
-  const tabIcons = { routines: 'repeat', journal: 'list-bullets', todos: 'todo', reminders: 'bell', habits: 'flame' };
-  for (const tab of host.querySelectorAll('.k-tab[data-id]')) {
-    if (tabIcons[tab.dataset.id]) tab.insertAdjacentHTML('afterbegin', ic(tabIcons[tab.dataset.id]));
-  }
-}
-
-// Клик по кнопке отдаёт сюда событие, поэтому вкладка принимается только строкой.
-async function openRoutines(tab) {
-  fillRoutineBots();
-  renderRoutines();
-  renderJournal();
-  $('#rt-new').open = !ordinaryRoutines().length;
-  mountRoutineTabs();
-  if (!routinesCloseBound) {
-    routinesCloseBound = true;
-    $('#modal-routines').addEventListener('close', dropRoutineTabViews);
-  }
-  setRoutineTab(typeof tab === 'string' && ['routines', 'journal', 'todos', 'reminders', 'habits'].includes(tab) ? tab : 'routines');
-  openModal('modal-routines');
-  if (await loadJournal()) renderJournal();
-  markJournalSeen();
 }
 
 async function onJournalEvent() {
   await refreshState();
   await loadJournal();
   scheduleTeam();
-  if (routinesOpen()) {
-    renderRoutines();
-    renderJournal();
-    markJournalSeen();
-  }
 }
 
 // Что случилось, пока окно было закрыто, показывает экран команды: запоминаем один раз при запуске.
@@ -8968,7 +8655,7 @@ function leaveCatalog() {
 }
 
 // ---------------------------------------------------------------------------
-// Рабочие процессы: список и холст на Svelte Flow (ui/src/components/workflows)
+// Задачи и процессы: вкладки, карточки процессов и холст на Svelte Flow (ui/src/components/processes, workflows)
 // ---------------------------------------------------------------------------
 
 const workflowsOpen = () => !$('#workflows').hidden;
@@ -9010,6 +8697,10 @@ function workflowModels() {
 function workflowProps() {
   return {
     bots: workflowBots(),
+    reminders: S.reminders,
+    onremindersChanged: refreshState,
+    onopentask: (id) => openTasks(id),
+    onopentelegram: openTelegramSettings,
     models: workflowModels,
     onconnect: () => DeloistProviders.open(),
     onsettings: (sub) => {
@@ -9020,7 +8711,8 @@ function workflowProps() {
   };
 }
 
-function showWorkflows() {
+// Раздел «Задачи и процессы»; { tab, canvas } открывает вкладку или процесс на холсте.
+function showTasks(open = {}) {
   if (!workflowsOpen()) {
     clearChatView();
     hideCatalog();
@@ -9032,14 +8724,15 @@ function showWorkflows() {
   }
   S.wfApprovals?.clear();
   markWorkflowsDot();
-  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
+  const shown = { ...(open.tab ? { tab: open.tab } : {}), ...(open.canvas ? { canvas: open.canvas } : {}) };
+  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots(), ...shown });
   else {
     loadWorkflowsBundle()
       .then(() => {
-        if (!S.workflowsUi) S.workflowsUi = window.DeloistWorkflows.mount($('#workflows-root'), workflowProps());
+        if (!S.workflowsUi) S.workflowsUi = window.DeloistWorkflows.mount($('#workflows-root'), { ...workflowProps(), ...shown });
       })
       .catch(() => {
-        $('#workflows-root').textContent = tr('Рабочие процессы не загрузились: перезапусти приложение.');
+        $('#workflows-root').textContent = tr('Задачи и процессы не загрузились: перезапусти приложение.');
       });
   }
   renderSidebar();
@@ -9058,7 +8751,7 @@ function workflowApprovalEvent(ev) {
   if (workflowsOpen()) return;
   const what = ev.question || ev.title || '';
   window.DeloistUI?.toast?.(what ? tr('Процесс ждёт решения: {q}', { q: what }) : tr('Процесс ждёт вашего решения'), {
-    action: { label: tr('Открыть'), onclick: () => showWorkflows() },
+    action: { label: tr('Открыть'), onclick: () => showTasks({ tab: 'processes' }) },
     duration: 9000,
   });
 }
@@ -9078,7 +8771,7 @@ function leaveWorkflows() {
 }
 
 function refreshWorkflowBots() {
-  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots() });
+  if (S.workflowsUi) S.workflowsUi.update({ bots: workflowBots(), reminders: S.reminders });
 }
 
 // Состояние поменялось: открытый каталог перечитывает, что стоит у человека.
@@ -9125,7 +8818,7 @@ function teamSectionHead(title, action) {
     button.type = 'button';
     button.className = 'k-btn k-btn--ghost';
     button.textContent = action;
-    button.addEventListener('click', openRoutines);
+    button.addEventListener('click', () => showTasks());
     head.append(button);
   }
   return head;
@@ -9255,12 +8948,6 @@ function renderTeam() {
 
   body.replaceChildren(...parts);
   if (focused) $(`.team-member[data-id="${CSS.escape(focused)}"]`, body)?.focus();
-}
-
-function fillRoutineBots() {
-  const sel = $('#routine-bot');
-  sel.innerHTML = S.bots.map((b) => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
-  if (S.currentId) sel.value = S.currentId;
 }
 
 // ---------------------------------------------------------------------------
@@ -9435,7 +9122,6 @@ function bindUi() {
   $('#modal-settings').addEventListener('close', () => {
     $$('#form-settings details.group').forEach((group) => { group.open = false; });
   });
-  $('#btn-routines').addEventListener('click', openRoutines);
   $('#btn-usage').addEventListener('click', openUsage);
   $('#modal-usage').addEventListener('close', () => {
     usageView?.destroy();
@@ -9443,11 +9129,6 @@ function bindUi() {
   });
   bindSharedMemory();
   $('#btn-compact').addEventListener('click', compactCurrent);
-  bindRoutineForm();
-  // Рутины правили в окне «Рутины» — вкладка панели бота показывает то же.
-  $('#modal-routines').addEventListener('close', () => {
-    if (drawerShown() && S.tab === 'routines') renderDrawer();
-  });
   $('#btn-panel').addEventListener('click', () => {
     // У группы панель — это её настройки: профиля, памяти и файлов у неё нет.
     if (inRoom()) openRoomModal(currentRoom());
@@ -9460,7 +9141,7 @@ function bindUi() {
   $('#btn-catalog').addEventListener('click', () => showCatalog());
   $$('#catalog-nav [data-catalog]').forEach((b) => b.addEventListener('click', () => showCatalog(b.dataset.catalog)));
   $('#btn-catalog-menu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
-  $('#btn-workflows').addEventListener('click', showWorkflows);
+  $('#btn-workflows').addEventListener('click', () => showTasks());
   $$('#theme-switch [data-value]').forEach((btn) => btn.addEventListener('click', () => chooseTheme(btn.dataset.value)));
   $$('.theme-toggle').forEach((btn) => btn.addEventListener('click', toggleTheme));
   initSidebarCollapse();
@@ -9651,86 +9332,6 @@ function bindUi() {
       toast(settings.hasKey ? tr('Настройки сохранены, ключ на месте') : tr('Настройки сохранены'));
       if (before !== `${settings.driver}|${settings.model}`) offerOwnModels();
       if (S.currentId) selectBot(S.currentId);
-    } catch (err) {
-      toast(err.message);
-    }
-  });
-}
-
-function selectedDays() {
-  return $$('#rt-days .day-btn')
-    .filter((b) => b.getAttribute('aria-pressed') === 'true')
-    .map((b) => Number(b.dataset.day));
-}
-
-// Расписание новой рутины рисует Svelte (по времени / по интервалу / один раз); поля интервала и дни остаются в форме.
-let routineSchedule = { kind: 'at', at: '', date: '', startOn: '', recurrence: null };
-let routineScheduleView = null;
-
-function mountRoutineSchedule() {
-  routineScheduleView?.destroy();
-  routineScheduleView = window.DeloistUI.mountRoutineSchedule($('#rt-schedule'), {
-    onchange: (next) => {
-      routineSchedule = next;
-      syncRoutineMode();
-    },
-  });
-}
-
-function syncRoutineMode() {
-  const every = routineSchedule.kind === 'every';
-  $('#rt-every-box').hidden = !every;
-  $('#rt-days-box').hidden = !every;
-}
-
-function bindRoutineForm() {
-  mountRoutineSchedule();
-  $$('#rt-days .day-btn').forEach((b) =>
-    b.addEventListener('click', () => b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'))),
-  );
-  $('#rt-night').addEventListener('click', () => {
-    const f = $('#form-routine');
-    f.windowFrom.value = '22:00';
-    f.windowTo.value = '07:00';
-  });
-
-  $('#form-routine').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = e.target;
-    const problem = window.DeloistUI.routineSchedule.scheduleProblem(routineSchedule);
-    if (problem) {
-      toast(problem === 'past' ? tr('Выбери момент в будущем') : tr('Выбери время запуска'));
-      return;
-    }
-    const every = routineSchedule.kind === 'every';
-    const body = {
-      botId: f.botId.value,
-      title: f.title.value.trim(),
-      prompt: f.prompt.value.trim(),
-      check: f.check.value.trim(),
-      everyMinutes: Number(f.everyMinutes.value) || 60,
-      everyMaxMinutes: every ? Number(f.everyMaxMinutes.value) || 0 : 0,
-      cron: every ? f.cron.value.trim() : '',
-      tz: every ? f.tz.value.trim() : '',
-      days: every ? selectedDays() : [],
-      windowFrom: every ? f.windowFrom.value : '',
-      windowTo: every ? f.windowTo.value : '',
-      ...window.DeloistUI.routineSchedule.scheduleFields(routineSchedule),
-      catchUp: f.catchUp ? (f.catchUp.value || 'last') : 'last',
-      quiet: f.quiet.checked,
-    };
-    try {
-      const { process: routine } = await api('/api/workflows', { method: 'POST', body });
-      S.routines.push(routine);
-      if (drawerShown() && S.tab === 'routines') renderDrawer();
-      renderRoutines();
-      f.reset();
-      $$('#rt-days .day-btn').forEach((b) => b.setAttribute('aria-pressed', 'false'));
-      // Форма вернулась в обычный вид: расписание снова доступно.
-      mountRoutineSchedule();
-      syncRoutineMode();
-      fillRoutineBots();
-      toast(tr('Рутина добавлена'));
     } catch (err) {
       toast(err.message);
     }

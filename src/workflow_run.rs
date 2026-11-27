@@ -771,7 +771,7 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
         }
         let floor = stored.wf.approval_floor.clone();
         let revision = stored.wf.revision;
-        let routine = stored.wf.from_routine;
+        let routine = stored.wf.simple;
         // Человек сам запустил процесс: пауза расписания из-за ошибок подряд кончилась (серия идёт, пока запуск не удастся).
         if source == "manual" {
             if let Some(stored) = inner.get_mut(wf_id).filter(|s| s.wf.error_paused) {
@@ -1061,7 +1061,7 @@ pub async fn tick_schedule(app: &Arc<App>) {
                 let skip = stored.wf.graph.node(&node).is_some_and(|n| n.text("catch_up") == "skip");
                 let schedule = stored.wf.graph.node(&node).and_then(|n| n.schedule.clone());
                 let closed = schedule.as_ref().is_some_and(|s| !crate::schedule::open_now(s, at));
-                let routine = stored.wf.from_routine;
+                let routine = stored.wf.simple;
                 if routine && schedule.as_ref().is_some_and(|s| s.kind == "once") {
                     stored.wf.enabled = false;
                 }

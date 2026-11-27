@@ -83,7 +83,7 @@ pub(crate) fn build(spec: &Spec) -> Stored {
             graph,
             created_at: spec.created_at,
             updated_at: now(),
-            from_routine: true,
+            simple: true,
             ..Workflow::default()
         },
         slots: HashMap::new(),
@@ -109,7 +109,7 @@ impl Stored {
 
     /// Процесс «триггер → бот».
     pub fn is_simple(&self) -> bool {
-        self.wf.from_routine
+        self.wf.simple
     }
 
     /// Бот простого процесса; у остальных — первый шаг-бот графа.

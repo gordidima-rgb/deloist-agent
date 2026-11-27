@@ -2,6 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ProcessList from './ProcessList.svelte';
 
+// jsdom не умеет Element.animate, а переходы окна журнала на нём держатся.
+if (!Element.prototype.animate) {
+  Element.prototype.animate = function animate() {
+    const animation = { onfinish: null, oncancel: null, cancel() {}, finish() {}, addEventListener() {}, removeEventListener() {} };
+    queueMicrotask(() => animation.onfinish?.());
+    return animation;
+  };
+}
+
 let host;
 let instance;
 afterEach(() => {
@@ -63,7 +72,7 @@ describe('ProcessList', () => {
     host.querySelector('.pc-run').click();
     await flush();
     const bodies = api.mock.calls.filter((c) => c[1]?.method === 'PATCH').map((c) => c[1].body);
-    expect(bodies).toEqual([{ enabled: false }, { quiet: false }, { error_paused: false }]);
+    expect(bodies).toEqual([{ enabled: false }, { quiet: false }, { errorPaused: false }]);
     expect(calls).toContain('POST /api/workflows/w1/run');
   });
 
@@ -105,5 +114,42 @@ describe('ProcessList', () => {
     const post = api.mock.calls.find((c) => c[0] === '/api/workflows' && c[1]?.method === 'POST');
     expect(post[1].body.title).toBe('Новый процесс 2');
     expect(onopen).toHaveBeenCalledWith('w7');
+  });
+
+  it('offers "continue now" for a run paused on a limit and resumes it', async () => {
+    const until = Date.now() + 3600e3;
+    const { api, calls } = backend([row('w1', 'a'), row('w2', 'b')], {
+      'GET /api/needs': async () => ({ items: [{ kind: 'run', paused: true, id: 'run9', routineId: 'w1', reason: 'limit', until }] }),
+    });
+    await render({ api });
+    const cards = host.querySelectorAll('.pc');
+    expect(cards[0].textContent).toContain('на паузе до');
+    expect(cards[0].textContent).toContain('лимит');
+    expect(cards[1].textContent).not.toContain('на паузе до');
+    [...cards[0].querySelectorAll('button')].find((b) => b.textContent.includes('Продолжить сейчас')).click();
+    await flush();
+    expect(calls).toContain('POST /api/runs/run9/resume');
+  });
+
+  it('has the journal and the calendar download in the header, but not in a bot panel', async () => {
+    const { api } = backend([row('w1', 'a')], {
+      'GET /api/journal?limit=200': async () => ({ entries: [{ id: 'j1', at: Date.now(), botName: 'Аналитик', title: 'Отчёт', status: 'needs', text: 'нужен ответ', missed: ['Что делать?'], routineId: 'w1' }, { id: 'j2', at: Date.now(), botName: 'Аналитик', title: 'Проверка', status: 'quiet' }], usage: { tokens: 1200 }, limit: 5000 }),
+    });
+    await render({ api });
+    expect(host.querySelector('a[href="/api/tasks.ics"]')?.hasAttribute('download')).toBe(true);
+    button('Журнал').click();
+    await flush();
+    const text = document.body.textContent;
+    expect(text).toContain('Сегодня потрачено');
+    expect(text).toContain('Что делать?');
+    expect(text).toContain('Тихих проверок');
+    [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Запустить снова')).click();
+    await flush();
+    expect(api.mock.calls.some((c) => c[0] === '/api/workflows/w1/run')).toBe(true);
+    unmount(instance);
+    host.remove();
+    await render({ api, botId: 'a' });
+    expect(button('Журнал')).toBeUndefined();
+    expect(host.querySelector('a[href="/api/tasks.ics"]')).toBeNull();
   });
 });

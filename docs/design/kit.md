@@ -426,7 +426,7 @@
 | `VoiceTip` | `text`, `action?: {label, onclick}`, `duration = 4500` | всплывает у лотка, уходит сам или по действию | `.k-voice-tip` |
 | `StatusMark` | `state: 'done' \| 'quiet' \| 'fail' \| 'skip' \| 'next'`, `label` | — | `.k-mark--*` |
 | `MetaChip` | `icon: 'calendar' \| 'clock' \| 'coin' \| …`, `children` | — | `.k-meta` |
-| `RoutineCard` | `routine: {id, title, botColor, schedule, nextRun, enabled, last: {state, text, at}, runs: RunState[]}`, `onrun`, `ontoggle` | `enabled` (пауза бледнит), наведение (тень 2) | `.k-routine` и части, `.k-runs-strip` (`q`, `f`, `s`, `now`) |
+| `ProcessCard` | `item` (строка `GET /api/workflows` с `card`), `bots`, `onrun`, `onquiet`, `ontoggle`, `onresume`, `ondelete`, `onopen` | выключенный бледнеет, наведение — рамка бренда; «Показать цепочку» раскрывает шаги списком, «Открыть на холсте» зовёт `onopen` | `.pc` (`ui/src/components/processes`) |
 | `GoalCard` | `goal: {title, done, total, botColor, bot, daysLeft}`, `reports: {date, text, delta}[]` | новая точка подскакивает; больше 60 единиц — полоса вместо точек | `.k-goal`, `.k-dots`, `.k-report` |
 | `Process` + `Step` | `Process`: `title = 'Ход работы'`, `botColor`, `steps: Step[]`; `Step`: `{name, state: 'done' \| 'run' \| 'wait' \| 'fail' \| 'next', kind?: PixKind, note?, time?}`, сниппет `actions` для `wait` и `fail` | новый шаг проявляется из размытия, провод заливается до текущего шага, счётчик «n из N» | `.k-process`, `.k-steps`, `.k-step.is-*` |
 | `RunTimeline` | `days: {label, total, cost, runs: Run[]}[]`; `Run`: `{at, state, routine, bot, botColor, text, duration, cost}`, `onopen(run)` | наведение строки, сбой красит итог кораллом | `.k-timeline`, `.k-timeline__day`, `.k-run(.is-fail)` |

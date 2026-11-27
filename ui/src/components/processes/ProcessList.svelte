@@ -6,9 +6,10 @@
   import { api as realApi } from '../../lib/api.js';
   import { toast } from '../../lib/workflows/notify.js';
   import { starterGraph } from '../../lib/workflows/graph.js';
-  import { Button, EmptyState, Skeleton } from '../kit';
+  import { Button, EmptyState, Modal, Skeleton } from '../kit';
   import ProcessCard from './ProcessCard.svelte';
   import NewProcess from './NewProcess.svelte';
+  import ProcessJournal from './ProcessJournal.svelte';
 
   /** bots [{id,name}]; botId — показать процессы одного бота; onopen(id) открывает холст; lead — подпись над списком. */
   let { api = realApi, bots = [], botId = '', onopen, lead = '' } = $props();
@@ -17,6 +18,8 @@
   let items = $state.raw([]);
   let loading = $state(true);
   let adding = $state(false);
+  let journal = $state(false);
+  let paused = $state.raw({}); // процесс → запуск, который стоит на паузе из-за лимита (GET /api/needs)
 
   const shown = $derived(botId ? items.filter((i) => i.card?.bot_id === botId) : items);
   const fail = (err) => toast(trServer(err?.message || tr('Не получилось')));
@@ -29,6 +32,25 @@
     } finally {
       loading = false;
     }
+  }
+
+  async function loadPaused() {
+    try {
+      const found = ((await request('/api/needs')).items || []).filter((i) => i.paused && i.routineId);
+      paused = Object.fromEntries(found.map((i) => [i.routineId, i]));
+    } catch {
+      paused = {};
+    }
+  }
+
+  // «Продолжить сейчас»: запуск не ждёт срока паузы.
+  async function resumeNow(runId) {
+    try {
+      await request(`/api/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+    } catch (err) {
+      fail(err);
+    }
+    loadPaused();
   }
 
   // Карточка меняется сразу, а при отказе сервера возвращается как была.
@@ -46,7 +68,7 @@
 
   const toggle = (id, enabled) => change(id, (i) => ({ ...i, enabled }), { enabled });
   const quiet = (id, value) => change(id, (i) => ({ ...i, card: { ...i.card, quiet: value } }), { quiet: value });
-  const resume = (id) => change(id, (i) => ({ ...i, error_paused: false, failures: 0, stop_reason: null }), { error_paused: false });
+  const resume = (id) => change(id, (i) => ({ ...i, error_paused: false, failures: 0, stop_reason: null }), { errorPaused: false });
 
   async function run(id) {
     try {
@@ -97,20 +119,28 @@
   $effect(() => {
     const onEvent = (e) => {
       if (e.detail?.type === 'workflows') load();
+      if (['workflows', 'turn_start', 'turn_end', 'queue_updated'].includes(e.detail?.type)) loadPaused();
     };
     window.addEventListener('deloist:event', onEvent);
     untrack(load);
+    untrack(loadPaused);
     return () => window.removeEventListener('deloist:event', onEvent);
   });
 </script>
 
 <div class="pl">
   {#if lead}<p class="pl-lead">{lead}</p>{/if}
+  {#if !botId}
+    <div class="pl-bar">
+      <Button size="sm" variant="ghost" iconName="list-bullets" onclick={() => (journal = true)}>{tr('Журнал')}</Button>
+      <a class="k-btn k-btn--sm k-btn--ghost" href="/api/tasks.ics" download="deloist-tasks.ics">{tr('Скачать для календаря (.ics)')}</a>
+    </div>
+  {/if}
   {#if loading}
     <Skeleton height="72px" />
   {:else}
     {#each shown as item (item.id)}
-      <ProcessCard {item} {bots} {api} onrun={run} onquiet={quiet} ontoggle={toggle} onresume={resume} ondelete={remove} {onopen} />
+      <ProcessCard {item} {bots} {api} onrun={run} onquiet={quiet} ontoggle={toggle} onresume={resume} wait={paused[item.id]} onresumenow={resumeNow} ondelete={remove} {onopen} />
     {:else}
       <EmptyState title={tr('Процессов пока нет')} text={tr('Процесс запускает бота по расписанию или событию. Опишите его фразой, и бот начнёт работать сам.')} />
     {/each}
@@ -122,6 +152,10 @@
   {/if}
 </div>
 
+<Modal bind:open={journal} title={tr('Журнал')} size="lg">
+  <ProcessJournal {api} onrerun={run} />
+</Modal>
+
 <style>
   .pl {
     display: flex;
@@ -132,6 +166,11 @@
     margin: 0;
     font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
     color: var(--k-text-3);
+  }
+  .pl-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--k-space-2);
   }
   .pl :global(.pl-new) {
     align-self: flex-start;

@@ -701,7 +701,7 @@ pub fn is_simple(name: &str, args: &Value) -> bool {
 
 /// Запуск процесса «триггер → бот» (бывшая рутина) спрашивает так же, как его создание и правка. Запуск графа — всегда.
 fn is_simple_run(app: &App, name: &str, args: &Value) -> bool {
-    name == "run_workflow" && app.workflows.lock().get(text(args, "workflow_id")).is_some_and(|s| s.wf.from_routine)
+    name == "run_workflow" && app.workflows.lock().get(text(args, "workflow_id")).is_some_and(|s| s.wf.simple)
 }
 
 /// Спрашивает ли вызов по режиму бота (простая форма), а не всегда.

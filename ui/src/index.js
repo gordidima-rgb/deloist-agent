@@ -54,12 +54,8 @@ import InstaboxCard from './components/sidebar/InstaboxCard.svelte';
 import InstaboxRing from './components/sidebar/InstaboxRing.svelte';
 import { instaboxFeed } from './lib/instabox.js';
 import UsageScreen from './components/usage/UsageScreen.svelte';
-import RemindersTab from './components/routines/RemindersTab.svelte';
-import RoutinesPane from './components/routines/RoutinesPane.svelte';
-import TodosTab from './components/routines/TodosTab.svelte';
-import RoutineSchedule from './components/routines/RoutineSchedule.svelte';
 import * as routineSchedule from './lib/routineSchedule.js';
-import HabitsTab from './components/routines/HabitsTab.svelte';
+import ProcessList from './components/processes/ProcessList.svelte';
 import Report from './components/report/Report.svelte';
 import { bindReportEntry } from './lib/reportEntry.js';
 
@@ -173,14 +169,10 @@ window.DeloistUI = {
   instaboxFeed,
   // Окно «Использование и лимиты»: расход токенов, лимиты ботов, модели и подписки.
   mountUsageScreen: (target, props) => mountComponent(UsageScreen, target, props),
-  // Окно «Рутины»: вкладки «Напоминания», «Задачи» и «Привычки».
-  mountRemindersTab: (target, props) => mountComponent(RemindersTab, target, props),
-  mountRoutinesPane: (target, props) => mountComponent(RoutinesPane, target, props),
-  mountHabitsTab: (target, props) => mountComponent(HabitsTab, target, props),
+  // Процессы бота: вкладка «Рутины» панели бота (те же карточки, что в разделе «Задачи и процессы»).
+  mountProcessList: (target, props) => mountComponent(ProcessList, target, props),
   mountReport: (target, props) => mountComponent(Report, target, props),
-  mountTodosTab: (target, props) => mountComponent(TodosTab, target, props),
-  // Расписание в форме новой рутины: по времени, по интервалу, один раз; routineSchedule — поля для сервера и подпись.
-  mountRoutineSchedule: (target, props) => mountComponent(RoutineSchedule, target, props),
+  // Поля и подпись расписания рутины (подпись карточки в чате).
   routineSchedule,
   shouldShowSignIn: signInLib.shouldShowSignIn,
   // Окно «Подключить свою ИИ»: список слева (строки кита, логотипы как в выборе модели).
