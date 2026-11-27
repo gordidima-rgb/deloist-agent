@@ -26,6 +26,8 @@ const WAIT: Duration = Duration::from_secs(300);
 /// Голова запроса возврата должна прийти целиком за это время и уложиться в этот размер.
 const HEAD_TIMEOUT: Duration = Duration::from_secs(5);
 const HEAD_MAX: usize = 8192;
+/// Столько соединений на возврат обслуживаем одновременно; остальные закрываем сразу (чужая программа на петле не забьёт задачи).
+const MAX_CONNECTIONS: usize = 16;
 /// Ответ обмена кода на ключ крошечный; больше этого не читаем.
 const EXCHANGE_MAX: usize = 64 * 1024;
 /// Номер входа: отменённый вход не может записать ключ и снять метку нового.
@@ -179,9 +181,10 @@ pub(crate) async fn wait_for_code(en: bool, listeners: Vec<Option<TcpListener>>,
         }
     }
     let (tx, mut rx) = mpsc::channel::<Result<String, String>>(8);
+    let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let mut handles = Vec::new();
     for listener in listeners.into_iter().flatten() {
-        let (tx, state, path) = (tx.clone(), state.to_string(), path.to_string());
+        let (tx, state, path, slots) = (tx.clone(), state.to_string(), path.to_string(), slots.clone());
         handles.push(
             tokio::spawn(async move {
                 loop {
@@ -189,8 +192,12 @@ pub(crate) async fn wait_for_code(en: bool, listeners: Vec<Option<TcpListener>>,
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         continue;
                     };
+                    let Ok(permit) = slots.clone().try_acquire_owned() else { continue };
                     let (tx, state, path) = (tx.clone(), state.clone(), path.clone());
-                    tokio::spawn(async move { serve_one(en, socket, &state, &path, tx).await });
+                    tokio::spawn(async move {
+                        serve_one(en, socket, &state, &path, tx).await;
+                        drop(permit);
+                    });
                 }
             })
             .abort_handle(),
@@ -277,4 +284,35 @@ async fn exchange(code: &str, verifier: &str) -> Result<String, String> {
     }
     let body: Value = serde_json::from_slice(&bytes).map_err(|_| odd())?;
     body["key"].as_str().map(str::trim).filter(|k| !k.is_empty()).map(str::to_string).ok_or_else(|| "OpenRouter не прислал ключ".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn connections_over_the_cap_are_dropped_and_the_real_answer_still_comes_through() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let waiting = tokio::spawn(wait_for_code(false, vec![Some(listener)], "st", "/cb"));
+        // Молчащие соединения занимают все места.
+        let mut idle = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            idle.push(TcpStream::connect(("127.0.0.1", port)).await.unwrap());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut extra = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let _ = extra.write_all(b"GET /cb?code=c&state=st HTTP/1.1\r\n\r\n").await;
+        let mut out = Vec::new();
+        let read = tokio::time::timeout(Duration::from_secs(2), extra.read_to_end(&mut out)).await;
+        assert!(read.is_ok() && out.is_empty(), "лишнее соединение закрыто без ответа");
+        assert!(!waiting.is_finished());
+        // Места освободились: настоящий возврат проходит.
+        drop(idle);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut ok = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        ok.write_all(b"GET /cb?code=the-code&state=st HTTP/1.1\r\n\r\n").await.unwrap();
+        assert_eq!(waiting.await.unwrap().unwrap(), "the-code");
+    }
 }
