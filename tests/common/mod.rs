@@ -262,6 +262,22 @@ impl Crew {
         (status, serde_json::from_str(&text).unwrap_or_else(|_| json!({})))
     }
 
+    /// Процесс «вебхук → бот» с выданным секретом: номер и секрет (он же последняя часть адреса `/hooks/workflows/<номер>/t1/<секрет>`).
+    pub async fn webhook_process(&self, bot_id: &str, title: &str, task: &str, events: &[&str]) -> (String, String) {
+        let graph = json!({
+            "nodes": [
+                { "id": "t1", "kind": "trigger", "x": 0, "y": 0, "fields": { "trigger": "webhook", "hook_events": events.join(",") } },
+                { "id": "b1", "kind": "bot", "x": 300, "y": 0, "fields": { "bot_id": bot_id, "task": task } }
+            ],
+            "edges": [{ "id": "e1", "from": "t1", "to": "b1" }]
+        });
+        let made = self.ok("POST", "/api/workflows", Some(json!({ "title": title, "graph": graph }))).await;
+        let id = made["workflow"]["id"].as_str().unwrap().to_string();
+        let url = self.ok("POST", &format!("/api/workflows/{id}/nodes/t1/webhook"), None).await["url"].as_str().unwrap().to_string();
+        let secret = url.rsplit('/').next().unwrap().to_string();
+        (id, secret)
+    }
+
     /// Запрос, который обязан пройти.
     pub async fn ok(&self, method: &str, path: &str, body: Option<Value>) -> Value {
         let (status, data) = self.send(method, path, body).await;

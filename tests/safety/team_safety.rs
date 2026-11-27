@@ -354,8 +354,7 @@ async fn a_hook_for_a_busy_bot_waits_and_its_secret_is_long() {
     let crew = Crew::start("hook-busy").await;
     let bots = ids(&crew.ok("GET", "/api/state", None).await);
     crew.listen().await;
-    let made = crew.ok("POST", "/api/routines", Some(json!({ "botId": bots[0], "title": "Форма", "prompt": "Разбери", "hook": true }))).await;
-    let (id, token) = (made["routine"]["id"].as_str().unwrap().to_string(), made["routine"]["hookToken"].as_str().unwrap().to_string());
+    let (id, token) = crew.webhook_process(&bots[0], "Форма", "Разбери", &[]).await;
     assert_eq!(token.len(), 64, "секрет короче остальных секретов программы");
 
     strict(&crew, &bots[0]).await;

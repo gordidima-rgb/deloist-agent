@@ -277,9 +277,7 @@ async fn await_event_for_minutes_pauses_the_run_and_the_button_continues_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_webhook_wakes_the_waiting_run_with_its_data() {
     let (crew, fake, bot) = setup("limits-webhook", &[]).await;
-    let made = crew.ok("POST", "/api/routines", Some(json!({ "botId": bot, "title": "Ответ клиента", "prompt": "Разбери ответ", "hook": true }))).await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "Ответ клиента", "Разбери ответ", &[]).await;
     *fake.script.lock().unwrap() = vec![Step::Tool("await_event", json!({ "webhook": id, "note": "ответ клиента" }))];
     crew.say(&bot, "жди ответа").await;
     let run = wait_state(&crew, "paused").await;
@@ -291,7 +289,7 @@ async fn a_webhook_wakes_the_waiting_run_with_its_data() {
     wait_state(&crew, "done").await;
     let messages = thread(&crew, &bot).await;
     assert!(said(&messages, "согласен"), "данные вебхука дошли до хода");
-    assert_eq!(runs_file(&crew).len(), 1, "нового хода по рутине нет: ждавший продолжился");
+    assert_eq!(runs_file(&crew).len(), 1, "нового запуска по процессу нет: ждавший продолжился");
     assert_eq!(fake.calls(), 2);
 }
 

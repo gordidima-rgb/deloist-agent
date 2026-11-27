@@ -459,14 +459,17 @@ pub struct Stored {
     #[serde(flatten)]
     pub wf: Workflow,
     pub slots: HashMap<String, Slot>,
-    /// Вебхуки: SHA-256 секрета по узлу. Сам секрет нигде не хранится и показывается один раз.
-    pub hooks: HashMap<String, String>,
 }
 
-/// Отпечаток секрета вебхука.
-pub fn hook_digest(secret: &str) -> String {
+/// Секрет вебхука узла лежит только в зашифрованных секретах (`connectors.secrets`): ни в файле процесса, ни в ответах API.
+/// Область — процесс, имя — от номера узла (номер может быть любым, имя секрета — нет).
+pub fn hook_scope(workflow_id: &str) -> String {
+    format!("wf.{workflow_id}")
+}
+
+pub fn hook_name(node_id: &str) -> String {
     use sha2::{Digest, Sha256};
-    crate::store::hex(&Sha256::digest(secret.as_bytes()))
+    format!("hook-{}", &crate::store::hex(&Sha256::digest(node_id.as_bytes()))[..16])
 }
 
 fn schedule_nodes(graph: &Graph) -> impl Iterator<Item = (&Node, &Schedule)> {
@@ -475,11 +478,7 @@ fn schedule_nodes(graph: &Graph) -> impl Iterator<Item = (&Node, &Schedule)> {
 
 /// Привести сроки в порядок: новые и изменённые узлы получают срок, исчезнувшие забываются. `true` — что-то изменилось.
 pub fn refresh_slots(stored: &mut Stored, now_ms: i64) -> bool {
-    // Секрет вебхука живёт, только пока узел остаётся запуском вебхуком: сменили вид или убрали узел — адрес мёртв.
-    let alive: HashSet<String> = stored.wf.graph.nodes.iter().filter(|n| n.kind == "trigger" && n.text("trigger") == "webhook").map(|n| n.id.clone()).collect();
-    let before_hooks = stored.hooks.len();
-    stored.hooks.retain(|id, _| alive.contains(id));
-    let mut changed = before_hooks != stored.hooks.len();
+    let mut changed = false;
     let mut keep: HashSet<String> = HashSet::new();
     for (node, schedule) in schedule_nodes(&stored.wf.graph) {
         keep.insert(node.id.clone());
@@ -734,7 +733,7 @@ impl Workflows {
 
 pub fn new_workflow(title: &str, graph: Graph) -> Stored {
     let at = now();
-    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, ..Workflow::default() }, slots: HashMap::new(), hooks: HashMap::new() }
+    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, ..Workflow::default() }, slots: HashMap::new() }
 }
 
 /// Строка списка: без графа.
@@ -846,7 +845,7 @@ mod tests {
                     { "id": "t", "kind": "trigger", "x":0.0,"y":0.0, "fields": {"trigger":"schedule"}, "schedule": sched }
                 ], "edges": [], "strokes": [] },
                 "created_at": 1, "updated_at": 1,
-                "slots": {}, "hooks": {}
+                "slots": {}
             });
             let mut stored: Stored = serde_json::from_value(json).expect(label);
             // refresh_slots выдаёт срок, не сдвигая его на повторный тик.

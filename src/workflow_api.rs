@@ -31,6 +31,7 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/workflows/{id}/files/{*path}", get(serve_file))
         .route("/api/workflows/{id}/nodes/{node_id}/webhook", post(rotate_hook))
         .route("/hooks/workflows/{id}/{node_id}/{secret}", post(incoming_hook))
+        .route("/hooks/{id}/{secret}", post(routine_hook))
         .route("/api/workflows/{id}/nodes/{node_id}/run", post(start_solo))
         .route("/api/workflows/{id}/versions", get(versions))
         .route("/api/workflows/{id}/versions/{v}", get(version))
@@ -85,6 +86,7 @@ fn graph_of(app: &Arc<App>, value: &Value) -> Result<Graph, Response> {
 }
 
 fn changed(app: &Arc<App>, id: &str) {
+    forget_dead_hooks(app, id);
     app.turns.emit(json!({ "type": "workflows", "workflow_id": id }));
 }
 
@@ -127,7 +129,7 @@ async fn read(State(app): Shared, Path(id): Path<String>) -> Response {
         .nodes
         .iter()
         .filter(|n| n.kind == "trigger")
-        .map(|n| json!({ "node_id": n.id, "type": if n.text("trigger").is_empty() { "manual".to_string() } else { n.text("trigger") }, "next_run": stored.slots.get(&n.id).and_then(|s| s.next), "hook": stored.hooks.contains_key(&n.id) }))
+        .map(|n| json!({ "node_id": n.id, "type": if n.text("trigger").is_empty() { "manual".to_string() } else { n.text("trigger") }, "next_run": stored.slots.get(&n.id).and_then(|s| s.next), "hook": app.connectors.secrets.get(&wf::hook_scope(&id), &wf::hook_name(&n.id)).is_some() }))
         .collect();
     let view = stored.wf.clone();
     if touched {
@@ -352,30 +354,63 @@ async fn restore(State(app): Shared, Path((id, v)): Path<(String, u64)>) -> Resp
     reply(StatusCode::OK, json!({ "workflow": view }))
 }
 
-/// Новый секрет вебхука узла. Секрет виден только в этом ответе; на диске остаётся отпечаток.
+/// Новый секрет вебхука узла. Секрет виден только в этом ответе; на диске он лежит лишь в зашифрованных секретах.
 async fn rotate_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id)): Path<(String, String)>) -> Response {
     let secret = crate::guard::random_token();
     {
-        let mut guard = app.workflows.lock();
-        let Some(stored) = guard.get_mut(&id) else { return not_found() };
-        if !stored.wf.graph.node(&node_id).is_some_and(|n| n.kind == "trigger" && n.text("trigger") == "webhook") {
+        let guard = app.workflows.lock();
+        let Some(stored) = guard.get(&id) else { return not_found() };
+        if hook_events(stored, &node_id).is_none() {
             return fail(StatusCode::BAD_REQUEST, "это не запуск вебхуком");
         }
-        stored.hooks.insert(node_id.clone(), wf::hook_digest(&secret));
-        guard.save_wf(&id);
+    }
+    if let Err(e) = app.connectors.secrets.set(&wf::hook_scope(&id), &wf::hook_name(&node_id), &secret) {
+        return fail(StatusCode::INTERNAL_SERVER_ERROR, &e);
     }
     let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("127.0.0.1");
     changed(&app, &id);
     reply(StatusCode::OK, json!({ "url": format!("http://{host}/hooks/workflows/{id}/{node_id}/{secret}") }))
 }
 
+/// События GitHub, которые узел-вебхук пропускает (`hook_events` в полях узла, через запятую; пусто — все). `None` — узел не вебхук.
+fn hook_events(stored: &Stored, node_id: &str) -> Option<Vec<String>> {
+    let node = stored.wf.graph.node(node_id).filter(|n| n.kind == "trigger" && n.text("trigger") == "webhook")?;
+    Some(node.text("hook_events").split(',').map(str::trim).filter(|e| !e.is_empty()).map(str::to_string).collect())
+}
+
+/// Секреты вебхуков узлов, которых больше нет или которые перестали быть вебхуком, стираются: адрес мёртв и не оживёт.
+pub(crate) fn forget_dead_hooks(app: &Arc<App>, id: &str) {
+    let secrets = &app.connectors.secrets;
+    let scope = wf::hook_scope(id);
+    let alive: Vec<String> = {
+        let guard = app.workflows.lock();
+        guard.get(id).map(|s| s.wf.graph.nodes.iter().filter(|n| hook_events(s, &n.id).is_some()).map(|n| wf::hook_name(&n.id)).collect()).unwrap_or_default()
+    };
+    for name in secrets.names(&scope).into_iter().filter(|name| !alive.contains(name)) {
+        let _ = secrets.delete(&scope, &name);
+    }
+}
+
 const HOOK_BODY_CHARS: usize = 64_000;
+const GITHUB_BODY_BYTES: usize = 1024 * 1024;
+const GITHUB_SUMMARY_CHARS: usize = 8_000;
 const HOOK_DELIVERIES: usize = 200;
 const HOOK_MIN_GAP_MS: i64 = 10_000;
 
+/// Старый адрес вебхука рутины `/hooks/<номер>/<секрет>`: рутина стала процессом с тем же номером, вебхук — его узел `t1`.
+async fn routine_hook(app: State<Arc<App>>, headers: HeaderMap, Path((id, secret)): Path<(String, String)>, body: Bytes) -> Response {
+    incoming_hook(app, headers, Path((id, crate::routine_migrate::TRIGGER.to_string(), secret)), body).await
+}
+
 /// Входящий вебхук процесса. Неверный адрес, неверный секрет и выключенный процесс отвечают одинаково.
+/// Пускают секрет в адресе и, у GitHub, подпись тела этим же секретом.
 async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id, secret)): Path<(String, String, String)>, body: Bytes) -> Response {
-    if body.len() > HOOK_BODY_CHARS * 4 || String::from_utf8_lossy(&body).chars().count() > HOOK_BODY_CHARS {
+    let github = headers.get("x-github-event").and_then(|v| v.to_str().ok()).map(str::to_string);
+    if github.is_some() {
+        if body.len() > GITHUB_BODY_BYTES {
+            return fail(StatusCode::PAYLOAD_TOO_LARGE, "тело больше 1 МБ");
+        }
+    } else if body.len() > HOOK_BODY_CHARS * 4 || String::from_utf8_lossy(&body).chars().count() > HOOK_BODY_CHARS {
         return fail(StatusCode::PAYLOAD_TOO_LARGE, "тело больше 64 000 знаков");
     }
     let delivery = ["x-delivery-id", "x-github-delivery", "idempotency-key"]
@@ -383,17 +418,44 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
         .find_map(|name| headers.get(*name).and_then(|v| v.to_str().ok()))
         .map(|v| v.trim().chars().take(200).collect::<String>())
         .filter(|v| !v.is_empty());
+    let stored_secret = app.connectors.secrets.get(&wf::hook_scope(&id), &wf::hook_name(&node_id));
+    let allowed = {
+        let guard = app.workflows.lock();
+        guard.get(&id).filter(|s| s.wf.enabled).and_then(|s| hook_events(s, &node_id))
+    };
+    let (Some(stored_secret), Some(allowed)) = (stored_secret, allowed) else { return fail(StatusCode::NOT_FOUND, "нет такого вебхука") };
+    if !crate::guard::same(&stored_secret, &secret) {
+        return fail(StatusCode::NOT_FOUND, "нет такого вебхука");
+    }
+    // GitHub: подпись проверяется до разбора JSON.
+    let mut data = None;
+    if let Some(event) = github.as_ref() {
+        let signature = headers.get("x-hub-signature-256").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if !verify_github_signature(&stored_secret, &body, signature) {
+            return fail(StatusCode::UNAUTHORIZED, "подпись GitHub не сошлась");
+        }
+        if event == "ping" {
+            return reply(StatusCode::OK, json!({ "ok": true, "ping": true }));
+        }
+        let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        let action = value.get("action").and_then(Value::as_str).unwrap_or("").to_string();
+        let composite = if action.is_empty() { event.clone() } else { format!("{event}.{action}") };
+        if !allowed.is_empty() && !allowed.contains(event) && !allowed.contains(&composite) {
+            return reply(StatusCode::ACCEPTED, json!({ "ok": true, "skipped": true }));
+        }
+        let mut summary = github_summary(event, &action, &value);
+        if summary.chars().count() > GITHUB_SUMMARY_CHARS {
+            summary = summary.chars().take(GITHUB_SUMMARY_CHARS - 1).collect::<String>() + "…";
+        }
+        data = Some(crate::workflow_run::frame_external(&format!("[GitHub: {composite}]\n{summary}")));
+    }
+    let data = data.unwrap_or_else(|| crate::workflow_run::frame_external(&String::from_utf8_lossy(&body)));
+    // Бот процесса ждал именно этого вебхука (`await_event`): его ход продолжается с данными, нового запуска нет.
+    if crate::runs::resume_on_webhook(&app, &id, &data).await {
+        return reply(StatusCode::ACCEPTED, json!({ "ok": true, "resumed": true }));
+    }
     {
         let guard = app.workflows.lock();
-        let found = guard.get(&id).is_some_and(|s| {
-            let digest = wf::hook_digest(&secret);
-            s.wf.enabled
-                && s.wf.graph.node(&node_id).is_some_and(|n| n.kind == "trigger" && n.text("trigger") == "webhook")
-                && s.hooks.get(&node_id).is_some_and(|stored| crate::guard::same(stored, &digest))
-        });
-        if !found {
-            return fail(StatusCode::NOT_FOUND, "нет такого вебхука");
-        }
         if let Some(key) = &delivery {
             if guard.deliveries.get(&id).is_some_and(|list| list.iter().any(|k| k == &format!("{node_id}:{key}"))) {
                 return reply(StatusCode::OK, json!({ "ok": true, "duplicate": true }));
@@ -407,7 +469,6 @@ async fn incoming_hook(State(app): Shared, headers: HeaderMap, Path((id, node_id
             return fail(StatusCode::TOO_MANY_REQUESTS, "слишком часто: не чаще раза в 10 секунд");
         }
     }
-    let data = crate::workflow_run::frame_external(&String::from_utf8_lossy(&body));
     match run::start_run_with(&app, &id, "webhook", None, None, Some(node_id.clone()), false, Some(data)) {
         Ok(started) => {
             app.workflows.lock().last_hook.insert(id.clone(), now());
@@ -545,4 +606,113 @@ async fn serve_file(State(app): Shared, Path((id, rel)): Path<(String, String)>)
         bytes,
     )
         .into_response()
+}
+pub(crate) fn verify_github_signature(secret: &str, body: &[u8], provided_header: &str) -> bool {
+    let provided = provided_header.strip_prefix("sha256=").unwrap_or("");
+    if provided.len() != 64 || !provided.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return false;
+    }
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<sha2::Sha256>;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac key");
+    mac.update(body);
+    let expected = crate::store::hex(&mac.finalize().into_bytes());
+    crate::guard::same(&expected, &provided.to_ascii_lowercase())
+}
+
+fn github_summary(event: &str, action: &str, value: &Value) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(repo) = value.get("repository").and_then(|r| r.get("full_name")).and_then(Value::as_str) {
+        lines.push(format!("repository: {}", repo));
+    }
+    if !action.is_empty() {
+        lines.push(format!("action: {}", action));
+    }
+    if let Some(sender) = value.get("sender").and_then(|s| s.get("login")).and_then(Value::as_str) {
+        lines.push(format!("sender: {}", sender));
+    }
+    match event {
+        "push" => {
+            if let Some(r) = value.get("ref").and_then(Value::as_str) { lines.push(format!("ref: {}", r)); }
+            if let Some(c) = value.get("compare").and_then(Value::as_str) { lines.push(format!("compare: {}", c)); }
+            if let Some(commits) = value.get("commits").and_then(Value::as_array) {
+                lines.push(format!("commits ({}):", commits.len()));
+                for c in commits.iter().take(10) {
+                    let id = c.get("id").and_then(Value::as_str).unwrap_or("");
+                    let short = if id.len() >= 7 { &id[..7] } else { id };
+                    let msg = c.get("message").and_then(Value::as_str).unwrap_or("");
+                    let first_line = msg.lines().next().unwrap_or("").trim();
+                    let author = c.get("author").and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or("");
+                    lines.push(format!("- {} {} ({})", short, first_line, author));
+                }
+            }
+        }
+        "pull_request" => {
+            if let Some(pr) = value.get("pull_request") {
+                if let Some(n) = pr.get("number") { lines.push(format!("number: {}", n)); }
+                if let Some(t) = pr.get("title").and_then(Value::as_str) { lines.push(format!("title: {}", t)); }
+                if let Some(u) = pr.get("html_url").and_then(Value::as_str) { lines.push(format!("url: {}", u)); }
+                if let Some(user) = pr.get("user").and_then(|u| u.get("login")).and_then(Value::as_str) { lines.push(format!("user: {}", user)); }
+                if let Some(b) = pr.get("base").and_then(|x| x.get("ref")).and_then(Value::as_str) { lines.push(format!("base: {}", b)); }
+                if let Some(h) = pr.get("head").and_then(|x| x.get("ref")).and_then(Value::as_str) { lines.push(format!("head: {}", h)); }
+                if let Some(body) = pr.get("body").and_then(Value::as_str) {
+                    let b: String = body.chars().take(1000).collect();
+                    lines.push(format!("body: {}", b));
+                }
+            }
+        }
+        "issues" => {
+            if let Some(issue) = value.get("issue") {
+                issue_summary(&mut lines, issue);
+            }
+        }
+        "issue_comment" => {
+            if let Some(issue) = value.get("issue") {
+                issue_summary(&mut lines, issue);
+            }
+            if let Some(comment) = value.get("comment") {
+                if let Some(body) = comment.get("body").and_then(Value::as_str) {
+                    let b: String = body.chars().take(1000).collect();
+                    lines.push(format!("comment: {}", b));
+                }
+            }
+        }
+        "release" => {
+            if let Some(rel) = value.get("release") {
+                if let Some(t) = rel.get("tag_name").and_then(Value::as_str) { lines.push(format!("tag: {}", t)); }
+                if let Some(n) = rel.get("name").and_then(Value::as_str) { lines.push(format!("name: {}", n)); }
+                if let Some(u) = rel.get("html_url").and_then(Value::as_str) { lines.push(format!("url: {}", u)); }
+            }
+        }
+        _ => {
+            let mut keys: Vec<&str> = value.as_object().map(|o| o.keys().map(|s| s.as_str()).collect()).unwrap_or_default();
+            keys.sort();
+            lines.push(format!("keys: {}", keys.join(", ")));
+        }
+    }
+    lines.join("\n")
+}
+
+fn issue_summary(lines: &mut Vec<String>, issue: &Value) {
+    if let Some(n) = issue.get("number") { lines.push(format!("number: {}", n)); }
+    if let Some(t) = issue.get("title").and_then(Value::as_str) { lines.push(format!("title: {}", t)); }
+    if let Some(u) = issue.get("html_url").and_then(Value::as_str) { lines.push(format!("url: {}", u)); }
+    if let Some(body) = issue.get("body").and_then(Value::as_str) {
+        let b: String = body.chars().take(1000).collect();
+        lines.push(format!("body: {}", b));
+    }
+}
+
+#[cfg(test)]
+mod github_signature_tests {
+    use super::verify_github_signature;
+    #[test]
+    fn documented_example() {
+        assert!(verify_github_signature(
+            "It's a Secret to Everybody",
+            b"Hello, World!",
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
+        ));
+        assert!(!verify_github_signature("secret", b"Hello, World!", "sha256=0000000000000000000000000000000000000000000000000000000000000000"));
+    }
 }

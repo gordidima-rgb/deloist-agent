@@ -929,6 +929,7 @@ pub fn delete_workflow(app: &Arc<App>, wf_id: &str) -> bool {
         guard.runs.remove(wf_id);
         guard.remove_files(wf_id);
     }
+    let _ = app.connectors.secrets.delete_scope(&crate::workflows::hook_scope(wf_id));
     change_event(app, wf_id, None);
     true
 }

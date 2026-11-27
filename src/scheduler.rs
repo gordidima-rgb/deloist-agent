@@ -138,21 +138,9 @@ pub async fn routine_finished(app: &Arc<App>, routine: &RoutineRef, status: &str
     }
 }
 
-/// Вебхук-рутина числится «идёт», а живого хода у неё нет: запись журнала о нём потеряна (старая версия, стёртый файл).
-/// Ход продолжает или закрывает `runs::recover`, здесь остаётся только не оставить рутину «идущей» навсегда.
-pub async fn settle_orphans(app: &Arc<App>) {
-    for routine in app.store.routines().into_iter().filter(|r| r.hook) {
-        if routine.last_status.as_deref() != Some("running") || app.turns.is_busy(&routine.bot_id) {
-            continue;
-        }
-        note(app, &routine, "failed", "Программа закрылась посреди хода.").await;
-        let _ = app.store.set_routine_status(&routine.id, "error").await;
-    }
-}
-
 async fn tick(app: &Arc<App>) {
     // Рутина, заведённая старым окном или инструментом бота, становится процессом сразу, а не к следующему запуску.
-    app.store.migrate_routines().await;
+    app.store.migrate_routines(&app.connectors.secrets).await;
     let now_ms = crate::store::now();
     let last = PRUNE_LAST.load(Ordering::Relaxed);
     if now_ms - last >= 24 * 3600 * 1000 {
@@ -421,20 +409,6 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn routine_check_hook_ignores_check() {
-        let dir = temp_dir("hook");
-        let app = make_app(dir.clone()).await;
-        let bot = app.store.bots().into_iter().next().unwrap();
-        // Вебхук-рутина с падающей проверкой: проверка не её дело, ход стартует.
-        let mut input = json!({ "botId": bot.id, "title": "T", "prompt": "p", "everyMinutes": 60, "check": "cmd /c exit 9", "hook": true });
-        if !cfg!(windows) { input["check"] = json!("sh -c 'exit 9'"); }
-        let routine = app.store.add_routine(&input, true).await.unwrap();
-        assert!(run_now(&app, &routine.id, true).await.is_ok());
-        assert!(app.turns.is_busy(&bot.id), "hook should start turn despite bad check");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
     async fn routine_check_timeout_marks_error() {
         let _gate = CHECK_GATE.lock().await;
         std::env::set_var("CREW_TEST_ROUTINE_CHECK_TIMEOUT_MS", "200");
@@ -454,7 +428,6 @@ pub fn start(app: Arc<App>) {
     tokio::spawn(async move {
         // Запуски процессов, прерванные перезапуском, продолжают проход.
         crate::workflow_run::resume(&app);
-        settle_orphans(&app).await;
         crate::attach::prune_copies(&app.store, crate::store::now());
         PRUNE_LAST.store(crate::store::now(), std::sync::atomic::Ordering::Relaxed);
         let mut timer = tokio::time::interval(tick_period());

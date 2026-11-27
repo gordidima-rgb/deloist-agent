@@ -1804,7 +1804,6 @@ impl Store {
         }
         store.migrate_one_bot_one_team().await;
         store.build_team_folders().await;
-        store.move_routines(true).await;
         Ok(store)
     }
 
@@ -3065,18 +3064,19 @@ impl Store {
 
     /// Рутины по расписанию переезжают в процессы «триггер → бот» с тем же номером (0.4.11, шаг 4a). Каждый файл
     /// пишется целиком и атомарно, и только потом рутина уходит из state; не записался — рутина остаётся и повтор будет на тике.
-    pub async fn migrate_routines(&self) {
-        self.move_routines(false).await;
+    /// Секрет вебхука-рутины переезжает в `secrets` раньше процесса: не записался — рутина остаётся и повтор будет на тике.
+    pub async fn migrate_routines(&self, secrets: &crate::secrets::Secrets) {
+        self.move_routines(secrets).await;
     }
 
-    /// `first` — запуск программы: перед первым настоящим переездом рядом ложится копия `state.json.before-processes.bak`.
-    async fn move_routines(&self, first: bool) {
-        let pending: Vec<Routine> = self.state.lock().unwrap().routines.iter().filter(|r| crate::routine_migrate::migratable(r) && !crate::reminders::is_reminder(r)).cloned().collect();
+    /// Перед первым настоящим переездом рядом ложится копия `state.json.before-processes.bak`.
+    async fn move_routines(&self, secrets: &crate::secrets::Secrets) {
+        let pending: Vec<Routine> = self.state.lock().unwrap().routines.iter().filter(|r| !crate::reminders::is_reminder(r)).cloned().collect();
         if pending.is_empty() {
             return;
         }
         let backup = self.data_dir.join("state.json.before-processes.bak");
-        if first && !backup.exists() {
+        if !backup.exists() {
             let _ = tokio::fs::copy(self.data_dir.join("state.json"), &backup).await;
         }
         let mut moved: Vec<String> = Vec::new();
@@ -3087,6 +3087,12 @@ impl Store {
                 if workflows.get(&routine.id).is_some() {
                     moved.push(routine.id.clone());
                     continue;
+                }
+                if routine.hook {
+                    if let Err(e) = secrets.set(&crate::workflows::hook_scope(&routine.id), &crate::workflows::hook_name(crate::routine_migrate::TRIGGER), &routine.hook_token) {
+                        eprintln!("[routines] секрет вебхука «{}» не переехал, рутина остаётся: {e}", routine.title);
+                        continue;
+                    }
                 }
                 match workflows.insert_new(crate::routine_migrate::to_stored(routine)) {
                     Ok(()) => moved.push(routine.id.clone()),
@@ -3144,33 +3150,20 @@ impl Store {
             ..Routine::default()
         };
         apply_schedule(&mut routine, input).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        routine.hook = input.get("hook").is_some_and(truthy);
+        if input.get("hook").is_some_and(truthy) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук включается у процесса на холсте, а не у рутины"));
+        }
         routine.goal_id = text_or(input, "goalId", "");
         routine.approval_floor = text_or(input, "approvalFloor", "");
         if human {
             routine.check = text_or(input, "check", "");
         }
-        if let Some(v) = input.get("hookEvents").filter(|v| !v.is_null()) {
-            routine.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        routine.next_run = next_run_for(&routine, now());
+        let mut workflows = self.workflows.lock();
+        if workflows.items.iter().filter(|s| s.wf.from_routine).count() >= cap {
+            return Ok(None);
         }
-        if routine.hook {
-            routine.hook_token = crate::guard::random_token();
-            // Вебхук не по расписанию: тикер его не трогает.
-            routine.next_run = 0;
-        } else {
-            routine.next_run = next_run_for(&routine, now());
-        }
-        // Замок процессов берётся раньше замка state: ход процесса держит первый и читает настройки из второго.
-        let processes = self.workflows.lock().items.iter().filter(|s| s.wf.from_routine).count();
-        {
-            let mut state = self.state.lock().unwrap();
-            if state.routines.len() + processes >= cap {
-                return Ok(None);
-            }
-            state.routines.push(routine.clone());
-        }
-        self.persist().await?;
-        self.move_routines(false).await;
+        workflows.insert_new(crate::routine_migrate::to_stored(&routine))?;
         Ok(Some(routine))
     }
 
@@ -3199,6 +3192,9 @@ impl Store {
         let Some(mut routine) = crate::routine_migrate::to_routine(stored) else { return Ok(None) };
         if patch.get("hook").is_some_and(truthy) {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук включается у новой рутины, а не у рутины по расписанию"));
+        }
+        if routine.hook {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук-процесс правится на холсте"));
         }
         patch_routine(&mut routine, patch, human)?;
         let before = serde_json::to_string(&stored.wf.graph).unwrap_or_default();
@@ -4848,7 +4844,9 @@ mod tests {
         tokio::fs::create_dir_all(dir).await.unwrap();
         let state = serde_json::json!({ "version": 1, "createdAt": 0, "settings": {}, "bots": [], "routines": routines, "skills": [], "rooms": [], "mcp": [] });
         tokio::fs::write(dir.join("state.json"), state.to_string()).await.unwrap();
-        Store::open(dir.clone()).await.unwrap()
+        let store = Store::open(dir.clone()).await.unwrap();
+        store.migrate_routines(&crate::secrets::Secrets::open(dir)).await;
+        store
     }
 
     fn state_routine_ids(store: &Store) -> Vec<String> {
@@ -4864,7 +4862,7 @@ mod tests {
             Routine { at: "09:00".into(), next_run: at, ..normal_routine("rt_b") },
             Routine { cron: "0 9 * * 1".into(), next_run: at, ..normal_routine("rt_c") },
             Routine { once_at: at, next_run: at, ..normal_routine("rt_d") },
-            Routine { hook: true, hook_token: "t".into(), ..normal_routine("rt_h") },
+            Routine { hook: true, hook_token: "secret-of-rt_h".into(), hook_events: vec!["push".into()], ..normal_routine("rt_h") },
         ];
         let store = open_with(&dir, routines).await;
         for id in ["rt_a", "rt_b", "rt_c", "rt_d"] {
@@ -4874,11 +4872,19 @@ mod tests {
             assert_eq!(stored.slots["t1"].next, Some(at), "{id}: срок тот же, второго запуска при переезде нет");
             assert!(dir.join("workflows").join(format!("{id}.json")).is_file(), "{id}: файл записан");
         }
-        assert_eq!(state_routine_ids(&store), vec!["rt_h".to_string()], "в state остался только вебхук");
+        assert!(state_routine_ids(&store).is_empty(), "в state ничего не осталось");
+        {
+            let workflows = store.workflows.lock();
+            let hook = workflows.get("rt_h").unwrap();
+            assert_eq!(hook.wf.graph.node("t1").unwrap().text("trigger"), "webhook");
+            assert!(!std::fs::read_to_string(dir.join("workflows").join("rt_h.json")).unwrap().contains("secret-of-rt_h"), "секрета нет в файле процесса");
+        }
+        let secrets = crate::secrets::Secrets::open(&dir);
+        assert_eq!(secrets.get(&crate::workflows::hook_scope("rt_h"), &crate::workflows::hook_name("t1")).as_deref(), Some("secret-of-rt_h"), "секрет переехал в секреты");
         assert_eq!(store.routines().len(), 5, "старое окно видит все пять");
         assert_eq!(store.routine("rt_b").unwrap().next_run, at);
         let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).unwrap()).unwrap();
-        assert_eq!(on_disk["routines"].as_array().unwrap().len(), 1, "state.json переписан");
+        assert_eq!(on_disk["routines"].as_array().unwrap().len(), 0, "state.json переписан");
         let backup = dir.join("state.json.before-processes.bak");
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
         assert_eq!(saved["routines"].as_array().unwrap().len(), 5, "копия снята до переезда");
@@ -4906,6 +4912,7 @@ mod tests {
         let state = serde_json::json!({ "version": 1, "createdAt": 0, "settings": {}, "bots": [], "routines": [normal_routine("rt_a"), normal_routine("rt_x"), normal_routine("rt_y")], "skills": [], "rooms": [], "mcp": [] });
         std::fs::write(dir.join("state.json"), state.to_string()).unwrap();
         let store = Store::open(dir.clone()).await.unwrap();
+        store.migrate_routines(&crate::secrets::Secrets::open(&dir)).await;
         assert_eq!(std::fs::read(&file).unwrap(), before, "готовый файл не переписан");
         assert!(store.workflows.lock().get("rt_y").is_some(), "соседняя рутина переехала");
         assert_eq!(state_routine_ids(&store), vec!["rt_x".to_string()], "с нечитаемым файлом рутина остаётся в state");

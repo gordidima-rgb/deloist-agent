@@ -1,7 +1,8 @@
 //! Рутина = процесс «триггер → бот» (0.4.11, шаг 4a). Здесь два перевода между старой рутиной и процессом:
 //! `to_stored` (переезд данных) и `to_routine` (вид процесса как рутины для старых адресов, пока их не убрал шаг 4b),
 //! плюс `apply` — запись правки рутины обратно в процесс.
-//! Вебхук-рутины остаются как есть: у процесса секрет вебхука хранится только отпечатком, а GitHub подписывает тело самим секретом.
+//! Вебхук-рутина тоже становится процессом: узел `t1` — вебхук, его секрет (`hook_token`) переезжает в секреты (`store::move_routines`),
+//! старый адрес `/hooks/<номер>/<секрет>` продолжает работать.
 
 use std::collections::HashMap;
 
@@ -11,13 +12,8 @@ use crate::schedule::{schedule_next, Schedule};
 use crate::store::{now, Routine};
 use crate::workflows::{Edge, Graph, LastRun, Node, Slot, Stored, Workflow};
 
-const TRIGGER: &str = "t1";
+pub(crate) const TRIGGER: &str = "t1";
 const BOT: &str = "b1";
-
-/// Рутина по расписанию переезжает в процесс; вебхук-рутина остаётся.
-pub fn migratable(routine: &Routine) -> bool {
-    !routine.hook
-}
 
 fn text(value: &str) -> Value {
     Value::String(value.to_string())
@@ -31,8 +27,15 @@ fn sig_of(schedule: &Schedule) -> String {
 pub fn to_stored(routine: &Routine) -> Stored {
     let schedule = routine.schedule();
     let mut trigger_fields = Map::new();
-    trigger_fields.insert("trigger".into(), text("schedule"));
-    trigger_fields.insert("catch_up".into(), text(&routine.catch_up));
+    if routine.hook {
+        trigger_fields.insert("trigger".into(), text("webhook"));
+        if !routine.hook_events.is_empty() {
+            trigger_fields.insert("hook_events".into(), text(&routine.hook_events.join(",")));
+        }
+    } else {
+        trigger_fields.insert("trigger".into(), text("schedule"));
+        trigger_fields.insert("catch_up".into(), text(&routine.catch_up));
+    }
     let mut bot_fields = Map::new();
     bot_fields.insert("bot_id".into(), text(&routine.bot_id));
     bot_fields.insert("task".into(), text(&routine.prompt));
@@ -44,7 +47,7 @@ pub fn to_stored(routine: &Routine) -> Stored {
     }
     let graph = Graph {
         nodes: vec![
-            Node { id: TRIGGER.into(), kind: "trigger".into(), x: 0.0, y: 0.0, fields: trigger_fields, schedule: Some(schedule.clone()), ..Node::default() },
+            Node { id: TRIGGER.into(), kind: "trigger".into(), x: 0.0, y: 0.0, fields: trigger_fields, schedule: (!routine.hook).then(|| schedule.clone()), ..Node::default() },
             Node { id: BOT.into(), kind: "bot".into(), x: 320.0, y: 0.0, fields: bot_fields, ..Node::default() },
         ],
         edges: vec![Edge { id: "e1".into(), from: TRIGGER.into(), to: BOT.into(), ..Edge::default() }],
@@ -63,7 +66,6 @@ pub fn to_stored(routine: &Routine) -> Stored {
             ..Workflow::default()
         },
         slots: HashMap::new(),
-        hooks: HashMap::new(),
     };
     write_state(&mut stored, routine);
     stored
@@ -83,7 +85,7 @@ fn write_state(stored: &mut Stored, routine: &Routine) {
     stored.slots.clear();
     // Срок рутины остаётся сроком процесса: тот же момент, второго запуска при переезде нет. Нет срока — его посчитает тик.
     let schedule = stored.wf.graph.node(TRIGGER).and_then(|n| n.schedule.as_ref()).map(sig_of);
-    if let Some(sig) = schedule.filter(|_| routine.next_run > 0) {
+    if let Some(sig) = schedule.filter(|_| routine.next_run > 0 && !routine.hook) {
         stored.slots.insert(TRIGGER.into(), Slot { sig, next: Some(routine.next_run) });
     }
 }
@@ -128,6 +130,7 @@ pub fn to_routine(stored: &Stored) -> Option<Routine> {
         title: wf.title.clone(),
         prompt: bot.text("task"),
         enabled: wf.enabled,
+        hook: trigger.text("trigger") == "webhook",
         quiet: bot.text("quiet") != "false",
         created_at: wf.created_at,
         goal_id: bot.text("goal_id"),
@@ -259,7 +262,5 @@ mod tests {
     fn an_ordinary_process_is_not_a_routine_and_a_webhook_stays_put() {
         let plain = crate::workflows::new_workflow("Т", Graph::default());
         assert!(to_routine(&plain).is_none());
-        assert!(!migratable(&Routine { hook: true, ..routine("rt_h") }));
-        assert!(migratable(&routine("rt_n")));
     }
 }

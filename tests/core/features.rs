@@ -247,17 +247,7 @@ async fn a_webhook_starts_a_routine_and_a_wrong_token_does_not() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "Форма", "prompt": "Разбери заявку", "hook": true })),
-        )
-        .await;
-    let routine = &made["routine"];
-    let id = routine["id"].as_str().unwrap().to_string();
-    let token = routine["hookToken"].as_str().unwrap().to_string();
-    assert!(routine["hook"].as_bool().unwrap(), "рутина не помечена как вебхук");
+    let (id, token) = crew.webhook_process(&bot, "Форма", "Разбери заявку", &[]).await;
     assert!(!token.is_empty(), "нет секрета вебхука");
 
     // Внешний вызов приходит без сессии окна: только Host и секрет в адресе.
@@ -282,9 +272,9 @@ async fn a_webhook_starts_a_routine_and_a_wrong_token_does_not() {
         .unwrap()
         .iter()
         .filter_map(|m| m["text"].as_str())
-        .any(|t| t.contains("вебхук"));
+        .any(|t| t.contains("new_ticket"));
 
-    assert!(said, "в треде нет следа вебхука");
+    assert!(said, "в треде нет данных вебхука");
 
     let bad = format!("{}/hooks/{id}/deadbeef", crew.base);
     let res = crew
@@ -362,16 +352,7 @@ async fn github_webhook_valid_push_starts_turn() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
-        )
-        .await;
-    let routine = &made["routine"];
-    let id = routine["id"].as_str().unwrap().to_string();
-    let token = routine["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "GH", "Разбери", &[]).await;
 
     let body = json!({
         "ref": "refs/heads/main",
@@ -403,7 +384,7 @@ async fn github_webhook_valid_push_starts_turn() {
         .iter()
         .filter_map(|m| m["text"].as_str())
         .collect();
-    assert!(texts.iter().any(|t| t.starts_with("[GitHub: push]")), "нет префикса GitHub: {texts:?}");
+    assert!(texts.iter().any(|t| t.contains("[GitHub: push]")), "нет префикса GitHub: {texts:?}");
     assert!(texts.iter().any(|t| t.contains("hello world")), "нет сообщения коммита: {texts:?}");
 }
 
@@ -414,15 +395,7 @@ async fn github_webhook_bad_signature_and_missing_signature() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
-        )
-        .await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "GH", "Разбери", &[]).await;
 
     let body = "{}";
     let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
@@ -471,15 +444,7 @@ async fn github_webhook_ping_returns_pong() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
-        )
-        .await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "GH", "Разбери", &[]).await;
 
     let body = json!({ "zen": "test" });
     let raw = body.to_string();
@@ -518,15 +483,7 @@ async fn github_webhook_hook_events_filter() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true, "hookEvents": ["pull_request.opened"] })),
-        )
-        .await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "GH", "Разбери", &["pull_request.opened"]).await;
 
     let body = json!({ "action": "closed", "pull_request": { "number": 1, "title": "t" } });
     let raw = body.to_string();
@@ -572,15 +529,7 @@ async fn github_webhook_push_100_commits_truncated() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "GH", "prompt": "Разбери", "hook": true })),
-        )
-        .await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "GH", "Разбери", &[]).await;
 
     let mut commits = Vec::new();
     for i in 0..100 {
@@ -632,15 +581,7 @@ async fn generic_webhook_still_works() {
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
     crew.listen().await;
 
-    let made = crew
-        .ok(
-            "POST",
-            "/api/routines",
-            Some(json!({ "botId": bot, "title": "Форма", "prompt": "Разбери", "hook": true })),
-        )
-        .await;
-    let id = made["routine"]["id"].as_str().unwrap().to_string();
-    let token = made["routine"]["hookToken"].as_str().unwrap().to_string();
+    let (id, token) = crew.webhook_process(&bot, "Форма", "Разбери", &[]).await;
 
     let hook = format!("{}/hooks/{}/{}", crew.base, id, token);
     let res = crew
@@ -653,6 +594,56 @@ async fn generic_webhook_still_works() {
         .unwrap();
     assert_eq!(res.status().as_u16(), 202);
     crew.wait_event("ход по вебхуку", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+}
+
+/// Один вебхук у процесса: секрет в адресе пускает, подпись GitHub считается тем же секретом, а самого секрета
+/// нет ни в файле процесса, ни в ответах API, ни на диске открытым текстом.
+#[tokio::test]
+async fn a_process_webhook_takes_the_token_or_the_signature_and_keeps_the_secret_in_the_secrets_store() {
+    let crew = Crew::start("hook-process").await;
+    let bot = crew.ok("GET", "/api/state", None).await["bots"][0]["id"].as_str().unwrap().to_string();
+    crew.listen().await;
+    let (id, secret) = crew.webhook_process(&bot, "Форма", "Разбери", &["push"]).await;
+    let post = |url: String| crew.client.post(url).header("content-type", "application/json");
+    let url = format!("{}/hooks/workflows/{id}/t1/{secret}", crew.base);
+
+    // Неверный секрет, чужой узел и неизвестный процесс отвечают одинаково.
+    for bad in [format!("{}/hooks/workflows/{id}/t1/deadbeef", crew.base), format!("{}/hooks/workflows/{id}/b1/{secret}", crew.base), format!("{}/hooks/workflows/нет/t1/{secret}", crew.base)] {
+        assert_eq!(post(bad.clone()).body("{}").send().await.unwrap().status().as_u16(), 404, "{bad}");
+    }
+    // GitHub: без подписи и с чужой подписью — отказ; ping отвечает, не запуская процесс; чужое событие пропускается.
+    let raw = json!({ "ref": "refs/heads/main", "repository": { "full_name": "org/repo" }, "commits": [{ "id": "abc1234567", "message": "fix: чинит" }] }).to_string();
+    let signed = |token: &str, event: &str| post(url.clone()).header("x-github-event", event.to_string()).header("x-hub-signature-256", github_sig(token, raw.as_bytes())).body(raw.clone());
+    assert_eq!(post(url.clone()).header("x-github-event", "push").body(raw.clone()).send().await.unwrap().status().as_u16(), 401, "без подписи");
+    assert_eq!(signed("чужой секрет", "push").send().await.unwrap().status().as_u16(), 401, "с чужой подписью");
+    assert_eq!(signed(&secret, "ping").send().await.unwrap().status().as_u16(), 200, "ping");
+    assert_eq!(signed(&secret, "issues").send().await.unwrap().status().as_u16(), 202, "чужое событие принято и пропущено");
+    assert_eq!(crew.ok("GET", &format!("/api/workflows/{id}/runs"), None).await["runs"].as_array().unwrap().len(), 0, "отказы и пропуски ничего не запустили");
+    // Верная подпись запускает процесс; тот же вызов с простым секретом (без заголовков GitHub) тоже принят.
+    let ok = signed(&secret, "push").send().await.unwrap();
+    assert_eq!(ok.status().as_u16(), 202, "{}", ok.text().await.unwrap());
+    crew.wait_event("ход по вебхуку", |e| e["type"] == "turn_end" && e["botId"] == bot.as_str()).await;
+    common::wait_until("конец запуска", 30, || async { crew.ok("GET", &format!("/api/workflows/{id}/runs"), None).await["runs"][0]["status"] == "done" }).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10_500)).await;
+    assert_eq!(post(url.clone()).body(r#"{"a":1}"#).send().await.unwrap().status().as_u16(), 202, "простой секрет");
+
+    // Секрета нет ни в файле процесса, ни в ответах, ни в открытом виде на диске; в секретах он есть.
+    let file = std::fs::read_to_string(crew.data_dir.join("workflows").join(format!("{id}.json"))).unwrap();
+    let answers = [crew.ok("GET", &format!("/api/workflows/{id}"), None).await.to_string(), crew.ok("GET", "/api/workflows", None).await.to_string(), crew.ok("GET", "/api/state", None).await.to_string()];
+    for (what, text) in std::iter::once(("файл процесса", &file)).chain(answers.iter().map(|a| ("ответ API", a))) {
+        assert!(!text.contains(&secret), "секрет вебхука в месте «{what}»");
+    }
+    let summary = crew.ok("GET", "/api/workflows", None).await["workflows"].as_array().unwrap().iter().find(|w| w["id"] == id.as_str()).cloned().unwrap();
+    assert!(!summary.to_string().contains(&secret));
+    // Узел перестал быть вебхуком — адрес мёртв и не оживает при возврате.
+    let mut graph = crew.ok("GET", &format!("/api/workflows/{id}"), None).await["workflow"].clone();
+    let revision = graph["revision"].as_i64().unwrap();
+    graph["graph"]["nodes"][0]["fields"] = json!({ "trigger": "manual" });
+    crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": revision, "graph": graph["graph"] }))).await;
+    assert_eq!(post(url.clone()).body("{}").send().await.unwrap().status().as_u16(), 404, "узел больше не вебхук");
+    graph["graph"]["nodes"][0]["fields"] = json!({ "trigger": "webhook" });
+    crew.ok("PUT", &format!("/api/workflows/{id}/graph"), Some(json!({ "base_revision": revision + 1, "graph": graph["graph"] }))).await;
+    assert_eq!(post(url).body("{}").send().await.unwrap().status().as_u16(), 404, "старый секрет не ожил");
 }
 
 fn github_sig(secret: &str, body: &[u8]) -> String {

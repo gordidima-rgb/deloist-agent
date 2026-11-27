@@ -774,7 +774,7 @@ pub fn wait_def() -> Value {
         "parameters": { "type": "object", "properties": {
             "in_minutes": { "type": "integer", "description": "Через сколько минут продолжить." },
             "at": { "type": "string", "description": "Во сколько продолжить, ЧЧ:ММ по часам человека (ближайшее такое время)." },
-            "webhook": { "type": "string", "description": "Номер рутины-вебхука этого бота (list_routines): продолжить, когда его вызовут. Вместе с in_minutes или at — это крайний срок." },
+            "webhook": { "type": "string", "description": "Номер процесса с вебхуком, в котором работает этот бот (list_workflows): продолжить, когда вебхук вызовут. Вместе с in_minutes или at — это крайний срок." },
             "note": { "type": "string", "description": "Чего ждёшь, коротко: человек увидит это в списке." },
         } },
     } })
@@ -786,8 +786,12 @@ pub fn exec_wait(app: &Arc<App>, bot: &crate::store::Bot, args: &Value) -> Resul
     let at = now();
     let webhook = Some(text("webhook")).filter(|w| !w.is_empty());
     if let Some(id) = webhook {
-        let hook = app.store.routine(id).filter(|r| r.hook && r.bot_id == bot.id);
-        hook.ok_or("webhook: нужен номер рутины-вебхука этого бота из list_routines")?;
+        let hook = app.workflows.lock().get(id).is_some_and(|s| {
+            s.wf.graph.nodes.iter().any(|n| n.kind == "trigger" && n.text("trigger") == "webhook") && s.wf.graph.nodes.iter().any(|n| n.kind == "bot" && n.text("bot_id") == bot.id)
+        });
+        if !hook {
+            return Err("webhook: нужен номер процесса с вебхуком, в котором работает этот бот (list_workflows)".into());
+        }
     }
     let until = if let Some(minutes) = args["in_minutes"].as_i64() {
         at + minutes.max(1).saturating_mul(60_000)
@@ -871,11 +875,9 @@ pub async fn resume_due(app: &Arc<App>) {
     }
 }
 
-/// Пришёл вебхук рутины: ход этого бота, который его ждал, продолжается с данными вместо нового хода. `false` — никто не ждал.
-pub async fn resume_on_webhook(app: &Arc<App>, routine_id: &str, bot_id: &str, data: &str) -> bool {
-    let waiting = app.runs.paused().into_iter().find(|r| {
-        r.bot_id == bot_id && matches!(&r.state, RunState::Paused { webhook: Some(w), .. } if w == routine_id)
-    });
+/// Пришёл вебхук процесса: ход бота, который его ждал, продолжается с данными вместо нового запуска. `false` — никто не ждал.
+pub async fn resume_on_webhook(app: &Arc<App>, workflow_id: &str, data: &str) -> bool {
+    let waiting = app.runs.paused().into_iter().find(|r| matches!(&r.state, RunState::Paused { webhook: Some(w), .. } if w == workflow_id));
     match waiting {
         Some(run) => resume(app, &run.id, false, Some(data)).await.is_ok(),
         None => false,

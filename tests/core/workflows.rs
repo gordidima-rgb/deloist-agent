@@ -1162,7 +1162,7 @@ async fn a_webhook_secret_dies_with_its_node() {
     crew.ok("POST", &format!("/api/workflows/{id}/versions/{oldest}/restore"), None).await;
     assert_eq!(bare.post(&url).body("x").send().await.unwrap().status().as_u16(), 404);
     let stored = std::fs::read_to_string(crew.data_dir.join("workflows").join(format!("{id}.json"))).unwrap();
-    assert!(stored.contains("\"hooks\":{}"), "отпечатки убраны с диска: {stored}");
+    assert!(!stored.contains("\"hooks\""), "в файле процесса нет таблицы секретов: {stored}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
