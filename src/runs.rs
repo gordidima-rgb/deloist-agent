@@ -952,7 +952,7 @@ async fn settle_origin(app: &Arc<App>, run: &Run, status: &str, text: &str) {
     match &run.origin {
         Origin::Routine { id, title } | Origin::Webhook { id, title } | Origin::Goal { id, title, .. } => {
             let routine = RoutineRef { id: id.clone(), title: title.clone() };
-            crate::scheduler::routine_finished(app, &routine, &run.bot_id, status, None).await;
+            crate::scheduler::routine_finished(app, &routine, status).await;
             if let Origin::Goal { run: goal_run, .. } = &run.origin {
                 crate::goals::finished(app, &run.bot_id, &Some(goal_run.clone()), status).await;
             }

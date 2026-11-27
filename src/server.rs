@@ -2732,9 +2732,10 @@ async fn run_routine_now(State(app): Shared, Path(id): Path<String>, body: axum:
         },
         _ => None,
     };
-    if let (Some(routine), Some((extra, commit))) = (routine, triggered) {
-        return match crate::scheduler::run_routine_with(&app, &routine, !attended, "routine", 0, &extra).await {
-            Ok(()) => {
+    if let Some((extra, commit)) = triggered {
+        let source = if attended { "manual" } else { "routine" };
+        return match crate::workflow_run::start_run_with(&app, &id, source, None, None, None, false, Some(extra)) {
+            Ok(_) => {
                 if let Some(commit) = commit {
                     commit(&app);
                 }

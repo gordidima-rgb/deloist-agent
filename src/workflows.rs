@@ -610,6 +610,24 @@ impl Inner {
         }
     }
 
+    /// Положить новый процесс: файл пишется целиком и атомарно, и только потом он появляется в памяти.
+    /// Файл с таким номером, который не прочитался при запуске, не затирается.
+    pub fn insert_new(&mut self, stored: Stored) -> std::io::Result<()> {
+        let id = stored.wf.id.clone();
+        let path = self.wf_path(&id);
+        if self.get(&id).is_some() || path.exists() {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, format!("файл процесса {id} уже есть и не читается: его не трогаем")));
+        }
+        std::fs::create_dir_all(&self.dir)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string(&stored).map_err(std::io::Error::other)?)?;
+        std::fs::rename(&tmp, &path)?;
+        self.runs.entry(id).or_default();
+        self.items.push(stored);
+        self.items.sort_by_key(|s| s.wf.created_at);
+        Ok(())
+    }
+
     pub fn remove_files(&self, id: &str) {
         let _ = std::fs::remove_file(self.wf_path(id));
         let _ = std::fs::remove_file(self.runs_path(id));

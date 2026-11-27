@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -526,9 +526,6 @@ pub struct Routine {
     /// Три «вечные» ошибки подряд (вход, проверка, неизвестная): рутина на паузе, пока человек не нажмёт «Возобновить».
     #[serde(skip_serializing_if = "is_false")]
     pub error_paused: bool,
-    /// С какого момента расписание ждёт занятого бота (0 — не ждёт). Только в памяти.
-    #[serde(skip)]
-    pub busy_since: i64,
     /// Что делать с пропущенными запусками: "last" — выполнить последний, "skip" — пропустить.
     #[serde(default = "default_catch_up")]
     pub catch_up: String,
@@ -553,17 +550,6 @@ fn is_zero_u32(v: &u32) -> bool {
 
 fn is_false(v: &bool) -> bool {
     !*v
-}
-
-/// Чем кончился запуск рутины для расписания.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RoutineOutcome {
-    /// Не ошибка (выполнена, тихо, остановил человек, пауза): серия не растёт.
-    Done,
-    /// Ошибка, серия подряд — `failures`.
-    Failed { failures: u32 },
-    /// Третья «вечная» ошибка подряд: рутина встала на паузу, человеку сообщаем один раз.
-    PausedByErrors { failures: u32 },
 }
 
 impl Default for Routine {
@@ -598,7 +584,6 @@ impl Default for Routine {
             failures: 0,
             stop_reason: None,
             error_paused: false,
-            busy_since: 0,
             catch_up: "last".to_string(),
             progress_note: String::new(),
             check: String::new(),
@@ -1310,6 +1295,82 @@ pub(crate) fn apply_schedule(routine: &mut Routine, input: &Value) -> Result<(),
     Ok(())
 }
 
+/// Правка полей рутины из тела запроса: одна для рутины в state и для рутины-процесса.
+fn patch_routine(r: &mut Routine, patch: &Value, human: bool) -> std::io::Result<()> {
+        if let Some(v) = patch.get("enabled").filter(|v| !v.is_null()) {
+            r.enabled = truthy(v);
+        }
+        if let Some(v) = patch.get("quiet").filter(|v| !v.is_null()) {
+            r.quiet = truthy(v);
+        }
+        if let Some(v) = patch.get("prompt").filter(|v| !v.is_null()) {
+            r.prompt = as_string(v);
+        }
+        if let Some(v) = patch.get("title").filter(|v| !v.is_null()) {
+            r.title = as_string(v);
+        }
+        if let Some(v) = patch.get("goalId").filter(|v| !v.is_null()) {
+            r.goal_id = as_string(v);
+        }
+        if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) {
+            r.approval_floor = as_string(v);
+        }
+        // «Возобновить» после паузы из-за ошибок.
+        if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
+            r.error_paused = truthy(v);
+            if !r.error_paused {
+                r.failures = 0;
+                r.stop_reason = None;
+            }
+        }
+        if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
+            r.catch_up = as_string(v);
+        }
+        if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
+            r.progress_note = as_string(v);
+        }
+        if human {
+            if let Some(v) = patch.get("check").filter(|v| !v.is_null()) {
+                r.check = as_string(v);
+            }
+        }
+        if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
+            r.every_minutes = minutes(patch.get("everyMinutes"));
+        }
+        if let Some(v) = patch.get("hook").filter(|v| !v.is_null()) {
+            let want = truthy(v);
+            if want && !r.hook {
+                r.hook_token = crate::guard::random_token();
+            }
+            if !want {
+                r.hook_token.clear();
+            }
+            r.hook = want;
+        }
+        if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
+            r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        }
+        apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
+        // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
+        if rescheduled || !r.enabled || r.hook {
+            r.failures = 0;
+            r.stop_reason = None;
+        }
+        if r.hook {
+            r.next_run = 0;
+        } else if rescheduled {
+            r.next_run = next_run_for(r, now());
+        }
+        // Только для проверок: приблизить срок, не дожидаясь его.
+        if cfg!(debug_assertions) {
+            if let Some(at) = number(patch.get("nextRun")) {
+                r.next_run = at as i64;
+            }
+        }
+    Ok(())
+}
+
 pub(crate) fn minutes(v: Option<&Value>) -> i64 {
     let raw = number(v).filter(|x| *x != 0.0 && x.is_finite()).unwrap_or(60.0);
     (raw as i64).max(5)
@@ -1335,6 +1396,8 @@ pub(crate) fn plain_file_name(name: &str) -> bool {
 
 pub struct Store {
     pub reminders: crate::reminders::Reminders,
+    /// Рабочие процессы: рутина по расписанию — это процесс «триггер → бот», он лежит здесь.
+    pub workflows: Arc<crate::workflows::Workflows>,
     data_dir: PathBuf,
     state: Mutex<State>,
     secrets: Mutex<Secrets>,
@@ -1723,8 +1786,10 @@ impl Store {
         }
 
         let reminders = crate::reminders::Reminders::open(data_dir.clone());
+        let workflows = Arc::new(crate::workflows::Workflows::open(&data_dir));
         let store = Self {
             reminders,
+            workflows,
             data_dir,
             state: Mutex::new(state),
             secrets: Mutex::new(secrets),
@@ -1739,6 +1804,7 @@ impl Store {
         }
         store.migrate_one_bot_one_team().await;
         store.build_team_folders().await;
+        store.move_routines(true).await;
         Ok(store)
     }
 
@@ -2653,6 +2719,12 @@ impl Store {
             state.routines.retain(|r| r.bot_id != id);
             calm_pets(&mut state);
         }
+        for routine in self.process_routines_of(id) {
+            let mut workflows = self.workflows.lock();
+            workflows.items.retain(|s| s.wf.id != routine);
+            workflows.runs.remove(&routine);
+            workflows.remove_files(&routine);
+        }
         self.persist().await?;
         let _ = tokio::fs::remove_file(self.thread_file(id)).await;
         // Бота нет, и входы в его кабинеты хранить незачем.
@@ -2983,8 +3055,57 @@ impl Store {
 
     // --- рутины ------------------------------------------------------------
 
+    /// Рутины: вебхук-рутины из state и рутины-процессы (вид для старых адресов, 0.4.11 step 5 removes this).
     pub fn routines(&self) -> Vec<Routine> {
-        self.state.lock().unwrap().routines.clone()
+        let mut all = self.state.lock().unwrap().routines.clone();
+        all.extend(self.workflows.lock().items.iter().filter_map(crate::routine_migrate::to_routine));
+        all.sort_by_key(|r| r.created_at);
+        all
+    }
+
+    /// Рутины по расписанию переезжают в процессы «триггер → бот» с тем же номером (0.4.11, шаг 4a). Каждый файл
+    /// пишется целиком и атомарно, и только потом рутина уходит из state; не записался — рутина остаётся и повтор будет на тике.
+    pub async fn migrate_routines(&self) {
+        self.move_routines(false).await;
+    }
+
+    /// `first` — запуск программы: перед первым настоящим переездом рядом ложится копия `state.json.before-processes.bak`.
+    async fn move_routines(&self, first: bool) {
+        let pending: Vec<Routine> = self.state.lock().unwrap().routines.iter().filter(|r| crate::routine_migrate::migratable(r) && !crate::reminders::is_reminder(r)).cloned().collect();
+        if pending.is_empty() {
+            return;
+        }
+        let backup = self.data_dir.join("state.json.before-processes.bak");
+        if first && !backup.exists() {
+            let _ = tokio::fs::copy(self.data_dir.join("state.json"), &backup).await;
+        }
+        let mut moved: Vec<String> = Vec::new();
+        {
+            let mut workflows = self.workflows.lock();
+            for routine in &pending {
+                // Процесс с этим номером уже есть (прошлый переезд не успел убрать рутину из state): рутину только убираем.
+                if workflows.get(&routine.id).is_some() {
+                    moved.push(routine.id.clone());
+                    continue;
+                }
+                match workflows.insert_new(crate::routine_migrate::to_stored(routine)) {
+                    Ok(()) => moved.push(routine.id.clone()),
+                    Err(e) => eprintln!("[routines] «{}» не переехала в процесс, остаётся рутиной: {e}", routine.title),
+                }
+            }
+        }
+        if moved.is_empty() {
+            return;
+        }
+        self.state.lock().unwrap().routines.retain(|r| !moved.contains(&r.id));
+        if let Err(e) = self.persist().await {
+            eprintln!("[routines] state.json не записался после переезда ({e}); при следующем запуске рутины только уберутся из него");
+        }
+    }
+
+    /// Номера рутин-процессов бота: они уходят вместе с ним.
+    fn process_routines_of(&self, bot_id: &str) -> Vec<String> {
+        self.workflows.lock().items.iter().filter(|s| s.wf.from_routine && s.wf.graph.nodes.iter().any(|n| n.kind == "bot" && n.text("bot_id") == bot_id)).map(|s| s.wf.id.clone()).collect()
     }
 
     /// Обычная рутина такой, какой её запишет `add_routine_capped` по тому же вводу, но без записи:
@@ -3039,105 +3160,70 @@ impl Store {
         } else {
             routine.next_run = next_run_for(&routine, now());
         }
+        // Замок процессов берётся раньше замка state: ход процесса держит первый и читает настройки из второго.
+        let processes = self.workflows.lock().items.iter().filter(|s| s.wf.from_routine).count();
         {
             let mut state = self.state.lock().unwrap();
-            if state.routines.len() >= cap {
+            if state.routines.len() + processes >= cap {
                 return Ok(None);
             }
             state.routines.push(routine.clone());
         }
         self.persist().await?;
+        self.move_routines(false).await;
         Ok(Some(routine))
     }
 
     pub async fn update_routine(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
         let updated = {
             let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(None);
-            };
-            if let Some(v) = patch.get("enabled").filter(|v| !v.is_null()) {
-                r.enabled = truthy(v);
-            }
-            if let Some(v) = patch.get("quiet").filter(|v| !v.is_null()) {
-                r.quiet = truthy(v);
-            }
-            if let Some(v) = patch.get("prompt").filter(|v| !v.is_null()) {
-                r.prompt = as_string(v);
-            }
-            if let Some(v) = patch.get("title").filter(|v| !v.is_null()) {
-                r.title = as_string(v);
-            }
-            if let Some(v) = patch.get("goalId").filter(|v| !v.is_null()) {
-                r.goal_id = as_string(v);
-            }
-            if let Some(v) = patch.get("approvalFloor").filter(|v| !v.is_null()) {
-                r.approval_floor = as_string(v);
-            }
-            // «Возобновить» после паузы из-за ошибок.
-            if let Some(v) = patch.get("errorPaused").filter(|v| !v.is_null()) {
-                r.error_paused = truthy(v);
-                if !r.error_paused {
-                    r.failures = 0;
-                    r.stop_reason = None;
+            match state.routines.iter_mut().find(|r| r.id == id) {
+                Some(r) => {
+                    patch_routine(r, patch, human)?;
+                    r.clone()
+                }
+                None => {
+                    drop(state);
+                    return self.update_process_routine(id, patch, human);
                 }
             }
-            if let Some(v) = patch.get("catchUp").filter(|v| !v.is_null()) {
-                r.catch_up = as_string(v);
-            }
-            if let Some(v) = patch.get("progressNote").filter(|v| !v.is_null()) {
-                r.progress_note = as_string(v);
-            }
-            if human {
-                if let Some(v) = patch.get("check").filter(|v| !v.is_null()) {
-                    r.check = as_string(v);
-                }
-            }
-            if patch.get("everyMinutes").is_some_and(|v| !v.is_null()) {
-                r.every_minutes = minutes(patch.get("everyMinutes"));
-            }
-            if let Some(v) = patch.get("hook").filter(|v| !v.is_null()) {
-                let want = truthy(v);
-                if want && !r.hook {
-                    r.hook_token = crate::guard::random_token();
-                }
-                if !want {
-                    r.hook_token.clear();
-                }
-                r.hook = want;
-            }
-            if let Some(v) = patch.get("hookEvents").filter(|v| !v.is_null()) {
-                r.hook_events = validate_hook_events(v).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            }
-            apply_schedule(r, patch).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-            let rescheduled = ["everyMinutes", "everyMaxMinutes", "at", "days", "windowFrom", "windowTo", "hook", "leadMinutes", "recurrence", "startOn", "onceAt", "cron", "tz"].iter().any(|key| patch.get(*key).is_some_and(|v| !v.is_null()));
-            // Человек выключил рутину или поменял расписание: прежняя серия ошибок больше не нужна.
-            if rescheduled || !r.enabled || r.hook {
-                r.failures = 0;
-                r.stop_reason = None;
-            }
-            if r.hook {
-                r.next_run = 0;
-            } else if rescheduled {
-                r.next_run = next_run_for(r, now());
-            }
-            // Только для проверок: приблизить срок, не дожидаясь его.
-            if cfg!(debug_assertions) {
-                if let Some(at) = number(patch.get("nextRun")) {
-                    r.next_run = at as i64;
-                }
-            }
-            r.clone()
         };
         self.persist().await?;
         Ok(Some(updated))
+    }
+
+    /// Правка рутины-процесса: тот же разбор тела, результат записан в граф «триггер → бот».
+    fn update_process_routine(&self, id: &str, patch: &Value, human: bool) -> std::io::Result<Option<Routine>> {
+        let mut workflows = self.workflows.lock();
+        let Some(stored) = workflows.get_mut(id) else { return Ok(None) };
+        let Some(mut routine) = crate::routine_migrate::to_routine(stored) else { return Ok(None) };
+        if patch.get("hook").is_some_and(truthy) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "вебхук включается у новой рутины, а не у рутины по расписанию"));
+        }
+        patch_routine(&mut routine, patch, human)?;
+        let before = serde_json::to_string(&stored.wf.graph).unwrap_or_default();
+        crate::routine_migrate::apply(stored, &routine);
+        if serde_json::to_string(&stored.wf.graph).unwrap_or_default() != before {
+            stored.wf.revision += 1;
+        }
+        let updated = crate::routine_migrate::to_routine(stored);
+        workflows.save_wf(id);
+        Ok(updated)
     }
 
     pub async fn remove_routine(&self, id: &str) -> std::io::Result<bool> {
         {
             let mut state = self.state.lock().unwrap();
             let Some(idx) = state.routines.iter().position(|r| r.id == id) else {
-                return Ok(false);
+                drop(state);
+                let mut workflows = self.workflows.lock();
+                if !workflows.get(id).is_some_and(|s| s.wf.from_routine) {
+                    return Ok(false);
+                }
+                workflows.items.retain(|s| s.wf.id != id);
+                workflows.runs.remove(id);
+                workflows.remove_files(id);
+                return Ok(true);
             };
             state.routines.remove(idx);
         }
@@ -3152,62 +3238,8 @@ impl Store {
                 return Ok(());
             };
             r.last_run = now();
-            r.busy_since = 0;
             // «Готово» ставит только конец хода: до него рутина «идёт», а обрыв перезапуском виден при старте.
             r.last_status = Some(if ok { "running" } else { "error" }.to_string());
-            schedule::finish(r, now());
-        }
-        self.persist().await
-    }
-
-    /// Ход рутины кончился со статусом `status`. Выполнено — серия ошибок сброшена. Ошибка (`reason`) растит серию:
-    /// от 3 подряд рутина идёт реже, а три «вечные» ошибки подряд ставят её на паузу. Выключить её сбои не могут.
-    pub async fn finish_routine_run(&self, id: &str, status: &str, reason: Option<crate::runs::StopReason>) -> std::io::Result<RoutineOutcome> {
-        let outcome = {
-            let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(RoutineOutcome::Done);
-            };
-            // Цель ведёт свои запуски сама, вебхук без расписания.
-            let counted = r.goal_id.is_empty() && !r.hook;
-            let outcome = match reason.filter(|r| counted && r.is_failure() && matches!(status, "failed" | "needs")) {
-                Some(reason) => {
-                    r.failures += 1;
-                    r.stop_reason = Some(reason);
-                    if r.enabled {
-                        r.next_run = r.next_run.max(r.last_run + schedule::failure_gap_ms(r.failures));
-                    }
-                    if reason.is_lasting() && r.failures >= 3 && !r.error_paused {
-                        r.error_paused = true;
-                        RoutineOutcome::PausedByErrors { failures: r.failures }
-                    } else {
-                        RoutineOutcome::Failed { failures: r.failures }
-                    }
-                }
-                None => {
-                    if counted && matches!(status, "ok" | "quiet") {
-                        r.failures = 0;
-                        r.stop_reason = None;
-                        r.error_paused = false;
-                    }
-                    RoutineOutcome::Done
-                }
-            };
-            r.last_status = Some(status.to_string());
-            outcome
-        };
-        self.persist().await?;
-        Ok(outcome)
-    }
-
-    /// Запуск не состоялся (не то время, предел токенов): просто следующий срок.
-    pub async fn reschedule_routine(&self, id: &str, status: &str) -> std::io::Result<()> {
-        {
-            let mut state = self.state.lock().unwrap();
-            let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else {
-                return Ok(());
-            };
-            r.last_status = Some(status.to_string());
             schedule::finish(r, now());
         }
         self.persist().await
@@ -3244,23 +3276,8 @@ impl Store {
     }
 
     pub fn routine(&self, id: &str) -> Option<Routine> {
-        self.state.lock().unwrap().routines.iter().find(|r| r.id == id).cloned()
-    }
-
-    /// Бот занят: рутина ждёт его по 5 минут, очередь не копит, но не дольше часа. `false` — час прошёл, запуск пропущен.
-    pub fn wait_for_bot(&self, id: &str) -> bool {
-        let mut state = self.state.lock().unwrap();
-        let Some(r) = state.routines.iter_mut().find(|r| r.id == id) else { return true };
-        let t = now();
-        if r.busy_since == 0 {
-            r.busy_since = t;
-        }
-        if t - r.busy_since >= schedule::hour_ms() {
-            r.busy_since = 0;
-            return false;
-        }
-        r.next_run = t + schedule::hour_ms() / 12;
-        true
+        let found = self.state.lock().unwrap().routines.iter().find(|r| r.id == id).cloned();
+        found.or_else(|| self.workflows.lock().get(id).and_then(crate::routine_migrate::to_routine))
     }
 
     // --- навыки ------------------------------------------------------------
@@ -4138,53 +4155,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
-    // Серия ошибок: после 3 рутина идёт реже, три «вечные» ставят её на паузу, один успех возвращает всё.
-    #[tokio::test]
-    async fn failed_runs_slow_a_routine_and_lasting_ones_pause_it() {
-        use crate::runs::StopReason::{Check, Login, Network};
-        let dir = temp_dir("routine-failures");
-        let store = Store::open(dir.clone()).await.unwrap();
-        let r = store.add_routine(&json!({ "botId": "bot", "title": "Срез", "prompt": "собери", "everyMinutes": 10 }), false).await.unwrap();
-
-        store.mark_routine_run(&r.id, true).await.unwrap();
-        assert_eq!(store.routine(&r.id).unwrap().last_status.as_deref(), Some("running"), "до конца хода — не «готово»");
-
-        for n in 1..=2 {
-            assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap(), RoutineOutcome::Failed { failures: n });
-        }
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run < saved.last_run + 20 * 60_000, "две ошибки расписание не меняют");
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap(), RoutineOutcome::Failed { failures: 3 });
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run >= saved.last_run + 3_600_000, "после трёх — не чаще раза в час");
-        assert!(!saved.error_paused, "сеть пройдёт сама: паузы нет");
-        for _ in 0..3 {
-            store.finish_routine_run(&r.id, "failed", Some(Network)).await.unwrap();
-        }
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.next_run >= saved.last_run + 4 * 3_600_000, "после шести — раз в 4 часа");
-
-        // Пауза и «стоп» человеком серию не трогают, успех сбрасывает.
-        assert_eq!(store.finish_routine_run(&r.id, "paused", Some(Network)).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.finish_routine_run(&r.id, "needs", Some(crate::runs::StopReason::Limit)).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.finish_routine_run(&r.id, "stopped", None).await.unwrap(), RoutineOutcome::Done);
-        assert_eq!(store.routine(&r.id).unwrap().failures, 6);
-        assert_eq!(store.finish_routine_run(&r.id, "ok", None).await.unwrap(), RoutineOutcome::Done);
-        let saved = store.routine(&r.id).unwrap();
-        assert_eq!((saved.failures, saved.stop_reason), (0, None), "выполнено — серия сброшена");
-
-        // Вход и проверка — «вечные»: третья подряд ставит на паузу, сообщение одно.
-        assert_eq!(store.finish_routine_run(&r.id, "needs", Some(Login)).await.unwrap(), RoutineOutcome::Failed { failures: 1 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::Failed { failures: 2 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::PausedByErrors { failures: 3 });
-        assert_eq!(store.finish_routine_run(&r.id, "failed", Some(Check)).await.unwrap(), RoutineOutcome::Failed { failures: 4 });
-        let saved = store.routine(&r.id).unwrap();
-        assert!(saved.error_paused && saved.enabled, "рутина на паузе, но не выключена");
-        let resumed = store.update_routine(&r.id, &json!({ "errorPaused": false }), false).await.unwrap().unwrap();
-        assert_eq!((resumed.error_paused, resumed.failures), (false, 0));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
     // Ночь тихих рутин не должна стоить боту памяти о живом разговоре.
     #[tokio::test]
     async fn quiet_routines_do_not_push_the_conversation_out_of_the_window() {
@@ -4872,6 +4842,97 @@ mod tests {
     }
     fn normal_routine(id: &str) -> Routine {
         Routine { id: id.into(), bot_id: "bot1".into(), title: format!("rt {id}"), prompt: "do".into(), every_minutes: 60, enabled: true, next_run: 10, ..Routine::default() }
+    }
+
+    async fn open_with(dir: &PathBuf, routines: Vec<Routine>) -> Store {
+        tokio::fs::create_dir_all(dir).await.unwrap();
+        let state = serde_json::json!({ "version": 1, "createdAt": 0, "settings": {}, "bots": [], "routines": routines, "skills": [], "rooms": [], "mcp": [] });
+        tokio::fs::write(dir.join("state.json"), state.to_string()).await.unwrap();
+        Store::open(dir.clone()).await.unwrap()
+    }
+
+    fn state_routine_ids(store: &Store) -> Vec<String> {
+        store.state.lock().unwrap().routines.iter().map(|r| r.id.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn routines_become_processes_with_the_same_id_and_next_run_and_a_backup_is_written_once() {
+        let dir = temp_dir("rt-to-proc");
+        let at = 1_900_000_000_000;
+        let routines = vec![
+            Routine { next_run: at, ..normal_routine("rt_a") },
+            Routine { at: "09:00".into(), next_run: at, ..normal_routine("rt_b") },
+            Routine { cron: "0 9 * * 1".into(), next_run: at, ..normal_routine("rt_c") },
+            Routine { once_at: at, next_run: at, ..normal_routine("rt_d") },
+            Routine { hook: true, hook_token: "t".into(), ..normal_routine("rt_h") },
+        ];
+        let store = open_with(&dir, routines).await;
+        for id in ["rt_a", "rt_b", "rt_c", "rt_d"] {
+            let workflows = store.workflows.lock();
+            let stored = workflows.get(id).unwrap_or_else(|| panic!("{id}: процесса нет"));
+            assert!(stored.wf.from_routine && stored.wf.enabled, "{id}");
+            assert_eq!(stored.slots["t1"].next, Some(at), "{id}: срок тот же, второго запуска при переезде нет");
+            assert!(dir.join("workflows").join(format!("{id}.json")).is_file(), "{id}: файл записан");
+        }
+        assert_eq!(state_routine_ids(&store), vec!["rt_h".to_string()], "в state остался только вебхук");
+        assert_eq!(store.routines().len(), 5, "старое окно видит все пять");
+        assert_eq!(store.routine("rt_b").unwrap().next_run, at);
+        let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).unwrap()).unwrap();
+        assert_eq!(on_disk["routines"].as_array().unwrap().len(), 1, "state.json переписан");
+        let backup = dir.join("state.json.before-processes.bak");
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
+        assert_eq!(saved["routines"].as_array().unwrap().len(), 5, "копия снята до переезда");
+        // Повторный запуск ничего не меняет, а копию не затирает.
+        std::fs::write(&backup, "моя копия").unwrap();
+        let before = std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap();
+        drop(store);
+        let again = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(again.routines().len(), 5);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "моя копия");
+        assert_eq!(std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap(), before);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_routine_whose_process_already_exists_only_leaves_state_and_a_broken_file_is_never_overwritten() {
+        let dir = temp_dir("rt-to-proc-safe");
+        let first = open_with(&dir, vec![normal_routine("rt_a")]).await;
+        assert!(first.workflows.lock().get("rt_a").is_some());
+        let file = dir.join("workflows").join("rt_a.json");
+        let before = std::fs::read(&file).unwrap();
+        drop(first);
+        // Прошлый переезд записал файл, но state.json не обновился: рутина снова в state.
+        std::fs::write(dir.join("workflows").join("rt_x.json"), "{broken").unwrap();
+        let state = serde_json::json!({ "version": 1, "createdAt": 0, "settings": {}, "bots": [], "routines": [normal_routine("rt_a"), normal_routine("rt_x"), normal_routine("rt_y")], "skills": [], "rooms": [], "mcp": [] });
+        std::fs::write(dir.join("state.json"), state.to_string()).unwrap();
+        let store = Store::open(dir.clone()).await.unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), before, "готовый файл не переписан");
+        assert!(store.workflows.lock().get("rt_y").is_some(), "соседняя рутина переехала");
+        assert_eq!(state_routine_ids(&store), vec!["rt_x".to_string()], "с нечитаемым файлом рутина остаётся в state");
+        assert_eq!(std::fs::read_to_string(dir.join("workflows").join("rt_x.json")).unwrap(), "{broken", "битый файл не тронут");
+        assert!(store.routine("rt_x").is_some(), "и по-прежнему видна окну");
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn edits_and_deletes_of_a_routine_process_go_through_the_old_api() {
+        let dir = temp_dir("rt-to-proc-edit");
+        let store = open_with(&dir, vec![Routine { next_run: 1_900_000_000_000, ..normal_routine("rt_a") }]).await;
+        let edited = store.update_routine("rt_a", &serde_json::json!({ "prompt": "новое", "at": "10:30", "enabled": false }), true).await.unwrap().unwrap();
+        assert_eq!((edited.prompt.as_str(), edited.at.as_str(), edited.enabled), ("новое", "10:30", false));
+        let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("workflows").join("rt_a.json")).unwrap()).unwrap();
+        assert_eq!(on_disk["enabled"], false);
+        assert_eq!(on_disk["revision"], 2, "правка графа поднимает ревизию");
+        assert!(store.update_routine("rt_a", &serde_json::json!({ "hook": true }), true).await.is_err(), "вебхук у рутины-процесса не включается");
+        assert!(store.update_routine("нет", &serde_json::json!({}), true).await.unwrap().is_none());
+        let made = store.add_routine(&serde_json::json!({ "botId": "bot1", "title": "Новая", "prompt": "x", "everyMinutes": 30 }), true).await.unwrap();
+        assert!(store.workflows.lock().get(&made.id).is_some(), "новая рутина сразу процесс");
+        assert!(state_routine_ids(&store).is_empty());
+        assert!(store.remove_routine(&made.id).await.unwrap());
+        assert!(store.remove_routine("rt_a").await.unwrap());
+        assert!(!dir.join("workflows").join("rt_a.json").exists());
+        assert!(!store.remove_routine("rt_a").await.unwrap());
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
     #[tokio::test]

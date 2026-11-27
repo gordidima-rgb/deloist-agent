@@ -282,7 +282,7 @@ impl Mail {
         self.state.lock().unwrap().triggers.iter().find(|t| t.routine_id == routine_id).cloned()
     }
 
-    fn set_trigger(&self, trigger: Trigger) {
+    pub(crate) fn set_trigger(&self, trigger: Trigger) {
         self.change(|s| {
             s.triggers.retain(|t| t.routine_id != trigger.routine_id);
             s.triggers.push(trigger);
@@ -1263,34 +1263,32 @@ pub fn commit(app: &App, routine_id: &str, bot_id: &str, senders: &[String], uid
     }
 }
 
-/// Тикер: рутина с триггером. Проверка идёт в фоне: медленный почтовый сервер не держит другие рутины.
-pub fn tick_routine(app: &Arc<App>, routine: crate::store::Routine, trigger: Trigger) {
-    if !app.mail.checking.lock().unwrap().insert(routine.id.clone()) {
+/// Срок процесса с почтовым триггером. Проверка идёт в фоне: медленный почтовый сервер не держит другие процессы.
+/// Есть новые письма — запуск с ними во входе; нет — срок просто пройден. `late` — пометка, что срок опоздал.
+pub fn tick_process(app: &Arc<App>, id: &str, node: &str, trigger: Trigger, late: Option<String>) {
+    let Some(routine) = app.store.routine(id) else { return };
+    if !app.mail.checking.lock().unwrap().insert(id.to_string()) {
         return;
     }
-    let app = app.clone();
+    let (app, node) = (app.clone(), node.to_string());
     tokio::spawn(async move {
-        // Метка «проверяется» снимается при любом выходе, и при панике тоже: иначе рутина не проверялась бы больше.
+        // Метка «проверяется» снимается при любом выходе, и при панике тоже: иначе процесс не проверялся бы больше.
         let _guard = Checking { app: app.clone(), id: routine.id.clone() };
-        let outcome = check_trigger(&app, &routine, &trigger).await;
-        match outcome {
-            Ok(Check::Nothing) => {
-                let _ = app.store.reschedule_routine(&routine.id, "no_mail").await;
-            }
+        match check_trigger(&app, &routine, &trigger).await {
+            Ok(Check::Nothing) => crate::workflow_run::note_status(&app, &routine.id, "no_mail"),
             Ok(Check::Letters { text, senders, uid_validity, last_uid, .. }) => {
-                if app.turns.is_busy(&routine.bot_id) {
-                    // Письма никуда не денутся: проверим снова через пять минут.
-                    app.store.wait_for_bot(&routine.id);
-                } else {
-                    match crate::scheduler::run_routine_with(&app, &routine, true, "routine", 0, &text).await {
-                        Ok(()) => commit(&app, &routine.id, &routine.bot_id, &senders, uid_validity, last_uid),
-                        Err(e) => crate::scheduler::note_failure(&app, &routine, &e.message).await,
-                    }
+                let data = format!("{}{text}", late.map(|l| format!("{l}
+")).unwrap_or_default());
+                match crate::workflow_run::start_run_with(&app, &routine.id, "schedule", None, None, Some(node), false, Some(data)) {
+                    Ok(_) => commit(&app, &routine.id, &routine.bot_id, &senders, uid_validity, last_uid),
+                    // У процесса уже идёт запуск: письма никуда не денутся, их заберёт следующий срок.
+                    Err(e) if e.status == 409 => {}
+                    Err(e) => crate::scheduler::note_failure(&app, &routine, &e.message).await,
                 }
             }
             Err(e) => {
                 crate::scheduler::note_failure(&app, &routine, &format!("Почта: {e}")).await;
-                let _ = app.store.reschedule_routine(&routine.id, "error").await;
+                crate::workflow_run::note_status(&app, &routine.id, "error");
             }
         }
     });

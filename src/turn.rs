@@ -2997,7 +2997,7 @@ fn run_turn_body(
                     };
                     crate::workflow_run::step_ended(&app, ended).await;
                 }
-                _ => crate::scheduler::routine_finished(&app, routine, &bot_id, status, stop).await,
+                _ => crate::scheduler::routine_finished(&app, routine, status).await,
             }
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
@@ -3311,6 +3311,8 @@ pub struct ProcessStep {
     pub unattended: bool,
     pub floor: Option<String>,
     pub quiet: bool,
+    /// Шаг ведёт цель (рутина цели): ход идёт к ней и пишет её заметку.
+    pub run: Option<crate::goals::Run>,
 }
 
 /// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём, с теми же согласиями и с записью в
@@ -3349,6 +3351,9 @@ pub async fn run_process_step(app: &Arc<App>, bot_id: &str, step: ProcessStep, t
     if step.unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
+    if let Some(run) = &step.run {
+        crate::goals::begin_run(bot_id, run.clone());
+    }
     let opts = TurnOptions {
         source: Some("delegation:Рабочий процесс".into()),
         depth: 1,
@@ -3358,6 +3363,7 @@ pub async fn run_process_step(app: &Arc<App>, bot_id: &str, step: ProcessStep, t
         quiet: step.quiet && step.unattended,
         approval_floor: step.floor,
         origin: Some(step.origin),
+        run: step.run,
         ..TurnOptions::default()
     };
     let watcher = {

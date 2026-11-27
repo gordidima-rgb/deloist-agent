@@ -483,24 +483,24 @@ pub struct GoalRun {
 }
 
 /// Цель для запуска рутиной. `Err` — цель не годится (нет, на паузе, завершена), и рутина пропускает срок.
-pub fn routine_run(app: &Arc<App>, routine: &Routine) -> Result<GoalRun, String> {
-    let goal = app.goals.get(&routine.goal_id).ok_or("цели этой рутины уже нет")?;
+pub fn routine_run(app: &Arc<App>, goal_id: &str, title: &str) -> Result<GoalRun, String> {
+    let goal = app.goals.get(goal_id).ok_or("цели этой рутины уже нет")?;
     match goal.status.as_str() {
         "paused" => return Err(format!("цель «{}» на паузе, запуск пропущен", goal.title)),
         "completed" => return Err(format!("цель «{}» завершена, запуск пропущен", goal.title)),
         _ => {}
     }
     Ok(GoalRun {
-        text: format!("[рутина] {}\n{}", routine.title, goal_prompt(&goal)),
+        text: format!("[рутина] {title}\n{}", goal_prompt(&goal)),
         run: Run::Goal(goal.id.clone()),
         floor: goal.approval_floor.clone(),
     })
 }
 
 /// Рутина, чья цель завершена или удалена, больше не нужна: выключаем её, а не пропускаем срок за сроком.
-pub async fn release_if_dead(app: &Arc<App>, routine: &Routine) {
-    if app.goals.get(&routine.goal_id).is_none_or(|g| g.status == "completed") {
-        let _ = app.store.update_routine(&routine.id, &json!({ "enabled": false }), false).await;
+pub async fn release_if_dead(app: &Arc<App>, routine_id: &str, goal_id: &str) {
+    if app.goals.get(goal_id).is_none_or(|g| g.status == "completed") {
+        let _ = app.store.update_routine(routine_id, &json!({ "enabled": false }), false).await;
     }
 }
 
