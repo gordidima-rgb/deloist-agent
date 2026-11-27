@@ -11,6 +11,10 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
   to bots"; after 5 minutes without touches the stream pauses. Revoking a device stops its stream at once. The phone
   page on `my.deloist.ru` ships separately.
 
+- **Readable routines.** The bot's Routines tab and the routines window show the same card: title and buttons in
+  the header row, the instruction at full width and collapsed to three lines — "Show all" expands it with its
+  paragraphs. Schedule, bot and last run are chips under the text.
+
 - **Routines no longer pile up cards and pauses.** While a routine waits for an answer to a card, scheduled starts
   no longer add another card and chat line every hour. A routine keeps one limit pause that wakes once, and a
   routine paused for errors does not wake its old waits. A repeated pause does not write "waiting for the limit"
