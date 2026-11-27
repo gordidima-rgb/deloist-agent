@@ -484,14 +484,9 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
                     complete(&app, &run_id, &step_id, result);
                 }
                 Spawn::Output { run_id, step_id, workflow_id, title, target, node, input, external } => {
-                    // Тихий шаг бота без новостей отдаёт пустой вход: сообщать нечего, пустое сообщение никуда не шлём.
-                    if input.trim().is_empty() {
-                        complete(&app, &run_id, &step_id, Ok((String::new(), None, Vec::new())));
-                        return;
-                    }
                     let result = crate::workflow_io::deliver(&app, &workflow_id, &title, &target, &node, &input, external).await;
                     complete(&app, &run_id, &step_id, result.map(|out| {
-                        let files = if target == "file" { vec![out.clone()] } else { Vec::new() };
+                        let files = if target == "file" && !out.is_empty() { vec![out.clone()] } else { Vec::new() };
                         (out, None, files)
                     }));
                 }

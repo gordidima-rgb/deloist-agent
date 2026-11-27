@@ -220,7 +220,10 @@ pub fn write_bytes(data_dir: &Path, workflow_id: &str, rel: &str, bytes: &[u8]) 
 
 /// Выполнить вывод. Возвращает текст, который станет выходом шага.
 pub async fn deliver(app: &Arc<App>, workflow_id: &str, title: &str, target: &str, node: &Node, input: &str, external: bool) -> Result<String, String> {
+    // Пустой вход — сообщать нечего (тихий шаг бота без новостей): настройку места проверяем, но ничего не шлём и не пишем.
+    let nothing = input.trim().is_empty();
     match target {
+        "notify" if nothing => Ok(String::new()),
         "notify" => {
             let body: String = input.trim().chars().take(500).collect();
             let list = crate::reminders::send_text(app, &format!("Рабочий процесс «{title}»"), &body, &["windows".to_string()]).await;
@@ -229,6 +232,7 @@ pub async fn deliver(app: &Arc<App>, workflow_id: &str, title: &str, target: &st
                 None => Ok(String::new()),
             }
         }
+        "chat" if nothing => Ok(String::new()),
         "chat" => {
             post_chat(app, title, node.text("bot_id").trim(), input, external).await?;
             Ok(String::new())
@@ -238,6 +242,9 @@ pub async fn deliver(app: &Arc<App>, workflow_id: &str, title: &str, target: &st
             let linked = linked_place(app, target);
             if !wanted.trim().is_empty() && wanted.trim() != linked {
                 return Err("это место не подключено: пишу только туда, куда человек уже привязал мессенджер".into());
+            }
+            if nothing {
+                return Ok(String::new());
             }
             app.workflows.lock().note_sent(input);
             match target {
@@ -250,6 +257,9 @@ pub async fn deliver(app: &Arc<App>, workflow_id: &str, title: &str, target: &st
         "file" => {
             let (data_dir, wf, rel, text) = (app.store.data_dir().to_path_buf(), workflow_id.to_string(), node.text("path"), input.to_string());
             let parts = safe_relative(&rel)?;
+            if nothing {
+                return Ok(String::new());
+            }
             tokio::task::spawn_blocking(move || write_file(&data_dir, &wf, &rel, &text)).await.map_err(|e| e.to_string())??;
             // Человеку показываем путь внутри папки процесса, а не полный путь на диске.
             Ok(parts.join("/"))
