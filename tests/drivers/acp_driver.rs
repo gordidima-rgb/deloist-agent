@@ -64,6 +64,14 @@ impl Setup {
         answer.and_then(|a| a["text"].as_str().map(str::to_string)).unwrap_or_default()
     }
 
+    /// Первый ответ бота на последнюю просьбу `asked`: ходы, которые будит закрытая задача, приходят следом и не в счёт.
+    async fn answer_to(&self, asked: &str) -> String {
+        let thread = self.crew.ok("GET", &format!("/api/bots/{}/thread?limit=30", self.bot), None).await;
+        let messages = thread["messages"].as_array().unwrap();
+        let from = messages.iter().rposition(|m| m["role"] == "user" && m["text"] == asked).map_or(messages.len(), |i| i + 1);
+        messages[from..].iter().find(|m| m["role"] == "assistant").and_then(|a| a["text"].as_str()).unwrap_or_default().to_string()
+    }
+
     fn methods(&self) -> Vec<Value> {
         std::fs::read_to_string(&self.log)
             .unwrap_or_default()
@@ -503,13 +511,17 @@ async fn the_agent_hands_a_task_to_another_bot_through_its_team_tools() {
     // Закрытая задача будит выдавшего своим ходом: его ответ не должен сойти за ответ на следующую просьбу.
     let lead = s.bot.as_str();
     let turns = |kind: &'static str| s.crew.count_events(move |e| e["type"] == kind && e["botId"] == lead);
-    common::wait_until("итог разбудил выдавшего", 30, || async { turns("turn_end") >= 2 && turns("turn_start") == turns("turn_end") }).await;
+    common::wait_until("итог разбудил выдавшего", 30, || async {
+        let woken = s.crew.ok("GET", &format!("/api/bots/{lead}/thread?limit=20"), None).await.to_string().contains("Закрылась задача");
+        woken && turns("turn_start") == turns("turn_end")
+    })
+    .await;
 
     // Без упоминания и вне команды поручить нельзя: вне команды общаются только ведущие (владелец, 16.11.2026).
     s.crew.clear_events();
     s.crew.say(&s.bot, "передай Второй ещё").await;
     s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
-    let answer = s.last_answer().await;
+    let answer = s.answer_to("передай Второй ещё").await;
     assert!(answer.contains("не в твоей команде"), "{answer}");
 
     // В одной команде — можно, и без карточки: передача ничего не разрешает, получатель работает по своим правилам.
@@ -518,7 +530,7 @@ async fn the_agent_hands_a_task_to_another_bot_through_its_team_tools() {
     s.crew.say(&s.bot, "передай Второй ещё").await;
     s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
     assert!(s.crew.find_event(|e| e["type"] == "approval").is_none(), "на передачу карточки нет");
-    let answer = s.last_answer().await;
+    let answer = s.answer_to("передай Второй ещё").await;
     assert!(answer.contains("делегирование: ответ:"), "{answer}");
 }
 

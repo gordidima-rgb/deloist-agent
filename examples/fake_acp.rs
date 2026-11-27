@@ -248,7 +248,9 @@ fn main() {
 
 fn prompt(io: &mut Io, session: &str, text: &str, pid: u32) -> &'static str {
     let mut cancelled = false;
-    if text.contains("finish_turn") || text.contains("итог хода") || text.starts_with("Продолжи незавершённую часть") {
+    // Пересказ прошлого («Ты: finish_turn: …» после хода-будильника) — не просьба: смотрим только на сам запрос.
+    let asked: String = text.lines().filter(|l| !l.starts_with("Ты: ") && !l.starts_with("Человек: ")).collect::<Vec<_>>().join("\n");
+    if asked.contains("finish_turn") || asked.contains("итог хода") || text.starts_with("Продолжи незавершённую часть") {
         let continuing = text.starts_with("Продолжи незавершённую часть");
         let (status, note) = if continuing { ("nothing", "x") } else { ("continue", "") };
         let answer = call_finish_turn(status, note);
