@@ -634,6 +634,7 @@ async fn touching_another_bots_routine_or_goal_asks_even_in_auto() {
     let theirs = goal(&crew, &other, false).await;
     for (name, args, tool_name) in [
         ("edit_workflow", json!({ "workflow_id": routine, "enabled": false }), "edit_workflow"),
+        ("run_workflow", json!({ "workflow_id": routine }), "run_workflow"),
         ("update_goal", json!({ "goal_id": theirs, "title": "Другое" }), "update_goal"),
         ("pause_goal", json!({ "goal_id": theirs }), "pause_goal"),
         ("create_goal", json!({ "title": "Чужому", "description": "d", "bot_id": other }), "create_goal"),
@@ -729,6 +730,26 @@ async fn a_bot_runs_a_routine_of_another_bot_after_a_card_and_an_unknown_id_is_r
     let (status, result) = tool_result(&crew);
     assert_eq!(status, "ok", "{result}");
     assert!(result.contains("Запуск") && result.contains("начат"), "{result}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn running_own_routine_in_auto_needs_no_card_but_an_unattended_run_asks() {
+    let (crew, fake, bot) = setup("rt-run-auto", "auto", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
+    let own = seed(&crew, &bot, json!({})).await;
+    let spare = seed(&crew, &bot, json!({ "title": "Вторая" })).await;
+
+    *fake.script.lock().unwrap() = vec![tool("run_workflow", json!({ "workflow_id": own })), say("Запустил")];
+    ask(&crew, &bot).await;
+    let (status, result) = tool_result(&crew);
+    assert_eq!(status, "ok", "{result}");
+    assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "свой запуск в режиме «решай сам» при человеке без карточки");
+
+    // Тот же вызов в ходе без человека спрашивает карточкой, а не отказывает.
+    *fake.script.lock().unwrap() = vec![tool("run_workflow", json!({ "workflow_id": spare })), say("Ждёт решения человека")];
+    crew.clear_events();
+    crew.ok("POST", &format!("/api/routines/{own}/run"), Some(json!({ "attended": false }))).await;
+    let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
+    assert_eq!(card["tool"], "run_workflow");
 }
 
 #[tokio::test(flavor = "multi_thread")]

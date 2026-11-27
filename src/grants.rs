@@ -917,6 +917,6 @@ pub fn scope_for(app: &crate::App, bot: &crate::store::Bot, name: &str, args: &V
     let unattended = app.turns.is_unattended(&bot.id) || matches!(crate::goals::current_run(&bot.id), Some(crate::goals::Run::CheckIn));
     let schedule_tool = crate::workflow_tools::is_mutating(name) || crate::goal_tools::is_goal_tool(name);
     // «Всегда спрашивать» (список бота): ни правило, ни «в этом разговоре» такой вызов не пропускают.
-    let once = crate::tools::never_remember(name) || (crate::workflow_tools::is_mutating(name) && !crate::workflow_tools::is_simple(name, args)) || (schedule_tool && unattended) || crate::tools::always_asks(bot, name, args, Some(&scope));
+    let once = crate::tools::never_remember(name) || (crate::workflow_tools::is_mutating(name) && !crate::workflow_tools::by_mode(app, name, args)) || (schedule_tool && unattended) || crate::tools::always_asks(bot, name, args, Some(&scope));
     Some(if once { scope.once_only() } else { scope })
 }

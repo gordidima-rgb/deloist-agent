@@ -281,7 +281,7 @@ pub(crate) fn target_bot(app: &App, me: &Bot, args: &Value) -> Result<Bot, Strin
 /// Почему этот вызов не выполняется вообще (до карточки): ход без человека, ход делегата, шаг самого процесса.
 pub fn refuse(app: &App, bot: &Bot, name: &str, args: &Value) -> Option<String> {
     // Простая форма (бывшая рутина) в ходе без человека и у делегата спрашивает карточкой, а не отказывает.
-    if !is_mutating(name) || is_simple(name, args) {
+    if !is_mutating(name) || by_mode(app, name, args) {
         return None;
     }
     if app.turns.is_unattended(&bot.id) {
@@ -699,11 +699,21 @@ pub fn is_simple(name: &str, args: &Value) -> bool {
     }
 }
 
-/// Нужна ли карточка. Граф, запуск и удаление спрашивают всегда. Простая форма — по режиму бота, как у `update_bot`;
+/// Запуск процесса «триггер → бот» (бывшая рутина) спрашивает так же, как его создание и правка. Запуск графа — всегда.
+fn is_simple_run(app: &App, name: &str, args: &Value) -> bool {
+    name == "run_workflow" && app.workflows.lock().get(text(args, "workflow_id")).is_some_and(|s| s.wf.from_routine)
+}
+
+/// Спрашивает ли вызов по режиму бота (простая форма), а не всегда.
+pub fn by_mode(app: &App, name: &str, args: &Value) -> bool {
+    is_simple(name, args) || is_simple_run(app, name, args)
+}
+
+/// Нужна ли карточка. Граф и удаление спрашивают всегда. Простая форма (создание, правка, запуск) — по режиму бота, как у `update_bot`;
 /// а в ходе без человека (по расписанию, вебхуком, через делегирование) и для чужого бота — тоже всегда:
 /// процесс, который молча плодит процессы, ночью не остановится.
 pub fn needs_approval(app: &App, bot: &Bot, name: &str, args: &Value) -> bool {
-    !is_simple(name, args) || bot.approval != "auto" || app.turns.is_unattended(&bot.id) || for_another_bot(app, bot, name, args)
+    !by_mode(app, name, args) || bot.approval != "auto" || app.turns.is_unattended(&bot.id) || for_another_bot(app, bot, name, args)
 }
 
 /// Процесс, который создают или правят у другого бота.
