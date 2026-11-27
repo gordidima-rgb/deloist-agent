@@ -2447,46 +2447,27 @@ async fn cloud_mode_file_tools_work_only_inside_the_bots_own_folder() {
     let (status, result) = cloud.call("list_files", json!({ "path": "." })).await;
     assert!(status == "ok" && result.contains("notes") && result.contains("b.txt"), "{status} {result}");
 
-    // Вызов вне папки в 0.4.9 спрашивает карточку «Этот компьютер» даже в облаке; человек отказывает —
-    // инструмент обязан вернуть отказ и не выдать ни байта. Пути, которые выполнение отобьёт само,
-    // карточки не получают.
-    async fn refused(cloud: &CloudCrew, name: &str, args: Value) -> (String, String) {
-        cloud.crew.events.lock().unwrap().clear();
-        *cloud.fake.tool.lock().unwrap() = json!({ "name": name, "args": args });
-        cloud.crew.say(&cloud.bot, "сделай").await;
-        let first = cloud.crew.wait_event("карточка или результат", |e| e["type"] == "approval" || e["type"] == "tool_update").await;
-        let tool = if first["type"] == "approval" {
-            assert_eq!(first["tool"], name, "{first}");
-            cloud.crew.ok("POST", &format!("/api/approvals/{}", first["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
-            cloud.crew.wait_event("результат", |e| e["type"] == "tool_update").await
-        } else {
-            first
-        };
-        cloud.crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
-        (tool["status"].as_str().unwrap_or_default().to_string(), tool["result"].as_str().unwrap_or_default().to_string())
-    }
-
     // Снаружи: чтение «где угодно» в облаке не действует.
     let mut forbidden = vec![plain.clone(), "/proc/1/environ".to_string(), "/proc/self/environ".to_string(), "/etc/passwd".to_string(), "../../../../etc/passwd".to_string(), "..".to_string()];
     forbidden.push(outside.display().to_string());
     forbidden.push(cloud.crew.data_dir.join("state.json").display().to_string());
     for path in &forbidden {
-        let (status, result) = refused(&cloud, "read_file", json!({ "path": path })).await;
-        assert!(status == "error" || status == "denied", "{path} прочитан: {status} {result}");
+        let (status, result) = cloud.call("read_file", json!({ "path": path })).await;
+        assert_eq!(status, "error", "{path} прочитан: {result}");
         assert!(!result.contains("OUTSIDE-MARKER") && !result.contains("CREW_SECRETS_KEY") && !result.contains(&cloud.hex), "{path}: {result}");
     }
     for path in [outside.display().to_string(), "/".to_string(), "/proc".to_string(), cloud.crew.data_dir.display().to_string()] {
-        let (status, result) = refused(&cloud, "list_files", json!({ "path": path })).await;
-        assert!(status == "error" || status == "denied", "{path} показан: {status} {result}");
+        let (status, result) = cloud.call("list_files", json!({ "path": path })).await;
+        assert_eq!(status, "error", "{path} показан: {result}");
         assert!(!result.contains("plain.txt"), "{path}: {result}");
     }
     // Запись наружу тоже закрыта.
     let target = outside.join("written.txt");
-    let (status, result) = refused(&cloud, "write_file", json!({ "path": target.display().to_string(), "content": "x" })).await;
-    assert!(status == "error" || status == "denied", "{status} {result}");
+    let (status, result) = cloud.call("write_file", json!({ "path": target.display().to_string(), "content": "x" })).await;
+    assert_eq!(status, "error", "{result}");
     assert!(!target.exists(), "запись ушла за пределы папки");
-    let (status, _) = refused(&cloud, "write_file", json!({ "path": "../escape.txt", "content": "x" })).await;
-    assert!(status == "error" || status == "denied", "{status}");
+    let (status, _) = cloud.call("write_file", json!({ "path": "../escape.txt", "content": "x" })).await;
+    assert_eq!(status, "error");
     assert!(!workspace.parent().unwrap().join("escape.txt").exists());
 
     // Ссылка внутри папки, ведущая наружу, не открывает дорогу ни на чтение, ни на запись.

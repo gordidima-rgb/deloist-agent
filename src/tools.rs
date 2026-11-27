@@ -980,10 +980,11 @@ fn in_runtime(app: &App, bot_id: &str, real: &Path) -> bool {
 
 /// Настоящий путь файлового вызова, если он ведёт к файлу этого компьютера вне папок бота.
 /// `None` — вызов не файловый режим: путь в папках бота, относительный, это секрет, ключи,
-/// ssh-config или путь, который выполнение всё равно отобьёт.
+/// ssh-config или путь, который выполнение всё равно отобьёт. В облаке выполнение отбивает любой
+/// путь вне своей папки (`cloud_target`), поэтому там файлового режима нет.
 fn outside_runtime_real(app: &App, bot_id: &str, name: &str, args: &Value) -> Option<std::path::PathBuf> {
     let raw = args.get("path").and_then(Value::as_str).unwrap_or_default();
-    if raw.trim().is_empty() || !matches!(name, "read_file" | "list_files" | "write_file") {
+    if crate::cloud::active() || raw.trim().is_empty() || !matches!(name, "read_file" | "list_files" | "write_file") {
         return None;
     }
     let real = if name == "write_file" {
