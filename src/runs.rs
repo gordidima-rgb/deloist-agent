@@ -556,9 +556,10 @@ impl Runs {
         })
     }
 
-    /// Рутина ждёт решения человека: карточка без ответа или остановка, которую человек не снял.
-    pub fn routine_waits_for_human(&self, routine_id: &str) -> bool {
-        self.inner.lock().unwrap().items.iter().any(|r| matches!(r.origin, Origin::Routine { .. }) && origin_routine(&r.origin) == Some(routine_id) && matches!(r.state, RunState::NeedsHuman { .. }))
+    /// Запуски рутины, которые ждут ответа человека на карточку. Живая ли карточка, решает вызывающий
+    /// (`card_for_run`): истёкшая карточка рутину не держит, обрыв связи и вход — тоже.
+    pub fn routine_waiting_runs(&self, routine_id: &str) -> Vec<String> {
+        self.inner.lock().unwrap().items.iter().filter(|r| origin_routine(&r.origin) == Some(routine_id) && matches!(r.state, RunState::NeedsHuman { reason: StopReason::Human, .. })).map(|r| r.id.clone()).collect()
     }
 
     /// Запись, которая сразу на паузе (ход ещё не начинался).
@@ -1068,8 +1069,8 @@ mod stale_pause_tests {
         let mut waiting = paused("rt_w", StopReason::Limit);
         waiting.state = RunState::NeedsHuman { reason: StopReason::Human, text: "Ждёт решения человека по: действие.".into() };
         runs.add(waiting);
-        assert!(runs.routine_waits_for_human("rt_w"));
-        assert!(!runs.routine_waits_for_human("rt_a"));
+        assert_eq!(runs.routine_waiting_runs("rt_w").len(), 1);
+        assert!(runs.routine_waiting_runs("rt_a").is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 

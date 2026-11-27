@@ -360,7 +360,7 @@ async fn tick(app: &Arc<App>) {
         }
         // Прошлый запуск ждёт человека (карточка без ответа): второй такой же ход получил бы вторую карточку и вторую
         // строку в чате каждый час (Маркетолог X, 19.11.2026: 17 часов). Срок пропускаем молча, ждёт одна запись.
-        if app.runs.routine_waits_for_human(&routine.id) {
+        if app.runs.routine_waiting_runs(&routine.id).iter().any(|run| app.turns.card_for_run(run).is_some()) {
             let _ = app.store.reschedule_routine(&routine.id, "needs").await;
             continue;
         }
