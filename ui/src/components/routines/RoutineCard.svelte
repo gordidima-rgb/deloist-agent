@@ -111,7 +111,9 @@
     font: 400 var(--k-text-sm) / 1.55 var(--k-font-body);
     color: var(--k-text-2);
   }
+  /* Превью — сплошным текстом: пустые строки инструкции не съедают три строки предпросмотра. */
   .rc-prompt.is-clamped {
+    white-space: normal;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
