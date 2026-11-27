@@ -38,7 +38,7 @@ pub const TEAM_TOOLS: [&str; 15] = ["offer_specialist", "list_bots", "remember",
 /// Всё, что MCP-процесс агента ACP вправе просить у приложения: браузер бота, команда и рутины.
 /// Рутины идут теми же правилами, что у API-ботов: создание и правка спрашивают человека по режиму бота, удаление всегда.
 pub fn is_bridge_tool(name: &str) -> bool {
-    TEAM_TOOLS.contains(&name) || crate::runs::is_wait_tool(name) || crate::team_tasks::is_tool(name) || crate::routine_tools::is_routine_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
+    TEAM_TOOLS.contains(&name) || crate::runs::is_wait_tool(name) || crate::team_tasks::is_tool(name) || crate::workflow_tools::is_tool(name) || crate::memory::team_review::is_tool(name) || crate::browser_tools::tool_defs().iter().any(|def| def["function"]["name"] == name)
 }
 
 pub fn team_tool_defs() -> Vec<Value> {
@@ -46,7 +46,7 @@ pub fn team_tool_defs() -> Vec<Value> {
         .filter(|def| def["function"]["name"].as_str().is_some_and(|n| TEAM_TOOLS.contains(&n)))
         .collect();
     defs.extend(crate::team_tasks::defs());
-    defs.extend(crate::routine_tools::defs());
+    defs.extend(crate::workflow_tools::defs());
     defs.extend(crate::memory::team_review::defs());
     defs.push(crate::runs::wait_def());
     defs.push(crate::help::tool_def());
@@ -58,7 +58,6 @@ pub fn tool_defs() -> Value {
     if let Some(list) = all.as_array_mut() {
         list.extend(crate::browser_tools::tool_defs());
         list.extend(crate::team_tasks::defs());
-        list.extend(crate::routine_tools::defs());
         list.push(crate::runs::wait_def());
         list.extend(crate::memory::team_review::defs());
         list.extend(crate::workflow_tools::defs());
@@ -78,7 +77,7 @@ pub fn tool_defs() -> Value {
 
 /// Инструменты, которые могут вызвать карточку: у них есть необязательное `purpose` — одна фраза бота человеку.
 /// Её показывают отдельной строкой «Бот объясняет»; на решение она не влияет (см. `describe`).
-const PURPOSE_TOOLS: &[&str] = &["run_command", "write_file", "web_fetch", "create_bot", "update_bot", "generate_image", "create_routine", "update_routine", "delete_routine"];
+const PURPOSE_TOOLS: &[&str] = &["run_command", "write_file", "web_fetch", "create_bot", "update_bot", "generate_image", "create_workflow", "edit_workflow", "delete_workflow"];
 
 fn add_purpose(all: &mut Value) {
     let Some(list) = all.as_array_mut() else { return };
@@ -347,13 +346,14 @@ fn base_tool_defs() -> Value {
 }
 
 /// Инструменты, на которые нельзя отвечать «разрешить на этот разговор» или «всегда»: каждый вызов — отдельное решение.
-/// Ход самопроверки и ход без человека спрашивают инструменты рутин и целей каждый раз (`grants::scope_for`).
+/// Ход самопроверки и ход без человека спрашивают инструменты процессов и целей каждый раз (`grants::scope_for`);
+/// правка графа и пустое создание процесса тоже не запоминаются: правило на простую правку не должно пускать граф.
 pub fn never_remember(tool: &str) -> bool {
-    matches!(tool, "delete_routine" | "delete_todo" | "archive_habit" | "delete_goal") || crate::workflow_tools::is_mutating(tool)
+    matches!(tool, "delete_todo" | "archive_habit" | "delete_goal" | "run_workflow" | "delete_workflow")
 }
 
 pub fn is_high_risk(name: &str) -> bool {
-    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_routine" | "update_routine" | "run_routine" | "delete_routine" | "create_workflow" | "edit_workflow" | "run_workflow" | "delete_workflow" | "delete_todo" | "archive_habit" | "delete_goal")
+    matches!(name, "run_command" | "create_bot" | "update_bot" | "create_workflow" | "edit_workflow" | "run_workflow" | "delete_workflow" | "delete_todo" | "archive_habit" | "delete_goal")
 }
 
 /// Инструменты, которые только читают: их не спрашиваем даже в строгом режиме.
@@ -473,7 +473,7 @@ fn ask_kinds(name: &str, args: &Value, scope: Option<&crate::grants::Scope>) -> 
     if name == "share_file" || (name == "assign_task" && args.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())) {
         kinds.push("files");
     }
-    if matches!(name, "create_bot" | "update_bot") || (crate::routine_tools::is_routine_tool(name) && name != "list_routines") || crate::workflow_tools::is_mutating(name) {
+    if matches!(name, "create_bot" | "update_bot") || crate::workflow_tools::is_mutating(name) {
         kinds.push("bots");
     }
     if name.starts_with("delete_") || name.starts_with("archive_") {
@@ -566,13 +566,13 @@ pub(crate) fn mode_needs_approval_for(app: &App, bot: &Bot, name: &str, args: &V
     if file_mode_place(app, &bot.id, name, args).is_some() {
         return true;
     }
-    if crate::routine_tools::is_routine_tool(name) {
-        return crate::routine_tools::needs_approval(app, bot, name, args);
-    }
-    // Рабочие процессы: чтение свободно, создание, правка, запуск и удаление спрашивают всегда, в любом режиме;
-    // остановка запуска — по режиму бота.
+    // Рабочие процессы: чтение свободно; граф, запуск и удаление спрашивают всегда, в любом режиме; простое создание и правка
+    // «триггер → бот» (бывшая рутина) — по режиму бота (`workflow_tools::needs_approval`); остановка запуска — по режиму бота.
     if crate::workflow_tools::is_tool(name) {
-        return crate::workflow_tools::is_mutating(name) || (!is_read_only(name) && policy_needs_approval(&bot.approval, name, false, false));
+        if crate::workflow_tools::is_mutating(name) {
+            return crate::workflow_tools::needs_approval(app, bot, name, args);
+        }
+        return !is_read_only(name) && policy_needs_approval(&bot.approval, name, false, false);
     }
     if crate::goal_tools::is_goal_tool(name) {
         return crate::goal_tools::needs_approval(app, bot, name, args);
@@ -1274,7 +1274,6 @@ pub fn label(name: &str) -> &str {
         "list_bots" => "просмотр команды",
         "create_bot" => "создание бота",
         "update_bot" => "настройка бота",
-        "list_routines" => "просмотр рутин",
         "list_workflows" => "просмотр процессов",
         "read_workflow" => "чтение процесса",
         "read_workflow_runs" => "запуски процесса",
@@ -1296,10 +1295,6 @@ pub fn label(name: &str) -> &str {
         "update_todo" => "изменение задачи",
         "complete_todo" => "задача выполнена",
         "delete_todo" => "удаление задачи",
-        "create_routine" => "создание рутины",
-        "update_routine" => "изменение рутины",
-        "run_routine" => "запуск рутины",
-        "delete_routine" => "удаление рутины",
         "create_goal" => "новая цель",
         "list_goals" => "просмотр целей",
         "update_goal" => "изменение цели",
@@ -1967,8 +1962,6 @@ pub async fn exec_tool(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, dept
 
         team if crate::team_tasks::is_tool(team) => crate::team_tasks::exec(app, bot, team, args, depth).await,
 
-        routine if crate::routine_tools::is_routine_tool(routine) => crate::routine_tools::exec(app, bot, routine, args).await,
-
         mail if crate::mail::is_tool(mail) => crate::mail::exec(app, bot, mail, args).await,
         wait if crate::runs::is_wait_tool(wait) => crate::runs::exec_wait(app, bot, args),
 
@@ -2084,10 +2077,10 @@ mod always_ask_tests {
         assert!(always_asks(&bot(&["files"]), "share_file", &json!({}), None));
         assert!(always_asks(&bot(&["files"]), "assign_task", &files, None));
         assert!(!always_asks(&bot(&["files"]), "assign_task", &json!({ "files": [] }), None), "без файлов передача карточки не требует");
-        for name in ["create_bot", "update_bot", "create_routine", "run_routine", "delete_routine", "create_workflow", "run_workflow"] {
+        for name in ["create_bot", "update_bot", "create_workflow", "run_workflow", "delete_workflow"] {
             assert!(always_asks(&bot(&["bots"]), name, &json!({}), None), "{name}");
         }
-        assert!(!always_asks(&bot(&["bots"]), "list_routines", &json!({}), None));
+        assert!(!always_asks(&bot(&["bots"]), "list_workflows", &json!({}), None));
         assert!(!always_asks(&bot(&["bots"]), "read_file", &json!({}), None));
     }
 
@@ -2105,7 +2098,7 @@ mod always_ask_tests {
     #[test]
     fn archive_and_delete_tools_are_deletes_even_with_an_empty_scope() {
         let scope = Scope::new("delete_todo", "*", "", "call", "");
-        for name in ["delete_todo", "archive_habit", "delete_goal", "delete_routine", "delete_workflow"] {
+        for name in ["delete_todo", "archive_habit", "delete_goal", "delete_workflow"] {
             assert!(always_asks(&bot(&["delete"]), name, &json!({}), Some(&scope)), "{name}");
         }
         assert!(always_asks(&bot(&["pay"]), "generate_image", &json!({}), None));

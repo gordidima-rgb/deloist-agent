@@ -82,7 +82,7 @@ async fn seed(crew: &Crew, bot: &str, extra: Value) -> String {
 async fn a_bot_sets_up_a_weekday_routine_and_names_the_next_run() {
     let (crew, fake, bot) = setup("rt-create", "auto", &[]).await;
     *fake.script.lock().unwrap() = vec![
-        tool("create_routine", json!({ "title": "Сводка продаж", "prompt": "Пришли сводку продаж за вчера", "at": "09:00", "days": [1, 2, 3, 4, 5] })),
+        tool("create_workflow", json!({ "title": "Сводка продаж", "prompt": "Пришли сводку продаж за вчера", "at": "09:00", "days": [1, 2, 3, 4, 5] })),
         say("Готово"),
     ];
     ask(&crew, &bot).await;
@@ -122,7 +122,7 @@ async fn bad_schedules_are_refused_with_the_same_rules_as_the_interface() {
         json!({ "title": "A", "prompt": "p", "every_minutes": 60, "window_from": "22:00" }),
         json!({ "title": "A", "prompt": "p", "at": "09:00", "bot_id": "нет-такого" }),
     ] {
-        *fake.script.lock().unwrap() = vec![tool("create_routine", args.clone()), say("не вышло")];
+        *fake.script.lock().unwrap() = vec![tool("create_workflow", args.clone()), say("не вышло")];
         ask(&crew, &bot).await;
         let (status, result) = tool_result(&crew);
         assert_eq!(status, "error", "{args}: {result}");
@@ -135,14 +135,14 @@ async fn a_bot_can_set_up_an_hourly_night_routine_for_a_colleague() {
     let (crew, fake, bot) = setup("rt-colleague", "auto", &[]).await;
     let other = crew.ok("POST", "/api/bots", Some(json!({ "name": "Сторож" }))).await["bot"]["id"].as_str().unwrap().to_string();
     *fake.script.lock().unwrap() = vec![
-        tool("create_routine", json!({ "title": "Ночной дозор", "prompt": "проверь сайт", "every_minutes": 60, "window_from": "22:00", "window_to": "07:00", "bot_id": other })),
+        tool("create_workflow", json!({ "title": "Ночной дозор", "prompt": "проверь сайт", "every_minutes": 60, "window_from": "22:00", "window_to": "07:00", "bot_id": other })),
         say("Готово"),
     ];
     // Рутина для коллеги — всегда с карточкой, даже в режиме «решай сам».
     crew.clear_events();
     crew.say(&bot, "сделай рутину сторожу").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "create_routine");
+    assert_eq!(card["tool"], "create_workflow");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     let list = routines(&crew).await;
@@ -159,7 +159,7 @@ async fn update_changes_the_schedule_and_moves_the_next_run() {
     let (crew, fake, bot) = setup("rt-update", "auto", &[]).await;
     let id = seed(&crew, &bot, json!({})).await;
     *fake.script.lock().unwrap() = vec![
-        tool("update_routine", json!({ "routine_id": id, "at": "10:30", "days": [3], "title": "Сводка по средам" })),
+        tool("edit_workflow", json!({ "workflow_id": id, "at": "10:30", "days": [3], "title": "Сводка по средам" })),
         say("Готово"),
     ];
     ask(&crew, &bot).await;
@@ -172,14 +172,14 @@ async fn update_changes_the_schedule_and_moves_the_next_run() {
     assert!(result.contains("по средам в 10:30") && result.contains("ср "), "{result}");
 
     // Обратно на интервал: время at снимается само, иначе оно осталось бы главнее.
-    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "every_minutes": 30 })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("edit_workflow", json!({ "workflow_id": id, "every_minutes": 30 })), say("Готово")];
     ask(&crew, &bot).await;
     let routine = routines(&crew).await.remove(0);
     assert_eq!(routine["at"], "");
     assert_eq!(routine["everyMinutes"], 30);
 
     // Выключенная рутина честно говорит, что запусков не будет.
-    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "enabled": false })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("edit_workflow", json!({ "workflow_id": id, "enabled": false })), say("Готово")];
     ask(&crew, &bot).await;
     assert_eq!(routines(&crew).await[0]["enabled"], false);
     assert!(tool_result(&crew).1.contains("выключена"));
@@ -189,7 +189,7 @@ async fn update_changes_the_schedule_and_moves_the_next_run() {
 async fn list_shows_schedule_and_next_run() {
     let (crew, fake, bot) = setup("rt-list", "strict", &[]).await;
     let id = seed(&crew, &bot, json!({ "at": "07:15", "days": [1, 2, 3, 4, 5] })).await;
-    *fake.script.lock().unwrap() = vec![tool("list_routines", json!({})), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("list_workflows", json!({})), say("Готово")];
     ask(&crew, &bot).await;
     let (status, result) = tool_result(&crew);
     assert_eq!(status, "ok");
@@ -201,16 +201,16 @@ async fn list_shows_schedule_and_next_run() {
 async fn delete_always_asks_and_a_denial_keeps_the_routine() {
     let (crew, fake, bot) = setup("rt-delete", "auto", &[]).await;
     let id = seed(&crew, &bot, json!({})).await;
-    *fake.script.lock().unwrap() = vec![tool("delete_routine", json!({ "routine_id": id })), say("Не удалось")];
+    *fake.script.lock().unwrap() = vec![tool("delete_workflow", json!({ "workflow_id": id })), say("Не удалось")];
     crew.clear_events();
     crew.say(&bot, "удали рутину").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "delete_routine", "даже в режиме «решай сам»");
+    assert_eq!(card["tool"], "delete_workflow", "даже в режиме «решай сам»");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     assert_eq!(routines(&crew).await.len(), 1, "отказ оставляет рутину");
 
-    *fake.script.lock().unwrap() = vec![tool("delete_routine", json!({ "routine_id": id })), say("Удалил")];
+    *fake.script.lock().unwrap() = vec![tool("delete_workflow", json!({ "workflow_id": id })), say("Удалил")];
     crew.clear_events();
     crew.say(&bot, "удали рутину").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
@@ -224,11 +224,11 @@ async fn delete_always_asks_and_a_denial_keeps_the_routine() {
 async fn create_asks_in_ask_and_strict_modes_and_a_denial_creates_nothing() {
     for mode in ["ask", "strict"] {
         let (crew, fake, bot) = setup(&format!("rt-ask-{mode}"), mode, &[]).await;
-        *fake.script.lock().unwrap() = vec![tool("create_routine", json!({ "title": "Сводка", "prompt": "p", "at": "09:00" })), say("Не вышло")];
+        *fake.script.lock().unwrap() = vec![tool("create_workflow", json!({ "title": "Сводка", "prompt": "p", "at": "09:00" })), say("Не вышло")];
         crew.clear_events();
         crew.say(&bot, "сделай рутину").await;
         let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-        assert_eq!(card["tool"], "create_routine", "{mode}");
+        assert_eq!(card["tool"], "create_workflow", "{mode}");
         crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": false }))).await;
         crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
         assert!(routines(&crew).await.is_empty(), "{mode}: после отказа рутины быть не должно");
@@ -240,19 +240,19 @@ async fn an_unattended_routine_run_cannot_create_a_routine_without_a_card() {
     let (crew, fake, bot) = setup("rt-unattended", "auto", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
     let id = seed(&crew, &bot, json!({})).await;
     *fake.script.lock().unwrap() = vec![
-        tool("create_routine", json!({ "title": "Размножение", "prompt": "p", "at": "09:00" })),
+        tool("create_workflow", json!({ "title": "Размножение", "prompt": "p", "at": "09:00" })),
         say("Ждёт решения человека"),
     ];
     crew.clear_events();
     crew.ok("POST", &format!("/api/routines/{id}/run"), Some(json!({ "attended": false }))).await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "create_routine", "ночью бот в режиме «решай сам» всё равно показывает карточку");
+    assert_eq!(card["tool"], "create_workflow", "ночью бот в режиме «решай сам» всё равно показывает карточку");
     crew.wait_event("журнал", |e| e["type"] == "journal").await;
     let list = routines(&crew).await;
     assert_eq!(list.len(), 1, "никто не ответил — новой рутины нет: {list:?}");
 
     // Тот же вызов в разговоре с человеком в этом режиме идёт без карточки.
-    *fake.script.lock().unwrap() = vec![tool("create_routine", json!({ "title": "Из чата", "prompt": "p", "at": "09:00" })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("create_workflow", json!({ "title": "Из чата", "prompt": "p", "at": "09:00" })), say("Готово")];
     ask(&crew, &bot).await;
     assert_eq!(routines(&crew).await.len(), 2);
     assert!(crew.find_event(|e| e["type"] == "approval").is_none());
@@ -458,7 +458,7 @@ async fn a_routine_with_a_goal_runs_the_goal_and_skips_a_paused_one() {
 async fn a_bot_attaches_a_routine_to_its_goal_from_chat() {
     let (crew, fake, bot) = setup("goal-routine-tool", "auto", &[]).await;
     let id = goal(&crew, &bot, true).await;
-    *fake.script.lock().unwrap() = vec![tool("create_routine", json!({ "title": "Дозор", "goal_id": id, "at": "09:00" })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("create_workflow", json!({ "title": "Дозор", "goal_id": id, "at": "09:00" })), say("Готово")];
     ask(&crew, &bot).await;
     let routines = routines(&crew).await;
     assert_eq!(routines[0]["goalId"], id.as_str());
@@ -588,11 +588,11 @@ async fn pressing_run_on_a_routine_does_not_wipe_the_mark_of_a_goal_run_in_progr
 async fn a_routine_made_by_a_careful_bot_for_a_bold_one_keeps_the_caution() {
     let (crew, fake, bot) = setup("routine-floor", "strict", &[("CREW_TEST_UNATTENDED_WAIT_MS", "300")]).await;
     let other = second_bot(&crew, "auto").await;
-    *fake.script.lock().unwrap() = vec![tool("create_routine", json!({ "title": "Дозор", "prompt": "работай", "at": "09:00", "bot_id": other })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("create_workflow", json!({ "title": "Дозор", "prompt": "работай", "at": "09:00", "bot_id": other })), say("Готово")];
     crew.clear_events();
     crew.say(&bot, "заведи рутину сторожу").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "create_routine");
+    assert_eq!(card["tool"], "create_workflow");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     let routine = routines(&crew).await.remove(0);
@@ -633,7 +633,7 @@ async fn touching_another_bots_routine_or_goal_asks_even_in_auto() {
     let routine = crew.ok("POST", "/api/routines", Some(json!({ "botId": other, "title": "Чужая", "prompt": "p", "everyMinutes": 60 }))).await["routine"]["id"].as_str().unwrap().to_string();
     let theirs = goal(&crew, &other, false).await;
     for (name, args, tool_name) in [
-        ("update_routine", json!({ "routine_id": routine, "enabled": false }), "update_routine"),
+        ("edit_workflow", json!({ "workflow_id": routine, "enabled": false }), "edit_workflow"),
         ("update_goal", json!({ "goal_id": theirs, "title": "Другое" }), "update_goal"),
         ("pause_goal", json!({ "goal_id": theirs }), "pause_goal"),
         ("create_goal", json!({ "title": "Чужому", "description": "d", "bot_id": other }), "create_goal"),
@@ -710,17 +710,17 @@ async fn a_bot_runs_a_routine_of_another_bot_after_a_card_and_an_unknown_id_is_r
     let other = crew.ok("POST", "/api/bots", Some(json!({ "name": "Второй" }))).await["bot"]["id"].as_str().unwrap().to_string();
     let id = seed(&crew, &other, json!({})).await;
 
-    *fake.script.lock().unwrap() = vec![tool("run_routine", json!({ "routine_id": "нет-такой" })), say("Не вышло")];
+    *fake.script.lock().unwrap() = vec![tool("run_workflow", json!({ "workflow_id": "нет-такой" })), say("Не вышло")];
     crew.clear_events();
     crew.say(&bot, "запусти рутину").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "run_routine");
+    assert_eq!(card["tool"], "run_workflow");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     let (status, result) = tool_result(&crew);
     assert_ne!(status, "ok", "{result}");
 
-    *fake.script.lock().unwrap() = vec![tool("run_routine", json!({ "routine_id": id })), say("Запустил")];
+    *fake.script.lock().unwrap() = vec![tool("run_workflow", json!({ "workflow_id": id })), say("Запустил")];
     crew.clear_events();
     crew.say(&bot, "запусти рутину").await;
     let card = crew.wait_event("карточка", |e| e["type"] == "approval").await;
@@ -728,7 +728,7 @@ async fn a_bot_runs_a_routine_of_another_bot_after_a_card_and_an_unknown_id_is_r
     crew.wait_event("конец хода", |e| e["type"] == "turn_end").await;
     let (status, result) = tool_result(&crew);
     assert_eq!(status, "ok", "{result}");
-    assert!(result.contains("запущена"), "{result}");
+    assert!(result.contains("Запуск") && result.contains("начат"), "{result}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -771,7 +771,7 @@ async fn a_bot_sets_up_the_page_watcher_itself_and_removes_it() {
     // Хвост «;» из скопированного текста не ломает ни адрес, ни селектор.
     let page = "https://93.184.216.34/feed";
     *fake.script.lock().unwrap() = vec![
-        tool("update_routine", json!({ "routine_id": id, "watch_pages": [format!("{page};")], "watch_item": "article[data-testid=\"tweet\"];" })),
+        tool("edit_workflow", json!({ "workflow_id": id, "watch_pages": [format!("{page};")], "watch_item": "article[data-testid=\"tweet\"];" })),
         say("Готово"),
     ];
     ask(&crew, &bot).await;
@@ -784,19 +784,19 @@ async fn a_bot_sets_up_the_page_watcher_itself_and_removes_it() {
     assert!(result.contains("Сторож страниц") && result.contains(page), "бот видит сторожа: {result}");
 
     // Внутренняя сеть — тот же отказ, что у browser_nav; сторож остаётся прежним.
-    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "watch_pages": ["http://127.0.0.1/admin"] })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("edit_workflow", json!({ "workflow_id": id, "watch_pages": ["http://127.0.0.1/admin"] })), say("Готово")];
     ask(&crew, &bot).await;
     assert_eq!(tool_result(&crew).0, "error");
     assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"][0]["urls"], json!([page]));
 
     // Пустой список снимает сторожа.
-    *fake.script.lock().unwrap() = vec![tool("update_routine", json!({ "routine_id": id, "watch_pages": [] })), say("Готово")];
+    *fake.script.lock().unwrap() = vec![tool("edit_workflow", json!({ "workflow_id": id, "watch_pages": [] })), say("Готово")];
     ask(&crew, &bot).await;
     assert_eq!(crew.ok("GET", "/api/watch", None).await["triggers"], json!([]));
 
     // Сразу при создании: рутина и её сторож.
     *fake.script.lock().unwrap() = vec![
-        tool("create_routine", json!({ "title": "Лента", "prompt": "ответь на новые посты", "every_minutes": 15, "watch_pages": [page] })),
+        tool("create_workflow", json!({ "title": "Лента", "prompt": "ответь на новые посты", "every_minutes": 15, "watch_pages": [page] })),
         say("Готово"),
     ];
     ask(&crew, &bot).await;

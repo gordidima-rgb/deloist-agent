@@ -479,18 +479,6 @@ pub fn call(app: &App, bot: &Bot, name: &str, args: &Value) -> Described {
                 format!("{me} wants to change a bot’s settings (fields: {})", fields.join(", "))
             );
         }
-        "create_routine" | "update_routine" | "run_routine" | "delete_routine" => {
-            let n = arg(args, "name");
-            let (ru, en, class) = match name {
-                "create_routine" => ("создать рутину", "create a routine", "create"),
-                "update_routine" => ("изменить рутину", "change a routine", "change"),
-                "run_routine" => ("запустить рутину", "run a routine", "run"),
-                _ => ("удалить рутину", "delete a routine", "delete"),
-            };
-            d.class = class;
-            d.risk = "high";
-            d.text = ph!(format!("{me} хочет {ru} «{n}»"), format!("{me} wants to {en} “{n}”"));
-        }
         "delete_todo" | "archive_habit" | "delete_goal" => {
             let label = crate::tools::label(name);
             d.class = "delete";

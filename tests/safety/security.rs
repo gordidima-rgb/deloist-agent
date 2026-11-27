@@ -1450,7 +1450,7 @@ async fn browser_bridge_works_only_with_the_key_of_the_running_turn() {
     assert_eq!(browser_call(&crew, &bot, Some(key.trim()), "browser_nav").await, 200);
 
     // Командные инструменты и рутины идут тем же мостом и под теми же ключами (рутины: и карточки те же, что у API-ботов); опасные (создание ботов, команды) мост не принимает.
-    for tool in ["assign_task", "list_bots", "remember", "recall", "telegram_posts", "list_routines", "create_routine", "update_routine", "delete_routine"] {
+    for tool in ["assign_task", "list_bots", "remember", "recall", "telegram_posts", "list_workflows", "create_workflow", "edit_workflow", "delete_workflow"] {
         assert_eq!(browser_call(&crew, &bot, None, tool).await, 403, "{tool} без ключа хода");
         assert_eq!(browser_call(&crew, &bot, Some(other_key.trim()), tool).await, 403, "{tool} с ключом другого бота");
         assert_eq!(browser_call(&crew, &other, Some(key.trim()), tool).await, 403, "{tool} от имени другого бота");
@@ -3129,13 +3129,13 @@ async fn the_delegation_floor_reaches_the_bridge_tools_and_survives_two_hops() {
     // Отправитель спрашивает; получатель по мосту создаёт рутину: карточка есть, хотя сам он «решает сам».
     let card = handoff_to_acp(&crew, &a, "передай Получатель рутина Цены").await;
     assert_eq!(card["botId"], b.as_str(), "{card}");
-    assert_eq!(card["tool"], "create_routine", "{card}");
+    assert_eq!(card["tool"], "create_workflow", "{card}");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == a.as_str()).await;
     // Цепочка A(ask) → B(auto) → C(auto): пол A держится и на втором шаге.
     let card = handoff_to_acp(&crew, &a, "передай Получатель передай Третий рутина Цены").await;
     assert_eq!(card["botId"], c.as_str(), "пол отправителя потерян на втором шаге: {card}");
-    assert_eq!(card["tool"], "create_routine");
+    assert_eq!(card["tool"], "create_workflow");
     crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "answer": "deny" }))).await;
     crew.wait_event("конец", |e| e["type"] == "turn_end" && e["botId"] == a.as_str()).await;
     // Без передачи те же боты в режиме «решай сам» рутину создают без вопроса.

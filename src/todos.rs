@@ -1230,7 +1230,7 @@ pub fn exec_bot_tool(app: &App, bot_id: &str, name: &str, args: &Value) -> Resul
     }
     match name {
         "list_todos" => {
-            let filter = Filter::parse(crate::routine_tools::text(args, "filter")).map_err(|e| e.message())?;
+            let filter = Filter::parse(crate::workflow_tools::text(args, "filter")).map_err(|e| e.message())?;
             let items = visible(app, filter, "", now.date_naive());
             if items.is_empty() {
                 return Ok("Задач нет.".into());
@@ -1244,7 +1244,7 @@ pub fn exec_bot_tool(app: &App, bot_id: &str, name: &str, args: &Value) -> Resul
             Ok(format!("Добавил задачу «{}»{}. Номер: {}.", made.title, made.due_date.as_deref().map(|d| format!(", срок {d}")).unwrap_or_default(), made.id))
         }
         _ => {
-            let key = crate::routine_tools::text(args, if name == "complete_todo" { "id" } else { "todo_id" });
+            let key = crate::workflow_tools::text(args, if name == "complete_todo" { "id" } else { "todo_id" });
             if key.is_empty() {
                 return Err("нужен номер или название задачи (list_todos)".into());
             }

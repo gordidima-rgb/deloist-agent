@@ -361,7 +361,7 @@ async fn deleting_a_routine_is_never_remembered_and_schedule_tools_ask_at_night(
     let routine = add_routine(&crew, &bot).await;
 
     // Удаление рутины: только «один раз» или «запретить»; «всегда» правила не создаёт.
-    let card = turn(&crew, &fake, &bot, tool("delete_routine", json!({ "routine_id": routine })), Some("always")).await.expect("удаление спрашивает");
+    let card = turn(&crew, &fake, &bot, tool("delete_workflow", json!({ "workflow_id": routine })), Some("always")).await.expect("удаление спрашивает");
     assert_eq!(card["grantable"], false, "{card}");
     assert_eq!(card["conversation"], false, "{card}");
     assert_eq!(card["always"], false, "{card}");
@@ -369,7 +369,7 @@ async fn deleting_a_routine_is_never_remembered_and_schedule_tools_ask_at_night(
     assert!(rules.is_empty(), "{rules:?}");
 
     // Днём «всегда» на создание рутины работает.
-    let create = || tool("create_routine", json!({ "title": "Сводка", "prompt": "пришли сводку", "every_minutes": 60 }));
+    let create = || tool("create_workflow", json!({ "title": "Сводка", "prompt": "пришли сводку", "every_minutes": 60 }));
     let card = turn(&crew, &fake, &bot, create(), Some("always")).await.expect("создание спрашивает");
     assert_eq!(card["grantable"], true, "{card}");
     assert!(turn(&crew, &fake, &bot, create(), None).await.is_none(), "днём — по правилу");

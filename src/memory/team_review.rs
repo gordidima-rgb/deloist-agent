@@ -326,7 +326,7 @@ pub async fn ensure_routines(app: &Arc<App>) {
     created.extend(known);
     let todo = pending(&rooms, &bots, &app.store.routines(), &created);
     for (room, orch) in todo {
-        match app.store.add_routine_capped(&routine_input(&room, &orch), crate::routine_tools::MAX_ROUTINES, false).await {
+        match app.store.add_routine_capped(&routine_input(&room, &orch), crate::workflow_tools::MAX_ROUTINES, false).await {
             Ok(Some(_)) => {
                 created.insert(room.id.clone());
             }

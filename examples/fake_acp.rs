@@ -541,14 +541,14 @@ fn call_routines(text: &str) -> String {
     let title = text.lines().last().unwrap_or_default().split("рутина").nth(1).unwrap_or_default().trim().to_string();
     with_mcp(|ask| {
         let names = tool_names(&ask(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })));
-        for need in ["list_routines", "create_routine", "update_routine", "delete_routine"] {
+        for need in ["list_workflows", "create_workflow", "edit_workflow", "delete_workflow"] {
             if !names.iter().any(|n| n == need) {
                 return format!("в списке нет {need}: {names:?}");
             }
         }
         let made = ask(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": { "name": "create_routine", "arguments": { "title": title, "prompt": "проверь цены", "every_minutes": 30 } } }));
-        let listed = ask(json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "list_routines", "arguments": {} } }));
+            "params": { "name": "create_workflow", "arguments": { "name": title, "prompt": "проверь цены", "every_minutes": 30 } } }));
+        let listed = ask(json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "list_workflows", "arguments": {} } }));
         format!("создание {} | список {}", reply_text(&made), reply_text(&listed))
     })
 }

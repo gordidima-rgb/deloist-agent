@@ -1,12 +1,12 @@
 //! Цели из чата: бот ставит постоянную задачу, запускает её, ставит на паузу, записывает прогресс.
-//! Права те же, что у рутин: см. `routine_tools`.
+//! Права те же, что у простых процессов «триггер → бот»: см. `workflow_tools`.
 
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 
 use crate::goals::{clear_pending, current_run, push_progress, Goal, Run, MAX_REPORT};
-use crate::routine_tools::{flag, target_bot, text};
+use crate::workflow_tools::{flag, target_bot, text};
 use crate::store::Bot;
 use crate::App;
 
@@ -34,7 +34,7 @@ pub fn defs() -> Vec<Value> {
         function(
             "create_goal",
             "Поставить цель: постоянную задачу в этом разговоре. У цели нет своего расписания: её запускают по просьбе (run_goal) \
-             или рутина бота (create_routine с goal_id). Повторяющаяся цель (recurring) не кончается сама: её запуски только записывают прогресс.",
+             или процесс бота (create_workflow с goal_id). Повторяющаяся цель (recurring) не кончается сама: её запуски только записывают прогресс.",
             json!({
                 "title": { "type": "string", "description": "Короткое название, до 80 символов." },
                 "description": { "type": "string", "description": "Чего добиваемся и как понять, что готово. Полностью: запуск стартует без этого разговора." },
@@ -218,7 +218,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
                     if let Some(r) = recurring {
                         g.recurring = r;
                     }
-                    // Правка чужой цели добавляет осторожность правящего, как у update_routine:
+                    // Правка чужой цели добавляет осторожность правящего, как у edit_workflow:
                     // прежний пол остаётся, строже можно, мягче нельзя.
                     if g.bot_id != bot.id {
                         if let Some(floor) = crate::goals::combine_floor(&g.approval_floor, &bot.approval) {

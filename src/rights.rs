@@ -14,7 +14,7 @@ fn probes() -> Vec<(&'static str, &'static str, Value)> {
         ("писать файлы в своей папке", "write_file", json!({ "path": "note.txt" })),
         ("запускать простые команды в своей папке", "run_command", json!({ "command": "echo hi" })),
         ("создавать и править ботов", "create_bot", json!({})),
-        ("создавать и запускать рутины", "create_routine", json!({})),
+        ("создавать и запускать процессы по расписанию", "create_workflow", json!({ "prompt": "p", "at": "09:00" })),
         ("тратить деньги на картинки", "generate_image", json!({})),
         ("передавать файлы другим ботам", "share_file", json!({})),
     ]

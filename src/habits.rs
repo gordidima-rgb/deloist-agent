@@ -801,7 +801,7 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
         let (_, view) = create(app, args).map_err(|e| e.message())?;
         return Ok(format!("Завёл привычку «{}». Номер: {}.", view["title"].as_str().unwrap_or_default(), view["id"].as_str().unwrap_or_default()));
     }
-    let key = crate::routine_tools::text(args, "habit");
+    let key = crate::workflow_tools::text(args, "habit");
     if key.is_empty() {
         return Err("нужен номер или название привычки (list_habits)".into());
     }
@@ -817,7 +817,7 @@ pub fn exec_bot_tool(app: &App, name: &str, args: &Value) -> Result<String, Stri
         }
         _ => {}
     }
-    let raw = crate::routine_tools::text(args, "date");
+    let raw = crate::workflow_tools::text(args, "date");
     let day = day_or_today(Some(raw)).map_err(|e| e.message())?;
     if day != now && Some(day) != now.pred_opt() {
         return Err("отмечать привычку можно только за сегодня или вчера".into());

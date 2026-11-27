@@ -38,12 +38,12 @@ const PERSONA_MAX = 12000;
 const MAX_SHAPE = 7; // src/store.rs MAX_SHAPE
 const MAX_EYES = 2; // src/store.rs MAX_EYES
 
-// Tool names a skill body may talk about (src/tools.rs, browser_tools.rs, routine_tools.rs, goal_tools.rs, skills.rs).
+// Tool names a skill body may talk about (src/tools.rs, browser_tools.rs, workflow_tools.rs, goal_tools.rs, skills.rs).
 const KNOWN_TOOLS = new Set([
   'list_files', 'read_file', 'write_file', 'run_command', 'web_fetch', 'remember', 'recall', 'ask_user',
   'list_bots', 'create_bot', 'update_bot', 'delegate', 'save_skill', 'read_skill',
   'browser_nav', 'browser_page', 'browser_mouse', 'browser_keyboard', 'browser_devtools', 'browser_human', 'browser_capture_key',
-  'list_routines', 'create_routine', 'update_routine', 'delete_routine',
+  'list_workflows', 'create_workflow', 'edit_workflow', 'delete_workflow', 'run_workflow',
   'list_goals', 'create_goal', 'update_goal', 'run_goal', 'pause_goal', 'resume_goal', 'complete_goal', 'report_goal_progress',
 ]);
 

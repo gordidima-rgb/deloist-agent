@@ -557,11 +557,11 @@ async fn the_agent_manages_routines_through_the_bridge_under_the_usual_approval(
     s.crew.clear_events();
     s.crew.say(&s.bot, "рутина Цены").await;
     let card = s.crew.wait_event("карточка", |e| e["type"] == "approval").await;
-    assert_eq!(card["tool"], "create_routine");
+    assert_eq!(card["tool"], "create_workflow");
     s.crew.ok("POST", &format!("/api/approvals/{}", card["id"].as_str().unwrap()), Some(json!({ "allow": true }))).await;
     s.crew.wait_event("конец хода", |e| e["type"] == "turn_end" && e["botId"] == s.bot.as_str()).await;
     let answer = s.last_answer().await;
-    assert!(answer.contains("создание ответ: Рутина создана") && answer.contains("список ответ:") && answer.contains("Цены"), "{answer}");
+    assert!(answer.contains("создание ответ: Процесс создан") && answer.contains("список ответ:") && answer.contains("Цены"), "{answer}");
     let state = s.crew.ok("GET", "/api/state", None).await;
     let routines = state["routines"].as_array().unwrap();
     assert_eq!(routines.len(), 1, "{state}");

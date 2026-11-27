@@ -333,8 +333,8 @@ fn tools() -> Value {
             }), vec!["room", "text"]),
         },
         {
-            "name": "list_routines",
-            "description": "Расписания ботов: что, когда и включено ли.",
+            "name": "list_workflows",
+            "description": "Процессы и расписания ботов: что, когда и включено ли.",
             "inputSchema": object(json!({}), vec![]),
         },
         {
@@ -445,7 +445,7 @@ fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
             let text = required(args, "text")?;
             answer(client.ask(Target::Room(&id), &text, timeout_of(args)), "(никто не ответил)")
         }
-        "list_routines" => {
+        "list_workflows" => {
             let state = client.get("/api/state")?;
             let bots = state["bots"].as_array().cloned().unwrap_or_default();
             let mut lines = Vec::new();
@@ -468,7 +468,7 @@ fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
                     .unwrap_or_default();
                 lines.push(format!("{} — {}: {}{state_text}{next}", routine["title"].as_str().unwrap_or("?"), bot, when));
             }
-            Ok(if lines.is_empty() { "Рутин нет.".into() } else { lines.join("\n") })
+            Ok(if lines.is_empty() { "Процессов нет.".into() } else { lines.join("\n") })
         }
         "recall" => {
             let reply = client.post("/api/memory/recall", args.clone())?;
