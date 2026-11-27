@@ -4,6 +4,33 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.11] — 2026-11-28
+
+- **"Tasks & processes" — one button instead of two.** The routines window and the Workflows screen became one
+  section with Tasks, Reminders, Habits and Processes tabs. A routine is now a small "schedule → bot" process: the
+  same card, the same journal, and the canvas opens from the card when a longer chain is needed. A new process can
+  be created from a phrase ("every weekday at 9 write a digest").
+
+- **Routines moved on their own.** On first start every routine becomes a process with the same id, schedule, bot
+  and quiet mode; the move does not fire a second run. The old settings are kept in `state.json.before-processes.bak`.
+
+- **Process journal.** The Journal button lists every run: the answer, an error, "waiting for a decision",
+  "skipped: computer was asleep" — and "Run again". A process paused by a limit shows until when, plus "Continue now".
+
+- **More reliable bot steps.** Limit pauses, failure series and runs missed during sleep work in processes the way
+  they did in routines. When the bot says "no news", the next step (Telegram, file, chat) sends nothing.
+
+- **Reminders on their own.** They live in their own file, apart from processes. The task calendar can be
+  subscribed to with the `.ics` link in the Processes tab.
+
+- **Mail in one click.** The mail wizard recognises the service from the address (Yandex, Mail.ru, VK Mail, Rambler,
+  Gmail and others). Yandex gets a "Sign in with Yandex" button: no app password, sign-in in the browser, the token
+  is kept in the secrets store and refreshes itself. Signing in again with the same address updates the mailbox
+  instead of adding a second one.
+
+- **Process webhooks** check a secret from the secrets store (a token or a GitHub signature) — one implementation
+  instead of two.
+
 ## [0.4.10] — 2026-11-27
 
 - **PC screen on the phone (PC side).** Settings → Devices has a "PC screen on the phone" switch per trusted device,
