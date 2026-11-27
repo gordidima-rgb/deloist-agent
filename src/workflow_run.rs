@@ -130,7 +130,13 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
                 finish(run, index, "failed", None, Some("в шаге не выбран бот".into()));
                 return;
             }
-            let text = format!("Рабочий процесс «{title}» поручает тебе шаг.\n\n{}\n\n--- вход ---\n{input}", node.text("task"));
+            // Рутина говорит с ботом как прежде: «[рутина] название» и задание; вход (опоздание, письма) идёт следом.
+            let text = if run.routine {
+                let data = if input.trim().is_empty() { String::new() } else { format!("\n\n--- вход ---\n{input}") };
+                format!("[рутина] {title}\n{}{data}", node.text("task"))
+            } else {
+                format!("Рабочий процесс «{title}» поручает тебе шаг.\n\n{}\n\n--- вход ---\n{input}", node.text("task"))
+            };
             let token = CancellationToken::new();
             tokens.insert(step_id.clone(), token.clone());
             run.steps[index].thread_id = Some(format!("bot:{bot_id}"));
@@ -469,9 +475,14 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
                                 floor = crate::goals::combine_floor(floor.as_deref().unwrap_or_default(), &plan.floor);
                             }
                             Err(why) => {
-                                crate::scheduler::note_of(&app, &workflow_id, &title, &bot_id, "skipped", &why).await;
+                                // Одна запись о пропуске, а не по строке на каждый срок.
+                                let repeat = app.ledger.read_journal(50).await.into_iter().find(|j| j["routineId"] == workflow_id.as_str()).is_some_and(|j| j["status"] == "skipped");
+                                if !repeat {
+                                    crate::scheduler::note_of(&app, &workflow_id, &title, &bot_id, "skipped", &why).await;
+                                }
                                 crate::goals::release_if_dead(&app, &workflow_id, &goal_id).await;
-                                return skipped(why);
+                                skipped(why);
+                                return note_status(&app, &workflow_id, "skipped");
                             }
                         }
                     }
@@ -494,6 +505,9 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
                     }
                     let step = crate::turn::ProcessStep { origin, unattended, floor, quiet, run };
                     if let Err(e) = crate::turn::run_process_step(&app, &bot_id, step, &text, attachments, token).await {
+                        if unattended && e.ends_with("запуск пропущен") {
+                            crate::scheduler::note_of(&app, &workflow_id, &title, &bot_id, "busy", "Бот был занят больше часа: запуск пропущен, жду следующего срока.").await;
+                        }
                         complete(&app, &run_id, &step_id, Err(e));
                     }
                 }
@@ -645,6 +659,10 @@ pub async fn step_ended(app: &Arc<App>, e: Ended<'_>) {
         _ => failed(e.summary),
     };
     complete(app, e.run, e.step, result);
+    // «Сообщать нечего» — не «готово»: так оно видно на карточке и в старом окне рутин.
+    if e.status == "quiet" && app.workflows.lock().get(e.workflow).and_then(|s| s.wf.last_run.as_ref().map(|r| r.status == "done")).unwrap_or(false) {
+        note_status(app, e.workflow, "quiet");
+    }
 }
 
 /// Серия ошибок процесса: выполнено — сброшена; ошибка растит серию, от 3 подряд процесс идёт реже,
@@ -744,7 +762,7 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
                 return Err(RunError { status: 400, message: "узла нет или с него нельзя начать".into(), code: Some("bad_node") });
             }
         }
-        if source != "manual" && inner.has_open_run(wf_id) {
+        if !on_request(source) && inner.has_open_run(wf_id) {
             return Err(err(409, "у процесса уже идёт запуск"));
         }
         // Запуски без человека не тратят токены сверх дневного предела; шаг-бот сам встаёт на паузу до полуночи.
@@ -753,6 +771,7 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
         }
         let floor = stored.wf.approval_floor.clone();
         let revision = stored.wf.revision;
+        let routine = stored.wf.from_routine;
         // Человек сам запустил процесс: пауза расписания из-за ошибок подряд кончилась (серия идёт, пока запуск не удастся).
         if source == "manual" {
             if let Some(stored) = inner.get_mut(wf_id).filter(|s| s.wf.error_paused) {
@@ -762,7 +781,7 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
         }
         let mut run = Run {
             id: uid("run"), workflow_id: wf_id.to_string(), status: "running".into(), source: source.to_string(), started_at: now(),
-            revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, trigger_data: data, floor, ..Run::default()
+            revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, routine, trigger_data: data, floor, ..Run::default()
         };
         if let Some(from) = &from_node {
             let prev = inner.runs.get(wf_id).and_then(|l| l.iter().max_by_key(|r| r.started_at)).cloned();
@@ -987,6 +1006,25 @@ pub fn on_message(app: &Arc<App>, source: &str, place: &str, text: &str) {
     }
 }
 
+/// Сколько сроков расписания прошло, пока программа не работала: от `first` до «сейчас минус опоздание».
+/// Считается неделя назад не дальше: долго выключенный компьютер не делает расчёт дорогим.
+fn missed_slots(schedule: &crate::schedule::Schedule, first: i64, at: i64) -> u32 {
+    let (mut slot, mut count) = (first.max(at - 7 * 24 * 3_600_000), 0);
+    while slot <= at - LATE_MS && count < 1000 {
+        count += 1;
+        match crate::schedule::schedule_next(schedule, slot) {
+            Some(next) if next > slot => slot = next,
+            _ => break,
+        }
+    }
+    count
+}
+
+/// Запуск по просьбе (кнопка, инструмент бота, устройство), а не по сроку или событию: прежний запуск ему не помеха, как у рутины.
+fn on_request(source: &str) -> bool {
+    matches!(source, "manual" | "request") || source.starts_with("device:")
+}
+
 /// Запуск опоздал больше чем на это — компьютер спал или программа была закрыта (тик идёт раз в 30 секунд).
 const LATE_MS: i64 = 5 * 60_000;
 
@@ -999,8 +1037,9 @@ pub async fn tick_schedule(app: &Arc<App>) {
         node: String,
         late_ms: i64,
         skip: bool,
-        /// Окно расписания закрыто: опоздавший запуск в нём не стартует.
+        /// Окно расписания закрыто: в нём запуск не стартует.
         closed: bool,
+        schedule: Option<crate::schedule::Schedule>,
         /// Процесс вырос из рутины: нет бота — выключается, разовый после срока выключается.
         routine: bool,
     }
@@ -1020,10 +1059,10 @@ pub async fn tick_schedule(app: &Arc<App>) {
                 let schedule = stored.wf.graph.node(&node).and_then(|n| n.schedule.clone());
                 let closed = schedule.as_ref().is_some_and(|s| !crate::schedule::open_now(s, at));
                 let routine = stored.wf.from_routine;
-                if routine && schedule.is_some_and(|s| s.kind == "once") {
+                if routine && schedule.as_ref().is_some_and(|s| s.kind == "once") {
                     stored.wf.enabled = false;
                 }
-                fire.push(Due { workflow: stored.wf.id.clone(), node, late_ms, skip, closed, routine });
+                fire.push(Due { workflow: stored.wf.id.clone(), node, late_ms, skip, closed, schedule: schedule.clone(), routine });
             }
         }
         // Срок сдвинут и записан до запуска: сбой запуска не повторит его каждые полминуты.
@@ -1053,8 +1092,19 @@ pub async fn tick_schedule(app: &Arc<App>) {
             continue;
         }
         let late = due.late_ms > LATE_MS;
-        if late && (due.skip || due.closed || due.late_ms > crate::schedule::CATCH_UP_MS) {
+        // Опоздавший не дольше 12 часов запускается один, остальные пропущенные сроки — записью в журнале.
+        let runs = late && !(due.skip || due.closed || due.late_ms > crate::schedule::CATCH_UP_MS);
+        if late {
+            let slots = due.schedule.as_ref().map_or(1, |s| missed_slots(s, at - due.late_ms, at));
+            if !runs {
+                note("skipped", format!("Срок прошёл, пока компьютер спал или программа была закрыта. Пропущено запусков: {slots}.")).await;
+            } else if slots > 1 {
+                note("skipped", format!("Пропущено запусков: {}. Компьютер был выключен или спал.", slots - 1)).await;
+            }
+        } else if due.closed {
             note("skipped", "Срок прошёл, пока компьютер спал или программа была закрыта.".into()).await;
+        }
+        if due.closed || (late && !runs) {
             continue;
         }
         if !replace_waiting(app, &due.workflow).await {

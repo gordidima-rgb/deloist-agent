@@ -240,7 +240,7 @@ async fn the_monthly_bot_limit_pauses_unattended_work_until_next_month() {
     let entry = run_unattended(&crew, &id).await;
     assert_eq!(entry["status"], "paused", "{entry}");
     assert_eq!(fake.calls(), before, "модель не вызвана");
-    let run = runs_file(&crew).into_iter().find(|r| r["origin"]["routine"].is_object()).unwrap();
+    let run = runs_file(&crew).into_iter().find(|r| r["origin"]["process"].is_object()).unwrap();
     assert_eq!(run["state"]["reason"], "budget", "{run}");
     use chrono::{Datelike, Local};
     let now = Local::now();

@@ -204,6 +204,9 @@ pub struct Run {
     /// Запуск одного узла («выполнить шаг»): ниже по графу ничего не идёт.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
+    /// Запускается процесс, выросший из рутины: боту уходит задание рутины, а не шаг процесса.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub routine: bool,
     /// Данные извне для запускающего узла (тело вебхука, сообщение) уже в рамке «это данные».
     #[serde(skip)]
     pub trigger_data: Option<String>,

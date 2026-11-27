@@ -69,7 +69,7 @@ pub fn over_limit(app: &App) -> bool {
 
 /// Запуск по просьбе («Запустить» в окне, инструмент бота): рутина идёт как процесс «триггер → бот», вебхук-рутина — прежним ходом.
 pub async fn run_now(app: &Arc<App>, id: &str, unattended: bool) -> Result<Routine, crate::turn::StartError> {
-    run_now_as(app, id, unattended, if unattended { "routine" } else { "manual" }).await
+    run_now_as(app, id, unattended, if unattended { "request" } else { "manual" }).await
 }
 
 /// То же с пометкой источника в журнале («device:iPhone», когда рутину запустили с устройства). Человек на устройстве рядом.
@@ -79,8 +79,12 @@ pub async fn run_now_as(app: &Arc<App>, id: &str, unattended: bool, source: &str
         return Err(refuse(400, "напоминание шлёт таймер, бота у него нет: для проверки есть «проверить напоминание»"));
     }
     let routine = app.store.routine(id).ok_or_else(|| refuse(404, "рутина не найдена"))?;
-    if app.store.bot(&routine.bot_id).is_none() {
+    let Some(bot) = app.store.bot(&routine.bot_id) else {
         return Err(refuse(400, "бота этой рутины уже нет"));
+    };
+    // Кнопку нажали сейчас: занятому боту отказ сразу, а не ожидание в очереди запуска.
+    if app.turns.is_busy(&bot.id) {
+        return Err(refuse(409, &format!("бот «{}» {}", bot.name, crate::turn::BUSY_SUFFIX)));
     }
     if routine.hook {
         run_hook_routine(app, &routine, unattended, source).await?;

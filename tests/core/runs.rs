@@ -211,11 +211,7 @@ async fn an_interrupted_routine_continues_instead_of_starting_over() {
     let routine = first.ok("POST", "/api/routines", Some(body)).await["routine"]["id"].as_str().unwrap().to_string();
     first.keep_data();
     drop(first);
-    // Рутина числилась «идёт», когда программа закрылась.
-    let path = dir.join("state.json");
-    let mut state: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    state["routines"][0]["lastStatus"] = json!("running");
-    std::fs::write(&path, serde_json::to_string(&state).unwrap()).unwrap();
+    // Рутина числилась «идёт», когда программа закрылась: запись хода с прежним происхождением «рутина» живёт в runs.json.
     write_run(&dir, &bot, json!({ "routine": { "id": routine, "title": "Проверка" } }), json!([step("чтение файла", "read", "ok")]), 0);
 
     *fake.script.lock().unwrap() = vec![Step::Say("сайт проверен".into())];

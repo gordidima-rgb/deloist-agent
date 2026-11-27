@@ -528,14 +528,14 @@ async fn an_old_state_file_without_quiet_reads_as_quiet() {
     let mut first = Crew::start_at(dir.clone(), &[]).await;
     let state = first.ok("GET", "/api/state", None).await;
     let bot = state["bots"][0]["id"].as_str().unwrap().to_string();
-    add_routine(&first, &bot, json!({})).await;
     first.keep_data();
     drop(first);
 
+    // Старый файл: рутина в state.json без поля quiet. При запуске она переезжает в процесс и остаётся тихой.
     let path = dir.join("state.json");
     let text = std::fs::read_to_string(&path).unwrap();
     let mut state: Value = serde_json::from_str(&text).unwrap();
-    state["routines"][0].as_object_mut().unwrap().remove("quiet");
+    state["routines"] = json!([{ "id": "rt_old", "botId": bot, "title": "Старая", "prompt": "проверь", "everyMinutes": 60, "enabled": true }]);
     std::fs::write(&path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
 
     let second = Crew::start_at(dir, &[]).await;
