@@ -4,10 +4,18 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-11-27
+
 - **PC screen on the phone (PC side).** Settings → Devices has a "PC screen on the phone" switch per trusted device,
   turned on by typing the device name. The phone can watch the screen, "Take over" control (bots wait) and "Return
   to bots"; after 5 minutes without touches the stream pauses. Revoking a device stops its stream at once. The phone
   page on `my.deloist.ru` ships separately.
+
+- **Gemini: one quota indicator per account.** The Limits screen no longer shows two identical rings for one Gemini
+  account.
+
+- **Cloud: files outside the bot's folder.** A cloud bot again gets a plain refusal for a path outside its folder,
+  without a pointless "This computer" card the cloud would never carry out.
 
 ## [0.4.9] — 2026-11-20
 
