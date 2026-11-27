@@ -131,9 +131,12 @@ impl Team {
 
     /// То же, но сообщение человека начинается с `prefix` (например, «@Дельта »).
     async fn run_with(&self, bot: &str, prefix: &str, calls: &[(&str, Value)]) -> Vec<String> {
-        let before = self.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == bot);
+        // Итог закрытой задачи будит выдавшего своим ходом: ждём, пока тот ход кончится, и считаем только свой.
+        let turns = |kind: &'static str| self.crew.count_events(move |e| e["type"] == kind && e["botId"] == bot);
+        common::wait_until("бот свободен", 30, || async { turns("turn_start") == turns("turn_end") }).await;
+        let before = turns("turn_end");
         self.crew.say(bot, &format!("{prefix}{}", script(calls))).await;
-        common::wait_until("конец хода", 30, || async { self.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == bot) > before }).await;
+        common::wait_until("конец хода", 30, || async { turns("turn_end") > before && turns("turn_start") == turns("turn_end") }).await;
         let thread = self.crew.ok("GET", &format!("/api/bots/{bot}/thread?limit=200"), None).await;
         // Результаты этого сценария — последние `calls.len()` вызовов в треде.
         let mut results: Vec<String> = thread["messages"]
@@ -171,8 +174,8 @@ fn is_task_done_for(bot: &str) -> impl Fn(&Value) -> bool + '_ {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn two_tasks_run_in_parallel_and_finish_without_waking_the_lead() {
-    let t = team("async-parallel", 1500).await;
+async fn two_tasks_run_in_parallel_and_finish_and_wake_the_lead_with_the_results() {
+    let t = team("async-parallel", 3000).await;
     let started = std::time::Instant::now();
     let out = t
         .run(&t.alpha, &[
@@ -180,7 +183,7 @@ async fn two_tasks_run_in_parallel_and_finish_without_waking_the_lead() {
             ("assign_task", json!({ "bot": "Гамма", "text": "Напиши пост" })),
         ])
         .await;
-    assert!(started.elapsed() < Duration::from_millis(1400), "assign_task не должен ждать участника: {:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_millis(2800), "assign_task не должен ждать участника: {:?}", started.elapsed());
     let (first, second) = (task_id(&out[0]), task_id(&out[1]));
     assert!(first.starts_with("task_") && second.starts_with("task_") && first != second, "{out:?}");
 
@@ -190,14 +193,10 @@ async fn two_tasks_run_in_parallel_and_finish_without_waking_the_lead() {
     assert_eq!(t.task_state(&first).await, "done");
     assert_eq!(t.task_state(&second).await, "done");
 
-    // Ведущий не просыпался: ход у него был один (тот, что раздал задачи), новых запросов к модели от него нет.
-    let lead_turns = t.crew.count_events(|e| e["type"] == "turn_start" && e["botId"] == t.alpha.as_str());
-    let lead_requests = t.model.requests.lock().unwrap().iter().filter(|r| r["messages"][0]["content"].as_str().is_some_and(|s| s.contains("Ты — Альфа"))).count();
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert_eq!(lead_turns, 1);
-    assert_eq!(t.crew.count_events(|e| e["type"] == "turn_start" && e["botId"] == t.alpha.as_str()), 1, "завершение задачи запустило ход ведущего");
-    let after = t.model.requests.lock().unwrap().iter().filter(|r| r["messages"][0]["content"].as_str().is_some_and(|s| s.contains("Ты — Альфа"))).count();
-    assert_eq!(lead_requests, after);
+    // Закрытая задача будит выдавшего: он получает итоги заметкой в начале нового хода и не ждёт, пока ему напишут.
+    common::wait_until("ведущего разбудили итогом", 30, || async { t.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == t.alpha.as_str()) >= 2 }).await;
+    let woken = t.model.requests.lock().unwrap().iter().any(|r| r["messages"].as_array().is_some_and(|ms| ms.iter().any(|m| m["role"] == "system" && text_of(m).contains("С прошлого хода закрылись задачи") && text_of(m).contains("Итог от"))));
+    assert!(woken, "итог не дошёл до ведущего в новом ходу");
 
     // В ленте ведущего короткая строка о каждой задаче, и она переживает перезагрузку чата.
     let thread = t.crew.ok("GET", &format!("/api/bots/{}/thread?limit=200", t.alpha), None).await;
@@ -407,6 +406,8 @@ async fn result_files_are_listed_and_secret_names_are_dropped() {
     std::fs::write(ws.join("out").join("secrets.key"), "k").unwrap();
     std::fs::write(ws.join("out").join(".env.local"), "K=2").unwrap();
     common::wait_until("готово", 20, || async { t.task_state(&id).await == "done" }).await;
+    // Итог будит ведущего своим ходом; его конец не должен сойти за конец хода со сценарием.
+    common::wait_until("ведущий получил итог", 20, || async { t.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == t.alpha.as_str()) >= 2 }).await;
     let status = t.run(&t.alpha, &[("task_status", json!({ "taskId": id }))]).await;
     assert!(status[0].contains("cover.png"), "файл результата пропал из списка: {}", status[0]);
     assert!(status[0].contains("post.md"), "файл из подпапки пропал: {}", status[0]);
@@ -488,9 +489,10 @@ async fn the_lead_hears_about_closed_tasks_once_at_the_start_of_the_next_turn() 
     let t = team("async-lead-note", 100).await;
     let out = t.run(&t.alpha, &[("assign_task", json!({ "bot": "Бета", "text": "Нарисуй обложку" }))]).await;
     let id = task_id(&out[0]);
-    common::wait_until("готово", 20, || async { t.task_state(&id).await == "done" }).await;
     let before = request_texts(&t, "Альфа").len();
-    t.run(&t.alpha, &[("task_status", json!({}))]).await;
+    common::wait_until("готово", 20, || async { t.task_state(&id).await == "done" }).await;
+    // Закрытая задача сама будит ведущего: заметка приходит в начале этого хода, а не ждёт чужого сообщения.
+    common::wait_until("ведущий получил итог", 20, || async { t.crew.count_events(|e| e["type"] == "turn_end" && e["botId"] == t.alpha.as_str()) >= 2 }).await;
     let second_turn: Vec<String> = request_texts(&t, "Альфа").into_iter().skip(before).collect();
     let note = second_turn.iter().find(|m| m.starts_with("system: ") && m.contains("закрылись задачи")).expect("в ходе ведущего нет заметки о закрытой задаче");
     assert!(note.contains("Бета") && note.contains(&id) && note.contains("Итог от Бета"), "{note}");

@@ -798,6 +798,32 @@ async fn finish(app: &Arc<App>, id: &str, state: &str, summary: String, files: V
     app.tasks.journal_event(&task, &task.state, tokens);
     app.turns.emit(json!({ "type": "task_update", "botId": task.from, "taskId": id, "state": task.state }));
     post_task_line(app, &task, &task.summary).await;
+    // Выдавший ход давно кончил и ждать итог не будет: без этого результат лежит строкой в ленте, пока кто-то не напишет боту.
+    if matches!(task.state.as_str(), "done" | "error") && task.started_by != "bot" {
+        tokio::spawn(wake_sender(app.clone(), task.id.clone()));
+    }
+}
+
+/// Будит выдавшего задачу ходом, в начале которого он получит итог (`closed_note`). Занят — ждёт; итог уже ушёл в чужой ход — не будит.
+/// Задачи «бот → бот» (`started_by == "bot"`, ответ исполнителя) не будят: иначе боты вечно отвечали бы друг другу.
+async fn wake_sender(app: Arc<App>, id: String) {
+    let deadline = Instant::now() + QUEUE_WAIT;
+    while Instant::now() < deadline {
+        let Some(task) = app.tasks.get(&id) else { return };
+        if task.noted {
+            return;
+        }
+        let opts = crate::turn::TurnOptions { unattended: true, approval_floor: Some(task.floor.clone()).filter(|f| !f.is_empty()), source: Some("task".into()), ..Default::default() };
+        let text = format!("Закрылась задача, которую ты выдал: «{}», taskId {}. Итог в заметке этого хода; продолжай начатое дело.", task.to_name, id);
+        match crate::turn::start_turn(&app, &task.from, &text, opts) {
+            Ok(()) => return,
+            Err(e) if e.status == 409 => tokio::time::sleep(Duration::from_secs(2)).await,
+            Err(e) => {
+                eprintln!("[team_tasks] не смог разбудить «{}» итогом задачи: {}", task.from_name, e.message);
+                return;
+            }
+        }
+    }
 }
 
 const CANCELLED: &str = "Отменено человеком";
