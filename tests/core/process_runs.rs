@@ -316,6 +316,18 @@ async fn a_quiet_step_with_nothing_to_say_hides_the_turn_and_a_loud_one_does_not
     assert_eq!((step(&done, "b")["status"].as_str(), step(&done, "b")["output"].as_str()), (Some("done"), Some("")), "{done}");
     assert_eq!(said(&thread(&crew, &bot).await, "поручает тебе шаг"), 0, "тихий ход исчез из истории");
 
+    // Шаг вывода после тихого бота без новостей ничего не шлёт: пустое сообщение в чат не уходит.
+    let mut graph = hook_chain(&bot, json!({ "quiet": "true" }));
+    graph["nodes"].as_array_mut().unwrap().push(node("o", "output", json!({ "target": "chat", "bot_id": bot })));
+    graph["edges"].as_array_mut().unwrap().push(json!({ "id": "e2", "from": "b", "to": "o" }));
+    let relayed = create(&crew, "Тихий с выводом", graph).await;
+    fake.script(vec![Step::Tool("finish_turn", json!({ "status": "nothing" }))]);
+    let before = thread(&crew, &bot).await.len();
+    let run = fire(&crew, &relayed).await;
+    let done = wait_wf_run(&crew, &relayed, &run, "done").await;
+    assert_eq!(step(&done, "o")["status"].as_str(), Some("done"), "{done}");
+    assert_eq!(thread(&crew, &bot).await.len(), before, "в чат ушло пустое сообщение");
+
     // Тот же ответ без «тихо»: ход виден.
     let loud = create(&crew, "Громкий", hook_chain(&bot, json!({}))).await;
     fake.script(vec![Step::Tool("finish_turn", json!({ "status": "nothing" }))]);
