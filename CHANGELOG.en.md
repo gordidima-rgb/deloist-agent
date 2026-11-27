@@ -11,6 +11,36 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
   to bots"; after 5 minutes without touches the stream pauses. Revoking a device stops its stream at once. The phone
   page on `my.deloist.ru` ships separately.
 
+- **Routines no longer pile up cards and pauses.** While a routine waits for an answer to a card, scheduled starts
+  no longer add another card and chat line every hour. A routine keeps one limit pause that wakes once, and a
+  routine paused for errors does not wake its old waits. A repeated pause does not write "waiting for the limit"
+  to the chat again.
+
+- **Clear agent action cards.** Instead of a bare "action", the card names what the agent wants to do (for
+  example, open a page in the browser).
+
+- **A finished task wakes the bot that assigned it.** When another bot completes a task, the assigning bot gets
+  the result at once and carries on instead of waiting for someone to message it.
+
+- **Gemini (Antigravity) quota is a pause, not an answer.** "Individual quota reached… Resets in 2h5m" now pauses
+  the bot until the reset and switches to the fallback model, like other providers.
+
+- **PC sleep no longer cuts a turn.** The agent silence watchdog does not count the time the PC slept.
+
+- **Clicking an input field in the browser** hits the visible part of the field and focuses it, even below the
+  fold.
+
+- **Handing the browser to a human** (for example, a Cloudflare check) no longer ends in a tool error, and a
+  routine does not stay silent while it waits for the human.
+
+- **Low disk space.** If a turn fails while the data disk is almost full, the bot says so.
+
+- **The bot's clock** counts quiet turns too: "N min passed" is no longer overstated.
+
+- **Sidebar:** team members without the rail and indent, so names and previews get more room.
+
+- **Agent update cards** show the installed and the new version: "2.11.0 → 2.12.1".
+
 - **Gemini: one quota indicator per account.** The Limits screen no longer shows two identical rings for one Gemini
   account.
 
