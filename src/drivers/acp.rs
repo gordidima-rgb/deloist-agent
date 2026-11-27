@@ -742,7 +742,8 @@ pub async fn run(req: Request<'_>, cancel: &CancellationToken, sink: Sink<'_>) -
             "refusal" => Err("агент отказался выполнять просьбу".into()),
             _ if turn.cancelled => stopped(),
             // Antigravity отдаёт «Individual quota reached… Resets in 2h5m» обычным текстом, а не ошибкой.
-            _ if !acted && said.len() < 400 && super::is_limit_error(&said) => Err(said.trim().trim_start_matches('⚠').trim().to_string()),
+            // Время сброса обязательно: короткий обычный ответ со словом «quota» или «balance» — не лимит.
+            _ if !acted && said.len() < 400 && super::is_limit_error(&said) && crate::limit::reset_in_error(&said, chrono::Local::now()).is_some() => Err(said.trim().trim_start_matches('⚠').trim().to_string()),
             _ => Ok(()),
         },
         Err(_) if turn.cancelled => stopped(),
