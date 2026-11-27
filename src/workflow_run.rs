@@ -24,7 +24,7 @@ fn err(status: u16, message: impl Into<String>) -> RunError {
 
 /// Что нужно сделать вне блокировки состояния.
 enum Spawn {
-    Bot { run_id: String, step_id: String, workflow_id: String, bot_id: String, text: String, files: Vec<String>, floor: Option<String>, unattended: bool, token: CancellationToken },
+    Bot { run_id: String, step_id: String, workflow_id: String, title: String, node_id: String, bot_id: String, text: String, files: Vec<String>, floor: Option<String>, unattended: bool, quiet: bool, token: CancellationToken },
     Image { run_id: String, step_id: String, workflow_id: String, prompt: String, size: String, token: CancellationToken },
     Llm { run_id: String, step_id: String, workflow_id: String, files: Vec<String>, system: String, task: String, provider: String, model: String, condition: bool, token: CancellationToken },
     Output { run_id: String, step_id: String, workflow_id: String, title: String, target: String, node: Node, input: String, external: bool },
@@ -134,7 +134,17 @@ fn start_node(run: &mut Run, title: &str, node_id: &str, inputs: &[walk::Input],
             let token = CancellationToken::new();
             tokens.insert(step_id.clone(), token.clone());
             run.steps[index].thread_id = Some(format!("bot:{bot_id}"));
-            spawns.push(Spawn::Bot { run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), bot_id, text, files: gathered.files, floor: step_floor(run), unattended: run.source != "manual", token });
+            // Осторожность и тишина — поля самого шага: так их несёт процесс, выросший из рутины.
+            let floor = match (step_floor(run), node.text("approval_floor")) {
+                (Some(base), own) if !own.is_empty() => Some(crate::tools::stricter(&base, &own)),
+                (None, own) if !own.is_empty() => Some(own),
+                (base, _) => base,
+            };
+            let quiet = node.text("quiet") == "true";
+            spawns.push(Spawn::Bot {
+                run_id: run.id.clone(), step_id, workflow_id: run.workflow_id.clone(), title: title.to_string(), node_id: node_id.to_string(), bot_id, text, files: gathered.files,
+                floor, unattended: run.source != "manual", quiet, token,
+            });
         }
         "llm" | "condition" => {
             let condition = kind == "condition";
@@ -427,13 +437,28 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
         let app = app.clone();
         tokio::spawn(async move {
             match spawn {
-                Spawn::Bot { run_id, step_id, workflow_id, bot_id, text, files, floor, unattended, token } => {
+                Spawn::Bot { run_id, step_id, workflow_id, title, node_id, bot_id, mut text, files, floor, unattended, quiet, token } => {
                     let attachments = match crate::workflow_io::attachments_for_bot(&app, &workflow_id, &bot_id, &files).await {
                         Ok(list) => list,
                         Err(e) => return complete(&app, &run_id, &step_id, Err(e)),
                     };
-                    let result = crate::turn::run_workflow_step(&app, &bot_id, &workflow_id, &text, attachments, unattended, floor, token).await;
-                    complete(&app, &run_id, &step_id, result.map(|text| (text, None, Vec::new())));
+                    let note = app.workflows.lock().get(&workflow_id).and_then(|s| s.wf.notes.get(&node_id).cloned()).unwrap_or_default();
+                    if !note.is_empty() {
+                        text.push_str("
+
+Заметка с прошлого запуска:
+");
+                        text.push_str(&note);
+                    }
+                    let origin = crate::runs::Origin::Process { id: workflow_id, title, run: run_id.clone(), step: step_id.clone() };
+                    // Дневной предел токенов: шаг не пропадает, а ждёт полуночи записью в журнале запусков.
+                    if unattended && crate::scheduler::over_limit(&app) {
+                        return pause_for_budget(&app, &bot_id, origin, &text, floor, quiet).await;
+                    }
+                    let step = crate::turn::ProcessStep { origin, unattended, floor, quiet };
+                    if let Err(e) = crate::turn::run_process_step(&app, &bot_id, step, &text, attachments, token).await {
+                        complete(&app, &run_id, &step_id, Err(e));
+                    }
                 }
                 Spawn::Image { run_id, step_id, workflow_id, prompt, size, token } => {
                     let made = tokio::select! {
@@ -472,6 +497,141 @@ fn spawn_all(app: &Arc<App>, spawns: Vec<Spawn>) {
             }
         });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Надёжность шага-бота: итог хода, серия ошибок, пауза до сброса лимита
+// ---------------------------------------------------------------------------
+
+/// Дневной предел токенов исчерпан: шаг ждёт полуночи записью в журнале запусков, а не падает.
+async fn pause_for_budget(app: &Arc<App>, bot_id: &str, origin: crate::runs::Origin, text: &str, floor: Option<String>, quiet: bool) {
+    let until = crate::limit::next_day_ms(chrono::Local::now()).unwrap_or_else(|| now() + crate::limit::backoff_ms(0));
+    let opts = crate::turn::TurnOptions {
+        source: Some("delegation:Рабочий процесс".into()), depth: 1, unattended: true, quiet, approval_floor: floor,
+        ..crate::turn::TurnOptions::default()
+    };
+    let crate::runs::Origin::Process { id, title, .. } = &origin else { return };
+    let (id, title) = (id.clone(), title.clone());
+    crate::runs::pause_unstarted(app, bot_id, origin, &opts, text, until, crate::runs::StopReason::Budget, "дневной предел");
+    crate::scheduler::note_of(app, &id, &title, bot_id, "paused", &format!("Дневной предел токенов исчерпан: шаг на паузе до {}.", crate::scheduler::clock(until))).await;
+    change_event(app, &id, None);
+}
+
+/// Чем кончился ход шага-бота (его собирает конец хода в `turn`).
+pub struct Ended<'a> {
+    pub workflow: &'a str,
+    pub title: &'a str,
+    pub run: &'a str,
+    pub step: &'a str,
+    pub bot_id: &'a str,
+    /// Итог хода как у рутины: ok, quiet, failed, needs, paused, stopped.
+    pub status: &'a str,
+    pub reason: Option<crate::runs::StopReason>,
+    /// Запись журнала держит ход (пауза до сброса, ждёт человека): шаг остаётся «идёт» и закончится продолжением.
+    pub held: bool,
+    pub answer: &'a str,
+    pub summary: &'a str,
+    pub note: Option<&'a str>,
+    /// Бот сам закрыл ход через `finish_turn`: пустой ответ тогда не ошибка («сообщать нечего», «готово»).
+    pub finished: bool,
+}
+
+enum Series {
+    Done,
+    Failed(u32),
+    Paused(u32),
+}
+
+/// Ход шага кончился: серия ошибок процесса, заметка для следующего запуска, итог шага и проход дальше.
+pub async fn step_ended(app: &Arc<App>, e: Ended<'_>) {
+    let node = app.workflows.lock().run(e.run).and_then(|r| r.steps.iter().find(|s| s.id == e.step).map(|s| s.node_id.clone()));
+    let series = count_series(app, e.workflow, e.status, e.reason, node.as_deref().zip(e.note));
+    let english = app.store.settings().ui_lang == "en";
+    let why = e.reason.map(|r| r.label(english)).unwrap_or_default();
+    match series {
+        Series::Failed(n @ (3 | 6)) => {
+            let gap = if n == 3 { if english { "once an hour" } else { "раз в час" } } else if english { "once in 4 hours" } else { "раз в 4 часа" };
+            let text = if english { format!("{n} failures in a row ({why}): runs no more often than {gap}.") } else { format!("Ошибок подряд: {n} ({why}) — запускаю не чаще, чем {gap}.") };
+            crate::scheduler::note_of(app, e.workflow, e.title, e.bot_id, "paused", &text).await;
+        }
+        Series::Paused(n) => {
+            let title = e.title;
+            let text = if english {
+                format!("Process “{title}” is paused: {n} failures in a row — {why}. Run it by hand when it is fixed.")
+            } else {
+                format!("Процесс «{title}» на паузе: {n} ошибки подряд — {why}. Когда исправишь, запусти его вручную.")
+            };
+            crate::scheduler::note_of(app, e.workflow, e.title, e.bot_id, "paused", &text).await;
+            let entry = json!({ "id": uid("msg"), "role": "assistant", "text": text, "at": now(), "error": true, "routineId": e.workflow });
+            if let Err(err) = app.store.append_message(e.bot_id, entry.clone()).await {
+                eprintln!("[workflows] {}: {err}", e.title);
+            }
+            app.turns.emit(json!({ "type": "message", "botId": e.bot_id, "message": entry }));
+        }
+        Series::Done | Series::Failed(_) => {}
+    }
+    if e.held {
+        change_event(app, e.workflow, Some(e.run));
+        return;
+    }
+    let failed = |text: &str| Err(if text.trim().is_empty() { "ход не удался".to_string() } else { text.to_string() });
+    let result: Result<Done, String> = match e.status {
+        "ok" if e.answer.trim().is_empty() && !e.finished => Err("бот не дал ответа".into()),
+        "ok" | "quiet" => Ok((e.answer.to_string(), None, Vec::new())),
+        "stopped" => Err("остановлено".into()),
+        "needs" => failed(&format!("нужен человек: {}", e.summary)),
+        _ => failed(e.summary),
+    };
+    complete(app, e.run, e.step, result);
+}
+
+/// Серия ошибок процесса: выполнено — сброшена; ошибка растит серию, от 3 подряд процесс идёт реже,
+/// а три «вечные» ошибки ставят расписание на паузу. Ошибки, которые зависят от человека (остановка, карточка), серию не растят.
+fn count_series(app: &Arc<App>, wf_id: &str, status: &str, reason: Option<crate::runs::StopReason>, note: Option<(&str, &str)>) -> Series {
+    let mut guard = app.workflows.lock();
+    let Some(stored) = guard.get_mut(wf_id) else { return Series::Done };
+    if let Some((node, text)) = note {
+        let chars: Vec<char> = text.chars().collect();
+        stored.wf.notes.insert(node.to_string(), chars[chars.len().saturating_sub(8000)..].iter().collect());
+    }
+    let series = match reason.filter(|r| r.is_failure() && matches!(status, "failed" | "needs")) {
+        Some(reason) => {
+            stored.wf.failures += 1;
+            stored.wf.stop_reason = Some(reason);
+            let gap = crate::schedule::failure_gap_ms(stored.wf.failures);
+            if gap > 0 {
+                for slot in stored.slots.values_mut() {
+                    slot.next = slot.next.map(|next| next.max(now() + gap));
+                }
+            }
+            if reason.is_lasting() && stored.wf.failures >= 3 && !stored.wf.error_paused {
+                stored.wf.error_paused = true;
+                Series::Paused(stored.wf.failures)
+            } else {
+                Series::Failed(stored.wf.failures)
+            }
+        }
+        None => {
+            if matches!(status, "ok" | "quiet") {
+                stored.wf.failures = 0;
+                stored.wf.stop_reason = None;
+                stored.wf.error_paused = false;
+            }
+            Series::Done
+        }
+    };
+    guard.save_wf(wf_id);
+    series
+}
+
+/// Три «вечные» ошибки подряд: расписание процесса ждёт, пока человек сам его не запустит.
+pub fn error_paused(app: &Arc<App>, wf_id: &str) -> bool {
+    app.workflows.lock().get(wf_id).is_some_and(|s| s.wf.error_paused)
+}
+
+/// Запись журнала закрыта без продолжения (бота нет, человек отменил): шаг кончается ошибкой с этим текстом.
+pub fn step_stopped(app: &Arc<App>, run_id: &str, step_id: &str, text: &str) {
+    complete(app, run_id, step_id, Err(text.to_string()));
 }
 
 fn snapshot(app: &Arc<App>, run_id: &str) -> Result<Run, RunError> {
@@ -514,12 +674,19 @@ pub fn start_run_with(app: &Arc<App>, wf_id: &str, source: &str, request_id: Opt
         if source != "manual" && inner.has_open_run(wf_id) {
             return Err(err(409, "у процесса уже идёт запуск"));
         }
-        // Запуски без человека не тратят токены сверх дневного предела.
-        if source != "manual" && crate::scheduler::over_limit(app) {
+        // Запуски без человека не тратят токены сверх дневного предела; шаг-бот сам встаёт на паузу до полуночи.
+        if source != "manual" && !graph.nodes.iter().any(|n| n.kind == "bot") && crate::scheduler::over_limit(app) {
             return Err(err(429, "дневной предел токенов исчерпан"));
         }
         let floor = stored.wf.approval_floor.clone();
         let revision = stored.wf.revision;
+        // Человек сам запустил процесс: пауза расписания из-за ошибок подряд кончилась (серия идёт, пока запуск не удастся).
+        if source == "manual" {
+            if let Some(stored) = inner.get_mut(wf_id).filter(|s| s.wf.error_paused) {
+                stored.wf.error_paused = false;
+                inner.save_wf(wf_id);
+            }
+        }
         let mut run = Run {
             id: uid("run"), workflow_id: wf_id.to_string(), status: "running".into(), source: source.to_string(), started_at: now(),
             revision, graph: graph.clone(), request_id, from_node: from_node.clone(), trigger_node, solo, trigger_data: data, floor, ..Run::default()
@@ -552,6 +719,7 @@ pub fn stop_run(app: &Arc<App>, run_id: &str) -> Result<Run, RunError> {
         }
     })
     .ok_or_else(|| err(404, "запуска нет"))?;
+    app.runs.close_process(run_id, None);
     snapshot(app, run_id)
 }
 
@@ -569,6 +737,7 @@ pub fn stop_step(app: &Arc<App>, step_id: &str) -> Result<Run, RunError> {
     if done != Some(true) {
         return Err(err(409, "шаг уже не идёт"));
     }
+    app.runs.close_process(&run_id, Some(step_id));
     snapshot(app, &run_id)
 }
 
@@ -629,6 +798,9 @@ pub fn decide(app: &Arc<App>, step_id: &str, approved: bool) -> Result<Run, RunE
     if done != Some(true) {
         return Err(err(409, "решение уже принято"));
     }
+    if !approved {
+        app.runs.close_process(&run_id, None);
+    }
     snapshot(app, &run_id)
 }
 
@@ -683,7 +855,8 @@ pub fn resume(app: &Arc<App>) {
                     run.ended_at = Some(now());
                 } else {
                     for index in 0..run.steps.len() {
-                        if run.steps[index].status == "running" {
+                        // Шаг-бота ведёт журнал запусков: он продолжается сам или ждёт человека, обрывать его нельзя.
+                        if run.steps[index].status == "running" && !app.runs.holds_step(&run.id, &run.steps[index].id) {
                             finish(run, index, "failed", None, Some("прервано перезапуском".into()));
                         }
                     }
@@ -741,19 +914,34 @@ pub fn on_message(app: &Arc<App>, source: &str, place: &str, text: &str) {
     }
 }
 
-/// Раз в тик планировщика: сработавшие запускающие узлы по расписанию.
-pub fn tick(app: &Arc<App>) {
+/// Запуск опоздал больше чем на это — компьютер спал или программа была закрыта (тик идёт раз в 30 секунд).
+const LATE_MS: i64 = 5 * 60_000;
+
+/// Раз в тик планировщика: сработавшие запускающие узлы по расписанию. Пропущенные слоты схлопнуты в один (`collect_due`):
+/// опоздавший не дольше 12 часов запускается с пометкой, остальные пропускаются записью в журнале (`catch_up: skip` — всегда пропуск).
+pub async fn tick_schedule(app: &Arc<App>) {
     let at = now();
-    let fire: Vec<(String, String)> = {
+    struct Due {
+        workflow: String,
+        node: String,
+        late_ms: i64,
+        skip: bool,
+    }
+    let fire: Vec<Due> = {
         let mut guard = app.workflows.lock();
         let mut fire = Vec::new();
         let mut changed = Vec::new();
         for stored in guard.items.iter_mut().filter(|s| s.wf.enabled) {
+            let before: HashMap<String, i64> = stored.slots.iter().filter_map(|(id, slot)| slot.next.map(|next| (id.clone(), next))).collect();
             let (due, touched) = collect_due(stored, at);
             if touched {
                 changed.push(stored.wf.id.clone());
             }
-            fire.extend(due.into_iter().map(|node| (stored.wf.id.clone(), node)));
+            for node in due {
+                let late_ms = before.get(&node).map_or(0, |next| (at - next).max(0));
+                let skip = stored.wf.graph.node(&node).is_some_and(|n| n.text("catch_up") == "skip");
+                fire.push(Due { workflow: stored.wf.id.clone(), node, late_ms, skip });
+            }
         }
         // Срок сдвинут и записан до запуска: сбой запуска не повторит его каждые полминуты.
         for id in changed {
@@ -761,13 +949,59 @@ pub fn tick(app: &Arc<App>) {
         }
         fire
     };
-    for (wf_id, node) in fire {
-        // Пока у процесса есть открытый запуск, новый по расписанию не стартует (слот сгорает).
-        match start_run(app, &wf_id, "schedule", None, None, Some(node), false) {
-            Ok(run) => change_event(app, &wf_id, Some(&run.id)),
-            Err(e) => eprintln!("[workflows] запуск по расписанию не начат: {}", e.message),
+    for due in fire {
+        let Some((title, bot_id)) = app.workflows.lock().get(&due.workflow).map(|s| (s.wf.title.clone(), s.wf.graph.nodes.iter().find(|n| n.kind == "bot").map(|n| n.text("bot_id")).unwrap_or_default())) else { continue };
+        let note = |status: &'static str, text: String| {
+            let (app, id, title, bot_id) = (app.clone(), due.workflow.clone(), title.clone(), bot_id.clone());
+            async move { crate::scheduler::note_of(&app, &id, &title, &bot_id, status, &text).await }
+        };
+        // Три «вечные» ошибки подряд: ждём ручного запуска, срок только отмечаем.
+        if error_paused(app, &due.workflow) {
+            note("paused", "Запуск пропущен: процесс на паузе из-за ошибок подряд.".into()).await;
+            continue;
+        }
+        let late = due.late_ms > LATE_MS;
+        if late && (due.skip || due.late_ms > crate::schedule::CATCH_UP_MS) {
+            note("skipped", "Срок прошёл, пока компьютер спал или программа была закрыта.".into()).await;
+            continue;
+        }
+        if !replace_waiting(app, &due.workflow).await {
+            continue;
+        }
+        let data = late.then(|| {
+            let (h, m) = (due.late_ms / 3_600_000, (due.late_ms % 3_600_000) / 60_000);
+            format!("Запуск опоздал на {h} ч {m} мин: компьютер был выключен или спал.")
+        });
+        match start_run_with(app, &due.workflow, "schedule", None, None, Some(due.node.clone()), false, data) {
+            Ok(run) => change_event(app, &due.workflow, Some(&run.id)),
+            // Пока у процесса идёт запуск, новый по расписанию не стартует (слот сгорает).
+            Err(e) if e.status == 409 => {}
+            Err(e) => note("failed", e.message).await,
         }
     }
+}
+
+/// Новый срок процесса, а прошлый запуск стоит: ждёт сброса лимита (тогда срок пропускаем, пауза сама разбудит ход),
+/// ждёт карточку без ответа (пока карточка жива — тоже пропускаем) или застрял на паузе и устарел (тогда его закрываем,
+/// пауза остаётся одна). `false` — запускать сейчас нельзя.
+async fn replace_waiting(app: &Arc<App>, wf_id: &str) -> bool {
+    if !app.workflows.lock().has_open_run(wf_id) {
+        return true;
+    }
+    if app.runs.routine_waiting_runs(wf_id).iter().any(|run| app.turns.card_for_run(run).is_some()) || app.runs.limit_pause_ahead(wf_id) {
+        return false;
+    }
+    let stale = app.runs.waiting_for_process(wf_id);
+    if stale.is_empty() {
+        return false;
+    }
+    app.runs.drop_stale_pauses(wf_id);
+    for run in stale {
+        if let crate::runs::Origin::Process { run: wf_run, .. } = &run.origin {
+            let _ = stop_run(app, wf_run);
+        }
+    }
+    true
 }
 
 #[cfg(test)]

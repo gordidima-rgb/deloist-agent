@@ -26,6 +26,7 @@ mod mentions;
 mod optimizer;
 mod night;
 mod pets;
+mod process_runs;
 mod queue;
 mod reasons;
 mod reminders;

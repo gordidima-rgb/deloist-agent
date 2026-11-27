@@ -569,7 +569,7 @@ async fn assign(app: &Arc<App>, from: &Bot, to_name: &str, text: &str, files: Op
     let started_by = match app.runs.active_id(&from.id) {
         Some(run_id) => app.runs.get(&run_id).map(|r| match r.origin {
             crate::runs::Origin::Human => "human",
-            crate::runs::Origin::Routine { .. } => "routine",
+            crate::runs::Origin::Routine { .. } | crate::runs::Origin::Process { .. } => "routine",
             crate::runs::Origin::Goal { .. } => "goal",
             crate::runs::Origin::Webhook { .. } => "webhook",
             crate::runs::Origin::Team { .. } => "bot",

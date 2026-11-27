@@ -2272,6 +2272,11 @@ fn run_turn_body(
             }
             _ => false,
         };
+        // Бот занят шагом процесса только с этой минуты: так отказ «занят» не оставляет отметки.
+        let process_step = matches!(opts.origin, Some(crate::runs::Origin::Process { .. }));
+        if let Some(crate::runs::Origin::Process { id, .. }) = &opts.origin {
+            app.workflows.lock().bot_steps.insert(bot_id.clone(), id.clone());
+        }
         // Ход, начатый человеком в личном чате, — это «разговор»: в нём действуют его разрешения.
         if opts.window && opts.depth == 0 && opts.routine.is_none() && !unattended {
             app.turns.set_conv(&bot_id, &format!("bot:{bot_id}"));
@@ -2852,6 +2857,11 @@ fn run_turn_body(
         // Что не решил делегат, заберёт его начальник; журнал пишет только сама рутина.
         let missed = if opts.routine.is_some() { app.turns.take_missed(&bot_id) } else { Vec::new() };
         app.turns.finish(&bot_id);
+        if process_step {
+            app.workflows.lock().bot_steps.remove(&bot_id);
+        }
+        // Запись журнала держит ход (пауза, ждёт человека): шаг процесса остаётся «идёт» и закончится продолжением.
+        let mut held = false;
         if journaled {
             let state = match (&failure, aborted) {
                 (_, true) => crate::runs::RunState::Failed { reason: crate::runs::StopReason::Human, text: "остановлено".into() },
@@ -2863,6 +2873,7 @@ fn run_turn_body(
             };
             // Неиспользованное разовое разрешение живёт, пока жив запуск.
             let ended = !matches!(state, crate::runs::RunState::NeedsHuman { .. });
+            held = matches!(state, crate::runs::RunState::Paused { .. } | crate::runs::RunState::NeedsHuman { .. });
             if let (true, Some(run)) = (ended, app.runs.active_id(&bot_id)) {
                 app.turns.drop_once(&bot_id, Some(&run));
             }
@@ -2978,7 +2989,16 @@ fn run_turn_body(
                 entry["reason"] = json!(reason);
             }
             app.ledger.append_journal(&entry).await;
-            crate::scheduler::routine_finished(&app, routine, &bot_id, status, stop).await;
+            match &opts.origin {
+                Some(crate::runs::Origin::Process { id, title, run, step }) => {
+                    let ended = crate::workflow_run::Ended {
+                        workflow: id, title, run, step, bot_id: &bot_id, status, reason: stop, held,
+                        answer: if quiet { "" } else { &final_text }, summary: &summary, note: finish_note_saved.as_deref(), finished: last_finish_status.is_some(),
+                    };
+                    crate::workflow_run::step_ended(&app, ended).await;
+                }
+                _ => crate::scheduler::routine_finished(&app, routine, &bot_id, status, stop).await,
+            }
             crate::goals::finished(&app, &bot_id, &opts.run, status).await;
             app.turns.emit(json!({ "type": "journal", "entry": entry }));
         }
@@ -2991,6 +3011,8 @@ fn run_turn_body(
                 (Some(crate::goals::Run::Goal(goal_id)), _) => {
                     app.goals.edit(goal_id, |g| g.progress_note = note).await;
                 }
+                // Заметку шага процесса хранит процесс: её кладёт `workflow_run::step_ended`.
+                (_, Some(_)) if process_step => {}
                 (_, Some(routine)) => {
                     let _ = app.store.update_routine(&routine.id, &json!({ "progressNote": note }), false).await;
                 }
@@ -3007,7 +3029,7 @@ fn run_turn_body(
             let _ = app.queues.prepend(&bot_id, leftover).await;
         }
         // Очередь делегата разбирается в `delegate_to_bot_with`, когда с него снята отметка «без человека».
-        if opts.depth == 0 {
+        if opts.depth == 0 || process_step {
             drain_queue(&app, &bot_id).await;
         }
         app.turns.clear_mentioned(&bot_id);
@@ -3283,32 +3305,61 @@ pub fn delegate_to_bot_with(
     })
 }
 
-/// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём и с теми же согласиями.
-/// Ждёт, пока бот освободится (до минуты). Возвращает последний ответ бота; `stop` останавливает ход.
-pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, workflow_id: &str, text: &str, attachments: Vec<Value>, unattended: bool, floor: Option<String>, stop: CancellationToken) -> Result<String, String> {
+/// Параметры шага-бота: чей это шаг, как строго и тихо ли.
+pub struct ProcessStep {
+    pub origin: crate::runs::Origin,
+    pub unattended: bool,
+    pub floor: Option<String>,
+    pub quiet: bool,
+}
+
+/// Шаг-бот рабочего процесса: ход бота с чистым контекстом (как у делегата), тем же путём, с теми же согласиями и с записью в
+/// журнале запусков. Итог шаг получает от самого хода (`workflow_run::step_ended`), в том числе после паузы и перезапуска.
+/// Ждёт, пока бот освободится: без человека до часа (живая очередь идёт первой), с человеком до минуты.
+/// `Err` — ход не начался. `stop` останавливает ход.
+pub async fn run_process_step(app: &Arc<App>, bot_id: &str, step: ProcessStep, text: &str, attachments: Vec<Value>, stop: CancellationToken) -> Result<(), String> {
+    let crate::runs::Origin::Process { id: workflow_id, title, .. } = &step.origin else {
+        return Err("это не шаг процесса".into());
+    };
     let Some(bot) = app.store.bot(bot_id) else {
         return Err("бот не найден".into());
     };
-    let mut waited = 0;
+    let patience = std::time::Duration::from_millis(if step.unattended { crate::schedule::hour_ms() } else { 60_000 }.max(1) as u64);
+    let began = std::time::Instant::now();
     let cancel = loop {
         if stop.is_cancelled() {
             return Err("остановлено".into());
         }
-        if let Some(cancel) = app.turns.begin(bot_id) {
-            break cancel;
+        // Человек важнее: живая очередь идёт первой, а на паузе она бота не держит.
+        let queue_waits = step.unattended && app.queues.count(bot_id) > 0 && !app.queues.is_paused(bot_id);
+        if !queue_waits {
+            if let Some(cancel) = app.turns.begin(bot_id) {
+                break cancel;
+            }
         }
-        if waited >= 60 {
-            return Err(format!("бот «{}» {BUSY_SUFFIX}", bot.name));
+        if began.elapsed() >= patience {
+            return Err(if step.unattended {
+                format!("бот «{}» {BUSY_SUFFIX} больше часа: запуск пропущен", bot.name)
+            } else {
+                format!("бот «{}» {BUSY_SUFFIX}", bot.name)
+            });
         }
-        waited += 1;
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1).min(patience / 4).max(std::time::Duration::from_millis(10))).await;
     };
-    // Бот занят шагом процесса только с этой минуты: так отказ «занят» не оставляет отметки.
-    app.workflows.lock().bot_steps.insert(bot_id.to_string(), workflow_id.to_string());
-    if unattended {
+    if step.unattended {
         app.turns.unattended.lock().unwrap().insert(bot_id.to_string(), Unattended::default());
     }
-    let opts = TurnOptions { source: Some("delegation:Рабочий процесс".into()), depth: 1, unattended, approval_floor: floor, ..TurnOptions::default() };
+    let opts = TurnOptions {
+        source: Some("delegation:Рабочий процесс".into()),
+        depth: 1,
+        unattended: step.unattended,
+        routine: Some(RoutineRef { id: workflow_id.clone(), title: title.clone() }),
+        // Кнопку «Запустить» нажал человек и ждёт ответа: скрывать от него нечего.
+        quiet: step.quiet && step.unattended,
+        approval_floor: step.floor,
+        origin: Some(step.origin),
+        ..TurnOptions::default()
+    };
     let watcher = {
         let (app, bot_id, stop) = (app.clone(), bot_id.to_string(), stop.clone());
         tokio::spawn(async move {
@@ -3316,19 +3367,9 @@ pub async fn run_workflow_step(app: &Arc<App>, bot_id: &str, workflow_id: &str, 
             app.turns.stop_turn(&bot_id);
         })
     };
-    let (answer, _tokens) = run_turn_body(app.clone(), bot, text.to_string(), attachments, opts, cancel).await;
+    let _ = run_turn_body(app.clone(), bot, text.to_string(), attachments, opts, cancel).await;
     watcher.abort();
-    // Отметка «без человека» уходит вместе с ходом: следующий разговор с ботом не должен её унаследовать.
-    app.turns.take_missed(bot_id);
-    app.workflows.lock().bot_steps.remove(bot_id);
-    if stop.is_cancelled() {
-        return Err("остановлено".into());
-    }
-    drain_queue(app, bot_id).await;
-    if answer.trim().is_empty() {
-        return Err("бот не дал ответа".into());
-    }
-    Ok(answer)
+    Ok(())
 }
 
 #[cfg(test)]

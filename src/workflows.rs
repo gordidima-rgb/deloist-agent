@@ -144,6 +144,22 @@ pub struct Workflow {
     pub created_at: i64,
     pub updated_at: i64,
     pub last_run: Option<LastRun>,
+    /// Сколько запусков подряд кончились ошибкой шага-бота: после 3 процесс идёт не чаще раза в час, после 6 — раза в 4 часа.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub failures: u32,
+    /// Причина последней ошибки: подпись на карточке процесса.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<crate::runs::StopReason>,
+    /// Три «вечные» ошибки подряд (вход, проверка, неизвестная): расписание на паузе, пока человек сам не запустит процесс.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub error_paused: bool,
+    /// Заметки прошлых запусков (`finish_turn`) по шагам-ботам: хвост до 8000 знаков, идёт в задание следующего запуска.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub notes: HashMap<String, String>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -864,13 +880,13 @@ impl Workflows {
 
 pub fn new_workflow(title: &str, graph: Graph) -> Stored {
     let at = now();
-    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, last_run: None }, slots: HashMap::new(), hooks: HashMap::new() }
+    Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, ..Workflow::default() }, slots: HashMap::new(), hooks: HashMap::new() }
 }
 
 /// Строка списка: без графа.
 pub fn summary(w: &Workflow) -> Value {
     let steps = w.graph.nodes.iter().filter(|n| !is_annotation(&n.kind)).count();
-    serde_json::json!({ "id": w.id, "title": w.title, "enabled": w.enabled, "steps": steps, "updated_at": w.updated_at, "last_run": w.last_run })
+    serde_json::json!({ "id": w.id, "title": w.title, "enabled": w.enabled, "steps": steps, "updated_at": w.updated_at, "last_run": w.last_run, "failures": w.failures, "stop_reason": w.stop_reason, "error_paused": w.error_paused })
 }
 
 #[cfg(test)]

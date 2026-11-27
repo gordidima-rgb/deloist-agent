@@ -2,7 +2,7 @@
 //! до старта, обновляется по шагам и закрывается в конце. После перезапуска программы незакрытые записи
 //! продолжаются один раз сами или честно переходят в «Нужен ты» (`recover`).
 //!
-//! Шаги процессов (`run_workflow_step`) и делегаты здесь не ведутся: у процессов свой путь, а делегат — часть хода начальника.
+//! Шаг-бот процесса ведётся здесь как ход с `Origin::Process`; делегат — часть хода начальника, своей записи у него нет.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -130,6 +130,8 @@ pub enum Origin {
     Goal { id: String, title: String, run: crate::goals::Run },
     Webhook { id: String, title: String },
     Team { task_id: String },
+    /// Шаг-бот рабочего процесса: `id` — процесс, `run` и `step` — запуск и шаг, который ждёт итога хода.
+    Process { id: String, title: String, run: String, step: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,11 +254,13 @@ impl Run {
     /// Параметры продолжающего хода: те же, что у прерванного.
     fn options(&self) -> TurnOptions {
         let (routine, run) = match &self.origin {
-            Origin::Routine { id, title } | Origin::Webhook { id, title } => (Some(RoutineRef { id: id.clone(), title: title.clone() }), None),
+            Origin::Routine { id, title } | Origin::Webhook { id, title } | Origin::Process { id, title, .. } => (Some(RoutineRef { id: id.clone(), title: title.clone() }), None),
             Origin::Goal { id, title, run } => (Some(RoutineRef { id: id.clone(), title: title.clone() }), Some(run.clone())),
             Origin::Human | Origin::Team { .. } => (None, None),
         };
         TurnOptions {
+            // Шаг процесса идёт ходом делегата (глубина 1), как и при первом запуске.
+            depth: u32::from(matches!(self.origin, Origin::Process { .. })),
             source: Some(self.source.clone()),
             unattended: self.unattended,
             routine,
@@ -562,6 +566,43 @@ impl Runs {
         self.inner.lock().unwrap().items.iter().filter(|r| origin_routine(&r.origin) == Some(routine_id) && matches!(r.state, RunState::NeedsHuman { reason: StopReason::Human, .. })).map(|r| r.id.clone()).collect()
     }
 
+    /// Шаг процесса держит живая запись (идёт, на паузе или ждёт человека): после перезапуска его не обрывают.
+    pub fn holds_step(&self, run_id: &str, step_id: &str) -> bool {
+        self.inner.lock().unwrap().items.iter().any(|r| {
+            matches!(&r.origin, Origin::Process { run, step, .. } if run == run_id && step == step_id)
+                && (r.is_running() || matches!(r.state, RunState::Paused { .. } | RunState::NeedsHuman { .. }))
+        })
+    }
+
+    /// Запись шага процесса, которая ждёт срока или человека (не идёт): тот, кто стартует новый срок, её закроет.
+    pub fn waiting_for_process(&self, workflow_id: &str) -> Vec<Run> {
+        self.inner
+            .lock()
+            .unwrap()
+            .items
+            .iter()
+            .filter(|r| matches!(&r.origin, Origin::Process { id, .. } if id == workflow_id) && matches!(r.state, RunState::Paused { .. } | RunState::NeedsHuman { .. }))
+            .cloned()
+            .collect()
+    }
+
+    /// Запуск процесса (или его шаг) остановлен или заменён: паузы и ожидания человека закрыты, будить их некому.
+    pub fn close_process(&self, run_id: &str, step_id: Option<&str>) {
+        let mut inner = self.inner.lock().unwrap();
+        let mut changed = false;
+        for run in inner.items.iter_mut().filter(|r| matches!(&r.origin, Origin::Process { run, step, .. } if run == run_id && step_id.is_none_or(|s| s == step))) {
+            if matches!(run.state, RunState::Paused { .. } | RunState::NeedsHuman { .. }) {
+                run.state = RunState::Failed { reason: StopReason::Human, text: "остановлено".into() };
+                run.steps.clear();
+                run.updated_ms = now();
+                changed = true;
+            }
+        }
+        if changed {
+            self.save(&inner.items);
+        }
+    }
+
     /// Запись, которая сразу на паузе (ход ещё не начинался).
     fn add(&self, run: Run) {
         let mut inner = self.inner.lock().unwrap();
@@ -769,7 +810,7 @@ pub fn exec_wait(app: &Arc<App>, bot: &crate::store::Bot, args: &Value) -> Resul
 /// Рутина, цель или вебхук, из которых вырос запуск.
 pub fn origin_routine(origin: &Origin) -> Option<&str> {
     match origin {
-        Origin::Routine { id, .. } | Origin::Webhook { id, .. } | Origin::Goal { id, .. } => Some(id),
+        Origin::Routine { id, .. } | Origin::Webhook { id, .. } | Origin::Goal { id, .. } | Origin::Process { id, .. } => Some(id),
         Origin::Human | Origin::Team { .. } => None,
     }
 }
@@ -815,8 +856,12 @@ pub async fn resume_due(app: &Arc<App>) {
     for run in app.runs.paused() {
         if matches!(run.state, RunState::Paused { until_ms, .. } if until_ms <= at) && !app.turns.is_busy(&run.bot_id) {
             // Рутина на паузе из-за ошибок: её старые ожидания лимита не просыпаются, пока человек не нажал «Возобновить».
-            if origin_routine(&run.origin).and_then(|id| app.store.routine(id)).is_some_and(|r| r.error_paused) {
-                app.runs.drop_stale_pauses(origin_routine(&run.origin).unwrap_or_default());
+            let id = origin_routine(&run.origin).unwrap_or_default();
+            if app.store.routine(id).is_some_and(|r| r.error_paused) || crate::workflow_run::error_paused(app, id) {
+                app.runs.drop_stale_pauses(id);
+                if let Origin::Process { run: wf_run, step, .. } = &run.origin {
+                    crate::workflow_run::step_stopped(app, wf_run, step, "процесс на паузе из-за ошибок подряд");
+                }
                 continue;
             }
             if let Err(e) = resume(app, &run.id, false, None).await {
@@ -840,7 +885,7 @@ pub async fn resume_on_webhook(app: &Arc<App>, routine_id: &str, bot_id: &str, d
 /// Ход ещё не начат, а ему уже нельзя (предел токенов): запись ждёт срока и потом идёт с этим текстом.
 /// Рутина — одна запись: повторный срок, пока она ждёт, новой не заводит. Вызовы вебхука — каждый свой.
 pub fn pause_unstarted(app: &Arc<App>, bot_id: &str, origin: Origin, opts: &TurnOptions, text: &str, until_ms: i64, reason: StopReason, note: &str) {
-    let key = origin_routine(&origin).map(str::to_string).filter(|_| matches!(origin, Origin::Routine { .. }));
+    let key = origin_routine(&origin).map(str::to_string).filter(|_| matches!(origin, Origin::Routine { .. } | Origin::Process { .. }));
     if key.is_some() && app.runs.paused().iter().any(|r| r.bot_id == bot_id && origin_routine(&r.origin) == key.as_deref()) {
         return;
     }
@@ -913,7 +958,9 @@ async fn settle_origin(app: &Arc<App>, run: &Run, status: &str, text: &str) {
             }
         }
         Origin::Team { task_id } => crate::team_tasks::finish_interrupted(app, task_id, text).await,
-        Origin::Human => {}
+        // Шаг процесса ждёт итога хода: отмена закрывает шаг, ожидание человека его оставляет.
+        Origin::Process { run: run_id, step, .. } if status == "stopped" => crate::workflow_run::step_stopped(app, run_id, step, text),
+        Origin::Process { .. } | Origin::Human => {}
     }
 }
 
@@ -1086,6 +1133,31 @@ mod stale_pause_tests {
         assert_eq!(left.len(), 2, "{left:?}");
         assert!(left.iter().any(|(rid, _)| *rid == id), "новая пауза осталась");
         assert!(left.iter().any(|(_, s)| matches!(s, RunState::Paused { reason: StopReason::Event, .. })), "ожидание бота не трогается");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_process_step_is_held_by_a_live_record_and_closing_the_run_ends_its_waits() {
+        let (runs, dir) = temp_runs("process");
+        let origin = |run: &str, step: &str| Origin::Process { id: "wf_a".into(), title: "Отчёт".into(), run: run.into(), step: step.into() };
+        let mut waiting = Run::new("bot", origin("run_1", "st_1"), &TurnOptions::default());
+        waiting.state = RunState::NeedsHuman { reason: StopReason::Login, text: "войди".into() };
+        runs.add(waiting);
+        let mut done = Run::new("bot", origin("run_1", "st_2"), &TurnOptions::default());
+        done.state = RunState::Done;
+        runs.add(done);
+        assert!(runs.holds_step("run_1", "st_1"), "ждёт человека: обрывать шаг при перезапуске нельзя");
+        assert!(!runs.holds_step("run_1", "st_2"), "закрытая запись шаг не держит");
+        assert!(!runs.holds_step("run_2", "st_1"));
+        assert_eq!(runs.waiting_for_process("wf_a").len(), 1);
+        assert!(runs.waiting_for_process("wf_b").is_empty());
+        runs.close_process("run_1", Some("st_2"));
+        assert!(runs.holds_step("run_1", "st_1"), "чужой шаг не тронут");
+        runs.close_process("run_1", None);
+        assert!(!runs.holds_step("run_1", "st_1"));
+        assert!(matches!(runs.waiting_for_process("wf_a").len(), 0));
+        let options = Run::new("bot", origin("run_1", "st_1"), &TurnOptions { unattended: true, quiet: true, ..TurnOptions::default() }).options();
+        assert_eq!((options.depth, options.routine.map(|r| r.id)), (1, Some("wf_a".to_string())), "продолжение идёт ходом шага процесса");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

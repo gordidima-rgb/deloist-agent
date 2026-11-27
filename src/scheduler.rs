@@ -37,10 +37,15 @@ fn tick_period() -> Duration {
 
 /// Запись журнала о том, что запуск не состоялся, и сообщение интерфейсу.
 async fn note(app: &Arc<App>, routine: &Routine, status: &str, text: &str) {
-    let bot = app.store.bot(&routine.bot_id).map(|b| b.name).unwrap_or_default();
+    note_of(app, &routine.id, &routine.title, &routine.bot_id, status, text).await;
+}
+
+/// Та же запись для процесса: `id` — процесс, `bot_id` может быть пуст, если запуск не дошёл до бота.
+pub async fn note_of(app: &Arc<App>, id: &str, title: &str, bot_id: &str, status: &str, text: &str) {
+    let bot = app.store.bot(bot_id).map(|b| b.name).unwrap_or_default();
     let entry = json!({
-        "id": uid("log"), "at": now(), "routineId": routine.id, "title": routine.title,
-        "botId": routine.bot_id, "botName": bot, "status": status, "text": text, "tokens": 0, "missed": Value::Array(Vec::new()),
+        "id": uid("log"), "at": now(), "routineId": id, "title": title,
+        "botId": bot_id, "botName": bot, "status": status, "text": text, "tokens": 0, "missed": Value::Array(Vec::new()),
     });
     app.ledger.append_journal(&entry).await;
     app.turns.emit(json!({ "type": "journal", "entry": entry }));
@@ -286,7 +291,7 @@ async fn tick(app: &Arc<App>) {
     crate::goals::tick(app).await;
     crate::runs::resume_due(app).await;
     crate::runs::notify_pauses(app).await;
-    crate::workflow_run::tick(app);
+    crate::workflow_run::tick_schedule(app).await;
     app.browsers.close_stale(&app.store).await;
     app.browsers.close_idle(browser_idle_ms(), |bot| app.turns.is_busy(bot)).await;
 
