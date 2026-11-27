@@ -740,6 +740,25 @@ pub fn new_workflow(title: &str, graph: Graph) -> Stored {
     Stored { wf: Workflow { id: uid("wf"), title: title.trim().to_string(), enabled: true, approval_floor: String::new(), revision: 1, graph, created_at: at, updated_at: at, ..Workflow::default() }, slots: HashMap::new() }
 }
 
+/// «Триггер → бот»: самый короткий процесс. Те же поля читает переезд рутин (`routine_migrate`).
+pub fn two_step_graph(schedule: Schedule, bot_id: &str, task: &str) -> Graph {
+    let text = |value: &str| Value::String(value.to_string());
+    let mut trigger = Map::new();
+    trigger.insert("trigger".into(), text("schedule"));
+    let mut bot = Map::new();
+    bot.insert("bot_id".into(), text(bot_id));
+    bot.insert("task".into(), text(task));
+    bot.insert("quiet".into(), text("true"));
+    Graph {
+        nodes: vec![
+            Node { id: "t1".into(), kind: "trigger".into(), x: 0.0, y: 0.0, fields: trigger, schedule: Some(schedule), ..Node::default() },
+            Node { id: "b1".into(), kind: "bot".into(), x: 320.0, y: 0.0, fields: bot, ..Node::default() },
+        ],
+        edges: vec![Edge { id: "e1".into(), from: "t1".into(), to: "b1".into(), ..Edge::default() }],
+        strokes: Vec::new(),
+    }
+}
+
 /// Строка списка: без графа.
 pub fn summary(w: &Workflow) -> Value {
     let steps = w.graph.nodes.iter().filter(|n| !is_annotation(&n.kind)).count();

@@ -1780,6 +1780,7 @@ async fn the_program_key_cannot_touch_workflows() {
     let calls = [
         ("GET", "/api/workflows".to_string()),
         ("POST", "/api/workflows".to_string()),
+        ("POST", "/api/workflows/simple".to_string()),
         ("GET", format!("/api/workflows/{id}")),
         ("PUT", format!("/api/workflows/{id}/graph")),
         ("PATCH", format!("/api/workflows/{id}")),

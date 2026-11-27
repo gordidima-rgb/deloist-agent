@@ -12,6 +12,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::schedule::Schedule;
 use crate::store::now;
 use crate::workflow_run::{self as run, RunError};
 use crate::workflows::{self as wf, Graph, Stored};
@@ -22,6 +23,7 @@ type Shared = State<Arc<App>>;
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/workflows", get(list).post(create))
+        .route("/api/workflows/simple", post(create_simple))
         .route("/api/workflows/{id}", get(read).patch(rename).delete(remove))
         .route("/api/workflows/{id}/graph", put(save_graph))
         .route("/api/workflows/{id}/duplicate", post(duplicate))
@@ -99,7 +101,58 @@ async fn list(State(app): Shared) -> Response {
     let guard = app.workflows.lock();
     let mut items: Vec<&Stored> = guard.items.iter().collect();
     items.sort_by_key(|s| std::cmp::Reverse(s.wf.updated_at));
-    reply(StatusCode::OK, json!({ "workflows": items.iter().map(|s| wf::summary(&s.wf)).collect::<Vec<_>>() }))
+    reply(StatusCode::OK, json!({ "workflows": items.iter().map(|s| summary_with_card(s)).collect::<Vec<_>>() }))
+}
+
+/// Строка списка и краткая карточка: когда, какой бот, что делает, срок. Цепочка шагов — по `GET /api/workflows/{id}`.
+fn summary_with_card(s: &Stored) -> Value {
+    let mut item = wf::summary(&s.wf);
+    let nodes = &s.wf.graph.nodes;
+    let trigger = nodes.iter().find(|n| n.kind == "trigger");
+    let bot = nodes.iter().find(|n| n.kind == "bot");
+    item["card"] = json!({
+        "trigger": trigger.map(|n| if n.text("trigger").is_empty() { "manual".to_string() } else { n.text("trigger") }),
+        "schedule": trigger.and_then(|n| n.schedule.clone()),
+        "bot_id": bot.map(|n| n.text("bot_id")),
+        "task": bot.map(|n| n.text("task")),
+        "quiet": bot.map(|n| n.text("quiet") != "false"),
+        "next_run": s.slots.values().filter_map(|slot| slot.next).min(),
+    });
+    item
+}
+
+/// «Каждый понедельник собери отчёт»: процесс «триггер → бот» из одной фразы и бота. Срок и повтор читает тот же разбор, что у напоминаний.
+async fn create_simple(State(app): Shared, bytes: Bytes) -> Response {
+    let body = match body_of(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let phrase: String = body.get("phrase").and_then(Value::as_str).unwrap_or("").trim().chars().take(2000).collect();
+    let bot_id = body.get("bot_id").and_then(Value::as_str).unwrap_or("");
+    if phrase.is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "нужна фраза");
+    }
+    if app.store.bot(bot_id).is_none() {
+        return fail(StatusCode::BAD_REQUEST, "нужен бот");
+    }
+    let local = chrono::Local::now();
+    let parsed = crate::dates_ru::parse(&phrase, local.date_naive(), local.time());
+    let time = parsed.due_time.map(|t| t.format("%H:%M").to_string()).unwrap_or_else(|| "09:00".to_string());
+    let schedule = if let Some(rule) = parsed.recurrence {
+        Schedule { kind: "daily".into(), time: Some(time), recurrence: Some(rule), ..Schedule::default() }
+    } else if let Some(date) = parsed.due_date {
+        Schedule { kind: "once".into(), date: Some(date.format("%Y-%m-%d").to_string()), time: Some(time), ..Schedule::default() }
+    } else if parsed.due_time.is_some() {
+        Schedule { kind: "daily".into(), time: Some(time), ..Schedule::default() }
+    } else {
+        return fail(StatusCode::BAD_REQUEST, "не понял, когда запускать: напишите, например, «каждый понедельник в 9:00 собери отчёт»");
+    };
+    if let Err(e) = schedule.validate() {
+        return fail(StatusCode::BAD_REQUEST, &e);
+    }
+    let title: String = parsed.title.chars().take(80).collect();
+    let graph = wf::two_step_graph(schedule, bot_id, &parsed.title);
+    reply(StatusCode::OK, json!({ "workflow": run::create_workflow(&app, &title, graph) }))
 }
 
 async fn create(State(app): Shared, bytes: Bytes) -> Response {
@@ -213,8 +266,11 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
     }
     let title = title_of(&body);
     let enabled = body.get("enabled").and_then(Value::as_bool);
-    if title.is_none() && enabled.is_none() {
-        return fail(StatusCode::BAD_REQUEST, "нужно название или enabled");
+    let quiet = body.get("quiet").and_then(Value::as_bool);
+    // «Продолжить» после паузы из-за ошибок подряд: серия сбрасывается, расписание идёт дальше.
+    let resume = body.get("error_paused").and_then(Value::as_bool) == Some(false);
+    if title.is_none() && enabled.is_none() && quiet.is_none() && !resume {
+        return fail(StatusCode::BAD_REQUEST, "нужно название, enabled, quiet или error_paused");
     }
     let view = {
         let mut guard = app.workflows.lock();
@@ -229,6 +285,17 @@ async fn rename(State(app): Shared, Path(id): Path<String>, bytes: Bytes) -> Res
                 wf::refresh_slots(stored, now());
             }
             stored.wf.enabled = enabled;
+        }
+        if let Some(quiet) = quiet {
+            for node in stored.wf.graph.nodes.iter_mut().filter(|n| n.kind == "bot") {
+                node.fields.insert("quiet".into(), Value::String(quiet.to_string()));
+            }
+            stored.wf.revision += 1;
+        }
+        if resume {
+            stored.wf.error_paused = false;
+            stored.wf.failures = 0;
+            stored.wf.stop_reason = None;
         }
         stored.wf.updated_at = now();
         let view = stored.wf.clone();

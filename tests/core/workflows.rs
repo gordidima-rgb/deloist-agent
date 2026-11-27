@@ -1260,3 +1260,32 @@ async fn a_bot_creates_a_workflow_after_a_card_and_stops_only_a_real_run() {
     assert_ne!(status, "ok");
     assert!(crew.find_event(|e| e["type"] == "approval").is_none(), "остановка в режиме «решай сам» без карточки");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phrase_makes_a_trigger_bot_process_with_a_card_and_quiet_and_resume_flags() {
+    let crew = Crew::start("wf-simple").await;
+    let bot = crew.ok("GET", "/api/state", None).await["bots"][0]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = crew.send("POST", "/api/workflows/simple", Some(json!({ "phrase": "собери отчёт", "bot_id": bot }))).await;
+    assert_eq!(status, 400, "без срока в фразе процесс не создаётся");
+    let (status, _) = crew.send("POST", "/api/workflows/simple", Some(json!({ "phrase": "каждый понедельник собери отчёт", "bot_id": "нет-такого" }))).await;
+    assert_eq!(status, 400, "бота выбирает человек, чужого номера нет");
+
+    let made = crew.ok("POST", "/api/workflows/simple", Some(json!({ "phrase": "каждый понедельник собери отчёт", "bot_id": bot }))).await;
+    let id = made["workflow"]["id"].as_str().unwrap().to_string();
+    let nodes = made["workflow"]["graph"]["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes[1]["fields"]["bot_id"], bot.as_str());
+    assert!(nodes[1]["fields"]["task"].as_str().unwrap().to_lowercase().contains("собери отчёт"));
+
+    let list = crew.ok("GET", "/api/workflows", None).await;
+    let card = list["workflows"].as_array().unwrap().iter().find(|w| w["id"] == id.as_str()).unwrap()["card"].clone();
+    assert_eq!(card["trigger"], "schedule");
+    assert_eq!(card["bot_id"], bot.as_str());
+    assert_eq!(card["quiet"], true);
+    assert!(card["next_run"].as_i64().unwrap() > 0, "срок виден в списке: {card}");
+
+    let patched = crew.ok("PATCH", &format!("/api/workflows/{id}"), Some(json!({ "quiet": false, "error_paused": false }))).await;
+    assert_eq!(patched["workflow"]["graph"]["nodes"][1]["fields"]["quiet"], "false");
+    assert_eq!(patched["workflow"]["revision"], 2, "правка узла поднимает ревизию: холст увидит конфликт");
+}
