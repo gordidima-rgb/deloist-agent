@@ -2156,6 +2156,7 @@ button.k-lrow__main:focus-visible { outline: none; box-shadow: var(--k-focus); }
 .chat .voice-note { position: absolute; bottom: 76px; width: max-content; max-width: 86%; }
 .snap-chip { display: flex; align-items: center; gap: var(--k-space-2); margin: 0 var(--k-space-3) var(--k-space-1); padding: var(--k-space-1) var(--k-space-2); border-radius: var(--k-radius-sm);
   background: var(--k-surface-2); box-shadow: inset 0 0 0 1px var(--k-line); font: 400 var(--k-text-sm) / 1.35 var(--k-font-body); }
+.snap-chip[hidden] { display: none; }
 .snap-chip img { width: 44px; height: 32px; object-fit: cover; border-radius: var(--k-radius-xs); flex: none; }
 .snap-chip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snap-chip button { border: 0; background: transparent; color: var(--k-text-3); cursor: pointer; font: inherit; font-size: var(--k-text-md); padding: 0 var(--k-space-1); }
