@@ -2977,6 +2977,28 @@ async fn mail_remove_trigger(State(app): Shared, Path(id): Path<String>) -> Resp
     ok(json!({ "ok": app.mail.remove_trigger(&id) }))
 }
 
+async fn mail_oauth_start(State(app): Shared) -> Response {
+    match crate::mail_oauth::start(&app).await {
+        Ok(v) => ok(v),
+        Err(e) => fail(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+async fn mail_oauth_status(State(app): Shared, Path(flow): Path<String>) -> Response {
+    match crate::mail_oauth::status(&app, &flow) {
+        Some(v) => ok(v),
+        None => fail(StatusCode::NOT_FOUND, "вход не найден: начните заново"),
+    }
+}
+
+async fn mail_oauth_finish(State(app): Shared, Path(flow): Path<String>, body: axum::body::Bytes) -> Response {
+    let body = match parse_body(&body) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    mail_reply(crate::mail::finish_oauth(&app, &flow, &body).await.map(|a| json!({ "account": a })))
+}
+
 async fn mail_sent(State(app): Shared) -> Response {
     ok(json!({ "sent": app.mail.sent(200) }))
 }
@@ -4713,6 +4735,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mail/accounts/{id}/check", post(mail_check))
         .route("/api/mail/triggers/{id}", axum::routing::put(mail_put_trigger).merge(delete(mail_remove_trigger)))
         .route("/api/mail/sent", get(mail_sent))
+        .route("/api/mail/oauth/yandex/start", post(mail_oauth_start))
+        .route("/api/mail/oauth/yandex/{flow}", get(mail_oauth_status))
+        .route("/api/mail/oauth/yandex/{flow}/finish", post(mail_oauth_finish))
         .route("/api/watch", get(watch_overview))
         .route("/api/watch/triggers/{id}", axum::routing::put(watch_put_trigger).merge(delete(watch_remove_trigger)))
         .route("/api/routines/{id}/test-reminder", post(test_reminder))

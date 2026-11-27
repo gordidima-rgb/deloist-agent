@@ -11,7 +11,7 @@ const routines = [
   { id: 'r2', botId: 'b1', title: 'Напоминание', kind: 'reminder' },
   { id: 'r3', botId: 'b2', title: 'Хук', kind: 'task', hook: true },
 ];
-const presets = [{ id: 'yandex', label: 'Яндекс', help: 'https://id.yandex.ru/security/app-passwords' }];
+const presets = [{ id: 'yandex', label: 'Яндекс', help: 'https://passport.yandex.ru/security/app-passwords', domains: ['yandex.ru', 'ya.ru'] }];
 const account = {
   id: 'a1',
   label: 'Рабочая',
@@ -72,15 +72,13 @@ afterEach(() => {
 });
 
 describe('MailSettings', () => {
-  it('lists the mailbox with a no-password badge, the error and the help link', async () => {
+  it('lists the mailbox with a no-password badge and the error', async () => {
     render(makeApi());
     await drain();
     expect(host.textContent).toContain('Рабочая');
     expect(host.textContent).toContain('me@yandex.ru');
     expect(host.textContent).toContain('нет пароля');
     expect(host.textContent).toContain('login failed');
-    const link = host.querySelector('a[href^="https://id.yandex.ru"]');
-    expect(link.textContent).toBe('Создать пароль приложения');
   });
 
   it('checks a mailbox and asks before deleting it', async () => {
@@ -112,10 +110,10 @@ describe('MailSettings', () => {
     render(api);
     await drain();
     type(host.querySelector('input[type="email"]'), 'new@yandex.ru');
-    const passwords = host.querySelectorAll('input[type="password"]');
-    type(passwords[0], 'app-secret');
     flushSync();
-    button('Подключить ящик').click();
+    type(host.querySelector('input[type="password"]'), 'app-secret');
+    flushSync();
+    button('Подключить').click();
     await drain();
     expect(api).toHaveBeenCalledWith('/api/mail/accounts', {
       method: 'POST',
@@ -133,9 +131,10 @@ describe('MailSettings', () => {
     render(api);
     await drain();
     type(host.querySelector('input[type="email"]'), 'new@yandex.ru');
-    type(host.querySelectorAll('input[type="password"]')[0], 'x');
     flushSync();
-    button('Подключить ящик').click();
+    type(host.querySelector('input[type="password"]'), 'x');
+    flushSync();
+    button('Подключить').click();
     await drain();
     expect(host.querySelector('[role="alert"]').textContent).toBe('Сервер не принял вход');
   });

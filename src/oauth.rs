@@ -27,7 +27,7 @@ pub const CLIENT_SECRET: &str = "oauth.client_secret";
 /// Сколько живёт незавершённый вход.
 const FLOW_TTL: Duration = Duration::from_secs(600);
 /// Токен, который истечёт раньше этого, обновляем заранее.
-const REFRESH_AHEAD_MS: i64 = 60_000;
+pub(crate) const REFRESH_AHEAD_MS: i64 = 60_000;
 
 /// Настройка OAuth подключения. Пустые поля берутся у встроенного провайдера.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -620,7 +620,7 @@ async fn listen(app: Arc<App>, listener: TcpListener, flow: Flow) {
             Err(_) => respond(&mut socket, 400, say("Не удалось получить токен. Вернитесь в приложение.", "Could not get a token. Return to the app.")).await,
         }
         let saved = match result {
-            Ok(tokens) => save_tokens(&app, &flow.id, &tokens, None),
+            Ok(tokens) => save_tokens(&app.connectors.secrets, &flow.id, &tokens, None),
             Err(e) => Err(e),
         };
         finish(&app, &flow, saved).await;
@@ -647,9 +647,9 @@ pub(crate) async fn respond(socket: &mut tokio::net::TcpStream, status: u16, tex
 
 #[derive(Debug)]
 pub struct Tokens {
-    access: String,
-    refresh: Option<String>,
-    expires_in: Option<i64>,
+    pub(crate) access: String,
+    pub(crate) refresh: Option<String>,
+    pub(crate) expires_in: Option<i64>,
 }
 
 fn tokens_from(value: &Value) -> Result<Tokens, String> {
@@ -684,7 +684,7 @@ async fn client_for(url: &str, resource: &str) -> Result<reqwest::Client, String
     pinned_client(&parsed, reqwest::Url::parse(resource).ok().as_ref()).await
 }
 
-async fn token_request(cfg: &Config, client_secret: &str, mut form: Vec<(&str, String)>) -> Result<Tokens, TokenError> {
+pub(crate) async fn token_request(cfg: &Config, client_secret: &str, mut form: Vec<(&str, String)>) -> Result<Tokens, TokenError> {
     form.push(("client_id", cfg.client_id.clone()));
     if !client_secret.is_empty() {
         form.push(("client_secret", client_secret.to_string()));
@@ -731,8 +731,7 @@ async fn exchange_inner(flow: &Flow, code: &str, device_id: Option<&str>) -> Res
     token_request(&flow.cfg, &flow.client_secret, form).await
 }
 
-fn save_tokens(app: &App, id: &str, tokens: &Tokens, keep_refresh: Option<&str>) -> Result<(), String> {
-    let secrets = &app.connectors.secrets;
+pub(crate) fn save_tokens(secrets: &crate::secrets::Secrets, id: &str, tokens: &Tokens, keep_refresh: Option<&str>) -> Result<(), String> {
     secrets.set(id, ACCESS, &tokens.access)?;
     match (&tokens.refresh, keep_refresh) {
         (Some(refresh), _) => secrets.set(id, REFRESH, refresh)?,
@@ -809,7 +808,7 @@ pub async fn ensure_fresh(app: &Arc<App>, id: &str, cfg: &Config) -> Result<(), 
     }
     let form = vec![("grant_type", "refresh_token".to_string()), ("refresh_token", refresh.clone())];
     match token_request(&full, &client_secret, form).await {
-        Ok(tokens) => save_tokens(app, id, &tokens, Some(&refresh)),
+        Ok(tokens) => save_tokens(&app.connectors.secrets, id, &tokens, Some(&refresh)),
         Err(e) if e.revoked => {
             mark_reauth(app, id).await;
             Err(format!("вход истёк ({}): нажмите «Переподключить»", e.text))

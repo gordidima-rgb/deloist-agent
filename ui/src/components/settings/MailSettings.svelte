@@ -4,36 +4,18 @@
   // и в запросе: обратно сервер его не отдаёт.
   import { untrack } from 'svelte';
   import { Section, Field, TextInput, TextArea, Select, Button, Checkbox, Switch, Badge, EmptyState } from '../kit';
+  import MailWizard from './MailWizard.svelte';
   import { toast } from '../../lib/toast.js';
   import { tr } from '../../lib/i18n.js';
 
   let { api, bots = [], routines = [], onchanged } = $props();
 
   const SENT_SHOWN = 20;
-  const SECURITY = [
-    { value: 'tls', label: 'TLS' },
-    { value: 'starttls', label: 'STARTTLS' },
-  ];
 
   let data = $state(null);
   let sent = $state([]);
   let loading = $state(true);
   let error = $state('');
-
-  // Форма добавления ящика.
-  let presetId = $state('');
-  let addr = $state('');
-  let login = $state('');
-  let password = $state('');
-  let displayName = $state('');
-  let imapHost = $state('');
-  let imapPort = $state('993');
-  let imapSec = $state('tls');
-  let smtpHost = $state('');
-  let smtpPort = $state('465');
-  let smtpSec = $state('tls');
-  let adding = $state(false);
-  let addError = $state('');
 
   // Редактирование ящика: открыта одна карточка за раз.
   let editId = $state('');
@@ -54,12 +36,6 @@
   const accounts = $derived(data?.accounts ?? []);
   const presets = $derived(data?.presets ?? []);
   const triggers = $derived(data?.triggers ?? []);
-  const isCustom = $derived(presetId === '' || presetId === 'custom');
-  const preset = $derived(presets.find((p) => p.id === presetId) || null);
-  const presetOptions = $derived([
-    ...presets.map((p) => ({ value: p.id, label: p.label })),
-    { value: 'custom', label: tr('Другой сервер') },
-  ]);
   const eligible = $derived(routines.filter((r) => !r.hook && r.kind !== 'reminder'));
   const routineOptions = $derived(eligible.map((r) => ({ value: r.id, label: r.title })));
   const trRoutineObj = $derived(eligible.find((r) => r.id === trRoutine) || null);
@@ -77,9 +53,6 @@
       .filter((t) => t.routine),
   );
 
-  $effect(() => {
-    if (presets.length && !presetId) presetId = presets[0].id;
-  });
   $effect(() => {
     if (eligible.length && !eligible.some((r) => r.id === trRoutine)) trRoutine = eligible[0].id;
   });
@@ -117,42 +90,9 @@
     }
   }
 
-  async function addAccount() {
-    if (adding) return;
-    const address = addr.trim();
-    if (!address || !password) return;
-    adding = true;
-    addError = '';
-    const body = { address, password };
-    if (login.trim()) body.login = login.trim();
-    if (displayName.trim()) body.displayName = displayName.trim();
-    if (isCustom) {
-      Object.assign(body, {
-        preset: 'custom',
-        imapHost: imapHost.trim(),
-        imapPort: Number(imapPort) || 993,
-        imapTls: imapSec,
-        smtpHost: smtpHost.trim(),
-        smtpPort: Number(smtpPort) || 465,
-        smtpTls: smtpSec,
-      });
-    } else {
-      body.preset = presetId;
-    }
-    try {
-      await api('/api/mail/accounts', { method: 'POST', body });
-      addr = '';
-      login = '';
-      password = '';
-      displayName = '';
-      toast(tr('Ящик подключён'));
-      await refreshAccounts();
-      onchanged?.();
-    } catch (err) {
-      addError = errText(err);
-    } finally {
-      adding = false;
-    }
+  async function added() {
+    await refreshAccounts();
+    onchanged?.();
   }
 
   async function check(account) {
@@ -391,11 +331,13 @@
                 <TextArea id={f.id} describedby={f.describedby} rows={2} bind:value={draft.authserv} />
               {/snippet}
             </Field>
-            <Field label={tr('Новый пароль приложения')} hint={tr('Оставьте пустым, чтобы не менять.')}>
-              {#snippet children(f)}
-                <TextInput id={f.id} type="password" autocomplete="off" spellcheck="false" bind:value={draft.password} />
-              {/snippet}
-            </Field>
+            {#if !account.auth}
+              <Field label={tr('Новый пароль приложения')} hint={tr('Оставьте пустым, чтобы не менять.')}>
+                {#snippet children(f)}
+                  <TextInput id={f.id} type="password" autocomplete="off" spellcheck="false" bind:value={draft.password} />
+                {/snippet}
+              </Field>
+            {/if}
             {#if editError}
               <p class="k-hint is-error" role="alert">{editError}</p>
             {/if}
@@ -408,83 +350,8 @@
     {/each}
   </Section>
 
-  <Section
-    title={tr('Добавить ящик')}
-    description={tr('Обычный пароль от почты не подойдёт: нужен пароль приложения, который почтовый сервис создаёт отдельно.')}
-  >
-    <Field label={tr('Почтовый сервис')}>
-      {#snippet children(f)}
-        <Select id={f.id} options={presetOptions} bind:value={presetId} />
-      {/snippet}
-    </Field>
-    {#if preset?.help && !isCustom}
-      <p class="ml-note">
-        <a class="ml-link" href={preset.help} target="_blank" rel="noopener noreferrer">{tr('Создать пароль приложения')}</a>
-      </p>
-    {/if}
-    <Field label={tr('Адрес почты')}>
-      {#snippet children(f)}
-        <TextInput id={f.id} type="email" autocomplete="off" spellcheck="false" bind:value={addr} />
-      {/snippet}
-    </Field>
-    <Field label={tr('Логин')} hint={tr('Необязательно: по умолчанию совпадает с адресом.')}>
-      {#snippet children(f)}
-        <TextInput id={f.id} describedby={f.describedby} autocomplete="off" spellcheck="false" bind:value={login} />
-      {/snippet}
-    </Field>
-    <Field label={tr('Пароль приложения')}>
-      {#snippet children(f)}
-        <TextInput id={f.id} type="password" autocomplete="off" spellcheck="false" bind:value={password} />
-      {/snippet}
-    </Field>
-    <Field label={tr('Имя отправителя')} hint={tr('Необязательно: так подпишутся письма.')}>
-      {#snippet children(f)}
-        <TextInput id={f.id} describedby={f.describedby} bind:value={displayName} />
-      {/snippet}
-    </Field>
-    {#if isCustom}
-      <Field label={tr('IMAP: сервер')}>
-        {#snippet children(f)}
-          <TextInput id={f.id} placeholder="imap.example.com" spellcheck="false" bind:value={imapHost} />
-        {/snippet}
-      </Field>
-      <Field label={tr('IMAP: порт')}>
-        {#snippet children(f)}
-          <TextInput id={f.id} inputmode="numeric" bind:value={imapPort} />
-        {/snippet}
-      </Field>
-      <Field label={tr('IMAP: защита')}>
-        {#snippet children(f)}
-          <Select id={f.id} options={SECURITY} bind:value={imapSec} />
-        {/snippet}
-      </Field>
-      <Field label={tr('SMTP: сервер')}>
-        {#snippet children(f)}
-          <TextInput id={f.id} placeholder="smtp.example.com" spellcheck="false" bind:value={smtpHost} />
-        {/snippet}
-      </Field>
-      <Field label={tr('SMTP: порт')}>
-        {#snippet children(f)}
-          <TextInput id={f.id} inputmode="numeric" bind:value={smtpPort} />
-        {/snippet}
-      </Field>
-      <Field label={tr('SMTP: защита')}>
-        {#snippet children(f)}
-          <Select id={f.id} options={SECURITY} bind:value={smtpSec} />
-        {/snippet}
-      </Field>
-    {/if}
-    {#if adding}
-      <p class="ml-note">{tr('Проверяю вход на сервере, это может занять до минуты…')}</p>
-    {/if}
-    {#if addError}
-      <p class="k-hint is-error" role="alert">{addError}</p>
-    {/if}
-    <div class="ml-actions">
-      <Button variant="primary" loading={adding} disabled={!addr.trim() || !password} onclick={addAccount}>
-        {tr('Подключить ящик')}
-      </Button>
-    </div>
+  <Section title={tr('Добавить ящик')} description={tr('Введите адрес: службу определим сами и подскажем, где взять пароль приложения.')}>
+    <MailWizard {api} {presets} yandexOauth={data.yandexOauth === true} onadded={added} />
   </Section>
 
   <Section
@@ -582,9 +449,6 @@
     color: var(--k-text-3);
     font: 400 var(--k-text-sm) / 1.45 var(--k-font-body);
     overflow-wrap: anywhere;
-  }
-  .ml-link {
-    color: var(--k-brand-text);
   }
   .ml-actions {
     display: flex;

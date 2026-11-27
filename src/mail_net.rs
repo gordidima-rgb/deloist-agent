@@ -57,7 +57,19 @@ pub struct Endpoint {
 #[derive(Clone)]
 pub struct Login {
     pub user: String,
+    /// Пароль приложения или, при `oauth`, токен доступа.
     pub password: String,
+    /// Вход по SASL XOAUTH2 (токен вместо пароля).
+    pub oauth: bool,
+}
+
+/// Строка SASL XOAUTH2 (до base64): `user=<адрес>auth=Bearer <токен>`.
+pub fn xoauth2(user: &str, token: &str) -> String {
+    format!("user={user}auth=Bearer {token}")
+}
+
+fn xoauth2_b64(login: &Login) -> String {
+    base64::engine::general_purpose::STANDARD.encode(xoauth2(&login.user, &login.password))
 }
 
 impl std::fmt::Debug for Login {
@@ -96,7 +108,7 @@ fn scrub(text: &str, login: Option<&Login>) -> String {
         let escaped = login.password.replace('\\', "\\\\").replace('"', "\\\"");
         let plain = format!("\0{}\0{}", login.user, login.password);
         // Длинные формы первыми: короткий пароль не должен ломать их поиск.
-        for secret in [b64(plain.as_bytes()), b64(login.password.as_bytes()), escaped, login.password.clone()] {
+        for secret in [xoauth2_b64(login), b64(plain.as_bytes()), b64(login.password.as_bytes()), escaped, login.password.clone()] {
             text = text.replace(&secret, "***");
         }
     }
@@ -339,6 +351,9 @@ impl Imap {
     }
 
     pub async fn login(&mut self, login: &Login) -> Result<(), String> {
+        if login.oauth {
+            return self.login_xoauth2(login).await;
+        }
         let user = text_part(&login.user);
         let pass = text_part(&login.password);
         let mut parts = vec![Part::Text("LOGIN ".into())];
@@ -347,6 +362,30 @@ impl Imap {
         parts.push(pass);
         self.login = Some(login.clone());
         self.command_with(&parts).await.map(|_| ()).map_err(|e| format!("вход не удался: {e}"))
+    }
+
+    /// `AUTHENTICATE XOAUTH2`: токен уходит по приглашению `+`; на ошибку сервер присылает `+ <json>`, отвечаем пустой строкой и читаем итог.
+    async fn login_xoauth2(&mut self, login: &Login) -> Result<(), String> {
+        self.login = Some(login.clone());
+        let tag = self.next_tag();
+        let fail = |e: String| format!("вход не удался: {e}");
+        self.send_raw(format!("{tag} AUTHENTICATE XOAUTH2
+").as_bytes()).await?;
+        let first = self.read_one().await?;
+        if !first.text.starts_with('+') {
+            return Err(fail(server_said(&scrub(&first.text, self.login.as_ref()))));
+        }
+        self.send_raw(format!("{}
+", xoauth2_b64(login)).as_bytes()).await?;
+        loop {
+            let resp = self.read_one().await?;
+            if resp.text.starts_with('+') {
+                self.send_raw(b"
+").await?;
+            } else if let Some(rest) = resp.text.strip_prefix(&tag).and_then(|r| r.strip_prefix(' ')) {
+                return if rest.to_ascii_uppercase().starts_with("OK") { Ok(()) } else { Err(fail(server_said(&scrub(rest, self.login.as_ref())))) };
+            }
+        }
     }
 
     /// Открыть папку только для чтения. Возвращает (UIDVALIDITY, число писем).
@@ -554,6 +593,19 @@ impl Smtp {
         self.login = Some(login.clone());
         let auth = self.extensions.iter().find(|e| e.to_ascii_uppercase().starts_with("AUTH")).map(|e| e.to_ascii_uppercase()).unwrap_or_default();
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
+        if login.oauth {
+            self.send_line(&format!("AUTH XOAUTH2 {}", xoauth2_b64(login))).await?;
+            // На отказ сервер присылает `334 <json>`: пустая строка вызывает итоговый 535.
+            if let Err(e) = self.expect(235).await {
+                if !e.contains("ответил 334") {
+                    return Err(format!("вход не удался: {e}"));
+                }
+                self.send_line("").await?;
+                let e = self.expect(235).await.err().unwrap_or_default();
+                return Err(format!("вход не удался: {e}"));
+            }
+            return Ok(());
+        }
         if auth.contains("PLAIN") || !auth.contains("LOGIN") {
             let mut token = vec![0u8];
             token.extend_from_slice(login.user.as_bytes());
@@ -936,7 +988,7 @@ mod tests {
 
     #[test]
     fn the_password_never_survives_in_server_text_or_debug() {
-        let login = Login { user: "me@corp.ru".into(), password: "ab".into() };
+        let login = Login { user: "me@corp.ru".into(), password: "ab".into(), oauth: false };
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         assert!(!format!("{login:?}").contains("ab\""), "{login:?}");
         assert!(format!("{login:?}").contains("***"));
@@ -1174,7 +1226,7 @@ mod stub_server {
     }
 
     fn login() -> Login {
-        Login { user: "me@corp.ru".into(), password: "p\"ss\\word".into() }
+        Login { user: "me@corp.ru".into(), password: "p\"ss\\word".into(), oauth: false }
     }
 
     #[tokio::test]
@@ -1205,7 +1257,7 @@ mod stub_server {
         let log = Arc::new(Mutex::new(Vec::new()));
         let port = imap_stub(log).await;
         let mut imap = Imap::connect(&Endpoint { host: "127.0.0.1".into(), port, security: Security::Plain }).await.unwrap();
-        let err = imap.login(&Login { user: "me".into(), password: "p\"ss\\word-wrong".into() }).await.unwrap_err();
+        let err = imap.login(&Login { user: "me".into(), password: "p\"ss\\word-wrong".into(), oauth: false }).await.unwrap_err();
         assert!(!err.contains("word-wrong") && err.contains("***"), "ни сам пароль, ни его форма в кавычках: {err}");
     }
 
@@ -1294,6 +1346,104 @@ mod stub_server {
         });
         let err = Imap::connect(&Endpoint { host: "127.0.0.1".into(), port, security: Security::Plain }).await.err().unwrap();
         assert!(err.contains("слишком длинную строку"), "{err}");
+    }
+
+    fn token_login(token: &str) -> Login {
+        Login { user: "me@yandex.ru".into(), password: token.into(), oauth: true }
+    }
+
+    #[test]
+    fn xoauth2_string_has_the_sasl_layout() {
+        assert_eq!(xoauth2("me@yandex.ru", "tok"), "user=me@yandex.ruauth=Bearer tok");
+        assert_eq!(xoauth2_b64(&token_login("tok")), "dXNlcj1tZUB5YW5kZXgucnUBYXV0aD1CZWFyZXIgdG9rAQE=");
+    }
+
+    /// IMAP: токен принимается по `+`; чужой — `+ <json>`, пустая строка, потом `NO`. Сам токен в ошибке не виден.
+    #[tokio::test]
+    async fn imap_xoauth2_accepts_the_token_and_refuses_a_wrong_one_without_echoing_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((socket, _)) = listener.accept().await else { return };
+                let mut reader = BufReader::new(socket);
+                reader.get_mut().write_all(b"* OK stub
+").await.unwrap();
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                let tag = line.split(' ').next().unwrap().to_string();
+                assert!(line.trim_end().ends_with("AUTHENTICATE XOAUTH2"), "{line}");
+                reader.get_mut().write_all(b"+ 
+").await.unwrap();
+                let mut token = String::new();
+                reader.read_line(&mut token).await.unwrap();
+                if token.trim_end() == xoauth2_b64(&token_login("good-token")) {
+                    reader.get_mut().write_all(format!("{tag} OK done
+").as_bytes()).await.unwrap();
+                } else {
+                    reader.get_mut().write_all(b"+ eyJzdGF0dXMiOiI0MDEifQ==
+").await.unwrap();
+                    let mut empty = String::new();
+                    reader.read_line(&mut empty).await.unwrap();
+                    assert_eq!(empty, "
+");
+                    reader.get_mut().write_all(format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials {}
+", token.trim_end()).as_bytes()).await.unwrap();
+                }
+            }
+        });
+        let at = || Endpoint { host: "127.0.0.1".into(), port, security: Security::Plain };
+        Imap::connect(&at()).await.unwrap().login(&token_login("good-token")).await.unwrap();
+        let err = Imap::connect(&at()).await.unwrap().login(&token_login("bad-token")).await.unwrap_err();
+        assert!(err.contains("AUTHENTICATIONFAILED") && !err.contains("bad-token"), "{err}");
+        assert!(!err.contains(&xoauth2_b64(&token_login("bad-token"))), "{err}");
+    }
+
+    #[tokio::test]
+    async fn smtp_xoauth2_sends_one_auth_line_and_reads_the_final_535() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((socket, _)) = listener.accept().await else { return };
+                let mut reader = BufReader::new(socket);
+                reader.get_mut().write_all(b"220 stub
+").await.unwrap();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let line = line.trim_end().to_string();
+                    log.lock().unwrap().push(line.clone());
+                    let reply: &[u8] = if line.starts_with("EHLO") {
+                        b"250-stub
+250 AUTH XOAUTH2
+"
+                    } else if line == format!("AUTH XOAUTH2 {}", xoauth2_b64(&token_login("good-token"))) {
+                        b"235 ok
+"
+                    } else if line.starts_with("AUTH XOAUTH2") {
+                        b"334 eyJzdGF0dXMiOiI0MDEifQ==
+"
+                    } else if line.is_empty() {
+                        b"535 5.7.8 authentication failed
+"
+                    } else {
+                        b"500 what
+"
+                    };
+                    reader.get_mut().write_all(reply).await.unwrap();
+                }
+            }
+        });
+        let at = || Endpoint { host: "127.0.0.1".into(), port, security: Security::Plain };
+        Smtp::connect(&at()).await.unwrap().login(&token_login("good-token")).await.unwrap();
+        let err = Smtp::connect(&at()).await.unwrap().login(&token_login("bad-token")).await.unwrap_err();
+        assert!(err.contains("535"), "{err}");
+        assert!(!seen.lock().unwrap().iter().any(|l| l.contains("AUTH PLAIN")), "токен идёт только по XOAUTH2");
     }
 
     #[tokio::test]

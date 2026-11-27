@@ -4075,6 +4075,10 @@ async fn the_agent_key_cannot_touch_mail_and_the_password_stays_secret() {
         call(reqwest::Method::POST, &format!("/api/mail/accounts/{id}/check"), None).await.unwrap(),
         call(reqwest::Method::PUT, "/api/mail/triggers/rt1", Some(json!({ "accountId": id }))).await.unwrap(),
         call(reqwest::Method::GET, "/api/mail/sent", None).await.unwrap(),
+        // Вход через Яндекс: старт, ожидание и сохранение ящика с токенами — только окно человека.
+        call(reqwest::Method::POST, "/api/mail/oauth/yandex/start", None).await.unwrap(),
+        call(reqwest::Method::GET, "/api/mail/oauth/yandex/oa1", None).await.unwrap(),
+        call(reqwest::Method::POST, "/api/mail/oauth/yandex/oa1/finish", Some(json!({}))).await.unwrap(),
         call(reqwest::Method::DELETE, "/api/mail/triggers/rt1", None).await.unwrap(),
         // Варианты записи пути не обходят защиту.
         call(reqwest::Method::GET, "/API/mail", None).await.unwrap(),
@@ -4086,6 +4090,11 @@ async fn the_agent_key_cannot_touch_mail_and_the_password_stays_secret() {
     for response in refused {
         assert_eq!(response.status().as_u16(), 403, "ключ программы прошёл в почту: {}", response.url());
     }
+    // Человеку неизвестный вход не отдаёт и не сохраняет ничего.
+    let (status, _) = crew.send("GET", "/api/mail/oauth/yandex/nope", None).await;
+    assert_eq!(status, 404);
+    let (status, _) = crew.send("POST", "/api/mail/oauth/yandex/nope/finish", Some(json!({}))).await;
+    assert_eq!(status, 404);
     let after = crew.ok("GET", "/api/mail", None).await;
     assert_eq!(after["accounts"][0]["autoBots"], json!([]), "авторабота осталась выключенной");
     assert_eq!(after["accounts"][0]["allow"], json!([]));

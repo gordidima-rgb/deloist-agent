@@ -68,6 +68,7 @@ mod ledger;
 mod limit;
 mod mail;
 mod mail_net;
+mod mail_oauth;
 mod history;
 mod watch;
 mod memory;

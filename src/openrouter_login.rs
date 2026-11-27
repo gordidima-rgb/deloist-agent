@@ -92,7 +92,7 @@ impl Providers {
                 old.abort();
             }
             let task = tokio::spawn(async move {
-                let result = tokio::time::timeout(WAIT, wait_for_code(&app2, vec![Some(listener), listener6], &state)).await;
+                let result = tokio::time::timeout(WAIT, wait_for_code(app2.store.settings().ui_lang == "en", vec![Some(listener), listener6], &state, "/cb")).await;
                 let outcome = match result {
                     Err(_) => Err("вход не завершён за 5 минут".to_string()),
                     Ok(Err(e)) => Err(e),
@@ -169,7 +169,7 @@ impl Providers {
 
 /// Принять ровно один возврат с верным `state`. Чужие и неверные ответы отклоняем, вход не обрываем.
 /// Каждое соединение обслуживается своей задачей, медленный клиент остальным не мешает.
-async fn wait_for_code(app: &Arc<App>, listeners: Vec<Option<TcpListener>>, state: &str) -> Result<String, String> {
+pub(crate) async fn wait_for_code(en: bool, listeners: Vec<Option<TcpListener>>, state: &str, path: &str) -> Result<String, String> {
     struct Stop(Vec<tokio::task::AbortHandle>);
     impl Drop for Stop {
         fn drop(&mut self) {
@@ -181,7 +181,7 @@ async fn wait_for_code(app: &Arc<App>, listeners: Vec<Option<TcpListener>>, stat
     let (tx, mut rx) = mpsc::channel::<Result<String, String>>(8);
     let mut handles = Vec::new();
     for listener in listeners.into_iter().flatten() {
-        let (app, tx, state) = (app.clone(), tx.clone(), state.to_string());
+        let (tx, state, path) = (tx.clone(), state.to_string(), path.to_string());
         handles.push(
             tokio::spawn(async move {
                 loop {
@@ -189,8 +189,8 @@ async fn wait_for_code(app: &Arc<App>, listeners: Vec<Option<TcpListener>>, stat
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         continue;
                     };
-                    let (app, tx, state) = (app.clone(), tx.clone(), state.clone());
-                    tokio::spawn(async move { serve_one(&app, socket, &state, tx).await });
+                    let (tx, state, path) = (tx.clone(), state.clone(), path.clone());
+                    tokio::spawn(async move { serve_one(en, socket, &state, &path, tx).await });
                 }
             })
             .abort_handle(),
@@ -225,13 +225,12 @@ async fn read_head(socket: &mut TcpStream) -> Option<String> {
     .flatten()
 }
 
-async fn serve_one(app: &Arc<App>, mut socket: TcpStream, state: &str, tx: mpsc::Sender<Result<String, String>>) {
+async fn serve_one(en: bool, mut socket: TcpStream, state: &str, path: &str, tx: mpsc::Sender<Result<String, String>>) {
     let Some(head) = read_head(&mut socket).await else { return };
     let target = head.lines().next().and_then(|l| l.strip_prefix("GET ")).and_then(|r| r.split(' ').next()).unwrap_or("");
-    let en = app.store.settings().ui_lang == "en";
     let say = |ru: &'static str, english: &'static str| if en { english } else { ru };
     let parsed = reqwest::Url::parse(&format!("http://localhost{target}")).ok();
-    let Some(parsed) = parsed.filter(|u| u.path() == "/cb") else {
+    let Some(parsed) = parsed.filter(|u| u.path() == path) else {
         crate::oauth::respond(&mut socket, 404, say("Не тот адрес.", "Wrong address.")).await;
         return;
     };

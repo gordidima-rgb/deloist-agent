@@ -44,6 +44,11 @@ const SENT_LOG_BYTES: u64 = 5 * 1024 * 1024;
 /// Столько писем на ящик помним по Message-ID, чтобы узнать повтор старого подписанного письма.
 const SEEN_PER_ACCOUNT: usize = 1000;
 const SECRET_NAME: &str = "password";
+/// client id (публичный, не секрет) приложения «Deloist — почта для ботов» на oauth.yandex.ru. Пусто — кнопки «Войти через Яндекс» нет.
+/// Redirect URI зарегистрирован как `http://127.0.0.1/yandex-mail` (без порта).
+pub const YANDEX_CLIENT_ID: &str = "8f09b28cef53474a9866b5fc799221be";
+/// Значение `Account.auth` для входа через Яндекс.
+const AUTH_YANDEX: &str = "yandex";
 
 pub fn is_tool(name: &str) -> bool {
     TOOLS.contains(&name)
@@ -64,6 +69,8 @@ pub struct Account {
     /// Имя в поле «От кого»; пусто — только адрес.
     pub display_name: String,
     pub preset: String,
+    /// Как входим: пусто — пароль приложения, `yandex` — вход через Яндекс (OAuth, токены в секретах).
+    pub auth: String,
     pub imap_host: String,
     pub imap_port: u16,
     pub imap_tls: String,
@@ -204,6 +211,8 @@ pub struct Mail {
     inflight: Mutex<HashMap<String, usize>>,
     /// Письма, для которых карточка показана из-за предела (а не из-за правил): после «да» они уходят как одобренные.
     capped: Mutex<HashMap<String, i64>>,
+    /// Вход через Яндекс в процессе (токены ждут в памяти, пока человек не завершит подключение).
+    pub(crate) oauth: Mutex<Option<crate::mail_oauth::Flow>>,
 }
 
 struct AutoSlot<'a> {
@@ -221,7 +230,7 @@ impl Drop for AutoSlot<'_> {
 
 impl Default for Mail {
     fn default() -> Self {
-        Self { path: None, sent_path: None, state: Mutex::default(), turn_senders: Mutex::default(), checking: Mutex::default(), inflight: Mutex::default(), capped: Mutex::default() }
+        Self { path: None, sent_path: None, state: Mutex::default(), turn_senders: Mutex::default(), checking: Mutex::default(), inflight: Mutex::default(), capped: Mutex::default(), oauth: Mutex::default() }
     }
 }
 
@@ -407,6 +416,8 @@ pub struct Preset {
     pub smtp: (&'static str, u16),
     /// Где человек создаёт пароль приложения.
     pub help: &'static str,
+    /// Домены адресов этой службы: по ним мастер сам выбирает службу.
+    pub domains: &'static [&'static str],
     /// Кому верим в `Authentication-Results`: суффиксы имени сервера, который пишет заголовок.
     pub authserv: &'static [&'static str],
 }
@@ -416,16 +427,26 @@ pub struct Preset {
 /// Имена серверов в `Authentication-Results` — по настоящим заголовкам этих служб (18.11.2026): Яндекс — `mxback…`/`mxfront….mail.yandex.net`
 /// (справка yandex.ru/support/kit/ru/settings/dkim.md, заголовки в обсуждениях habr/qna), Mail — `mxs.mail.ru`, Gmail — `mx.google.com`.
 pub const PRESETS: &[Preset] = &[
-    Preset { id: "yandex", label: "Яндекс Почта", imap: ("imap.yandex.ru", 993), smtp: ("smtp.yandex.ru", 465), help: "https://id.yandex.ru/security/app-passwords", authserv: &["yandex.ru", "yandex.net"] },
-    Preset { id: "mailru", label: "Почта Mail", imap: ("imap.mail.ru", 993), smtp: ("smtp.mail.ru", 465), help: "https://account.mail.ru/user/2-step-auth/passwords/", authserv: &["mail.ru"] },
-    Preset { id: "gmail", label: "Gmail", imap: ("imap.gmail.com", 993), smtp: ("smtp.gmail.com", 465), help: "https://myaccount.google.com/apppasswords", authserv: &["google.com"] },
+    Preset { id: "yandex", label: "Яндекс Почта", imap: ("imap.yandex.ru", 993), smtp: ("smtp.yandex.ru", 465), help: "https://passport.yandex.ru/security/app-passwords", domains: &["yandex.ru", "ya.ru", "yandex.com"], authserv: &["yandex.ru", "yandex.net"] },
+    Preset { id: "mailru", label: "Почта Mail", imap: ("imap.mail.ru", 993), smtp: ("smtp.mail.ru", 465), help: "https://help.mail.ru/mail/login/mailer/", domains: &["mail.ru", "inbox.ru", "list.ru", "bk.ru", "internet.ru"], authserv: &["mail.ru"] },
+    // Хосты VK Почты (@vk.com) официально не подтверждены: те же серверы Mail — предположение, решает проверка входа.
+    Preset { id: "vk", label: "VK Почта", imap: ("imap.mail.ru", 993), smtp: ("smtp.mail.ru", 465), help: "https://help.mail.ru/mail/login/mailer/", domains: &["vk.com"], authserv: &[] },
+    // Рамблер: адреса и порты — help.rambler.ru/mail/mail-pochtovye-klienty/1277; OAuth нет, имя сервера в заголовках не проверяли.
+    Preset { id: "rambler", label: "Рамблер Почта", imap: ("imap.rambler.ru", 993), smtp: ("smtp.rambler.ru", 465), help: "https://help.rambler.ru/mail/mail-pochtovye-klienty/1277", domains: &["rambler.ru", "lenta.ru", "ro.ru", "myrambler.ru", "autorambler.ru"], authserv: &[] },
+    Preset { id: "gmail", label: "Gmail", imap: ("imap.gmail.com", 993), smtp: ("smtp.gmail.com", 465), help: "https://myaccount.google.com/apppasswords", domains: &["gmail.com", "googlemail.com"], authserv: &["google.com"] },
 ];
+
+/// Служба по домену адреса; `None` — незнакомый домен.
+pub fn detect(address: &str) -> Option<&'static Preset> {
+    let domain = address.trim().rsplit_once('@')?.1.to_lowercase();
+    PRESETS.iter().find(|p| p.domains.contains(&domain.as_str()))
+}
 
 fn presets_json() -> Value {
     Value::Array(
         PRESETS
             .iter()
-            .map(|p| json!({ "id": p.id, "label": p.label, "imapHost": p.imap.0, "imapPort": p.imap.1, "smtpHost": p.smtp.0, "smtpPort": p.smtp.1, "help": p.help }))
+            .map(|p| json!({ "id": p.id, "label": p.label, "imapHost": p.imap.0, "imapPort": p.imap.1, "smtpHost": p.smtp.0, "smtpPort": p.smtp.1, "help": p.help, "domains": p.domains }))
             .collect(),
     )
 }
@@ -438,8 +459,38 @@ fn password(app: &App, account: &Account) -> Result<String, String> {
     app.connectors.secrets.get(&account.secret_scope(), SECRET_NAME).filter(|p| !p.is_empty()).ok_or_else(|| "у ящика нет пароля приложения: человек вводит его на экране «Почта»".to_string())
 }
 
-fn login_of(app: &App, account: &Account) -> Result<Login, String> {
-    Ok(Login { user: if account.login.is_empty() { account.address.clone() } else { account.login.clone() }, password: password(app, account)? })
+/// Есть чем входить: пароль приложения или токены Яндекса.
+fn has_credentials(app: &App, account: &Account) -> bool {
+    if account.auth == AUTH_YANDEX {
+        return app.connectors.secrets.get(&account.secret_scope(), crate::oauth::ACCESS).is_some();
+    }
+    password(app, account).is_ok()
+}
+
+/// Данные для входа. `force` — токен Яндекса обновить сейчас (сервер отказал во входе).
+async fn login_of(app: &App, account: &Account, force: bool) -> Result<Login, String> {
+    if account.auth == AUTH_YANDEX {
+        let token = crate::mail_oauth::fresh_token(&app.connectors.secrets, &account.secret_scope(), crate::mail_oauth::TOKEN_URL, YANDEX_CLIENT_ID, force).await?;
+        return Ok(Login { user: account.address.clone(), password: token, oauth: true });
+    }
+    Ok(Login { user: if account.login.is_empty() { account.address.clone() } else { account.login.clone() }, password: password(app, account)?, oauth: false })
+}
+
+/// Сервер отказал во входе (неверный пароль или токен), а не отвалилась сеть.
+fn auth_failed(error: &str) -> bool {
+    let upper = error.to_uppercase();
+    ["AUTHENTICATIONFAILED", "AUTHENTICATION FAILED", "INVALID CREDENTIALS", "INCORRECT AUTHENTICATION", "ОТВЕТИЛ 535"].iter().any(|m| upper.contains(m))
+}
+
+/// Ошибка входа словами для человека. Прочее — как ответил сервер.
+pub fn friendly(error: String, oauth: bool) -> String {
+    if auth_failed(&error) {
+        return if oauth { "Яндекс не принял вход. Войдите через Яндекс заново.".into() } else { "Неверный пароль приложения или IMAP выключен в настройках почты — проверь шаг 1 и 2.".into() };
+    }
+    if ["нет связи с", "не ответил вовремя", "TLS с", "закрыл соединение"].iter().any(|m| error.contains(m)) {
+        return "Не получилось связаться с почтовым сервером. Проверь интернет и попробуй ещё раз.".into();
+    }
+    error
 }
 
 async fn imap_session(account: &Account, login: &Login) -> Result<Imap, String> {
@@ -710,6 +761,15 @@ pub fn describe(app: &App, bot: &Bot, name: &str, args: &Value) -> (String, Stri
 }
 
 pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result<String, String> {
+    let first = exec_once(app, bot, name, args, false).await;
+    // Яндекс мог отозвать токен раньше срока: один раз обновляем его и повторяем (до отправки письма отказ входа ничего не менял).
+    match first {
+        Err(e) if auth_failed(&e) && account_for(app, bot, args).is_ok_and(|a| a.auth == AUTH_YANDEX) => exec_once(app, bot, name, args, true).await,
+        other => other,
+    }
+}
+
+async fn exec_once(app: &Arc<App>, bot: &Bot, name: &str, args: &Value, force: bool) -> Result<String, String> {
     if name == "mail_accounts" {
         let open: Vec<String> = app
             .mail
@@ -721,7 +781,7 @@ pub async fn exec(app: &Arc<App>, bot: &Bot, name: &str, args: &Value) -> Result
         return Ok(if open.is_empty() { "Почтовых ящиков у этого бота нет: их открывает человек на экране «Почта».".into() } else { format!("Ящики:\n{}", open.join("\n")) });
     }
     let account = account_for(app, bot, args)?;
-    let login = login_of(app, &account)?;
+    let login = login_of(app, &account, force).await?;
     let folder = match arg(args, "folder") {
         "" => "INBOX".to_string(),
         f => f.to_string(),
@@ -1100,7 +1160,7 @@ pub async fn check_trigger(app: &Arc<App>, routine: &crate::store::Routine, trig
     if !account.open_to(&routine.bot_id) {
         return Err(format!("бот рутины не допущен к ящику {}", account.address));
     }
-    let login = login_of(app, &account)?;
+    let login = login_of(app, &account, false).await?;
     let folder = if trigger.folder.is_empty() { "INBOX".to_string() } else { trigger.folder.clone() };
     let result: Result<(u32, Batch), String> = tokio::time::timeout(TRIGGER_TIMEOUT, async {
         let mut imap = imap_session(&account, &login).await?;
@@ -1232,13 +1292,13 @@ impl Drop for Checking {
 
 fn public(app: &App, account: &Account) -> Value {
     let mut value = serde_json::to_value(account).unwrap_or_default();
-    value["hasPassword"] = json!(password(app, account).is_ok());
+    value["hasPassword"] = json!(has_credentials(app, account));
     value
 }
 
 pub fn overview(app: &App) -> Value {
     let accounts: Vec<Value> = app.mail.accounts().iter().map(|a| public(app, a)).collect();
-    json!({ "accounts": accounts, "presets": presets_json(), "triggers": app.mail.triggers() })
+    json!({ "accounts": accounts, "presets": presets_json(), "triggers": app.mail.triggers(), "yandexOauth": crate::mail_oauth::enabled() })
 }
 
 fn text_field(body: &Value, key: &str) -> Option<String> {
@@ -1383,17 +1443,24 @@ pub enum ApiError {
 /// `POST /api/mail/accounts`: новый ящик. Пароль сразу в секреты; `check: false` — без проверки входа.
 pub async fn create(app: &Arc<App>, body: &Value) -> Result<Value, ApiError> {
     let mut account = Account { id: uid("mbx"), created_at: now(), ..Account::default() };
-    apply(app, &mut account, body).map_err(ApiError::Bad)?;
+    let mut body = body.clone();
+    // Служба не названа — берём по домену адреса.
+    if text_field(&body, "preset").is_none() {
+        if let Some(p) = text_field(&body, "address").and_then(|a| detect(&a)) {
+            body["preset"] = json!(p.id);
+        }
+    }
+    apply(app, &mut account, &body).map_err(ApiError::Bad)?;
     if account.address.is_empty() {
         return Err(ApiError::Bad("нужен адрес ящика".into()));
     }
-    let password = text_field(body, "password").unwrap_or_default();
+    let password = text_field(&body, "password").unwrap_or_default();
     if password.is_empty() {
         return Err(ApiError::Bad("нужен пароль приложения".into()));
     }
-    let login = Login { user: if account.login.is_empty() { account.address.clone() } else { account.login.clone() }, password: password.clone() };
+    let login = Login { user: if account.login.is_empty() { account.address.clone() } else { account.login.clone() }, password: password.clone(), oauth: false };
     if body.get("check").and_then(Value::as_bool).unwrap_or(true) {
-        check_account(&account, &login).await.map_err(ApiError::Upstream)?;
+        check_account(&account, &login).await.map_err(|e| ApiError::Upstream(friendly(e, false)))?;
         account.checked_at = now();
     }
     app.connectors.secrets.set(&account.secret_scope(), SECRET_NAME, &password).map_err(ApiError::Upstream)?;
@@ -1440,8 +1507,16 @@ pub async fn remove(app: &Arc<App>, id: &str) -> Result<Value, ApiError> {
 
 pub async fn check(app: &Arc<App>, id: &str) -> Result<Value, ApiError> {
     let account = app.mail.account(id).ok_or_else(|| ApiError::NotFound("ящик не найден".into()))?;
-    let login = login_of(app, &account).map_err(ApiError::Bad)?;
-    let result = check_account(&account, &login).await;
+    let login = login_of(app, &account, false).await.map_err(ApiError::Bad)?;
+    let mut result = check_account(&account, &login).await;
+    // Яндекс мог отозвать токен раньше срока: один раз обновляем его и проверяем снова.
+    if account.auth == AUTH_YANDEX && result.as_ref().is_err_and(|e| auth_failed(e)) {
+        result = match login_of(app, &account, true).await {
+            Ok(login) => check_account(&account, &login).await,
+            Err(e) => Err(e),
+        };
+    }
+    let result = result.map_err(|e| friendly(e, account.auth == AUTH_YANDEX));
     app.mail.change(|s| {
         if let Some(a) = s.accounts.iter_mut().find(|a| a.id == id) {
             a.checked_at = now();
@@ -1450,6 +1525,22 @@ pub async fn check(app: &Arc<App>, id: &str) -> Result<Value, ApiError> {
     });
     result.map_err(ApiError::Upstream)?;
     Ok(json!({ "ok": true }))
+}
+
+/// `POST /api/mail/oauth/yandex/{flow}/finish`: токены из браузерного входа — в секреты, ящик — в список. Вход проверяется до сохранения.
+pub async fn finish_oauth(app: &Arc<App>, flow: &str, body: &Value) -> Result<Value, ApiError> {
+    let (address, tokens) = crate::mail_oauth::take(app, flow).ok_or_else(|| ApiError::NotFound("вход не найден: начните заново".into()))?.map_err(ApiError::Bad)?;
+    let p = detect("x@yandex.ru").ok_or_else(|| ApiError::Bad("нет службы Яндекс".into()))?;
+    let mut account = Account { id: uid("mbx"), created_at: now(), auth: AUTH_YANDEX.into(), address, preset: p.id.into(), imap_host: crate::mail_oauth::IMAP_HOST.into(), imap_port: p.imap.1, imap_tls: "tls".into(), smtp_host: crate::mail_oauth::SMTP_HOST.into(), smtp_port: p.smtp.1, smtp_tls: "tls".into(), authserv: p.authserv.iter().map(|s| s.to_string()).collect(), ..Account::default() };
+    if let Some(name) = text_field(body, "displayName") {
+        account.display_name = name.chars().filter(|c| !c.is_control()).take(120).collect();
+    }
+    let login = Login { user: account.address.clone(), password: tokens.access.clone(), oauth: true };
+    check_account(&account, &login).await.map_err(|e| ApiError::Upstream(friendly(e, true)))?;
+    account.checked_at = now();
+    crate::oauth::save_tokens(&app.connectors.secrets, &account.secret_scope(), &tokens, None).map_err(ApiError::Upstream)?;
+    app.mail.change(|s| s.accounts.push(account.clone()));
+    Ok(public(app, &account))
 }
 
 /// `PUT /api/mail/triggers/{routine}`: ящик, папка и фильтры. Начальная точка — текущее последнее письмо.
@@ -1477,7 +1568,7 @@ pub async fn put_trigger(app: &Arc<App>, routine_id: &str, body: &Value) -> Resu
             trigger.last_uid = p.last_uid;
         }
         None => {
-            let login = login_of(app, &account).map_err(ApiError::Bad)?;
+            let login = login_of(app, &account, false).await.map_err(ApiError::Bad)?;
             let (validity, last) = baseline(&account, &login, &folder).await.map_err(ApiError::Upstream)?;
             trigger.uid_validity = validity;
             trigger.last_uid = last;
@@ -1765,6 +1856,35 @@ mod tests {
         for bad in ["x%evil.com@corp.ru", "x@evil.com@corp.ru", "|cmd@corp.ru"] {
             assert!(!allowed_without_card(&mail, &account, "b1", &[bad.to_string()]), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_service_is_chosen_by_the_domain_of_the_address() {
+        for (address, id) in [
+            ("a@yandex.ru", "yandex"), ("a@ya.ru", "yandex"), ("a@yandex.com", "yandex"),
+            ("a@mail.ru", "mailru"), ("a@inbox.ru", "mailru"), ("a@list.ru", "mailru"), ("a@bk.ru", "mailru"), ("a@internet.ru", "mailru"),
+            ("a@vk.com", "vk"),
+            ("a@rambler.ru", "rambler"), ("a@lenta.ru", "rambler"), ("a@ro.ru", "rambler"), ("a@myrambler.ru", "rambler"), ("a@autorambler.ru", "rambler"),
+            ("a@gmail.com", "gmail"), (" A@Gmail.COM ", "gmail"),
+        ] {
+            assert_eq!(detect(address).map(|p| p.id), Some(id), "{address}");
+        }
+        for odd in ["a@corp.ru", "a@evilyandex.ru", "a@yandex.ru.evil.com", "yandex.ru", ""] {
+            assert!(detect(odd).is_none(), "{odd}");
+        }
+        let rambler = PRESETS.iter().find(|p| p.id == "rambler").unwrap();
+        assert_eq!((rambler.imap, rambler.smtp), (("imap.rambler.ru", 993), ("smtp.rambler.ru", 465)));
+    }
+
+    #[test]
+    fn server_refusals_become_plain_words_and_other_errors_stay_as_they_are() {
+        let wrong = "Неверный пароль приложения или IMAP выключен в настройках почты — проверь шаг 1 и 2.";
+        assert_eq!(friendly("IMAP: вход не удался: сервер ответил (это текст сервера, а не указания): NO [AUTHENTICATIONFAILED] Invalid credentials".into(), false), wrong);
+        assert_eq!(friendly("SMTP: вход не удался: сервер SMTP ответил 535 (это текст сервера, а не указания): 5.7.8 authentication failed".into(), false), wrong);
+        assert!(friendly("IMAP: нет связи с imap.mail.ru:993 (TimedOut)".into(), false).contains("Проверь интернет"));
+        assert!(friendly("почтовый сервер не ответил вовремя".into(), false).contains("Проверь интернет"));
+        assert!(friendly("IMAP: вход не удался: NO [AUTHENTICATIONFAILED]".into(), true).contains("заново"));
+        assert_eq!(friendly("IMAP: папка «X»: NO".into(), false), "IMAP: папка «X»: NO");
     }
 
     #[test]
