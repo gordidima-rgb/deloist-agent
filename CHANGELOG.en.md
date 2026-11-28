@@ -31,6 +31,8 @@ Format — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions �
 - **Process webhooks** check a secret from the secrets store (a token or a GitHub signature) — one implementation
   instead of two.
 
+- **Dock:** no empty screenshot strip above the message field.
+
 ## [0.4.10] — 2026-11-27
 
 - **PC screen on the phone (PC side).** Settings → Devices has a "PC screen on the phone" switch per trusted device,
