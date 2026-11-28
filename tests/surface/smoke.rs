@@ -80,11 +80,19 @@ async fn demo_turns_go_through_the_whole_loop() {
     let target = delegation["to"].as_str().unwrap();
     let thread = crew.ok("GET", &format!("/api/bots/{target}/thread?limit=10"), None).await;
     assert!(thread["messages"].as_array().unwrap().iter().any(|m| m["role"] == "user"), "у получателя нет задачи");
+    // Закрытая задача будит выдавшего своим ходом: дождаться его конца, иначе его turn_end примут за конец следующего хода.
+    let lead = bot.as_str();
+    let turns = |kind: &'static str| crew.count_events(move |e| e["type"] == kind && e["botId"] == lead);
+    common::wait_until("итог разбудил выдавшего", 30, || async {
+        let woken = crew.ok("GET", &format!("/api/bots/{lead}/thread?limit=20"), None).await.to_string().contains("Закрылась задача");
+        woken && turns("turn_start") == turns("turn_end")
+    })
+    .await;
 
     // Память.
     crew.ok("POST", "/api/memory/facts", Some(json!({ "scope": bot, "title": "тестовая заметка" }))).await;
     let memory = crew.ok("GET", &format!("/api/bots/{bot}/memory"), None).await;
-    assert_eq!(memory["facts"][0]["title"], "тестовая заметка");
+    assert!(memory["facts"].as_array().unwrap().iter().any(|f| f["title"] == "тестовая заметка"), "{memory}");
     // Личная память бота — файл memory.md в его папке.
     assert!(memory["file"].as_str().unwrap().contains("- тестовая заметка"), "{memory}");
     let file = std::fs::read_to_string(crew.data_dir.join("workspaces").join(&bot).join("memory.md")).unwrap();
